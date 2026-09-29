@@ -154,7 +154,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
     // wake-on-event: an event delivered into this conversation gets its own
     // block — it is not the owner's turn, so it is never a waypoint.
     case "event":
-      return <EventBlock source={block.source} title={block.title} body={block.body} time={block.time} steer={block.steer} autorun={block.autorun} sessions={block.sessions} onOpenSession={openSession} />;
+      return <EventBlock source={block.source} title={block.title} body={block.body} time={block.time} steer={block.steer} autorun={block.autorun} scheduledFor={block.scheduledFor} deliveredAt={block.deliveredAt} sessions={block.sessions} onOpenSession={openSession} />;
     // A voice call the owner had with the delegate: the questions it asked
     // this session and what this session answered, grouped as one exchange
     // between two agents — never as the owner's own messages.

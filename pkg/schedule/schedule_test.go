@@ -128,3 +128,55 @@ func TestCancelIsIdempotentAndPersistent(t *testing.T) {
 		t.Fatalf("persisted cancellation = %#v, exists %v", got, ok)
 	}
 }
+
+func TestParseAtRejectsPastTime(t *testing.T) {
+	madrid, _ := time.LoadLocation("Europe/Madrid")
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, madrid)
+	if _, err := ParseCreateArgsAt("at 2026-07-10 11:59 Europe/Madrid -- late", now, time.UTC); err == nil {
+		t.Fatal("past time accepted")
+	}
+	if _, err := ParseCreateArgsAt("at 2026-07-10 12:01 Europe/Madrid -- soon", now, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCancelRejectsDeliveredRecord(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "s.json"))
+	rec, _ := store.Create(Schedule{SessionID: "a", Text: "x", DueAt: time.Now(), TimeZone: "UTC"})
+	if _, err := store.MarkDelivered(rec.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Cancel(rec.ID); !errors.Is(err, ErrAlreadyDelivered) {
+		t.Fatalf("Cancel delivered err = %v", err)
+	}
+	if got, _ := store.Get(rec.ID); got.Status != StatusDelivered {
+		t.Fatalf("status = %q", got.Status)
+	}
+}
+
+func TestPurgeSettledKeepsPendingAndRecent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.json")
+	store := NewStore(path)
+	now := time.Now()
+	mk := func(session string, due time.Time, status string) Schedule {
+		r, err := store.Create(Schedule{SessionID: session, Text: "x", DueAt: due, TimeZone: "UTC", Status: status})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	oldDone := mk("a", now.Add(-40*24*time.Hour), StatusDelivered)
+	oldCanceled := mk("a", now.Add(-40*24*time.Hour), StatusCanceled)
+	oldPending := mk("a", now.Add(-40*24*time.Hour), StatusPending)
+	recent := mk("a", now.Add(-time.Hour), StatusDelivered)
+	n, err := store.PurgeSettled(now.Add(-RetainSettled))
+	if err != nil || n != 2 {
+		t.Fatalf("purged %d, %v", n, err)
+	}
+	reopened, _ := Open(path)
+	for id, want := range map[string]bool{oldDone.ID: false, oldCanceled.ID: false, oldPending.ID: true, recent.ID: true} {
+		if _, ok := reopened.Get(id); ok != want {
+			t.Fatalf("record %s present=%v want %v", id, ok, want)
+		}
+	}
+}

@@ -1945,3 +1945,14 @@ test('a voice call block carries a timestamp the relative clock can read', () =>
   expect(call.time).toBe(seconds * 1000);
   expect(Math.abs(Date.now() - call.time) < 10 * 60 * 1000).toBe(true);
 });
+
+test('a delivered scheduled prompt is an event mark with its due and delivery times, not a waypoint', () => {
+  const [block] = projectStream(session([user('deploy the thing\nnow', {
+    _msg_id: 'sch-1',
+    custom: { source: 'schedule', schedule_id: 's1', scheduled_for: '2026-09-30T01:00:00Z', delivered_at: '2026-09-30T07:12:00Z' },
+  })]));
+  expect(block).toMatchObject({
+    kind: 'event', source: 'scheduled', title: 'deploy the thing', body: 'deploy the thing\nnow',
+    scheduledFor: '2026-09-30T01:00:00Z', deliveredAt: '2026-09-30T07:12:00Z',
+  });
+});

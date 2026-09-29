@@ -91,7 +91,28 @@ func cmdSchedule(m *Manager, sess *ManagedSession, args []string) (*CommandResul
 	if err != nil {
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
-	return &CommandResult{OK: true, Message: fmt.Sprintf("scheduled %s at %s", record.ID, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"))}, nil
+	return &CommandResult{OK: true, Message: fmt.Sprintf("scheduled %s for %s (%s)", record.ID, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"), untilLabel(time.Until(record.DueAt)))}, nil
+}
+
+// untilLabel renders a remaining duration as "in 2h 5m", to whole minutes
+// (seconds only under a minute).
+func untilLabel(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("in %ds", int(d.Seconds()))
+	}
+	total := int(d.Round(time.Minute).Minutes())
+	days, hours, mins := total/1440, total%1440/60, total%60
+	var parts []string
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if mins > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%dm", mins))
+	}
+	return "in " + strings.Join(parts, " ")
 }
 
 // ExecCommand executes a slash command in a session. id is the client-minted

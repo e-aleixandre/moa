@@ -40,10 +40,17 @@ func (s *schedulerService) Start(m *Manager) {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		defer close(s.stopped)
+		s.purge(time.Now())
+		lastPurge := time.Now()
 		for {
 			select {
 			case <-ticker.C:
-				s.deliverDue(m, time.Now())
+				now := time.Now()
+				s.deliverDue(m, now)
+				if now.Sub(lastPurge) >= time.Hour {
+					s.purge(now)
+					lastPurge = now
+				}
 			case <-s.stop:
 				return
 			}
@@ -74,6 +81,20 @@ func (s *schedulerService) cancel(id string) (schedule.Schedule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.store.Cancel(id)
+}
+
+func (s *schedulerService) deleteSession(sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.DeleteSession(sessionID)
+}
+
+func (s *schedulerService) purge(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.store.PurgeSettled(now.Add(-schedule.RetainSettled)); err != nil {
+		slog.Warn("purge settled schedules", "error", err)
+	}
 }
 
 func (s *schedulerService) deliverDue(m *Manager, now time.Time) {
@@ -112,6 +133,8 @@ func (s *schedulerService) deliverDue(m *Manager, now time.Time) {
 				"source":        "schedule",
 				"schedule_id":   record.ID,
 				"occurrence_id": record.OccurrenceID,
+				"scheduled_for": record.DueAt.Format(time.RFC3339),
+				"delivered_at":  now.UTC().Format(time.RFC3339),
 			},
 		})
 		sess.lifecycle.RUnlock()

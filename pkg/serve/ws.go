@@ -517,6 +517,15 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 			projected["steer"] = steer
 		}
 	}
+	// A scheduled prompt names when it was meant to run and when it did, so
+	// the transcript can tell it from a message the user typed.
+	if source == "schedule" {
+		for _, key := range []string{"scheduled_for", "delivered_at"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+	}
 	// A heartbeat carries its beat id (the server confirms delivery by it) and
 	// how many facts woke the owner.
 	if source == "heartbeat" {

@@ -544,6 +544,24 @@ export function projectStream(session) {
         });
         continue;
       }
+      // A prompt the scheduler delivered: something the user queued earlier,
+      // not something they typed now. Shown as an event mark that says when it
+      // was meant to run and, when it ran late, when it did.
+      if (msg.custom?.source === 'schedule') {
+        const text = joinText(msg.content);
+        blocks.push({
+          kind: 'event',
+          id: blockID('schedule', msg, i),
+          source: 'scheduled',
+          title: text.split('\n')[0].slice(0, 200),
+          body: text,
+          time: msg.timestamp,
+          autorun: true,
+          scheduledFor: msg.custom.scheduled_for || '',
+          deliveredAt: msg.custom.delivered_at || '',
+        });
+        continue;
+      }
       // A batch of reports from the sessions of a project reaches its owner as
       // a user-role message for the same reason an event does. It renders as
       // an event block: something arrived, the owner did not say it.

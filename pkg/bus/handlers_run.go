@@ -256,7 +256,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		if err := startRunWithOrigin(sctx, cmd.Text, originFromCustom(cmd.Custom), func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
 				switch cmd.Custom["source"] {
-				case "secret_batch", "event", "report", "owner", "heartbeat", "voice_call":
+				case "secret_batch", "event", "report", "owner", "heartbeat", "voice_call", "schedule":
 					// Announced: these are turns the user did not type, and the
 					// open transcript has to show them the moment they land.
 					return sctx.Agent.SendWithCustomAnnounced(ctx, cmd.Text, cmd.Custom)

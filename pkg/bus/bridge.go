@@ -1415,6 +1415,14 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 			projected["secret_aliases"] = values
 		}
 	}
+	// A scheduled prompt names when it was due and when it ran.
+	if source == "schedule" {
+		for _, key := range []string{"scheduled_for", "delivered_at"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+	}
 	// An event's identity is what its block is headed with live; without it
 	// the block reads "event" until a reload brings the full record back.
 	if source == "event" {

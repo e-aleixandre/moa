@@ -1204,8 +1204,8 @@ func TestProjectLiveCustomExposesOnlyFrontendFields(t *testing.T) {
 	if _, ok := got["internal_only"]; ok {
 		t.Fatalf("internal Custom field was exposed: %#v", got)
 	}
-	ordinary := projectLiveCustom(map[string]any{"source": "schedule", "schedule_id": "private"})
-	if len(ordinary) != 1 || ordinary["source"] != "schedule" {
+	ordinary := projectLiveCustom(map[string]any{"source": "auto_verify", "private_id": "private"})
+	if len(ordinary) != 1 || ordinary["source"] != "auto_verify" {
 		t.Fatalf("ordinary source projection = %#v", ordinary)
 	}
 }

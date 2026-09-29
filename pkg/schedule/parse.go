@@ -73,6 +73,9 @@ func ParseCreateArgsAt(input string, now time.Time, defaultLocation *time.Locati
 		if local.Format("2006-01-02 15:04") != fields[1]+" "+fields[2] {
 			return CreateArgs{}, errors.New("local time does not exist in the selected time zone")
 		}
+		if !local.After(now) {
+			return CreateArgs{}, errors.New("time is in the past")
+		}
 		return CreateArgs{DueAt: local.UTC(), TimeZone: zoneName, Text: text}, nil
 
 	case "in":

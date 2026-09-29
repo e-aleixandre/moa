@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { EVENT_BODY_PREVIEW, eventAge, eventBodyLang, eventBodyLine, eventBodyPreview } from "./EventBlock.jsx";
+import { EVENT_BODY_PREVIEW, eventAge, eventBodyLang, eventBodyLine, eventBodyPreview, scheduleLate } from "./EventBlock.jsx";
 
 test("a long event payload is previewed and keeps its full text for Show all", () => {
   const body = "{".repeat(EVENT_BODY_PREVIEW + 40);
@@ -63,4 +63,10 @@ test("a truncated payload is not claimed to be JSON", () => {
 test("a payload flattens to one line for the inbox row", () => {
   expect(eventBodyLine('{\n  "ok": true\n}')).toBe('{ "ok": true }');
   expect(eventBodyLine(undefined)).toBe("");
+});
+
+test("a delivery is late only when it ran more than a minute after its due time", () => {
+  expect(scheduleLate("2026-09-30T01:00:00Z", "2026-09-30T01:00:30Z")).toBe(false);
+  expect(scheduleLate("2026-09-30T01:00:00Z", "2026-09-30T07:12:00Z")).toBe(true);
+  expect(scheduleLate("", "2026-09-30T07:12:00Z")).toBe(false);
 });

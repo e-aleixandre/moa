@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/schedule"
 )
 
@@ -86,5 +87,104 @@ func TestSchedulerLeavesSchedulePendingForUnloadedSession(t *testing.T) {
 	got, _ := mgr.scheduler.store.Get(record.ID)
 	if got.Status != schedule.StatusPending {
 		t.Fatalf("unloaded session schedule status = %q, want pending", got.Status)
+	}
+}
+
+func TestSchedulerAnnouncesDeliveredPromptLiveWithTimes(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appended := make(chan bus.UserMessageAppended, 4)
+	unsub := sess.runtime.Bus.Subscribe(func(e bus.UserMessageAppended) { appended <- e })
+	defer unsub()
+	due := time.Now().Add(-time.Minute)
+	if _, err := mgr.scheduler.create(schedule.Schedule{SessionID: sess.ID, Text: "live check", DueAt: due, TimeZone: "UTC"}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.scheduler.deliverDue(mgr, time.Now())
+	select {
+	case e := <-appended:
+		if e.Custom["source"] != "schedule" || e.Custom["scheduled_for"] != due.UTC().Format(time.RFC3339) || e.Custom["delivered_at"] == "" {
+			t.Fatalf("announced custom = %#v", e.Custom)
+		}
+		ev, _ := wsEventFromBus(e)
+		projected := ev.Data.(UserMessageData).Custom
+		if projected["scheduled_for"] == nil || projected["delivered_at"] == nil {
+			t.Fatalf("projection dropped schedule times: %#v", projected)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduled prompt was not announced live")
+	}
+}
+
+func TestScheduleCommandRejectsCancelOfDeliveredAndPastAt(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := mgr.scheduler.create(schedule.Schedule{SessionID: sess.ID, Text: "done", DueAt: time.Now(), TimeZone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.scheduler.store.MarkDelivered(record.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	res, err := mgr.ExecCommand(sess.ID, "/schedule cancel "+record.ID, "")
+	if err != nil || res.OK || !strings.Contains(res.Message, "already delivered") {
+		t.Fatalf("cancel delivered = %#v, %v", res, err)
+	}
+	if got, _ := mgr.scheduler.store.Get(record.ID); got.Status != schedule.StatusDelivered {
+		t.Fatalf("status = %q, want delivered", got.Status)
+	}
+	res, err = mgr.ExecCommand(sess.ID, "/schedule at 2020-01-01 03:00 Europe/Madrid -- old", "")
+	if err != nil || res.OK || !strings.Contains(res.Message, "past") {
+		t.Fatalf("past at = %#v, %v", res, err)
+	}
+}
+
+func TestScheduleCommandConfirmationShowsIDTimeAndRemaining(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := mgr.ExecCommand(sess.ID, "/schedule in 2h -- later", "")
+	if err != nil || !res.OK {
+		t.Fatalf("create = %#v, %v", res, err)
+	}
+	id := mgr.scheduler.list()[0].ID
+	if !strings.Contains(res.Message, id) || !strings.Contains(res.Message, "in 2h") || !strings.Contains(res.Message, "for ") {
+		t.Fatalf("message = %q", res.Message)
+	}
+}
+
+func TestDeletingSessionRemovesItsSchedules(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	gone, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{gone.ID, kept.ID} {
+		if _, err := mgr.scheduler.create(schedule.Schedule{SessionID: id, Text: "x", DueAt: time.Now().Add(time.Hour), TimeZone: "UTC"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := mgr.Delete(gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := schedule.Open(mgr.scheduler.store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := reopened.List()
+	if len(records) != 1 || records[0].SessionID != kept.ID {
+		t.Fatalf("persisted records after delete = %#v", records)
 	}
 }

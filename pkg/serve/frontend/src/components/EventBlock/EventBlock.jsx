@@ -115,11 +115,28 @@ export function EventPayload({ body, compact = false }) {
 //   time     when it arrived (ms/ISO/label)
 //   steer    it landed mid-run and the model saw it after the current tool
 //   autorun  false → it was recorded and no turn was started
+// scheduleClock prints an instant in the viewer's zone, with the zone name so
+// "03:00" is never ambiguous.
+export function scheduleClock(iso) {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return "";
+  return new Date(ms).toLocaleString(undefined, {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short",
+  });
+}
+
+// A delivery more than a minute after its due time is worth saying.
+export function scheduleLate(scheduledFor, deliveredAt) {
+  const due = Date.parse(scheduledFor);
+  const done = Date.parse(deliveredAt);
+  return Number.isFinite(due) && Number.isFinite(done) && done - due > 60000;
+}
+
 function sessionState(status) {
   return ({ done: "saved", failed: "error", needs_input: "permission" })[status] || "idle";
 }
 
-export function EventBlock({ source = "event", title = "", body = "", time, steer = false, autorun = true, sessions = [], onOpenSession }) {
+export function EventBlock({ source = "event", title = "", body = "", time, steer = false, autorun = true, scheduledFor = "", deliveredAt = "", sessions = [], onOpenSession }) {
   const [open, setOpen] = useState(false);
   const age = eventAge(time);
   const hasBody = !!body;
@@ -138,6 +155,8 @@ export function EventBlock({ source = "event", title = "", body = "", time, stee
             <span class="evb-glyph" aria-hidden="true"><Import size={13} /></span>
             <span class="evb-source">{source}</span>
             {age && <span>· {age}</span>}
+            {scheduledFor && <span>· for {scheduleClock(scheduledFor)}</span>}
+            {scheduledFor && deliveredAt && scheduleLate(scheduledFor, deliveredAt) && <span>· delivered {scheduleClock(deliveredAt)}</span>}
             {steer && <span>· seen after current tool</span>}
             {!autorun && <span>· not run</span>}
           </span>

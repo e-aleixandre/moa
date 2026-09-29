@@ -21,7 +21,17 @@ const (
 	StatusDelivered = "delivered"
 )
 
-var ErrNotFound = errors.New("schedule not found")
+var (
+	ErrNotFound = errors.New("schedule not found")
+	// ErrAlreadyDelivered rejects canceling an occurrence that already ran:
+	// relabeling it would rewrite history.
+	ErrAlreadyDelivered = errors.New("schedule was already delivered and cannot be canceled")
+)
+
+// RetainSettled is how long delivered and canceled records are kept (counted
+// from their due time) before PurgeSettled may drop them. Pending records are
+// never purged by age.
+const RetainSettled = 30 * 24 * time.Hour
 
 // Schedule is a single, durable delivery occurrence. All stored timestamps are
 // normalized to UTC.
@@ -59,6 +69,9 @@ func Open(path string) (*Store, error) {
 	}
 	return s, nil
 }
+
+// Path returns the file the store persists to.
+func (s *Store) Path() string { return s.path }
 
 // Load replaces the in-memory records with those in the store file. A missing
 // file is treated as an empty store.
@@ -178,6 +191,9 @@ func (s *Store) Cancel(id string) (Schedule, error) {
 	if record.Status == StatusCanceled {
 		return record, nil
 	}
+	if record.Status == StatusDelivered {
+		return Schedule{}, ErrAlreadyDelivered
+	}
 	previousStatus := record.Status
 	record.Status = StatusCanceled
 	s.schedules[id] = record
@@ -215,6 +231,50 @@ func (s *Store) MarkDelivered(id string, deliveredAt time.Time) (Schedule, error
 		return Schedule{}, err
 	}
 	return record, nil
+}
+
+// DeleteSession removes every record of a session, whatever its status: once
+// the session is gone nothing can be delivered to it.
+func (s *Store) DeleteSession(sessionID string) error {
+	return s.removeWhere(func(r Schedule) bool { return r.SessionID == sessionID })
+}
+
+// PurgeSettled removes delivered and canceled records due before cutoff and
+// returns how many it dropped.
+func (s *Store) PurgeSettled(cutoff time.Time) (int, error) {
+	n := 0
+	err := s.removeWhere(func(r Schedule) bool {
+		drop := r.Status != StatusPending && r.DueAt.Before(cutoff)
+		if drop {
+			n++
+		}
+		return drop
+	})
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *Store) removeWhere(match func(Schedule) bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make(map[string]Schedule, len(s.schedules))
+	for id, record := range s.schedules {
+		if !match(record) {
+			kept[id] = record
+		}
+	}
+	if len(kept) == len(s.schedules) {
+		return nil
+	}
+	previous := s.schedules
+	s.schedules = kept
+	if err := s.saveLocked(); err != nil {
+		s.schedules = previous
+		return err
+	}
+	return nil
 }
 
 func (s *Store) recordsLocked() []Schedule {

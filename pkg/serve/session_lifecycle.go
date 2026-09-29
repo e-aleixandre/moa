@@ -777,7 +777,14 @@ func (m *Manager) isOwnerSession(id string) bool {
 }
 
 // deleteSession is Delete's body. Callers must hold automationMu.
-func (m *Manager) deleteSession(id string) error {
+func (m *Manager) deleteSession(id string) (err error) {
+	defer func() {
+		if err == nil && m.scheduler != nil {
+			if serr := m.scheduler.deleteSession(id); serr != nil {
+				slog.Warn("delete session schedules", "session", id, "error", serr)
+			}
+		}
+	}()
 	if m.automation != nil {
 		// A deleted session must not keep answering an idempotency key: the next
 		// retry should create a fresh run rather than resolve to a gone session.

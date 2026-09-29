@@ -656,6 +656,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           // (up to 15s on mobile). The server has already persisted it.
           const title = result.message.replace(/^renamed to:\s*/, '');
           updateSession(sessionId, { title });
+        } else if (text.startsWith('/schedule') && result && result.ok) {
+          // The command changes nothing in the transcript, so its answer (the
+          // id, the time, the list) is the only confirmation there is.
+          addToast({ title: 'Schedule', detail: result.message, type: 'info' });
         } else if (result && !result.ok) {
           addToast({ title: 'Command failed', detail: result.message, type: 'error' });
         }
