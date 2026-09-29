@@ -165,9 +165,8 @@ func registerHistoryHandlers(sctx *SessionContext) {
 				reloadPromptAfterCut(sctx)
 			}
 		}
-		// Idle is checked and the cut applied under the state lock, so a run
-		// cannot start between the check and the cut. The cut itself is an
-		// in-memory slice, so holding the lock is cheap.
+		// Idle is checked and the cut plus prompt reload applied under the
+		// state lock, so neither a run nor a concurrent /reload can overtake it.
 		if sctx.State != nil {
 			if !sctx.State.DoIfIdle(cut) {
 				return ErrSessionBusy

@@ -63,6 +63,14 @@ func (s *ManagedSession) reloadSession() []string {
 	return labels
 }
 
+// tryReloadSession admits the whole disk-read/build/install as one idle
+// operation. Start fresh already holds this lock; compactions hold the session
+// busy, so their post-cut paths call reloadSession directly instead.
+func (s *ManagedSession) tryReloadSession() (labels []string, admitted bool) {
+	admitted = s.runtime.State.DoIfIdle(func() { labels = s.reloadSession() })
+	return labels, admitted
+}
+
 // promptAfterCompaction is the agent's hook for an automatic compaction, which
 // lands in the middle of a run: the agent refuses SetSystemPrompt then, so
 // instead of applying the rebuilt prompt this hands it to the loop, which
@@ -142,20 +150,43 @@ func formatReloadReport(outcomes []reloadOutcome) string {
 // refused. Applying instructions is not urgent, but losing the request is
 // confusing: the user edited a file and asked for it to take effect.
 func cmdReload(m *Manager, sess *ManagedSession, _ []string) (*CommandResult, error) {
+	return cmdReloadWithID(m, sess, "")
+}
+
+func cmdReloadWithID(m *Manager, sess *ManagedSession, id string) (*CommandResult, error) {
 	if err := requireIdle(sess); err != nil {
 		return nil, err
 	}
+	return reloadAfterIdleCheck(m, sess, id)
+}
 
+// reloadAfterIdleCheck reclaims the idle slot: another run may have taken it
+// since the initial command check.
+func reloadAfterIdleCheck(m *Manager, sess *ManagedSession, id string) (*CommandResult, error) {
 	// Reload the caller first, so its own outcome leads the report.
-	outcomes := []reloadOutcome{{
-		SessionID: sess.ID,
-		Title:     sess.title(),
-		Changed:   sess.reloadSession(),
-	}}
+	out := reloadOutcome{SessionID: sess.ID, Title: sess.title()}
+	var admitted bool
+	out.Changed, admitted = sess.tryReloadSession()
+	if !admitted {
+		if id == "" {
+			id = core.NewSteerID()
+		}
+		if err := sess.runtime.Bus.Execute(bus.QueueCommand{ID: id, Raw: "/reload"}); err != nil {
+			out.Err = err.Error()
+		} else {
+			out.Queued = true
+		}
+	}
+	outcomes := []reloadOutcome{out}
 
 	for _, other := range m.liveSessionsExcept(sess.ID) {
 		out := reloadOutcome{SessionID: other.ID, Title: other.title()}
-		if requireIdle(other) != nil {
+		if requireIdle(other) == nil {
+			out.Changed, admitted = other.tryReloadSession()
+		} else {
+			admitted = false
+		}
+		if !admitted {
 			// Busy: queue the barrier on that session's own rail. It runs at
 			// its next idle point, in send order with anything else queued.
 			err := other.runtime.Bus.Execute(bus.QueueCommand{
@@ -174,11 +205,15 @@ func cmdReload(m *Manager, sess *ManagedSession, _ []string) (*CommandResult, er
 			outcomes = append(outcomes, out)
 			continue
 		}
-		out.Changed = other.reloadSession()
 		outcomes = append(outcomes, out)
 	}
 
-	return &CommandResult{OK: true, Message: formatReloadReport(outcomes)}, nil
+	result := &CommandResult{OK: out.Err == "", Message: formatReloadReport(outcomes)}
+	if out.Queued {
+		result.Queued = true
+		result.ID = id
+	}
+	return result, nil
 }
 
 // liveSessionsExcept returns the loaded sessions other than id.

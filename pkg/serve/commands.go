@@ -154,6 +154,9 @@ func (m *Manager) ExecCommand(sessionID, rawCommand, id string) (*CommandResult,
 		// PolicyInstant falls through to run now.
 	}
 
+	if cmd == "reload" {
+		return cmdReloadWithID(m, sess, id)
+	}
 	return handler(m, sess, args)
 }
 

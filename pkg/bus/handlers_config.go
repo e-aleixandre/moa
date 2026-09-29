@@ -18,7 +18,13 @@ func registerConfigPromptHandlers(sctx *SessionContext) {
 		if sctx.ReloadPrompt == nil {
 			return nil
 		}
-		sctx.ReloadPrompt()
+		if sctx.State != nil {
+			if !sctx.State.DoIfIdle(func() { sctx.ReloadPrompt() }) {
+				return ErrSessionBusy
+			}
+		} else {
+			sctx.ReloadPrompt()
+		}
 		return nil
 	})
 }

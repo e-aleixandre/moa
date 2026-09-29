@@ -2,12 +2,17 @@ package serve
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/book"
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/owner"
 )
 
 // newCompactPromptManager is newFreshTestManager with a chosen context window,
@@ -115,6 +120,186 @@ func TestReloadOnCompact_StartFreshPicksUpEditedAgentsMD(t *testing.T) {
 	sendAndWait(t, mgr, sess, "after fresh")
 	if sys := prov.last().System; !strings.Contains(sys, "ticket id") {
 		t.Errorf("the request after Start fresh lacks the edited AGENTS.md:\n%s", sys)
+	}
+}
+
+func TestReloadOnCompact_StartFreshCannotOvertakeReload(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := &recordingProvider{}
+	mgr := newFreshTestManager(t, ctx, prov)
+	cwd := t.TempDir()
+	writeAgentsMD(t, cwd, oldRule+"\n")
+	sess := sessionWithHistory(t, mgr, cwd)
+
+	built := make(chan struct{})
+	release := make(chan struct{})
+	var blocked atomic.Bool
+	build := sess.infra.buildBasePrompt
+	sess.infra.buildBasePrompt = func(specs []core.ToolSpec) string {
+		prompt := build(specs)
+		if strings.Contains(prompt, newRule) && blocked.CompareAndSwap(false, true) {
+			close(built)
+			<-release
+		}
+		return prompt
+	}
+	writeAgentsMD(t, cwd, oldRule+"\n"+newRule+"\n")
+	reloadDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.ExecCommand(sess.ID, "/reload", "")
+		reloadDone <- err
+	}()
+	select {
+	case <-built:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("/reload did not reach the prompt builder")
+	}
+	writeAgentsMD(t, cwd, oldRule+"\n"+newRule+"\n- Newer rule after reload.\n")
+	freshDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.ExecCommand(sess.ID, "/start-fresh", "")
+		freshDone <- err
+	}()
+	freshFinished := false
+	select {
+	case err := <-freshDone:
+		if err != nil {
+			t.Errorf("start fresh: %v", err)
+		}
+		freshFinished = true
+		t.Error("Start fresh overtook an in-progress reload")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	waits := map[string]<-chan error{"reload": reloadDone}
+	if !freshFinished {
+		waits["start fresh"] = freshDone
+	}
+	for name, done := range waits {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s did not finish", name)
+		}
+	}
+	if sys := sess.runtime.Context().Agent.SystemPrompt(); !strings.Contains(sys, "Newer rule after reload") {
+		t.Error("the older reload overwrote the newer Start fresh prompt")
+	}
+	if changed := sess.reloadSession(); len(changed) != 0 {
+		t.Errorf("prompt sources are still out of sync: %v", changed)
+	}
+}
+
+func TestReloadOnCompact_ReloadLostAdmissionQueuesCallerAndUpdatesOthers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newFreshTestManager(t, ctx, &recordingProvider{})
+	cwd := t.TempDir()
+	writeAgentsMD(t, cwd, oldRule+"\n")
+	caller, err := mgr.CreateSession(CreateOpts{CWD: cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := mgr.CreateSession(CreateOpts{CWD: cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAgentsMD(t, cwd, oldRule+"\n"+newRule+"\n")
+	if err := caller.runtime.State.Transition(bus.StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := caller.runtime.State.Transition(bus.StateIdle); err != nil {
+			t.Error(err)
+		}
+	}()
+	res, err := reloadAfterIdleCheck(mgr, caller, "client-id")
+	if err != nil || !res.OK || !res.Queued || res.ID != "client-id" {
+		t.Fatalf("raced reload = %+v, %v", res, err)
+	}
+	if strings.Contains(caller.runtime.Context().Agent.SystemPrompt(), newRule) {
+		t.Error("caller prompt was changed mid-run")
+	}
+	if !strings.Contains(other.runtime.Context().Agent.SystemPrompt(), newRule) {
+		t.Error("the caller's lost slot prevented reloading the other session")
+	}
+}
+
+func TestReloadOnCompact_ReloadLostAdmissionReportsQueueFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newFreshTestManager(t, ctx, &recordingProvider{})
+	cwd := t.TempDir()
+	writeAgentsMD(t, cwd, oldRule+"\n")
+	caller, err := mgr.CreateSession(CreateOpts{CWD: cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAgentsMD(t, cwd, oldRule+"\n"+newRule+"\n")
+	if err := caller.runtime.State.Transition(bus.StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := caller.runtime.State.Transition(bus.StateIdle); err != nil {
+			t.Error(err)
+		}
+	}()
+	full := false
+	for i := 0; i < 64; i++ {
+		if err := caller.runtime.Bus.Execute(bus.QueueCommand{ID: core.NewSteerID(), Raw: "/reload"}); err != nil {
+			full = true
+			break
+		}
+	}
+	if !full {
+		t.Fatal("the reload queue did not fill")
+	}
+	res, err := reloadAfterIdleCheck(mgr, caller, "client-id")
+	if err == nil && (res == nil || res.OK) {
+		t.Fatalf("failed enqueue was reported as success: %+v", res)
+	}
+}
+
+func TestReloadOnCompact_OwnerFreshReloadsBookAndRole(t *testing.T) {
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prov := &recordingProvider{}
+	mgr := newFreshTestManager(t, ctx, prov)
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Winerim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, ok := mgr.Get(info.SessionID)
+	if !ok {
+		t.Fatal("owner session missing")
+	}
+	for i := range 6 {
+		sendAndWait(t, mgr, sess, turn(i))
+	}
+	store, err := owner.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeBookIndex(t, info.CodebaseKey, "# Project\n\nUpdated book content.\n")
+	if err := os.WriteFile(filepath.Join(store.BookDir(info.CodebaseKey), book.OwnerFile), []byte("Updated owner preference.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := mgr.ExecCommand(sess.ID, "/start-fresh", "")
+	if err != nil || !res.OK {
+		t.Fatalf("start fresh = %+v, %v", res, err)
+	}
+	sendAndWait(t, mgr, sess, "after fresh")
+	sys := prov.last().System
+	for _, want := range []string{"Updated book content", "Updated owner preference", "You are the owner of this project"} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("owner prompt after Start fresh lacks %q", want)
+		}
 	}
 }
 
