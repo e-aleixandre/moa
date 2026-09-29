@@ -109,6 +109,10 @@ func attachRelations(ctx context.Context, q querier, recs []Record) error {
 			args[i] = id
 		}
 		ph := placeholders(len(chunk))
+		inChunk := make(map[int64]bool, len(chunk))
+		for _, id := range chunk {
+			inChunk[id] = true
+		}
 		rows, err := q.QueryContext(ctx, `SELECT id, task_id, title, done FROM task_subtasks
 			WHERE task_id IN (`+ph+`) ORDER BY task_id, position, id`, args...)
 		if err != nil {
@@ -142,10 +146,12 @@ func attachRelations(ctx context.Context, q querier, recs []Record) error {
 			if err := rows.Scan(&task, &waits); err != nil {
 				return err
 			}
-			if i, ok := idx[task]; ok {
+			// An edge whose ends fall in different chunks is returned by both
+			// queries: each end is filled only by the chunk that owns it.
+			if i, ok := idx[task]; ok && inChunk[task] {
 				recs[i].WaitsFor = append(recs[i].WaitsFor, waits)
 			}
-			if i, ok := idx[waits]; ok {
+			if i, ok := idx[waits]; ok && inChunk[waits] {
 				recs[i].Unblocks = append(recs[i].Unblocks, task)
 			}
 		}

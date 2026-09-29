@@ -366,8 +366,8 @@ func (r *Repo) archiveDue(ctx context.Context) {
 	}
 	now := r.now().UnixMilli()
 	_ = r.write(ctx, func(tx *sql.Tx) (bool, error) {
-		res, err := tx.ExecContext(ctx, `UPDATE tasks SET archived_at = ?
-			WHERE status = 'done' AND archived_at IS NULL AND completed_at IS NOT NULL AND completed_at <= ?`, now, cutoff)
+		res, err := tx.ExecContext(ctx, `UPDATE tasks SET archived_at = ?, updated_at = ?, revision = revision + 1
+			WHERE status = 'done' AND archived_at IS NULL AND completed_at IS NOT NULL AND completed_at <= ?`, now, now, cutoff)
 		if err != nil {
 			return false, err
 		}

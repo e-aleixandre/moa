@@ -189,7 +189,7 @@ func TestOnlyOneSessionWinsAClaim(t *testing.T) {
 			switch {
 			case err == nil:
 				winners = append(winners, sid)
-			case errors.Is(err, ErrClaimed):
+			case errors.Is(err, ErrNotFound):
 				losers = append(losers, sid)
 			default:
 				t.Errorf("%s: unexpected error %v", sid, err)
@@ -333,4 +333,16 @@ func contains(list []int64, id int64) bool {
 		}
 	}
 	return false
+}
+
+func TestClaimDoesNotRevealAnotherSessionsDirectTask(t *testing.T) {
+	r := newRepo(t)
+	mine, err := r.AgentCreate(bg, actor("A", "p"), AgentInput{Title: "private to A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.AgentClaim(bg, actor("B", "p"), mine.ID)
+	if !errors.Is(err, ErrNotFound) || errors.Is(err, ErrClaimed) {
+		t.Fatalf("claiming another session's task = %v, want not available", err)
+	}
 }

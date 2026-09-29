@@ -367,3 +367,67 @@ func itoa(n int64) string {
 	b, _ := json.Marshal(n)
 	return string(b)
 }
+
+func TestTasksAPIAssignmentProjectAlwaysComesFromTheTargetSession(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	dirA, dirB := t.TempDir(), t.TempDir()
+	a, err := mgr.CreateSession(CreateOpts{CWD: dirA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := mgr.CreateSession(CreateOpts{CWD: dirB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if core.CodebaseKey(a.CWD) == core.CodebaseKey(b.CWD) {
+		t.Fatal("sessions must have distinct projects")
+	}
+	wantB := func(rec tasks.Record, what string) {
+		t.Helper()
+		if rec.ProjectKey != core.CodebaseKey(b.CWD) || rec.ProjectCWD != b.CWD || rec.AssigneeSessionID != b.ID {
+			t.Fatalf("%s: project not from target session: %+v", what, rec)
+		}
+	}
+
+	// POST with a conflicting key and cwd.
+	resp := apiReq(t, srv, "POST", "/api/tasks", `{"title":"t","place":"agent","assignee_session_id":"`+b.ID+`","project_key":"evil","project_cwd":"/evil"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create = %d", resp.StatusCode)
+	}
+	wantB(decode[tasks.Record](t, resp), "post")
+
+	// Reassignment without place.
+	rec := decode[tasks.Record](t, apiReq(t, srv, "POST", "/api/tasks", `{"title":"t2","place":"agent","assignee_session_id":"`+a.ID+`"}`))
+	resp = apiReq(t, srv, "PATCH", "/api/tasks/"+itoa(rec.ID), `{"revision":`+itoa(rec.Revision)+`,"assignee_session_id":"`+b.ID+`"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reassign = %d", resp.StatusCode)
+	}
+	rec = decode[tasks.Record](t, resp)
+	wantB(rec, "reassign without place")
+
+	// Reassignment back and forth with conflicting project fields.
+	resp = apiReq(t, srv, "PATCH", "/api/tasks/"+itoa(rec.ID), `{"revision":`+itoa(rec.Revision)+`,"assignee_session_id":"`+a.ID+`"}`)
+	rec = decode[tasks.Record](t, resp)
+	resp = apiReq(t, srv, "PATCH", "/api/tasks/"+itoa(rec.ID), `{"revision":`+itoa(rec.Revision)+`,"assignee_session_id":"`+b.ID+`","project_key":"evil","project_cwd":"/evil"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reassign with project = %d", resp.StatusCode)
+	}
+	rec = decode[tasks.Record](t, resp)
+	wantB(rec, "reassign with conflicting project")
+
+	// Move from You with a place and conflicting fields.
+	you := decode[tasks.Record](t, apiReq(t, srv, "POST", "/api/tasks", `{"title":"t3","place":"you"}`))
+	resp = apiReq(t, srv, "PATCH", "/api/tasks/"+itoa(you.ID), `{"revision":`+itoa(you.Revision)+`,"place":"agent","assignee_session_id":"`+b.ID+`","project_key":"evil"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("move = %d", resp.StatusCode)
+	}
+	wantB(decode[tasks.Record](t, resp), "move with conflicting key")
+
+	// An owner cannot silently misfile an assigned task by editing only its project.
+	resp = apiReq(t, srv, "PATCH", "/api/tasks/"+itoa(rec.ID), `{"revision":`+itoa(rec.Revision)+`,"project_key":"evil","project_cwd":"/evil"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("project-only patch = %d", resp.StatusCode)
+	}
+	wantB(decode[tasks.Record](t, resp), "project-only patch")
+}

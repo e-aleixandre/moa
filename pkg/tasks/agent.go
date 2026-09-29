@@ -390,7 +390,8 @@ func (r *Repo) AgentDone(ctx context.Context, a Actor, id int64) (AgentTask, err
 
 // AgentClaim takes a pending backlog task of the agent's own project. It is
 // the only write an agent has on the backlog. Of two sessions claiming at
-// once, one wins and the other gets ErrClaimed.
+// once, one wins and the others get "not available", the same answer as for
+// a task assigned directly to someone else.
 func (r *Repo) AgentClaim(ctx context.Context, a Actor, id int64) (AgentTask, error) {
 	var out AgentTask
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
@@ -407,7 +408,10 @@ func (r *Repo) AgentClaim(ctx context.Context, a Actor, id int64) (AgentTask, er
 			if cur.AssigneeSessionID == a.SessionID {
 				return false, invalid("task #%d is already yours", id)
 			}
-			return false, ErrClaimed
+			// Indistinguishable from a task that was never claimable: telling a
+			// race loser "claimed" would reveal that another session's direct
+			// assignment exists.
+			return false, notAvailable(id)
 		}
 		if cur.Status != StatusPending {
 			return false, invalid("task #%d is not open", id)

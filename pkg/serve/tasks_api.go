@@ -336,13 +336,31 @@ func handlePatchTask(m *Manager) http.HandlerFunc {
 			CompletionNote: b.CompletionNote, Subtasks: b.Subtasks, WaitsFor: b.WaitsFor,
 		}
 		if b.AssigneeSessionID != nil && *b.AssigneeSessionID != "" {
-			cwd, known := m.sessionCWD(*b.AssigneeSessionID)
-			if !known {
+			if _, known := m.sessionCWD(*b.AssigneeSessionID); !known {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown assignee session"})
 				return
 			}
-			if b.ProjectKey == nil && b.ProjectCWD == nil && b.Place != nil && *b.Place == tasks.PlaceAgent {
-				p.ProjectCWD = &cwd
+		}
+		if b.AssigneeSessionID != nil || b.ProjectKey != nil || b.ProjectCWD != nil || b.Place != nil && *b.Place == tasks.PlaceAgent {
+			cur, err := m.tasks.Get(r.Context(), id)
+			if err != nil {
+				writeTaskError(w, err)
+				return
+			}
+			if b.Place != nil && *b.Place == tasks.PlaceAgent || b.Place == nil && cur.Place == tasks.PlaceAgent {
+				assignee := cur.AssigneeSessionID
+				if b.AssigneeSessionID != nil {
+					assignee = *b.AssigneeSessionID
+				}
+				if assignee != "" {
+					cwd, known := m.sessionCWD(assignee)
+					if !known {
+						writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown assignee session"})
+						return
+					}
+					// An assigned task always belongs to the target session's project.
+					p.ProjectKey, p.ProjectCWD = nil, &cwd
+				}
 			}
 		}
 		rec, err := m.tasks.Update(r.Context(), id, b.Revision, p)

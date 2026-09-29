@@ -400,3 +400,68 @@ func findTask(list []Record, id int64) Record {
 
 func ptr[T any](v T) *T       { return &v }
 func ptrPlace(p Place) *Place { return &p }
+
+func TestRelationsAcrossChunkBoundaryAreNotDuplicated(t *testing.T) {
+	r := newRepo(t)
+	var ids []int64
+	for i := 0; i < 401; i++ {
+		ids = append(ids, note(t, r, "n").ID)
+	}
+	// First and last task land in different 400-id chunks.
+	first, last := ids[0], ids[400]
+	if _, err := r.Update(bg, last, mustGet(t, r, last).Revision, Patch{WaitsFor: &[]int64{first}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := r.List(bg, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findTask(res.Tasks, last).WaitsFor; len(got) != 1 {
+		t.Fatalf("WaitsFor = %v, want one edge", got)
+	}
+	if got := findTask(res.Tasks, first).Unblocks; len(got) != 1 {
+		t.Fatalf("Unblocks = %v, want one edge", got)
+	}
+}
+
+func mustGet(t *testing.T, r *Repo, id int64) Record {
+	t.Helper()
+	rec, err := r.Get(bg, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+func TestAutomaticArchiveBumpsRevisionSoStalePatchConflicts(t *testing.T) {
+	r := newRepo(t)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	clock := base
+	r.SetClock(func() time.Time { return clock })
+	rec := mustCreate(t, r, CreateInput{Title: "finished", Place: PlaceYou})
+	rec, err := r.Update(bg, rec.ID, rec.Revision, Patch{Status: ptr(StatusDone)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(8 * 24 * time.Hour)
+	if _, err := r.List(bg, Filter{}); err != nil {
+		t.Fatal(err)
+	}
+	arch := mustGet(t, r, rec.ID)
+	if arch.ArchivedAt == 0 {
+		t.Fatal("not archived")
+	}
+	if arch.Revision <= rec.Revision {
+		t.Fatalf("revision %d -> %d: archive must bump it", rec.Revision, arch.Revision)
+	}
+	if arch.UpdatedAt <= rec.UpdatedAt {
+		t.Fatalf("updated_at %d -> %d: archive must touch it", rec.UpdatedAt, arch.UpdatedAt)
+	}
+	var conflict *ConflictError
+	if _, err := r.Update(bg, rec.ID, rec.Revision, Patch{Title: ptr("late edit")}); !errors.As(err, &conflict) {
+		t.Fatalf("stale patch = %v, want conflict", err)
+	}
+	if conflict.Current.Revision != arch.Revision || conflict.Current.ArchivedAt != arch.ArchivedAt {
+		t.Fatalf("conflict contains stale task: %+v, want %+v", conflict.Current, arch)
+	}
+}
