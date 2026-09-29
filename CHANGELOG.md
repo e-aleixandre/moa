@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.2] - 2026-09-29
+
+### Added
+
+- GPT-6.1 Sol (`gpt-6.1-sol`): $2/$10 per million tokens up to 272K of input,
+  $4/$15 above, with fast mode at 2x. It takes the same five thinking levels
+  as Astra (`off` maps to `low`, never to `none`).
+
+### Changed
+
+- The `sol` alias now points to `gpt-6.1-sol`. `gpt-6-sol` stays available by
+  its ID. If you use `subagent_allowed_models`, add `gpt-6.1-sol` or subagents
+  asked for `sol` are refused.
+
 ## [0.44.1] - 2026-09-29
 
 ### Fixed
