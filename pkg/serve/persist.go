@@ -54,13 +54,13 @@ func (sp *servePersister) Snapshot(messages []core.AgentMessage, epoch int, meta
 
 	// A snapshot deliberately ignores `closing`: the final flush of a closing
 	// runtime is exactly what must reach disk.
-	sp.persisted.Title, sp.persisted.TitleSource, _ = sp.titleState()
-	sp.persisted.Messages = make([]core.AgentMessage, len(messages))
-	copy(sp.persisted.Messages, messages)
-	sp.persisted.CompactionEpoch = epoch
-	sp.persisted.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
-
 	snapshot := *sp.persisted
+	snapshot.Title, snapshot.TitleSource, _ = sp.titleState()
+	snapshot.Messages = make([]core.AgentMessage, len(messages))
+	copy(snapshot.Messages, messages)
+	snapshot.CompactionEpoch = epoch
+	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
+
 	store := sp.store
 	// Save under the lock so it serializes with saveTitle: otherwise a
 	// concurrent out-of-band write could land between the copy above and the
@@ -68,6 +68,9 @@ func (sp *servePersister) Snapshot(messages []core.AgentMessage, epoch int, meta
 	// single-threaded, so the only contenders for this lock are the rare
 	// out-of-band writers, making the in-lock I/O cost negligible.
 	err := store.Save(&snapshot)
+	if err == nil {
+		*sp.persisted = snapshot
+	}
 	sp.mu.Unlock()
 
 	if err != nil {
@@ -86,20 +89,23 @@ func (sp *servePersister) SnapshotTree(entries []session.Entry, leafID string, m
 		return nil
 	}
 
-	sp.persisted.Title, sp.persisted.TitleSource, _ = sp.titleState() // see Snapshot
-	sp.persisted.Version = session.SessionVersion
-	sp.persisted.Entries = make([]session.Entry, len(entries))
-	copy(sp.persisted.Entries, entries)
-	sp.persisted.LeafID = leafID
-	sp.persisted.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
-	// Clear v1 fields
-	sp.persisted.Messages = nil
-	sp.persisted.CompactionEpoch = 0
-
 	snapshot := *sp.persisted
+	snapshot.Title, snapshot.TitleSource, _ = sp.titleState() // see Snapshot
+	snapshot.Version = session.SessionVersion
+	snapshot.Entries = make([]session.Entry, len(entries))
+	copy(snapshot.Entries, entries)
+	snapshot.LeafID = leafID
+	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
+	// Clear v1 fields
+	snapshot.Messages = nil
+	snapshot.CompactionEpoch = 0
+
 	store := sp.store
 	// Save under the lock — see the rationale in Snapshot.
 	err := store.Save(&snapshot)
+	if err == nil {
+		*sp.persisted = snapshot
+	}
 	sp.mu.Unlock()
 
 	if err != nil {

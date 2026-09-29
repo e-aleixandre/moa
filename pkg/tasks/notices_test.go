@@ -15,7 +15,6 @@ func notices(t *testing.T, r *Repo, taskID int64) []Notice {
 	return ns
 }
 
-
 func mustUpdate(t *testing.T, r *Repo, rec Record, p Patch) Record {
 	t.Helper()
 	out, err := r.Update(bg, rec.ID, rec.Revision, p)
@@ -79,18 +78,26 @@ func TestAssigningNotifiesOnceAndPlainSaveDoesNot(t *testing.T) {
 	wantKinds(t, notices(t, r, b.ID), NoticeAssigned)
 }
 
-func TestCompletingAndDeletingAnAgentTaskNotifyItsSession(t *testing.T) {
+func TestCompletingAnAgentTaskAndDeletingAnOpenOneNotifyItsSession(t *testing.T) {
 	r := newRepo(t)
 	rec := mustCreate(t, r, CreateInput{Title: "t", Place: PlaceAgent, AssigneeSessionID: "s1", ProjectKey: "p"})
 	rec = mustUpdate(t, r, rec, Patch{Status: ptr(StatusDone), Notify: true})
 	wantKinds(t, notices(t, r, rec.ID), NoticeAgentDone, NoticeAssigned)
 
+	// Deleting it now that it is done tells nobody: the completion notice was
+	// the last thing the session needed to hear.
 	if err := r.Delete(bg, rec.ID, rec.Revision, DeliverWake); err != nil {
 		t.Fatal(err)
 	}
+	wantKinds(t, notices(t, r, rec.ID), NoticeAgentDone, NoticeAssigned)
+
+	open := mustCreate(t, r, CreateInput{Title: "o", Place: PlaceAgent, AssigneeSessionID: "s1", ProjectKey: "p"})
+	if err := r.Delete(bg, open.ID, open.Revision, DeliverWake); err != nil {
+		t.Fatal(err)
+	}
 	// The notice outlives its task and still says what it was about.
-	ns := notices(t, r, rec.ID)
-	wantKinds(t, ns, NoticeAgentDeleted, NoticeAgentDone, NoticeAssigned)
+	ns := notices(t, r, open.ID)
+	wantKinds(t, ns, NoticeAgentDeleted, NoticeAssigned)
 	if ns[0].RecipientSessionID != "s1" || !strings.Contains(ns[0].Text, `task #`) || ns[0].Title == "" || ns[0].Deliver != DeliverWake {
 		t.Fatalf("deleted notice = %+v", ns[0])
 	}

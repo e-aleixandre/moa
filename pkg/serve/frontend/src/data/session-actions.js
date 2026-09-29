@@ -883,7 +883,7 @@ export function recallQueuedSteers(id) {
     })
     .catch((e) => {
       recall.pending = false;
-      const fallback = queued.filter((steer) => !recall.restoredIDs.has(steer.id));
+      const fallback = queued.filter((steer) => !steer.non_recallable && !recall.restoredIDs.has(steer.id));
       if (fallback.length > 0) {
         fallback.forEach((steer) => recall.restoredIDs.add(steer.id));
         setState((state) => ({

@@ -418,8 +418,19 @@ func TestNoticeOwnerCompletesAndDeletesAgentTask(t *testing.T) {
 	}
 	pollUntil(t, 5*time.Second, "idle", func() bool { return sessState(sess) == StateIdle })
 
+	// A finished task is deleted without telling its session.
 	mustAPI(t, srv, "DELETE", fmt.Sprintf("/api/tasks/%d", rec.ID), fmt.Sprintf(`{"revision":%d,"deliver":"hold"}`, rec.Revision), http.StatusNoContent).Body.Close() //nolint:errcheck
-	deleted := waitNoticeState(t, mgr, rec.ID, tasks.NoticeDelivered)
+	time.Sleep(200 * time.Millisecond)
+	if n, ok := latestNotice(t, mgr, rec.ID); !ok || n.Kind != tasks.NoticeAgentDone {
+		t.Fatalf("deleting a finished task notified: %+v", n)
+	}
+
+	// An open one does.
+	open := decode[tasks.Record](t, mustAPI(t, srv, "POST", "/api/tasks", fmt.Sprintf(`{"title":"b","place":"agent","assignee_session_id":%q}`, sess.ID), http.StatusCreated))
+	waitNoticeState(t, mgr, open.ID, tasks.NoticeDelivered)
+	pollUntil(t, 5*time.Second, "idle", func() bool { return sessState(sess) == StateIdle })
+	mustAPI(t, srv, "DELETE", fmt.Sprintf("/api/tasks/%d", open.ID), fmt.Sprintf(`{"revision":%d,"deliver":"hold"}`, open.Revision), http.StatusNoContent).Body.Close() //nolint:errcheck
+	deleted := waitNoticeState(t, mgr, open.ID, tasks.NoticeDelivered)
 	if deleted.Kind != tasks.NoticeAgentDeleted || len(noticeMessages(sess.History(), deleted.ID)) != 1 {
 		t.Fatalf("delete = %+v", deleted)
 	}
@@ -477,7 +488,7 @@ func TestNoticeSessionLimitWaitsForTheOwner(t *testing.T) {
 		t.Fatal("deliver did not bring the notice")
 	}
 	resp = mustAPI(t, srv, "POST", "/api/tasks/notices/"+n.ID+"/deliver", "", http.StatusConflict)
-	resp.Body.Close() //nolint:errcheck
+	resp.Body.Close()                                                                                   //nolint:errcheck
 	mustAPI(t, srv, "POST", "/api/tasks/notices/tn_nope/deliver", "", http.StatusNotFound).Body.Close() //nolint:errcheck
 }
 

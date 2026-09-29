@@ -1457,6 +1457,31 @@ test('recallQueuedSteers gives the whole queue back to the composer, in order', 
   expect(getToasts().some((t) => t.title === 'Queued images dropped')).toBe(true);
 });
 
+test('a failed recall restores only the owner\'s text, never a task notice', async () => {
+  setState({ composerDrops: {} });
+  globalThis.fetch = () => Promise.resolve(new Response('boom', { status: 500 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [
+    { id: 'n1', text: 'Task #1 done', non_recallable: true, confirmed: true },
+    { id: 'q1', text: 'mine' },
+  ] } } });
+
+  expect(recallQueuedSteers('s1')).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(store.get().composerDrops.s1.text).toBe('mine');
+});
+
+test('a recall with only a task notice queued leaves the composer alone', async () => {
+  setState({ composerDrops: {} });
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({ discarded_steer_ids: [], discarded_steers: [] }), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [
+    { id: 'n1', text: 'Task #1 done', non_recallable: true, confirmed: true },
+  ] } } });
+
+  recallQueuedSteers('s1');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(store.get().composerDrops.s1).toBeUndefined();
+});
+
 test('recallQueuedSteers does nothing without a queue, and never twice at once', async () => {
   setState({ composerDrops: {} });
   let inflight;

@@ -675,11 +675,13 @@ func (m *Manager) injectEvent(sessionID string, in eventInjection) (steered bool
 		return false, ErrNotFound
 	}
 
+	// Text renders first, as deliverEvent always did: it can take time, and
+	// the state must be read after it to be current.
+	text := in.Text()
 	state := sess.runtime.State.Current()
 	if in.RefuseQuestion && state == bus.StatePermission {
 		return false, errEventSessionQuestion
 	}
-	text := in.Text()
 	busy := state == bus.StateRunning || state == bus.StatePermission || sess.runtime.Context().Agent.IsRunning()
 	queued := false
 	if !busy {
@@ -701,7 +703,10 @@ func (m *Manager) injectEvent(sessionID string, in eventInjection) (steered bool
 		if id == "" {
 			id = core.NewSteerID()
 		}
-		err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: id, Text: text, Custom: custom})
+		err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: id, Text: text, Custom: custom, RefuseQuestion: in.RefuseQuestion})
+		if errors.Is(err, bus.ErrSessionQuestion) {
+			return false, errEventSessionQuestion
+		}
 		if err == nil {
 			sess.sendGeneration.Add(1)
 		}
@@ -712,20 +717,33 @@ func (m *Manager) injectEvent(sessionID string, in eventInjection) (steered bool
 			Message: core.NewUserMessage(text),
 			Custom:  custom,
 		}
+		// Minted before the append so the command can carry exactly this
+		// message: a snapshot of the agent context taken afterwards could end
+		// with a row from a concurrent send.
+		msg.EnsureMsgID()
 		if err := sess.runtime.Bus.Execute(bus.AppendToConversation{SessionID: sess.ID, Message: msg}); err != nil {
 			return false, err
+		}
+		var published []core.AgentMessage
+		if isTaskNotice(custom) {
+			published = []core.AgentMessage{msg}
+		} else {
+			published = sess.runtime.Context().Agent.Messages()
 		}
 		sess.runtime.Bus.Publish(bus.CommandExecuted{
 			SessionID: sess.ID,
 			Command:   "event",
-			Messages:  sess.runtime.Context().Agent.Messages(),
+			Messages:  published,
 		})
 		return false, nil
 	}
 	// A queue that appeared since the check turns the prompt into a steer;
 	// AcceptedSteerID says so.
 	var acceptedSteer string
-	err = sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, Custom: custom, SteerID: in.SteerID, AcceptedSteerID: &acceptedSteer})
+	err = sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, Custom: custom, SteerID: in.SteerID, AcceptedSteerID: &acceptedSteer, RefuseQuestion: in.RefuseQuestion})
+	if errors.Is(err, bus.ErrSessionQuestion) {
+		return false, errEventSessionQuestion
+	}
 	if err == nil {
 		sess.sendGeneration.Add(1)
 	}

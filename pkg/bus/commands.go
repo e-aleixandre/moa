@@ -32,6 +32,11 @@ var ErrVerifyRunning = errors.New("verify already running")
 // queued.
 var ErrNotIdle = errors.New("session is not idle")
 
+// ErrSessionQuestion is returned by SteerAgent or SendPrompt with
+// RefuseQuestion set when the session is blocked on a permission prompt or an
+// ask_user question, so the caller does not queue behind the owner's answer.
+var ErrSessionQuestion = errors.New("session is waiting for an answer")
+
 // ---------------------------------------------------------------------------
 // Agent interaction
 // ---------------------------------------------------------------------------
@@ -75,6 +80,9 @@ type SendPrompt struct {
 	// tool is an interruptible wait. It wakes that wait like a user steer, without
 	// injecting the prompt into a run that is actively reasoning or executing.
 	InterruptWait bool
+	// RefuseQuestion rejects the prompt with ErrSessionQuestion while the
+	// session is in StatePermission. Checked under abortMu, before admission.
+	RefuseQuestion bool
 }
 
 // SendPromptWithContent starts an agent run with structured content (e.g. images).
@@ -111,6 +119,9 @@ type SteerAgent struct {
 	// is delivered to the agent but excluded from the user-visible queue
 	// snapshot. Its delivery event is separately suppressed via SteerFilter.
 	Internal bool
+	// RefuseQuestion rejects the steer with ErrSessionQuestion while the
+	// session is in StatePermission. Checked under abortMu, before enqueuing.
+	RefuseQuestion bool
 }
 
 // QueueCommand enqueues a slash command as a BARRIER in the agent's unified

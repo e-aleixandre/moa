@@ -80,6 +80,9 @@ func registerRunControlHandlers(sctx *SessionContext) {
 	b.OnCommand(func(cmd SteerAgent) error {
 		sctx.abortMu.Lock()
 		defer sctx.abortMu.Unlock()
+		if cmd.RefuseQuestion && sctx.State != nil && sctx.State.Current() == StatePermission {
+			return ErrSessionQuestion
+		}
 		// Centralize the ID invariant: every queued steer has a stable ID even
 		// if a caller (CLI, internal) forgot to mint one.
 		if cmd.ID == "" {
@@ -154,6 +157,9 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 	b.OnCommand(func(cmd SendPrompt) error {
 		sctx.abortMu.Lock()
 		defer sctx.abortMu.Unlock()
+		if cmd.RefuseQuestion && sctx.State != nil && sctx.State.Current() == StatePermission {
+			return ErrSessionQuestion
+		}
 		// IdleOnly is decided here, under the same lock that converts prompts
 		// into steers and that the pump takes before starting a queued run: a
 		// caller checking idleness from outside could only observe a snapshot

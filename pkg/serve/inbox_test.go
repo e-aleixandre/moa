@@ -992,3 +992,88 @@ func TestManualRouteRunsEvenWhenSourceAutorunIsOff(t *testing.T) {
 		t.Fatalf("manual route did not deliver with autorun true: %+v", sess.History())
 	}
 }
+
+func newInjectSession(t *testing.T) (*Manager, *ManagedSession) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	mgr := newTestManager(t, ctx, newMockProvider(simpleResponseHandler("ok")))
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mgr, sess
+}
+
+// The state is read after the text renders: a session that finished its run
+// while the text was being built takes an autorun:false event as an append.
+func TestInjectEventReadsStateAfterTextRenders(t *testing.T) {
+	mgr, sess := newInjectSession(t)
+	sess.runtime.State.ForceState(bus.StateRunning)
+	before := len(sess.runtime.Context().Agent.Messages())
+
+	steered, err := mgr.injectEvent(sess.ID, eventInjection{
+		Text: func() string {
+			sess.runtime.State.ForceState(bus.StateIdle)
+			return "late text"
+		},
+		Custom: func(bool) map[string]any { return map[string]any{"source": "event"} },
+	})
+	if err != nil || steered {
+		t.Fatalf("injectEvent = steered %v, err %v; want an append", steered, err)
+	}
+	if got := len(sess.runtime.Context().Agent.Messages()); got != before+1 {
+		t.Fatalf("messages = %d, want %d", got, before+1)
+	}
+}
+
+// A permission prompt that opens while the text renders is refused.
+func TestInjectEventRefusesQuestionOpenedDuringText(t *testing.T) {
+	mgr, sess := newInjectSession(t)
+	sess.runtime.State.ForceState(bus.StateRunning)
+
+	steered, err := mgr.injectEvent(sess.ID, eventInjection{
+		Text: func() string {
+			sess.runtime.State.ForceState(bus.StatePermission)
+			return "t"
+		},
+		Custom:         func(bool) map[string]any { return nil },
+		Autorun:        true,
+		RefuseQuestion: true,
+	})
+	if steered || err != errEventSessionQuestion {
+		t.Fatalf("injectEvent = %v, %v; want refusal", steered, err)
+	}
+	if n := sess.runtime.Context().Agent.QueueLen(); n != 0 {
+		t.Fatalf("queue = %d, want 0", n)
+	}
+}
+
+// A permission prompt that opens between the state read and bus admission is
+// caught by the bus command, on both the steer and the prompt paths.
+func TestInjectEventRefusesQuestionOpenedBeforeAdmission(t *testing.T) {
+	for _, from := range []bus.SessionState{bus.StateRunning, bus.StateIdle} {
+		t.Run(string(from), func(t *testing.T) {
+			mgr, sess := newInjectSession(t)
+			if from == bus.StateRunning {
+				sess.runtime.State.ForceState(bus.StateRunning)
+			}
+			steered, err := mgr.injectEvent(sess.ID, eventInjection{
+				Text: func() string { return "t" },
+				Custom: func(bool) map[string]any {
+					sess.runtime.State.ForceState(bus.StateRunning)
+					sess.runtime.State.ForceState(bus.StatePermission)
+					return nil
+				},
+				Autorun:        true,
+				RefuseQuestion: true,
+			})
+			if steered || err != errEventSessionQuestion {
+				t.Fatalf("injectEvent = %v, %v; want refusal", steered, err)
+			}
+			if n := sess.runtime.Context().Agent.QueueLen(); n != 0 {
+				t.Fatalf("queue = %d, want 0", n)
+			}
+		})
+	}
+}

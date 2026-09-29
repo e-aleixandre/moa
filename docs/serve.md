@@ -921,9 +921,9 @@ Some of your gestures tell a session what happened, as a folded event in its con
 - assigning a task to a session (creating it in **Agents**, or moving it there);
 - **Save and notify** on a task with a session: its assignee, or the session that asked for a request. Plain **Save** tells nobody;
 - completing a request, with your optional note: the session that asked;
-- completing or deleting a session's task: that session.
+- completing a session's task, or deleting one that is still open: that session.
 
-Deleting an open request, and whatever an agent does with its own tasks, tell nobody. One gesture sends at most one notice. The agent reads what happened, the task's ID, your note quoted as data, and that it can read the task with its `tasks` tool.
+Deleting an open request, a finished task, and whatever an agent does with its own tasks, tell nobody. One gesture sends at most one notice. The agent reads what happened, the task's ID, your note quoted as data, and that it can read the task with its `tasks` tool.
 
 A session that is working gets the notice as a queued message; one that is stopped gets it as a prompt and starts a turn. For a session that is saved but not open you choose: **wake** opens it and delivers like to a stopped one; **hold** keeps the notice until the session is opened, by any means. Without a choice the notice waits.
 

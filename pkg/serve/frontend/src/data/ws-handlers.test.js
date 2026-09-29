@@ -1069,6 +1069,17 @@ test('mergeSteers carries command/images through a reconnect snapshot', async ()
   expect(steers[1]).toMatchObject({ id: 'm1', images: 2, command: false, confirmed: true });
 });
 
+test('mergeSteers keeps a task notice marked non-recallable', async () => {
+  seedSession('s1');
+  handleWsInit('s1', {
+    state: 'running',
+    pending_steers: [{ id: 'n1', text: 'Task #1 done', non_recallable: true }, { id: 'm1', text: 'mine' }],
+  });
+  const [notice, mine] = store.get().sessions.s1.pendingSteers;
+  expect(notice.non_recallable).toBe(true);
+  expect(mine.non_recallable).toBe(false);
+});
+
 test('handleWsRunEnd keeps genuinely queued steers (mostrar la verdad)', async () => {
   seedSession('s1');
   setState({ sessions: { s1: { ...store.get().sessions.s1, messages: [], state: 'running', pendingSteers: [{ id: 'q1', text: 'do this next' }] } } });
@@ -2026,6 +2037,26 @@ test('handleWsCommand does not duplicate a skill message already present', () =>
   handleWsCommand('s1', payload);
   const hits = store.get().sessions.s1.messages.filter((m) => m._msg_id === 'm-skill-2');
   expect(hits).toHaveLength(1);
+});
+
+test('handleWsCommand appends only the new event notice, keeping history and deduping by MsgID', () => {
+  seedSession('s1');
+  handleWsCommand('s1', { command: 'skill', messages: [{ msg_id: 'm-old-1', role: 'user', content: [{ type: 'text', text: 'hi' }] }] });
+  const payload = {
+    command: 'event',
+    // The event carries the whole agent context, older rows included.
+    messages: [
+      { msg_id: 'm-old-1', role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      { msg_id: 'm-old-2', role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+      { msg_id: 'm-notice', role: 'user', custom: { source: 'event', id: 'tn_1', autorun: false }, content: [{ type: 'text', text: 'task queued' }] },
+    ],
+  };
+  handleWsCommand('s1', payload);
+  let ids = store.get().sessions.s1.messages.map((m) => m._msg_id);
+  expect(ids).toEqual(['m-old-1', 'm-notice']);
+  handleWsCommand('s1', payload);
+  ids = store.get().sessions.s1.messages.map((m) => m._msg_id);
+  expect(ids).toEqual(['m-old-1', 'm-notice']);
 });
 
 test('a compacted child projects its summary as a compaction card', () => {

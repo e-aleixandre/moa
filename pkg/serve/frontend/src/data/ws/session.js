@@ -293,6 +293,15 @@ export function handleWsCommand(id, data) {
       const fresh = normalizeHistory(data.messages).filter(row => row._msg_id && !known.has(row._msg_id));
       if (fresh.length > 0) updateSession(id, { messages: [...sess.messages, ...fresh] });
     }
+  } else if (data.command === 'event') {
+    // Task notices carry just their appended row; older event producers carry
+    // the context. Only take the last row, never unloaded older history.
+    const sess = store.get().sessions[id];
+    if (sess && data.messages?.length) {
+      const known = new Set(sess.messages.map(message => message?._msg_id).filter(Boolean));
+      const fresh = normalizeHistory(data.messages.slice(-1)).filter(row => row._msg_id && !known.has(row._msg_id));
+      if (fresh.length > 0) updateSession(id, { messages: [...sess.messages, ...fresh] });
+    }
   } else if (data.command === 'branch') {
     // Branch switched — reload messages from new branch path.
     if (data.messages) {

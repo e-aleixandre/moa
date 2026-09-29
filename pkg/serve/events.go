@@ -83,12 +83,14 @@ type PromptResolvedData struct {
 // barrier (Text holds its raw command line, e.g. "/compact") so the client
 // renders a command chip; Images is the number of image blocks a queued message
 // carries (0 for a plain-text steer or a command) so the chip can show an
-// attachment badge.
+// attachment badge. NonRecallable marks a task notice: it is not the owner's
+// text, so a recall must never hand it back to the composer.
 type PendingSteerData struct {
-	ID      string `json:"id"`
-	Text    string `json:"text"`
-	Command bool   `json:"command,omitempty"`
-	Images  int    `json:"images,omitempty"`
+	ID            string `json:"id"`
+	Text          string `json:"text"`
+	Command       bool   `json:"command,omitempty"`
+	Images        int    `json:"images,omitempty"`
+	NonRecallable bool   `json:"non_recallable,omitempty"`
 }
 
 // LiveToolInitData is one tool call that is still generating its arguments or

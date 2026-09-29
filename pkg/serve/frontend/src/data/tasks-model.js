@@ -365,18 +365,19 @@ export function createBody(draft, dest, choice = null) {
 
 export function deletePath(task, choice = null) {
   const q = new URLSearchParams({ revision: String(task.revision) });
-  if (isAgentTask(task) && choice) q.set('deliver', choice);
+  if (deleteNotifies(task) && choice) q.set('deliver', choice);
   return `/api/tasks/${task.id}?${q}`;
 }
 
-// Deleting an agent's task tells it; deleting a request or a note does not.
+// Deleting an open agent task tells it; a finished task, a request or a note
+// does not.
 export function deleteNotifies(task) {
-  return isAgentTask(task) && !!task.assignee_session_id;
+  return isAgentTask(task) && !!task.assignee_session_id && task.status !== 'done';
 }
 
 // Completing tells the requester (a request) or the assignee (an agent's).
 export function completeNotifies(task) {
-  return isRequest(task) || deleteNotifies(task);
+  return isRequest(task) || (isAgentTask(task) && !!task.assignee_session_id);
 }
 
 // ── Notices ───────────────────────────────────────────────────────────────

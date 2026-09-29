@@ -346,3 +346,42 @@ func TestClaimDoesNotRevealAnotherSessionsDirectTask(t *testing.T) {
 		t.Fatalf("claiming another session's task = %v, want not available", err)
 	}
 }
+
+func TestChecklistDoesNotProjectPrivateDependencyIDs(t *testing.T) {
+	r := newRepo(t)
+	a, b := actor("A", "p"), actor("B", "p")
+	work, _ := r.AgentCreate(bg, a, AgentInput{Title: "deploy"})
+	mine, _ := r.AgentCreate(bg, a, AgentInput{Title: "prepare"})
+	back := backlog(t, r, "shared backlog", "p")
+	private := note(t, r, "private vault secret")
+
+	rec, _ := r.Get(bg, work.ID)
+	if _, err := r.Update(bg, rec.ID, rec.Revision,
+		Patch{WaitsFor: &[]int64{private.ID, mine.ID, back.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{a.SessionID, b.SessionID} {
+		list, err := r.Checklist(bg, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tk := range list {
+			for _, d := range tk.DependsOn {
+				if int64(d) == private.ID {
+					t.Fatalf("session %s: private id leaked: %+v", s, tk)
+				}
+			}
+		}
+		if s == "A" {
+			var got []int
+			for _, tk := range list {
+				if int64(tk.ID) == work.ID {
+					got = tk.DependsOn
+				}
+			}
+			if len(got) != 2 {
+				t.Fatalf("visible deps lost: %v", got)
+			}
+		}
+	}
+}

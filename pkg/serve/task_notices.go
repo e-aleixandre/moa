@@ -215,9 +215,9 @@ func (d *noticeDispatcher) pass(ctx context.Context) {
 
 // setState moves n to state/reason unless it is already there, so a pass that
 // changes nothing writes nothing.
-func (d *noticeDispatcher) setState(ctx context.Context, n *tasks.Notice, c tasks.NoticeChange) {
+func (d *noticeDispatcher) setState(ctx context.Context, n *tasks.Notice, c tasks.NoticeChange) bool {
 	if n.State == c.State && n.Reason == c.Reason && (c.Method == "" || c.Method == n.Method) && n.SteerID == c.SteerID {
-		return
+		return true
 	}
 	if len(c.From) == 0 {
 		c.From = []string{n.State}
@@ -227,7 +227,7 @@ func (d *noticeDispatcher) setState(ctx context.Context, n *tasks.Notice, c task
 		if ctx.Err() == nil {
 			slog.Warn("task notices: recording a state failed", "notice", n.ID, "state", c.State, "error", err)
 		}
-		return
+		return false
 	}
 	if ok {
 		n.State, n.Reason, n.SteerID = c.State, c.Reason, c.SteerID
@@ -235,6 +235,7 @@ func (d *noticeDispatcher) setState(ctx context.Context, n *tasks.Notice, c task
 			n.Method = c.Method
 		}
 	}
+	return ok
 }
 
 func (d *noticeDispatcher) pendingFor(ctx context.Context, n *tasks.Notice, reason string) {
@@ -276,8 +277,26 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 		}
 	}
 
+	// Reconcile even a pending row: an earlier admission may have reached the
+	// transcript before recording its state failed (including older binaries).
+	if sess, live := m.Get(to); live {
+		if sess.persister != nil && sess.persister.has(func(s *session.Session) bool { return transcriptHasNotice(s, n.ID) }) {
+			n = d.delivered(ctx, n)
+			return n
+		}
+		if hasNotice(sess.History(), n.ID) || noticeQueued(sess, n) {
+			d.setState(ctx, &n, tasks.NoticeChange{State: tasks.NoticeSent, SteerID: n.SteerID})
+			d.markInflight(to)
+			return n
+		}
+	}
 	run := n.Method == tasks.MethodRun
 	steerID := core.NewSteerID()
+	// Persist the recovery decision before admission. If this write fails, no
+	// message or turn may start; a crash afterwards is reconciled as sent.
+	if !d.setState(ctx, &n, tasks.NoticeChange{State: tasks.NoticeSent, SteerID: steerID}) {
+		return n
+	}
 	d.steers.Store(steerID, n.ID)
 	d.markInflight(to)
 	steered, err := m.injectEvent(to, eventInjection{
@@ -292,13 +311,10 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 	}
 	switch {
 	case err == nil:
-		sent := tasks.NoticeChange{From: []string{tasks.NoticePending, tasks.NoticeHeld}, State: tasks.NoticeSent}
-		if steered {
-			sent.SteerID = steerID
+		if !steered {
+			d.setState(ctx, &n, tasks.NoticeChange{State: tasks.NoticeSent})
 		}
-		d.setState(ctx, &n, sent)
-		// The transcript may already have been saved before the notice was
-		// recorded as sent; look once more.
+		// The transcript may already have been saved during admission.
 		d.trigger(func() { d.reconcile[to] = true })
 	case errors.Is(err, errEventSessionQuestion):
 		d.markWaitingIdle(to)
@@ -403,11 +419,12 @@ func (d *noticeDispatcher) reconcileSent(ctx context.Context, n tasks.Notice) {
 	d.nudge()
 }
 
-func (d *noticeDispatcher) delivered(ctx context.Context, n tasks.Notice) {
+func (d *noticeDispatcher) delivered(ctx context.Context, n tasks.Notice) tasks.Notice {
 	if n.SteerID != "" {
 		d.steers.Delete(n.SteerID)
 	}
-	d.setState(ctx, &n, tasks.NoticeChange{From: []string{tasks.NoticePending, tasks.NoticeSent}, State: tasks.NoticeDelivered})
+	d.setState(ctx, &n, tasks.NoticeChange{From: []string{tasks.NoticePending, tasks.NoticeHeld, tasks.NoticeSent}, State: tasks.NoticeDelivered})
+	return n
 }
 
 func noticeQueued(sess *ManagedSession, n tasks.Notice) bool {

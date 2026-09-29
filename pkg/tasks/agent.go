@@ -457,12 +457,43 @@ func (r *Repo) flat(ctx context.Context, where, sessionID string) ([]Task, error
 	if err != nil {
 		return nil, err
 	}
+	// The session WebSocket and /tasks are the agent's view: an edge to a
+	// task the session cannot read is not projected, as in AgentGet.
+	known := map[int64]*Record{}
+	var need []int64
+	for i := range recs {
+		known[recs[i].ID] = &recs[i]
+	}
+	for _, t := range recs {
+		for _, w := range t.WaitsFor {
+			if known[w] == nil {
+				need = append(need, w)
+			}
+		}
+	}
+	err = inChunks(need, func(chunk []int64) error {
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		extra, err := loadBare(ctx, rd, "id IN ("+placeholders(len(chunk))+")", args...)
+		for i := range extra {
+			known[extra[i].ID] = &extra[i]
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Task, 0, len(recs))
 	for _, t := range recs {
+		a := Actor{SessionID: sessionID, ProjectKey: t.ProjectKey}
 		ft := Task{ID: int(t.ID), Title: t.Title, Description: t.Description, Status: t.Status,
 			CreatedAt: t.CreatedAt, CompletedAt: t.CompletedAt}
 		for _, w := range t.WaitsFor {
-			ft.DependsOn = append(ft.DependsOn, int(w))
+			if k := known[w]; k != nil && a.reads(k) {
+				ft.DependsOn = append(ft.DependsOn, int(w))
+			}
 		}
 		out = append(out, ft)
 	}

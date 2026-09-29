@@ -300,8 +300,9 @@ func (r *Repo) saveTask(ctx context.Context, tx *sql.Tx, t Record, revision int6
 }
 
 // Delete removes a task with its subtasks and dependency edges. Deleting an
-// open request tells nobody: the owner decided that. Deleting a session's
-// task tells that session; deliver is as in CreateInput.
+// open request tells nobody: the owner decided that. Deleting a session's open
+// task tells that session; a finished one tells nobody. deliver is as in
+// CreateInput.
 func (r *Repo) Delete(ctx context.Context, id, revision int64, deliver string) error {
 	if revision <= 0 {
 		return invalid("revision is required")
@@ -320,7 +321,7 @@ func (r *Repo) Delete(ctx context.Context, id, revision int64, deliver string) e
 		if _, err := tx.ExecContext(ctx, "DELETE FROM tasks WHERE id = ?", id); err != nil {
 			return false, err
 		}
-		if cur.Place == PlaceAgent {
+		if cur.Place == PlaceAgent && cur.Status != StatusDone {
 			return true, r.addNotice(ctx, tx, NoticeAgentDeleted, cur.AssigneeSessionID, deliver, cur)
 		}
 		return true, nil

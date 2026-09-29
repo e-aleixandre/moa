@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import {
-  createBody, completePatch, deletePath, deliverFields, editorActions, editorDraft, groupTasks, latestUndelivered,
+  createBody, completeNotifies, completePatch, deleteNotifies, deletePath, deliverFields, editorActions, editorDraft, groupTasks, latestUndelivered,
   movePatch, needsDeliverChoice, noticeLine, openRequestCount, pinnedLine, rebaseDraft, recipientFor, savePatch,
   sessionTasksVerdict, startNotifyGesture,
 } from "./tasks-model.js";
@@ -122,10 +122,20 @@ test("every gesture that can tell a session carries deliver only when chosen", (
   expect(deletePath(agent)).toBe("/api/tasks/1?revision=3");
   expect(deletePath(agent, "wake")).toBe("/api/tasks/1?revision=3&deliver=wake");
   expect(deletePath(T(), "wake")).toBe("/api/tasks/1?revision=3"); // a note tells nobody
+  const finished = T({ place: "agent", assignee_session_id: "A", status: "done" });
+  expect(deletePath(finished, "wake")).toBe("/api/tasks/1?revision=3"); // a finished task tells nobody
   const draft = { title: " x ", description: "", subtasks: [], waits_for: [] };
   expect("deliver" in createBody(draft, { place: "agent", sessionId: "A" })).toBe(false);
   expect(createBody(draft, { place: "agent", sessionId: "A" }, "wake").deliver).toBe("wake");
   expect("deliver" in completePatch(agent)).toBe(false);
+});
+
+test("deleting a finished agent task asks nothing; completing it still notifies", () => {
+  const open = T({ place: "agent", assignee_session_id: "A", status: "in_progress" });
+  const finished = { ...open, status: "done" };
+  expect(deleteNotifies(open)).toBe(true);
+  expect(deleteNotifies(finished)).toBe(false);
+  expect(completeNotifies(open)).toBe(true);
 });
 
 test("the recipient comes from the server when it says, else from the roster", () => {

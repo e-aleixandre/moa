@@ -25,7 +25,7 @@ const (
 
 // Notice states. pending is waiting for the dispatcher (with a Reason when an
 // attempt could not deliver it); held waits for its saved session to be
-// opened; sent was admitted into the session and is waiting to be seen in the
+// opened; sent reserves a delivery attempt and waits to be seen in the
 // persisted transcript; delivered is there; failed is terminal.
 const (
 	NoticePending   = "pending"
