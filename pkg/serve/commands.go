@@ -45,17 +45,16 @@ func cmdSchedule(m *Manager, sess *ManagedSession, args []string) (*CommandResul
 		return &CommandResult{OK: false, Message: "schedule storage is unavailable"}, nil
 	}
 	if len(args) == 0 || args[0] == "list" {
-		var lines []string
+		var mine []schedule.Schedule
 		for _, record := range m.scheduler.list() {
-			if record.SessionID != sess.ID {
-				continue
+			if record.SessionID == sess.ID {
+				mine = append(mine, record)
 			}
-			lines = append(lines, fmt.Sprintf("%s %s %s — %s", record.ID, record.Status, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"), record.Text))
 		}
-		if len(lines) == 0 {
+		if len(mine) == 0 {
 			return &CommandResult{OK: true, Message: "no schedules"}, nil
 		}
-		return &CommandResult{OK: true, Message: strings.Join(lines, "\n")}, nil
+		return &CommandResult{OK: true, Message: formatScheduleList(mine)}, nil
 	}
 	if args[0] == "cancel" {
 		if len(args) != 2 {
@@ -71,7 +70,7 @@ func cmdSchedule(m *Manager, sess *ManagedSession, args []string) (*CommandResul
 		if !owned {
 			return &CommandResult{OK: false, Message: "schedule not found"}, nil
 		}
-		record, err := m.scheduler.cancel(args[1])
+		record, err := m.scheduler.cancel(sess, args[1])
 		if err != nil {
 			return &CommandResult{OK: false, Message: err.Error()}, nil
 		}
@@ -92,6 +91,36 @@ func cmdSchedule(m *Manager, sess *ManagedSession, args []string) (*CommandResul
 		return &CommandResult{OK: false, Message: err.Error()}, nil
 	}
 	return &CommandResult{OK: true, Message: fmt.Sprintf("scheduled %s for %s (%s)", record.ID, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"), untilLabel(time.Until(record.DueAt)))}, nil
+}
+
+// scheduleListMax bounds the /schedule list answer: it is shown in a toast, and
+// a long history would run off the screen.
+const scheduleListMax = 8
+
+// formatScheduleList shows pending records first (soonest due), then the most
+// recent settled ones, and says how many did not fit.
+func formatScheduleList(records []schedule.Schedule) string {
+	var pending, settled []schedule.Schedule
+	for _, record := range records { // records arrive ordered by due time
+		if record.Status == schedule.StatusPending {
+			pending = append(pending, record)
+		} else {
+			settled = append([]schedule.Schedule{record}, settled...)
+		}
+	}
+	ordered := append(pending, settled...)
+	shown := ordered
+	if len(shown) > scheduleListMax {
+		shown = shown[:scheduleListMax]
+	}
+	lines := make([]string, 0, len(shown)+1)
+	for _, record := range shown {
+		lines = append(lines, fmt.Sprintf("%s %s %s — %s", record.ID, record.Status, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"), record.Text))
+	}
+	if hidden := len(ordered) - len(shown); hidden > 0 {
+		lines = append(lines, fmt.Sprintf("+%d more", hidden))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // untilLabel renders a remaining duration as "in 2h 5m", to whole minutes

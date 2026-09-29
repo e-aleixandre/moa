@@ -536,6 +536,30 @@ test("a dead request still reports commands whose outcome is not deferred", asyn
   expect(shown).toHaveLength(1);
 });
 
+test("a /schedule answer is shown as a note that stays long enough to read", async () => {
+  refs.length = 0;
+  commands.length = 0;
+  commandError = null;
+  commandResult = { ok: true, message: "scheduled abc for 2026-09-30 03:00 UTC (in 8h)" };
+  const before = getToasts().length;
+  const sessionId = `schedule-${Math.random()}`;
+  setState({ sessions: { ...store.get().sessions, [sessionId]: { id: sessionId, state: "idle" } } });
+  const tree = Composer({ sessionId, session: { state: "idle" } });
+  const textarea = descendants(tree).find((node) => node.type === "textarea");
+  refs[0].current = { value: "/schedule in 8h -- x", style: {}, scrollHeight: 24 };
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+    isComposing: false, preventDefault() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  const shown = getToasts().slice(before);
+  expect(shown).toHaveLength(1);
+  expect(shown[0]).toMatchObject({ title: "Schedule", type: "info", detail: commandResult.message });
+  expect(shown[0].duration).toBeGreaterThan(5000);
+});
+
 test("the desktop + opens the file picker directly, with no menu", () => {
   refs.length = 0;
   const tree = Composer({ sessionId: "s1", session: { state: "idle" } });

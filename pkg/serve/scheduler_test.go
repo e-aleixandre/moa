@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -186,5 +188,106 @@ func TestDeletingSessionRemovesItsSchedules(t *testing.T) {
 	records := reopened.List()
 	if len(records) != 1 || records[0].SessionID != kept.ID {
 		t.Fatalf("persisted records after delete = %#v", records)
+	}
+}
+
+// A lifecycle writer (session delete) waiting behind a command that holds the
+// read side must not wedge the scheduler: the command waits for the scheduler,
+// and the delivery loop used to hold the scheduler while waiting for the read
+// side, which the pending writer blocks.
+func TestSchedulerDoesNotDeadlockWithPendingLifecycleWriter(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.scheduler.create(schedule.Schedule{SessionID: sess.ID, Text: "x", DueAt: time.Now().Add(-time.Second), TimeZone: "UTC"}); err != nil {
+		t.Fatal(err)
+	}
+	sess.lifecycle.RLock() // the /schedule command, inside its read section
+	writer := make(chan struct{})
+	go func() { sess.lifecycle.Lock(); sess.lifecycle.Unlock(); close(writer) }() //nolint:staticcheck // barrier
+	time.Sleep(50 * time.Millisecond)
+	delivery := make(chan struct{})
+	go func() { mgr.scheduler.deliverDue(mgr, time.Now()); close(delivery) }()
+	time.Sleep(100 * time.Millisecond)
+
+	listed := make(chan struct{})
+	go func() { mgr.scheduler.list(); close(listed) }()
+	select {
+	case <-listed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduler is wedged: list() waits behind a delivery blocked on the lifecycle lock")
+	}
+	sess.lifecycle.RUnlock()
+	for name, ch := range map[string]chan struct{}{"writer": writer, "delivery": delivery} {
+		select {
+		case <-ch:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s never finished", name)
+		}
+	}
+}
+
+func TestCancelRefusesOccurrenceAlreadyInHistoryEvenIfDeliveredWasNotPersisted(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("directory permissions do not bind root")
+	}
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := mgr.scheduler.create(schedule.Schedule{SessionID: sess.ID, Text: "once", DueAt: time.Now().Add(-time.Second), TimeZone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(mgr.scheduler.store.Path())
+	if err := os.Chmod(dir, 0o500); err != nil { // persisting `delivered` will fail
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(dir, 0o700) }()
+	mgr.scheduler.deliverDue(mgr, time.Now())
+	pollUntil(t, 2*time.Second, "prompt in history", func() bool {
+		return scheduleOccurrenceExists(sess.History(), record.OccurrenceID)
+	})
+	pollUntil(t, 2*time.Second, "run to finish", func() bool { return sess.runtime.State.Current() == "idle" })
+	if got, _ := mgr.scheduler.store.Get(record.ID); got.Status != schedule.StatusPending {
+		t.Fatalf("precondition: status = %q, want pending (persist failed)", got.Status)
+	}
+	res, err := mgr.ExecCommand(sess.ID, "/schedule cancel "+record.ID, "")
+	if err != nil || res.OK || !strings.Contains(res.Message, "already delivered") {
+		t.Fatalf("cancel = %#v, %v", res, err)
+	}
+	if got, _ := mgr.scheduler.store.Get(record.ID); got.Status == schedule.StatusCanceled {
+		t.Fatal("delivered occurrence was marked canceled")
+	}
+}
+
+func TestScheduleListIsBoundedAndSaysHowManyAreHidden(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 22; i++ {
+		status := schedule.StatusDelivered
+		if i%11 == 0 {
+			status = schedule.StatusPending
+		}
+		if _, err := mgr.scheduler.create(schedule.Schedule{SessionID: sess.ID, Text: "t", DueAt: time.Now().Add(time.Duration(i-30) * time.Hour), TimeZone: "UTC", Status: status}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := mgr.ExecCommand(sess.ID, "/schedule list", "")
+	if err != nil || !res.OK {
+		t.Fatalf("list = %#v, %v", res, err)
+	}
+	lines := strings.Split(res.Message, "\n")
+	if len(lines) != scheduleListMax+1 || lines[len(lines)-1] != "+14 more" {
+		t.Fatalf("list = %d lines, last %q", len(lines), lines[len(lines)-1])
+	}
+	if strings.Count(res.Message, " pending ") != 2 || !strings.Contains(lines[0], "pending") || !strings.Contains(lines[1], "pending") {
+		t.Fatalf("pending records must come first:\n%s", res.Message)
 	}
 }

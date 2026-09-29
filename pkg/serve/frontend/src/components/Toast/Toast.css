@@ -59,6 +59,8 @@
   min-width: 0;
   color: var(--zl-t3);
   font-size: 13px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .toast-x {

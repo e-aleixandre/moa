@@ -20,7 +20,7 @@ export function addToast(toast) {
   const id = Date.now() + Math.random();
   toasts = [...toasts, { ...toast, id }];
   notifyToastListeners();
-  setTimeout(() => removeToast(id), 5000);
+  setTimeout(() => removeToast(id), toast.duration ?? 5000);
   return id;
 }
 
