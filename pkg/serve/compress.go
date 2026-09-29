@@ -93,3 +93,11 @@ func (w *gzipResponseWriter) Flush() {
 // Unwrap exposes the real writer to http.NewResponseController (used by
 // bodyTimeoutMiddleware to set read deadlines).
 func (w *gzipResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// skipBody turns the response into a bodyless one (a 304): the gzip header the
+// wrapper announced is withdrawn and the compressor's empty stream, which the
+// deferred Close still emits, goes nowhere.
+func (w *gzipResponseWriter) skipBody() {
+	w.Header().Del("Content-Encoding")
+	w.writer.Reset(io.Discard)
+}

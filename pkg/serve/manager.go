@@ -1439,8 +1439,13 @@ func (m *Manager) ListWith(opts ListOptions) []SessionInfo {
 		}))
 	}
 
+	// The ID tie-break keeps the order (and so the roster's ETag) stable when
+	// two sessions share an Updated stamp; map iteration order is random.
 	sort.Slice(list, func(i, j int) bool {
-		return list[i].Updated.After(list[j].Updated)
+		if !list[i].Updated.Equal(list[j].Updated) {
+			return list[i].Updated.After(list[j].Updated)
+		}
+		return list[i].ID < list[j].ID
 	})
 	return list
 }

@@ -2,8 +2,10 @@ package serve
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -425,7 +427,7 @@ func handleListSessions(mgr *Manager) http.HandlerFunc {
 		// Owner conversations are hidden by default: they are not work waiting
 		// for the user. ?include=owners is for the client that shows them.
 		opts := ListOptions{IncludeOwners: r.URL.Query().Get("include") == "owners"}
-		writeJSON(w, http.StatusOK, mgr.ListWith(opts))
+		writeJSONConditional(w, r, mgr.ListWith(opts))
 	}
 }
 
@@ -1554,6 +1556,52 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Debug("write JSON response", "status", status, "error", err)
 	}
+}
+
+// writeJSONConditional answers a polled read route with a weak ETag derived
+// from the serialized body, and a bodyless 304 when the client already holds
+// that exact body. The tag is a hash of what would be sent, so anything a
+// client can see changing changes the tag: there is no separate version
+// counter that a new field could forget to bump. A request without
+// If-None-Match gets the plain 200 it always got.
+func writeJSONConditional(w http.ResponseWriter, r *http.Request, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, "encode response", http.StatusInternalServerError)
+		return
+	}
+	body = append(body, '\n') // same bytes json.Encoder produced before
+	sum := sha256.Sum256(body)
+	etag := `W/"` + hex.EncodeToString(sum[:12]) + `"`
+	h := w.Header()
+	h.Set("ETag", etag)
+	// no-cache = "store it, but revalidate every time": browsers then send
+	// If-None-Match themselves and hand the page the cached body on a 304.
+	h.Set("Cache-Control", "no-cache")
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		if gz, ok := w.(*gzipResponseWriter); ok {
+			gz.skipBody()
+		}
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	h.Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// etagMatches implements the weak comparison of If-None-Match.
+func etagMatches(header, etag string) bool {
+	if header == "" {
+		return false
+	}
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || strings.TrimPrefix(candidate, "W/") == strings.TrimPrefix(etag, "W/") {
+			return true
+		}
+	}
+	return false
 }
 
 // wsAcceptOptions is the upgrade configuration shared by every WebSocket this
