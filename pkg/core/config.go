@@ -436,6 +436,9 @@ func (s MCPServer) Validate() error {
 	if s.URL == "" {
 		return nil
 	}
+	if s.Lazy || s.IdleTimeout != "" {
+		return errors.New(`"lazy" and "idle_timeout" are only supported for command-based servers`)
+	}
 	u, err := url.Parse(s.URL)
 	if err != nil {
 		return fmt.Errorf("invalid url: %v", err)

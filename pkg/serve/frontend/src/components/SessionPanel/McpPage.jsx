@@ -391,12 +391,13 @@ export function McpPage({ sessionId, mcpTick, servers: fixtureServers, inline = 
   const servers = data.servers || [];
   if (servers.length === 0) return <p class="zl-page-sum">No MCP servers for this session.</p>;
 
-  const available = servers.filter((s) => s.state === "ready" || s.state === "idle").length;
+  const hasIdleServers = servers.some((s) => s.lazy || s.idle_timeout);
+  const up = servers.filter((s) => s.state === "ready" || (hasIdleServers && s.state === "idle")).length;
 
   return (
     <div class="zl-page">
       <p class="zl-page-sum">
-        <span class="zl-data">{available}</span> of <span class="zl-data">{servers.length}</span> available. A server runs only when every scope has it on.
+        <span class="zl-data">{up}</span> of <span class="zl-data">{servers.length}</span> {hasIdleServers ? "available" : "running"}. A server runs only when every scope has it on.
       </p>
       <div class="zl-kv">
         {servers.map((s) => {

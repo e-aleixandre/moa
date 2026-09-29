@@ -81,11 +81,13 @@ const authRequiredMessage = "sign-in required"
 
 // ServerStatus is an immutable snapshot of one server's health, for the UI.
 type ServerStatus struct {
-	Name      string      `json:"name"`
-	State     ServerState `json:"state"`
-	ToolCount int         `json:"tool_count"`
-	ToolNames []string    `json:"tool_names,omitempty"`
-	Error     string      `json:"error,omitempty"`
+	Name        string      `json:"name"`
+	State       ServerState `json:"state"`
+	ToolCount   int         `json:"tool_count"`
+	ToolNames   []string    `json:"tool_names,omitempty"`
+	Error       string      `json:"error,omitempty"`
+	Lazy        bool        `json:"lazy"`
+	IdleTimeout string      `json:"idle_timeout"`
 	// AuthAction is set only in StateAuthRequired: "connect" when moa has
 	// never been authorized for this server, "reconnect" when it had been.
 	AuthAction string `json:"auth_action,omitempty"`
@@ -130,7 +132,9 @@ type Manager struct {
 // closures (which route through the session by name) capturing a dead
 // generation.
 type serverSession struct {
-	name string
+	name        string
+	lazy        bool
+	idleTimeout string
 
 	// lifecycle serializes an entire start/restart/close transition for this
 	// server: teardown of the old process, the dial, and the final state write.
@@ -147,14 +151,11 @@ type serverSession struct {
 	state   ServerState
 	// remote records the transport of the last connect, so a tool call can tell
 	// a remote peer (which may hang indefinitely) from a local subprocess.
-	remote bool
-	err    string
-	tools  []toolInfo
-	// A wake may discover a changed schema during a model turn. Keep the
-	// advertised tools intact until the controller's quiescent sync consumes it.
-	pendingTools *[]toolInfo
-	startedAt    time.Time
-	changedAt    time.Time
+	remote    bool
+	err       string
+	tools     []toolInfo
+	startedAt time.Time
+	changedAt time.Time
 	// gen increments on every (re)connect. The exit watcher captures the gen it
 	// was started for and ignores its notification if a newer generation has
 	// already taken over — so a slow Wait() from an old process can't clobber
@@ -163,6 +164,8 @@ type serverSession struct {
 	active    int
 	idleTimer *time.Timer
 	idleSeq   uint64
+	used      bool
+	lostState bool
 
 	// oauth is the handler of the live remote connection, so a late auth-loss
 	// callback can tell whether it still refers to the current connection.
@@ -213,7 +216,7 @@ func (m *Manager) toolsCachePath(name string, cfg core.MCPServer) string {
 }
 
 func (m *Manager) loadTools(name string, cfg core.MCPServer) ([]toolInfo, bool) {
-	if !m.canCacheTools(cfg) {
+	if cfg.IsRemote() {
 		return nil, false
 	}
 	path := m.toolsCachePath(name, cfg)
@@ -240,7 +243,7 @@ func (m *Manager) loadTools(name string, cfg core.MCPServer) ([]toolInfo, bool) 
 }
 
 func (m *Manager) saveTools(name string, cfg core.MCPServer, tools []toolInfo) {
-	if !cfg.Lazy || !m.canCacheTools(cfg) {
+	if !cfg.Lazy || cfg.IsRemote() {
 		return
 	}
 	path := m.toolsCachePath(name, cfg)
@@ -278,24 +281,6 @@ func (m *Manager) saveTools(name string, cfg core.MCPServer, tools []toolInfo) {
 	_ = os.Rename(f.Name(), path)
 }
 
-// The OAuth store exposes whether credentials exist, but not an offline
-// credential identity. Reusing metadata across identities could expose tools
-// belonging to another account. Cache anonymous remotes and local servers;
-// authenticated remotes discover on each manager start instead.
-func (m *Manager) canCacheTools(cfg core.MCPServer) bool {
-	if !cfg.IsRemote() {
-		return true
-	}
-	m.mu.Lock()
-	store := m.oauthStore
-	m.mu.Unlock()
-	if store == nil {
-		store = auth.DefaultMCPOAuthStore()
-	}
-	exists, _ := store.Has(auth.MCPOAuthKey(cfg.URL))
-	return !exists
-}
-
 func stopIdleLocked(s *serverSession) {
 	s.idleSeq++
 	if s.idleTimer != nil {
@@ -305,6 +290,9 @@ func stopIdleLocked(s *serverSession) {
 }
 
 func (m *Manager) armIdle(sess *serverSession, cfg core.MCPServer) {
+	if cfg.IsRemote() {
+		return
+	}
 	d, err := time.ParseDuration(cfg.IdleTimeout)
 	if err != nil || d <= 0 {
 		return
@@ -350,6 +338,8 @@ func (m *Manager) parkIdle(sess *serverSession) {
 	}
 	stopIdleLocked(sess)
 	sess.gen++
+	sess.lostState = sess.used
+	sess.used = false
 	oldSession, oldCmd := sess.session, sess.cmd
 	sess.session, sess.cmd, sess.client, sess.oauth = nil, nil, nil, nil
 	sess.oauthAuthenticated = false
@@ -438,7 +428,7 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 	sortStrings(names)
 	cached := make(map[string][]toolInfo)
 	for _, name := range names {
-		if !initiallyDisabled[name] && servers[name].Lazy {
+		if !initiallyDisabled[name] && servers[name].Lazy && !servers[name].IsRemote() {
 			if tools, ok := m.loadTools(name, servers[name]); ok {
 				cached[name] = tools
 			}
@@ -468,24 +458,14 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 	}
 	for i, name := range names {
 		var sess *serverSession
+		cfg := servers[name]
 		if initiallyDisabled[name] {
-			sess = newDisabledSession(name)
+			sess = newDisabledSession(name, cfg)
 		} else {
-			sess = &serverSession{name: name, state: StateStarting, changedAt: now}
+			sess = &serverSession{name: name, lazy: cfg.Lazy, idleTimeout: cfg.IdleTimeout, state: StateStarting, changedAt: now}
 			if tools, ok := cached[name]; ok {
 				sess.tools = tools
 				sess.state = StateIdle
-			}
-			if cfg := servers[name]; cfg.Lazy && cfg.IsRemote() && m.oauthStore != nil {
-				if _, needsReauth := m.oauthStore.Has(auth.MCPOAuthKey(cfg.URL)); needsReauth {
-					sess.tools = nil
-					sess.state = StateAuthRequired
-					sess.err = authRequiredMessage
-					sess.authAction = "reconnect"
-					if m.oauthStore.SignedOut(auth.MCPOAuthKey(cfg.URL)) {
-						sess.authAction = "connect"
-					}
-				}
 			}
 		}
 		sessions[i] = sess
@@ -559,7 +539,7 @@ func (m *Manager) finishStart(ctx context.Context, sess *serverSession, cfg core
 	st := sess.status()
 	m.logger.Info("MCP server connected", "server", st.Name, "tools", st.ToolCount)
 	m.notify(st)
-	if cfg.Lazy {
+	if cfg.Lazy && !cfg.IsRemote() {
 		m.parkIdle(sess)
 	} else {
 		m.armIdle(sess, cfg)
@@ -568,9 +548,9 @@ func (m *Manager) finishStart(ctx context.Context, sess *serverSession, cfg core
 
 // newDisabledSession builds a placeholder for a configured-but-disabled server:
 // no process, no connection, no tools, in StateDisabled.
-func newDisabledSession(name string) *serverSession {
+func newDisabledSession(name string, cfg core.MCPServer) *serverSession {
 	now := time.Now()
-	return &serverSession{name: name, state: StateDisabled, changedAt: now}
+	return &serverSession{name: name, lazy: cfg.Lazy, idleTimeout: cfg.IdleTimeout, state: StateDisabled, changedAt: now}
 }
 
 // connect starts the server (subprocess for a command-based one, nothing to
@@ -673,12 +653,7 @@ func (m *Manager) connect(ctx context.Context, sess *serverSession, cfg core.MCP
 		exists, needsReauth := oauth.store.Has(oauth.key)
 		sess.oauthAuthenticated = exists && !needsReauth
 	}
-	if sess.tools != nil && sess.state == StateStarting {
-		sess.pendingTools = &tools
-	} else {
-		sess.tools = tools
-		sess.pendingTools = nil
-	}
+	sess.tools = tools
 	sess.state = StateReady
 	sess.err = ""
 	now := time.Now()
@@ -714,7 +689,6 @@ func (m *Manager) watchExit(sess *serverSession, session *sdkmcp.ClientSession, 
 			sess.err = "connection to the remote server was lost"
 		}
 		sess.tools = nil
-		sess.pendingTools = nil
 		stopIdleLocked(sess)
 		sess.changedAt = time.Now()
 		st := sess.statusLocked()
@@ -757,10 +731,6 @@ func (m *Manager) ToolsForServer(name string) ([]core.Tool, bool) {
 		return nil, false
 	}
 	sess.mu.Lock()
-	if sess.pendingTools != nil {
-		sess.tools = *sess.pendingTools
-		sess.pendingTools = nil
-	}
 	tools := append([]toolInfo(nil), sess.tools...)
 	sess.mu.Unlock()
 	out := make([]core.Tool, 0, len(tools))
@@ -859,6 +829,8 @@ func (m *Manager) RestartServer(ctx context.Context, name string) (ServerStatus,
 	sess.err = ""
 	sess.changedAt = time.Now()
 	sess.gen++ // invalidate the old exit watcher
+	sess.lostState = false
+	sess.used = false
 	oldSession := sess.session
 	oldCmd := sess.cmd
 	sess.session = nil
@@ -886,7 +858,7 @@ func (m *Manager) RestartServer(ctx context.Context, name string) (ServerStatus,
 	st := sess.status()
 	m.logger.Info("MCP server restarted", "server", name, "tools", st.ToolCount)
 	m.notify(st)
-	if cfg.Lazy {
+	if cfg.Lazy && !cfg.IsRemote() {
 		m.parkIdle(sess)
 	} else {
 		m.armIdle(sess, cfg)
@@ -967,7 +939,7 @@ func (m *Manager) enableLocked(ctx context.Context, sess *serverSession, cfg cor
 	st := sess.status()
 	m.logger.Info("MCP server enabled", "server", sess.name, "tools", st.ToolCount)
 	m.notify(st)
-	if cfg.Lazy {
+	if cfg.Lazy && !cfg.IsRemote() {
 		m.parkIdle(sess)
 	} else {
 		m.armIdle(sess, cfg)
@@ -984,11 +956,12 @@ func (m *Manager) disableLocked(sess *serverSession) ServerStatus {
 	sess.err = ""
 	sess.changedAt = time.Now()
 	sess.gen++ // invalidate the old exit watcher so it won't report StateExited
+	sess.lostState = false
+	sess.used = false
 	oldSession := sess.session
 	oldCmd := sess.cmd
 	sess.session = nil
 	sess.tools = nil
-	sess.pendingTools = nil
 	sess.mu.Unlock()
 	m.notify(sess.status())
 
@@ -1070,7 +1043,6 @@ func (s *serverSession) setFailed(msg string) {
 	s.state = StateFailed
 	s.err = msg
 	s.tools = nil
-	s.pendingTools = nil
 	s.session = nil
 	s.oauth = nil
 	s.changedAt = time.Now()
@@ -1084,7 +1056,6 @@ func (s *serverSession) setAuthRequired(action string) {
 	s.err = authRequiredMessage
 	s.authAction = action
 	s.tools = nil
-	s.pendingTools = nil
 	s.session = nil
 	s.oauth = nil
 	s.oauthAuthenticated = false
@@ -1109,6 +1080,8 @@ func (s *serverSession) statusLocked() ServerStatus {
 		ToolCount:          len(s.tools),
 		ToolNames:          names,
 		Error:              s.err,
+		Lazy:               s.lazy,
+		IdleTimeout:        s.idleTimeout,
 		StartedAt:          s.startedAt,
 		ChangedAt:          s.changedAt,
 		OAuthAuthenticated: s.oauthAuthenticated,
@@ -1210,12 +1183,12 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 			session := sess.session
 			state := sess.state
 			remote := sess.remote
-			current := sess.tools
-			if sess.pendingTools != nil {
-				current = *sess.pendingTools
+			lostState := idle && session != nil && sess.lostState
+			if lostState {
+				sess.lostState = false
 			}
 			present := false
-			for _, tool := range current {
+			for _, tool := range sess.tools {
 				if tool.name == toolName {
 					present = true
 					break
@@ -1228,21 +1201,24 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 				}
 			}
 			sess.mu.Unlock()
+			if session != nil && !present && idle && cfg.Lazy && cfg.IdleTimeout == "" {
+				m.parkIdle(sess)
+			}
 			sess.lifecycle.Unlock()
 			if session == nil {
 				return core.ErrorResult(fmt.Sprintf("MCP server %s is %s", sess.name, state)), nil
 			}
 			if !present {
-				return core.ErrorResult(fmt.Sprintf("MCP tool %s is no longer available", label)), nil
+				if cfg.IdleTimeout != "" {
+					m.armIdle(sess, cfg)
+				}
+				return noteLostMCPState(core.ErrorResult(fmt.Sprintf("MCP tool %s is no longer available", label)), lostState), nil
 			}
 			defer func() {
 				sess.mu.Lock()
 				sess.active--
-				same := sess.session == session && sess.state == StateReady
 				sess.mu.Unlock()
-				if same {
-					m.armIdle(sess, cfg)
-				}
+				m.armIdle(sess, cfg)
 			}()
 			if _, hasDeadline := ctx.Deadline(); remote && !hasDeadline {
 				var cancel context.CancelFunc
@@ -1256,11 +1232,23 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 				Arguments: args,
 			})
 			if err != nil {
-				return core.ErrorResult(fmt.Sprintf("MCP tool %s failed: %v", label, err)), nil
+				return noteLostMCPState(core.ErrorResult(fmt.Sprintf("MCP tool %s failed: %v", label, err)), lostState), nil
 			}
-			return convertMCPResult(ctx, result), nil
+			sess.mu.Lock()
+			if sess.session == session {
+				sess.used = true
+			}
+			sess.mu.Unlock()
+			return noteLostMCPState(convertMCPResult(ctx, result), lostState), nil
 		},
 	}
+}
+
+func noteLostMCPState(result core.Result, lost bool) core.Result {
+	if lost {
+		result.Content = append([]core.Content{core.TextContent("MCP server woke from idle; previous state (including open pages and logins) is gone.\n")}, result.Content...)
+	}
+	return result
 }
 
 // convertMCPResult turns an MCP result into moa content. It takes the ctx of

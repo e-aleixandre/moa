@@ -319,6 +319,17 @@ func TestMCPServerIdleTimeoutValidation(t *testing.T) {
 	}
 }
 
+func TestMCPServerRejectsRemoteLifecycleOptions(t *testing.T) {
+	for _, cfg := range []MCPServer{
+		{URL: "https://example.com/mcp", Lazy: true},
+		{URL: "https://example.com/mcp", IdleTimeout: "15m"},
+	} {
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "command-based") {
+			t.Errorf("remote lifecycle options accepted: %+v: %v", cfg, err)
+		}
+	}
+}
+
 func TestLoadMCPFile_NotExist(t *testing.T) {
 	_, err := LoadMCPFile("/nonexistent/.mcp.json")
 	if err == nil {

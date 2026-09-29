@@ -159,8 +159,9 @@ A server entry declares **exactly one** transport:
 - `url` (+ optional `headers`) — streamable HTTP: Moa connects to a remote
   endpoint. Only `http` and `https` are accepted.
 
-Both transports also accept `lazy` and `idle_timeout`, independently for each
-server. For example, in `~/.config/moa/config.json`:
+`lazy` and `idle_timeout` are available per **local command-based server**. They
+are not supported for remote URL servers; an entry setting either key on a
+remote server is rejected. For example, in `~/.config/moa/config.json`:
 
 ```json
 {
@@ -182,15 +183,15 @@ descriptions before the model can call it. On a cache miss (for instance a new
 server or a changed command), Moa connects once to discover its tools, then
 closes it; subsequent sessions can advertise those tools without starting it.
 The first call after a lazy start or idle close waits for the server to reconnect.
+After an idle close, the first tool result notes that state held by the old
+process (such as open browser pages or logins) is gone.
 The metadata cache is in the OS user cache directory (`moa/mcp-tools`); it
 contains tool definitions, not tool results or config credentials. Its key
-includes the server name, working directory, transport, command, arguments,
-environment and headers. Changing those invalidates its cached metadata.
+includes the server name, working directory, command, arguments and
+environment. Changing those invalidates its cached metadata.
 If a server changes its tools without a config change (for example an `@latest`
 package update), use **Restart** in the MCP panel to rediscover its tools; new
-tools cannot be advertised from an old cached list before that. Servers with
-stored OAuth credentials discover on each session start rather than share
-tool metadata across different signed-in accounts. These keys work
+tools cannot be advertised from an old cached list before that. These keys work
 in both config levels and in the global or trusted project `.mcp.json` (under
 `mcpServers` there); same-name entries replace rather than extend one another.
 

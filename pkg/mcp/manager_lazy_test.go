@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,7 +94,10 @@ func TestLazyCacheColdWarmAndInvalidation(t *testing.T) {
 	if len(readPIDs(t, log)) != 1 {
 		t.Fatal("warm lazy Start spawned process")
 	}
-	callPing(t, warm)
+	firstResult, err := warm.Tools()[0].Execute(context.Background(), nil, nil)
+	if err != nil || firstResult.IsError || len(firstResult.Content) != 1 || firstResult.Content[0].Text != "pong" {
+		t.Fatalf("first warm-cache call must not report lost state: %+v %v", firstResult, err)
+	}
 	pids = awaitPIDs(t, log, 2)
 	awaitDead(t, pids[1])
 	if original.Description != warm.Tools()[0].Description || string(original.Parameters) != string(warm.Tools()[0].Parameters) {
@@ -168,12 +172,13 @@ func TestLazySingleFlightAndIdlePreservesActiveCall(t *testing.T) {
 	}
 }
 
-func TestLazyWakeDefersChangedSchemaUntilSync(t *testing.T) {
+func TestLazyWakeUpdatesChangedSchema(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	log := filepath.Join(dir, "pids")
 	schema := filepath.Join(dir, "schema")
 	cfg := lazyConfig(log)
+	cfg.IdleTimeout = ""
 	cfg.Env["MCP_SCHEMA_FILE"] = schema
 	mgr := NewManager(nil, dir)
 	startWait(t, mgr, map[string]core.MCPServer{"server": cfg}, nil)
@@ -184,19 +189,47 @@ func TestLazyWakeDefersChangedSchemaUntilSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := old.Execute(context.Background(), nil, nil)
-	if err != nil || !res.IsError {
-		t.Fatalf("stale tool should fail after wake: %+v, %v", res, err)
+	if err != nil || !res.IsError || len(res.Content) != 1 {
+		t.Fatalf("stale tool after cold probe should fail without lost-state note: %+v, %v", res, err)
 	}
-	if mgr.Tools()[0].Name != old.Name {
-		t.Fatal("schema changed before quiescent sync")
+	if mgr.Tools()[0].Name != "mcp__server__renamed" {
+		t.Fatal("wake did not update tool metadata")
 	}
-	if len(readPIDs(t, log)) != 2 {
-		t.Fatal("wake did not reconnect to updated server")
-	}
-	updated, _ := mgr.ToolsForServer("server") // controller calls this at quiescence
+	updated, _ := mgr.ToolsForServer("server")
 	if len(updated) != 1 || updated[0].Name != "mcp__server__renamed" {
 		t.Fatalf("sync did not pick up schema: %+v", updated)
 	}
+	awaitDead(t, awaitPIDs(t, log, 2)[1])
+	if st := mgr.Status()[0]; st.State != StateIdle {
+		t.Fatalf("stale lazy wake without timeout did not park: %+v", st)
+	}
+}
+
+func TestIdleWakeWithStaleToolNotesLostStateAndParks(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	log := filepath.Join(dir, "pids")
+	schema := filepath.Join(dir, "schema")
+	cfg := lazyConfig(log)
+	cfg.Env["MCP_SCHEMA_FILE"] = schema
+	mgr := NewManager(nil, dir)
+	startWait(t, mgr, map[string]core.MCPServer{"server": cfg}, nil)
+	defer mgr.Close()
+	awaitDead(t, awaitPIDs(t, log, 1)[0])
+	old := mgr.Tools()[0]
+	callPing(t, mgr)
+	awaitDead(t, awaitPIDs(t, log, 2)[1])
+	if err := os.WriteFile(schema, []byte("renamed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := old.Execute(context.Background(), nil, nil)
+	if err != nil || !result.IsError || len(result.Content) != 2 || !strings.Contains(result.Content[0].Text, "open pages and logins") || !strings.Contains(result.Content[1].Text, "no longer available") {
+		t.Fatalf("stale result must note lost state: %+v %v", result, err)
+	}
+	if !waitForState(t, mgr, "server", StateIdle, 5*time.Second) {
+		t.Fatal("stale tool left woken server running")
+	}
+	awaitDead(t, awaitPIDs(t, log, 3)[2])
 }
 
 func TestLazyCanceledWakeRetainsToolsAndRetries(t *testing.T) {
@@ -256,6 +289,7 @@ func TestLazyManualRestartRefreshesCachedSchema(t *testing.T) {
 }
 
 func TestLazyEnableImmediatelyParks(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	log := filepath.Join(dir, "pids")
 	cfg := lazyConfig(log)
@@ -296,4 +330,103 @@ func TestEagerIdleDisableDoesNotReviveProcess(t *testing.T) {
 		t.Fatal("idle timer revived disabled server")
 	}
 	mgr.Close()
+}
+
+func TestIdleWakeResultNotesLostState(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "pids")
+	cfg := pidTrackingConfig(log)
+	cfg.IdleTimeout = "60ms"
+	mgr := NewManager(nil, dir)
+	startWait(t, mgr, map[string]core.MCPServer{"server": cfg}, nil)
+	defer mgr.Close()
+	tool := mgr.Tools()[0]
+	if st := mgr.Status()[0]; st.State != StateReady || st.Lazy || st.IdleTimeout != "60ms" {
+		t.Fatalf("ready status lost idle configuration: %+v", st)
+	}
+	if result, err := tool.Execute(context.Background(), nil, nil); err != nil || result.IsError || len(result.Content) != 1 || result.Content[0].Text != "pong" {
+		t.Fatalf("initial result: %+v %v", result, err)
+	}
+	if !waitForState(t, mgr, "server", StateIdle, 5*time.Second) {
+		t.Fatal("server did not idle")
+	}
+	awaitDead(t, awaitPIDs(t, log, 1)[0])
+	result, err := tool.Execute(context.Background(), nil, nil)
+	if err != nil || result.IsError || len(result.Content) != 2 || !strings.Contains(result.Content[0].Text, "open pages and logins") || result.Content[1].Text != "pong" {
+		t.Fatalf("wake result must note lost state before tool output: %+v %v", result, err)
+	}
+	awaitDead(t, awaitPIDs(t, log, 2)[1])
+}
+
+func TestIdleRestartWithActiveCallRearmsTimer(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "pids")
+	marker, release := filepath.Join(dir, "started"), filepath.Join(dir, "release")
+	cfg := pidTrackingConfig(log)
+	cfg.IdleTimeout = "60ms"
+	cfg.Env["MCP_CALL_MARKER"], cfg.Env["MCP_CALL_RELEASE"] = marker, release
+	mgr := NewManager(nil, dir)
+	startWait(t, mgr, map[string]core.MCPServer{"server": cfg}, nil)
+	defer mgr.Close()
+	defer func() { _ = os.WriteFile(release, nil, 0o600) }()
+	first := awaitPIDs(t, log, 1)[0]
+	callDone := make(chan struct{})
+	go func() {
+		defer close(callDone)
+		_, _ = mgr.Tools()[0].Execute(context.Background(), nil, nil)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("call did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	restartDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.RestartServer(context.Background(), "server")
+		restartDone <- err
+	}()
+	if !waitForState(t, mgr, "server", StateRestarting, 5*time.Second) {
+		t.Fatal("restart did not begin")
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-restartDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("restart did not finish")
+	}
+	select {
+	case <-callDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("old call did not finish")
+	}
+	if !waitForState(t, mgr, "server", StateIdle, 5*time.Second) {
+		t.Fatal("restart did not rearm idle timer after active call")
+	}
+	awaitDead(t, first)
+	awaitDead(t, awaitPIDs(t, log, 2)[1])
+}
+
+func TestDisabledServerStatusIncludesIdleConfiguration(t *testing.T) {
+	cfg := core.MCPServer{Command: "unused", Lazy: true, IdleTimeout: "15m"}
+	mgr := NewManager(nil, t.TempDir())
+	mgr.Start(context.Background(), map[string]core.MCPServer{"server": cfg}, map[string]bool{"server": true})
+	defer mgr.Close()
+	st := mgr.Status()[0]
+	if st.State != StateDisabled || !st.Lazy || st.IdleTimeout != "15m" {
+		t.Fatalf("disabled status lost configuration: %+v", st)
+	}
+	data, err := json.Marshal(st)
+	if err != nil || !strings.Contains(string(data), `"lazy":true`) || !strings.Contains(string(data), `"idle_timeout":"15m"`) {
+		t.Fatalf("disabled JSON status lost configuration: %s %v", data, err)
+	}
 }
