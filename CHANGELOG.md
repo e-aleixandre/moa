@@ -17,11 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new files. `/reload` still refreshes every live session at once. See
   [Skills and `/reload`](docs/serve.md#skills-and-reload).
 
-### Fixed
-
-- A `/reload` that overlapped a **Start fresh** could leave the session running
-  on the older prompt.
-
 ## [0.43.0] - 2026-09-29
 
 ### Added
