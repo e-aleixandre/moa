@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.0] - 2026-09-29
+
+### Changed
+
+- A session re-reads `AGENTS.md`, the skills index, the memory index and, for
+  an owner, its book and role whenever it compacts (manually or automatically)
+  or you use **Start fresh**, and rebuilds its own prompt. The cached prompt
+  prefix is lost at that point anyway, so the refresh costs nothing; nothing
+  changes when the files did not, and subagents it launches afterwards see the
+  new files. `/reload` still refreshes every live session at once. See
+  [Skills and `/reload`](docs/serve.md#skills-and-reload).
+
+### Fixed
+
+- A `/reload` that overlapped a **Start fresh** could leave the session running
+  on the older prompt.
+
 ## [0.43.0] - 2026-09-29
 
 ### Added
