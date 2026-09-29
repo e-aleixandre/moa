@@ -558,6 +558,7 @@ test("a /schedule answer is shown as a note that stays long enough to read", asy
   expect(shown).toHaveLength(1);
   expect(shown[0]).toMatchObject({ title: "Schedule", type: "info", detail: commandResult.message });
   expect(shown[0].duration).toBeGreaterThan(5000);
+  expect(shown[0].scrollDetail).toBe(true);
 });
 
 test("the desktop + opens the file picker directly, with no menu", () => {

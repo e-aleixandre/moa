@@ -659,7 +659,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         } else if (text.startsWith('/schedule') && result && result.ok) {
           // The command changes nothing in the transcript, so its answer (the
           // id, the time, the list) is the only confirmation there is.
-          addToast({ title: 'Schedule', detail: result.message, type: 'info', duration: 15000 });
+          addToast({ title: 'Schedule', detail: result.message, type: 'info', duration: 15000, scrollDetail: true });
         } else if (result && !result.ok) {
           addToast({ title: 'Command failed', detail: result.message, type: 'error' });
         }

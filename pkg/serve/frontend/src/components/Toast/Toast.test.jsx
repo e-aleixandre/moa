@@ -1,5 +1,8 @@
 import { test, expect } from "bun:test";
 import { Toast } from "./Toast.jsx";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 function textContent(node) {
   if (node == null || node === false) return "";
@@ -43,4 +46,25 @@ test("the title shares the state's line; detail and action sit under it", () => 
   expect(textContent(find(sub, "toast-detail"))).toBe("Gone.");
   expect(textContent(find(sub, "toast-act"))).toBe("Retry");
   expect(find(Toast({ title: "bare" }), "toast-sub")).toBeNull();
+});
+
+test("scrollDetail makes only the detail a keyboard-reachable scroll region", () => {
+  const toast = Toast({ title: "t", detail: "long", scrollDetail: true });
+  expect(toast.props.class).toContain("is-scrollable");
+  expect(toast.props.scrollDetail).toBeUndefined();
+  expect(find(toast, "toast-detail").props.tabIndex).toBe(0);
+
+  const plain = Toast({ title: "t", detail: "long" });
+  expect(plain.props.class).not.toContain("is-scrollable");
+  expect(find(plain, "toast-detail").props.tabIndex).toBeUndefined();
+});
+
+test("the scroll bound is scoped to .is-scrollable and ordinary toasts stay unbounded", () => {
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "Toast.css"), "utf8");
+  const rule = css.match(/\.toast\.is-scrollable \.toast-detail\s*\{([^}]*)\}/);
+  expect(rule).not.toBeNull();
+  expect(rule[1]).toMatch(/max-height:\s*min\(60vh,\s*600px\)/);
+  expect(rule[1]).toMatch(/overflow-y:\s*auto/);
+  const base = css.match(/\n\.toast-detail\s*\{([^}]*)\}/)[1];
+  expect(base).not.toMatch(/max-height|overflow-y/);
 });

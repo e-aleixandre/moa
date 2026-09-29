@@ -63,6 +63,14 @@
   overflow-wrap: anywhere;
 }
 
+/* Opt-in (Toast scrollDetail): a long answer scrolls inside the toast rather
+   than growing it past the viewport. */
+.toast.is-scrollable .toast-detail {
+  max-height: min(60vh, 600px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .toast-x {
   flex: none;
   display: inline-flex;

@@ -10,11 +10,12 @@ export const TOAST_WORD = {
 };
 
 // Toast — one ledger line: state dot and state word, then the title, in the
-// LiveBar's voice; the detail and an optional action sit under it.
-export function Toast({ tone = "info", title, detail, action, onDismiss, class: className, ...rest }) {
+// LiveBar's voice; the detail and an optional action sit under it. scrollDetail
+// bounds a long detail to a scrollable region so the toast fits the viewport.
+export function Toast({ tone = "info", title, detail, action, onDismiss, scrollDetail, class: className, ...rest }) {
   const key = TOAST_WORD[tone] ? tone : "info";
   return (
-    <div class={`toast is-${key}${className ? ` ${className}` : ""}`} role="status" {...rest}>
+    <div class={`toast is-${key}${scrollDetail ? " is-scrollable" : ""}${className ? ` ${className}` : ""}`} role="status" {...rest}>
       <div class="toast-row">
         <span class="toast-dot" aria-hidden="true" />
         <span class="toast-word">{TOAST_WORD[key]}</span>
@@ -32,7 +33,7 @@ export function Toast({ tone = "info", title, detail, action, onDismiss, class: 
       </div>
       {(detail || action) && (
         <div class="toast-sub">
-          {detail && <span class="toast-detail">{detail}</span>}
+          {detail && <span class="toast-detail" tabIndex={scrollDetail ? 0 : undefined}>{detail}</span>}
           {action && (
             <button
               type="button"

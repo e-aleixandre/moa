@@ -50,6 +50,7 @@ export function ToastContainer() {
           tone={TONE[t.type] || "info"}
           title={t.title}
           detail={t.detail}
+          scrollDetail={t.scrollDetail}
           action={t.action ? {
             ...t.action,
             onClick: (event) => {
