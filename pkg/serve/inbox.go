@@ -634,18 +634,52 @@ func (m *Manager) releaseRouting(id string) {
 // turn; idle+!autorun only appends; busy/queued + !autorun leaves the event
 // in the inbox.
 func (m *Manager) deliverEvent(sessionID string, ev events.Event, autorun bool) error {
+	_, err := m.injectEvent(sessionID, eventInjection{
+		Text:    func() string { return m.eventMessage(ev) },
+		Custom:  func(steer bool) map[string]any { return eventCustom(ev, autorun, steer) },
+		Autorun: autorun,
+	})
+	return err
+}
+
+// eventInjection is one event-like message for a session: an inbox event or a
+// task notice. Text and Custom are built only once the session is known to be
+// able to take it.
+type eventInjection struct {
+	Text    func() string
+	Custom  func(steer bool) map[string]any
+	Autorun bool
+	// SteerID names the steer when the message has to queue; "" mints one.
+	SteerID string
+	// RefuseQuestion refuses a session blocked on a permission prompt or an
+	// ask_user question instead of queueing behind the owner's answer.
+	RefuseQuestion bool
+}
+
+// errEventSessionQuestion means the session is waiting on the owner's answer
+// and the caller asked not to queue behind it.
+var errEventSessionQuestion = errors.New("session is waiting for an answer")
+
+// injectEvent is the shared delivery into a live session: steer when it is
+// working or has a queue, a prompt that starts a turn when it is idle and
+// autorun is on, a plain append when it is idle and autorun is off. It
+// reports whether the message went in as a steer.
+func (m *Manager) injectEvent(sessionID string, in eventInjection) (steered bool, err error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
-		return ErrNotFound
+		return false, ErrNotFound
 	}
 	sess.lifecycle.RLock()
 	defer sess.lifecycle.RUnlock()
 	if sess.closing.Load() {
-		return ErrNotFound
+		return false, ErrNotFound
 	}
 
-	text := m.eventMessage(ev)
 	state := sess.runtime.State.Current()
+	if in.RefuseQuestion && state == bus.StatePermission {
+		return false, errEventSessionQuestion
+	}
+	text := in.Text()
 	busy := state == bus.StateRunning || state == bus.StatePermission || sess.runtime.Context().Agent.IsRunning()
 	queued := false
 	if !busy {
@@ -653,42 +687,49 @@ func (m *Manager) deliverEvent(sessionID string, ev events.Event, autorun bool) 
 		queued = ql > 0
 	}
 	steer := busy || queued
-	if steer && !autorun {
-		return errEventSessionBusy
+	if steer && !in.Autorun {
+		return false, errEventSessionBusy
 	}
-	custom := eventCustom(ev, autorun, steer)
+	custom := in.Custom(steer)
 
 	sess.mu.Lock()
 	sess.Updated = time.Now()
 	sess.mu.Unlock()
 
 	if steer {
-		err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: core.NewSteerID(), Text: text, Custom: custom})
+		id := in.SteerID
+		if id == "" {
+			id = core.NewSteerID()
+		}
+		err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: id, Text: text, Custom: custom})
 		if err == nil {
 			sess.sendGeneration.Add(1)
 		}
-		return err
+		return true, err
 	}
-	if !autorun {
+	if !in.Autorun {
 		msg := core.AgentMessage{
 			Message: core.NewUserMessage(text),
 			Custom:  custom,
 		}
 		if err := sess.runtime.Bus.Execute(bus.AppendToConversation{SessionID: sess.ID, Message: msg}); err != nil {
-			return err
+			return false, err
 		}
 		sess.runtime.Bus.Publish(bus.CommandExecuted{
 			SessionID: sess.ID,
 			Command:   "event",
 			Messages:  sess.runtime.Context().Agent.Messages(),
 		})
-		return nil
+		return false, nil
 	}
-	err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, Custom: custom})
+	// A queue that appeared since the check turns the prompt into a steer;
+	// AcceptedSteerID says so.
+	var acceptedSteer string
+	err = sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, Custom: custom, SteerID: in.SteerID, AcceptedSteerID: &acceptedSteer})
 	if err == nil {
 		sess.sendGeneration.Add(1)
 	}
-	return err
+	return acceptedSteer != "", err
 }
 
 func eventCustom(ev events.Event, autorun, steer bool) map[string]any {
