@@ -333,8 +333,9 @@ head holds search (`⌘K`), **+** for a new session, and the two orders:
 
 Each row says why a session wants you in words, not only in colour. Use a row's
 menu to close or reopen it, copy its ID, or delete it. The foot holds the
-[inbox](#event-inbox), the version and **Settings** (compaction, notification
-sound and push, subagent models, paired devices).
+[inbox](#event-inbox), [**Tasks**](#using-tasks-in-the-web-ui) and **Settings**
+(compaction, notification sound and push, subagent models, paired devices, and
+the version under **About**). The gear shows a dot when a newer release is out.
 
 On a phone, every panel opens as a bottom sheet: swipe it down from anywhere on
 its surface, or tap the scrim, to dismiss it. A step opened from inside a sheet
@@ -344,7 +345,8 @@ sheet on top.
 ## Session panel
 
 Click the conversation's title (tap it on a phone) to open its panel: the name,
-which you can edit in place, the folder, and rows for **Usage**, **MCP** and
+which you can edit in place, the folder, and rows for **Tasks** (see
+[Using tasks in the web UI](#using-tasks-in-the-web-ui)), **Usage**, **MCP** and
 **Artifacts**. At its foot:
 
 - **Detach from ‹owner›** / **Reattach to ‹owner›** — only on a session you
@@ -870,6 +872,47 @@ A task can have one level of subtasks and can wait for other tasks (`Waits for` 
 `/tasks` shows the current session's checklist and requests, `/tasks done <id>` completes one of them and `/tasks reset` clears only that session's checklist. Checklists that older versions kept inside the session file are not imported: they stay in the file, unused.
 
 If `tasks.sqlite` was written by a newer moa, this one reads it but refuses to change it, and says so.
+
+### Using tasks in the web UI
+
+**Tasks**, at the foot of the session list, opens every task in one view. Its
+number counts only the requests agents made that are still open; your own
+notes never add to it. The view groups tasks under **You** (requests first,
+then your notes), one **Backlog** per project and **Done**, folded. Agents'
+checklists stay out of sight until you turn on **Agents' tasks**; the project
+menu narrows everything to one project. A request that arrived since your last
+visit carries a dot.
+
+Click a task to open it on the right; on a phone it opens as a sheet, and
+**Move** is a page of that same sheet. In the detail you edit the title and
+details, add subtasks and tasks it waits for, and use:
+
+- **Move** — to **You**, a project's **Backlog**, or a session (which assigns
+  it and tells that session).
+- **Done** — on a request you can add a note for the agent that asked;
+  **Reopen** undoes it.
+- **Save** / **Save and notify** — appear once you change something. **Save
+  and notify** is only offered when the task has a session to tell.
+
+Keyboard, in the view: `j`/`k` or `↓`/`↑` move between tasks, `c` creates one,
+`m` opens Move, `Alt+Enter` (`⌘Enter` on a Mac) completes the open task, and
+`Esc` closes the detail.
+
+Inside a conversation, the session panel's **Tasks** row lists what that
+session asked you and its own checklist, with **Add a task** to give it one.
+While the session has an open request for you, its first one is pinned above
+the message box with **Done**, and `+N` when there are more.
+
+When a gesture would tell a session that is saved rather than open, moa asks
+before sending anything: **Wake and notify** opens it now; **Notify when
+opened** keeps the notice until you open it. Neither is preselected. An open
+session is told at once, without asking.
+
+A notice that has not arrived is said in the task's detail, in words:
+*Waiting for ‹session› to open* with **Wake now**, *Not delivered* with the
+reason and **Retry**, or *Couldn't notify* when the session is gone. In the
+list, such a task shows the same state next to its title. In the conversation,
+a notice appears as a folded **tasks** event.
 
 ### Notices to sessions
 
