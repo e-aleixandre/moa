@@ -221,10 +221,10 @@ func TestStaleRevisionGetsAConflictWithTheCurrentTask(t *testing.T) {
 	if got.Title != "cli title" {
 		t.Fatalf("stale form overwrote: %q", got.Title)
 	}
-	if err := r.Delete(bg, rec.ID, rec.Revision); !errors.As(err, &conflict) {
+	if err := r.Delete(bg, rec.ID, rec.Revision, ""); !errors.As(err, &conflict) {
 		t.Fatalf("stale delete: %v", err)
 	}
-	if err := r.Delete(bg, rec.ID, got.Revision); err != nil {
+	if err := r.Delete(bg, rec.ID, got.Revision, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Get(bg, rec.ID); !errors.Is(err, ErrNotFound) {
@@ -363,7 +363,7 @@ func TestSubtasksAreOneLevelAndDependenciesCannotCycle(t *testing.T) {
 
 	// Deleting a task removes its edges and its subtasks.
 	cur, _ := r.Get(bg, ag.ID)
-	if err := r.Delete(bg, cur.ID, cur.Revision); err != nil {
+	if err := r.Delete(bg, cur.ID, cur.Revision, ""); err != nil {
 		t.Fatal(err)
 	}
 	youNow, _ = r.Get(bg, you.ID)

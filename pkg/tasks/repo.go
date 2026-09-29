@@ -66,6 +66,25 @@ CREATE INDEX tasks_assignee ON tasks(assignee_session_id, archived_at);
 CREATE INDEX tasks_requester ON tasks(requester_session_id, place, archived_at);
 CREATE INDEX task_subtasks_task ON task_subtasks(task_id, position);
 CREATE INDEX task_dependencies_waits ON task_dependencies(waits_for_id);`,
+	// 2: the notice outbox. A row is written in the same transaction as the
+	// owner gesture that causes it and carries its rendered text, so it has no
+	// foreign key: it outlives a deleted task.
+	`CREATE TABLE task_notifications (
+  id TEXT PRIMARY KEY,
+  task_id INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('assigned','updated','request_done','agent_done','agent_deleted')),
+  recipient_session_id TEXT NOT NULL,
+  deliver TEXT NOT NULL CHECK(deliver IN ('wake','hold')),
+  method TEXT NOT NULL CHECK(method IN ('run','append')),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('pending','held','sent','delivered','failed')),
+  reason TEXT NOT NULL DEFAULT '',
+  steer_id TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, delivered_at INTEGER
+);
+CREATE INDEX task_notifications_task ON task_notifications(task_id, created_at);
+CREATE INDEX task_notifications_open ON task_notifications(state, created_at);`,
 }
 
 // Repo is the shared task database. It opens lazily: a process that never

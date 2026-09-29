@@ -139,6 +139,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	}
 
 	sp := newServePersister(persisted, store, sess.titleState)
+	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
@@ -641,6 +642,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// Wire background session services before the session can run (no-ops if
 	// the respective feature is unavailable).
 	m.subscribeAttachmentReleases(sess)
+	m.subscribeTaskNotices(sess)
 	m.subscribePush(sess)
 	m.subscribeAutoTitle(sess)
 	m.subscribeSessionBrief(sess)
@@ -1264,6 +1266,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 
 	// 5. Attach persistence.
 	sp := newServePersister(saved, store, sess.titleState)
+	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
@@ -1274,6 +1277,9 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 	m.initializeAttentionRuntimeLocked(sess)
 	m.sessions[id] = sess
 	m.mu.Unlock()
+	// Every way of opening a saved session ends here, so this is where held
+	// task notices learn that their session is back.
+	m.notices.sessionOpened(id)
 	return sess, nil
 }
 
@@ -1295,6 +1301,9 @@ const shutdownDrainBudget = 5 * time.Second
 func (m *Manager) Shutdown() {
 	if m.tasksCancel != nil {
 		m.tasksCancel()
+	}
+	if m.notices != nil {
+		<-m.notices.done
 	}
 	if m.secretReaperCancel != nil {
 		m.secretReaperCancel()

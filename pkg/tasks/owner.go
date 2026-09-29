@@ -25,6 +25,10 @@ type CreateInput struct {
 
 	Subtasks []SubtaskInput
 	WaitsFor []int64
+
+	// Deliver is the owner's choice for a saved recipient: DeliverWake or
+	// DeliverHold ("" means hold). A loaded recipient gets the notice at once.
+	Deliver string
 }
 
 // Patch is a partial owner edit; nil fields are left alone.
@@ -41,6 +45,11 @@ type Patch struct {
 
 	Subtasks *[]SubtaskInput
 	WaitsFor *[]int64
+
+	// Notify is "Save and notify": the saved task is sent to its assignee (or
+	// to the requester of a request). Assigning or completing notifies anyway.
+	Notify  bool
+	Deliver string // see CreateInput.Deliver
 }
 
 func validStatus(s string) bool {
@@ -92,6 +101,9 @@ func (r *Repo) Create(ctx context.Context, in CreateInput) (Record, error) {
 	if !validStatus(status) {
 		return Record{}, invalid("unknown status %q", status)
 	}
+	if err := validDeliver(in.Deliver); err != nil {
+		return Record{}, err
+	}
 	rec := Record{
 		Title: title, Description: in.Description, Status: status, Place: in.Place,
 		ProjectKey: projectKeyFor(in.ProjectKey, in.ProjectCWD), ProjectCWD: in.ProjectCWD,
@@ -107,7 +119,11 @@ func (r *Repo) Create(ctx context.Context, in CreateInput) (Record, error) {
 			return false, err
 		}
 		out, err = getRecord(ctx, tx, id)
-		return true, err
+		if err != nil {
+			return false, err
+		}
+		kind, to := ownerNotice(nil, out, false)
+		return true, r.addNotice(ctx, tx, kind, to, in.Deliver, out)
 	})
 	return out, err
 }
@@ -171,6 +187,9 @@ func (r *Repo) Update(ctx context.Context, id, revision int64, p Patch) (Record,
 	if revision <= 0 {
 		return Record{}, invalid("revision is required")
 	}
+	if err := validDeliver(p.Deliver); err != nil {
+		return Record{}, err
+	}
 	var out Record
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		cur, err := getRecord(ctx, tx, id)
@@ -180,6 +199,7 @@ func (r *Repo) Update(ctx context.Context, id, revision int64, p Patch) (Record,
 		if cur.Revision != revision {
 			return false, &ConflictError{Current: cur}
 		}
+		before := cur
 		if err := r.applyPatch(&cur, p); err != nil {
 			return false, err
 		}
@@ -197,7 +217,11 @@ func (r *Repo) Update(ctx context.Context, id, revision int64, p Patch) (Record,
 			}
 		}
 		out, err = getRecord(ctx, tx, id)
-		return true, err
+		if err != nil {
+			return false, err
+		}
+		kind, to := ownerNotice(&before, out, p.Notify)
+		return true, r.addNotice(ctx, tx, kind, to, p.Deliver, out)
 	})
 	return out, err
 }
@@ -276,10 +300,14 @@ func (r *Repo) saveTask(ctx context.Context, tx *sql.Tx, t Record, revision int6
 }
 
 // Delete removes a task with its subtasks and dependency edges. Deleting an
-// open request tells nobody: the owner decided that.
-func (r *Repo) Delete(ctx context.Context, id, revision int64) error {
+// open request tells nobody: the owner decided that. Deleting a session's
+// task tells that session; deliver is as in CreateInput.
+func (r *Repo) Delete(ctx context.Context, id, revision int64, deliver string) error {
 	if revision <= 0 {
 		return invalid("revision is required")
+	}
+	if err := validDeliver(deliver); err != nil {
+		return err
 	}
 	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		cur, err := getRecord(ctx, tx, id)
@@ -289,8 +317,13 @@ func (r *Repo) Delete(ctx context.Context, id, revision int64) error {
 		if cur.Revision != revision {
 			return false, &ConflictError{Current: cur}
 		}
-		_, err = tx.ExecContext(ctx, "DELETE FROM tasks WHERE id = ?", id)
-		return err == nil, err
+		if _, err := tx.ExecContext(ctx, "DELETE FROM tasks WHERE id = ?", id); err != nil {
+			return false, err
+		}
+		if cur.Place == PlaceAgent {
+			return true, r.addNotice(ctx, tx, NoticeAgentDeleted, cur.AssigneeSessionID, deliver, cur)
+		}
+		return true, nil
 	})
 }
 
@@ -369,6 +402,18 @@ func (r *Repo) List(ctx context.Context, f Filter) (ListResult, error) {
 	}
 	if recs != nil {
 		res.Tasks = recs
+	}
+	states, err := latestNoticeStates(ctx, tx)
+	if err != nil {
+		return res, err
+	}
+	for i := range res.Tasks {
+		// Only an undelivered outcome is worth a mark in the list; sent is on
+		// its way and delivered is done.
+		switch st := states[res.Tasks[i].ID]; st {
+		case NoticeHeld, NoticePending, NoticeFailed:
+			res.Tasks[i].NoticeState = st
+		}
 	}
 	for _, t := range recs {
 		if t.ArchivedAt != 0 || t.Status == StatusDone {

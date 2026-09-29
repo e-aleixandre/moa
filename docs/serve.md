@@ -871,6 +871,23 @@ A task can have one level of subtasks and can wait for other tasks (`Waits for` 
 
 If `tasks.sqlite` was written by a newer moa, this one reads it but refuses to change it, and says so.
 
+### Notices to sessions
+
+Some of your gestures tell a session what happened, as a folded event in its conversation (like an [inbox event](#event-inbox)):
+
+- assigning a task to a session (creating it in **Agents**, or moving it there);
+- **Save and notify** on a task with a session: its assignee, or the session that asked for a request. Plain **Save** tells nobody;
+- completing a request, with your optional note: the session that asked;
+- completing or deleting a session's task: that session.
+
+Deleting an open request, and whatever an agent does with its own tasks, tell nobody. One gesture sends at most one notice. The agent reads what happened, the task's ID, your note quoted as data, and that it can read the task with its `tasks` tool.
+
+A session that is working gets the notice as a queued message; one that is stopped gets it as a prompt and starts a turn. For a session that is saved but not open you choose: **wake** opens it and delivers like to a stopped one; **hold** keeps the notice until the session is opened, by any means. Without a choice the notice waits.
+
+A notice that cannot go in stays visible in the task's detail with the reason: the session was deleted (final), too many sessions are open, or the session is waiting for your answer to a question or permission. It is not retried in a loop and never goes to another session. It is tried again when that session opens, when it goes idle after your answer, when `moa serve` starts, or when you press **Wake now** / **Retry**.
+
+If you press **Stop** or pull the queue back before the agent read a queued notice, the notice stays in the conversation without starting a turn, and it does not come back to your message box. A notice counts as delivered once it is saved in the conversation; after a restart, one that was accepted but never saved is delivered again, and one already saved is not repeated.
+
 ## REST endpoints
 
 Beyond the per-session WebSocket, Serve exposes a few global read/write endpoints:
@@ -900,7 +917,8 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` · `POST /api/events/dismiss` | The [event inbox](#event-inbox): history, sending or dropping one, or dismissing a source |
 | `POST /api/sessions/{id}/steers/cancel` | Cancel every queued, not-yet-delivered message; with the header `X-Moa-Steers-Cancel-Response: discarded` the reply lists exactly what was discarded |
 | `POST /api/sessions/{id}/mcp/{server}/oauth/start` · `.../oauth/finish` · `.../oauth/signout` | Sign a session's remote MCP server in or out |
-| `GET /api/tasks?project=&include_agents=&include_archived=` · `POST /api/tasks` · `GET`/`PATCH`/`DELETE /api/tasks/{id}` · `GET /api/tasks/projects` · `GET /api/sessions/{id}/tasks` | The [task database](#tasks): the owner's view of every task. `PATCH` and `DELETE` need the `revision` you last read and answer `409` with the current task when it is stale |
+| `GET /api/tasks?project=&include_agents=&include_archived=` · `POST /api/tasks` · `GET`/`PATCH`/`DELETE /api/tasks/{id}` · `GET /api/tasks/projects` · `GET /api/sessions/{id}/tasks` | The [task database](#tasks): the owner's view of every task. `PATCH` and `DELETE` need the `revision` you last read and answer `409` with the current task when it is stale. A gesture that [notifies a session](#notices-to-sessions) takes `"deliver": "wake"` or `"hold"` for a saved one (`DELETE` in its JSON body or as `?deliver=`); `PATCH` takes `"notify": true` for Save and notify. `GET /api/tasks/{id}` adds `recipient` (who a gesture would notify now, and whether it is `live`, `saved` or `missing`) and the task's last five `notices`; the list marks a task with `notice_state` when its latest notice is `held`, `pending` or `failed` |
+| `POST /api/tasks/notices/{id}/deliver` | Wake now / Retry: opens the notice's session if it is saved and tries to deliver. Answers the notice with its new state, `404` for an unknown notice, `409` when it is already delivered or on its way |
 | `GET /api/tasks/ws` | WebSocket that sends `{"type":"tasks_changed","revision":N}` whenever any process (this server, the CLI) changes a task. It is only an invalidation: read `GET /api/tasks` again, on it and on every reconnect |
 | `POST /api/sessions/{id}/owner` | Detach a session from its project owner (`{"detached": true}`) or reattach it |
 | `/api/owners/...` | [Project owners](./owners.md#api) and their books |

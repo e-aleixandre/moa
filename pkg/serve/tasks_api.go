@@ -1,9 +1,11 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"sync"
@@ -180,7 +182,43 @@ func handleGetTask(m *Manager) http.HandlerFunc {
 			writeTaskError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, rec)
+		notices, err := m.tasks.TaskNotices(r.Context(), id, noticeDetailLimit)
+		if err != nil {
+			writeTaskError(w, err)
+			return
+		}
+		if notices == nil {
+			notices = []tasks.Notice{}
+		}
+		writeJSON(w, http.StatusOK, taskDetail{Record: rec, Recipient: m.noticeRecipientOf(rec), Notices: notices})
+	}
+}
+
+// taskDetail is the owner's task view: the task, who a gesture would notify
+// now, and what the latest notices did.
+type taskDetail struct {
+	tasks.Record
+	Recipient *noticeRecipient `json:"recipient,omitempty"`
+	Notices   []tasks.Notice   `json:"notices"`
+}
+
+// handleDeliverNotice is "Wake now" / "Retry" on a notice that has not
+// reached its session.
+func handleDeliverNotice(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if m.notices == nil {
+			writeTaskError(w, tasks.ErrUnavailable)
+			return
+		}
+		n, err := m.notices.deliverNow(r.Context(), r.PathValue("id"))
+		switch {
+		case errors.Is(err, errNoticeSettled):
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "notice": n})
+		case err != nil:
+			writeTaskError(w, err)
+		default:
+			writeJSON(w, http.StatusOK, n)
+		}
 	}
 }
 
@@ -272,7 +310,8 @@ type createTaskBody struct {
 	AssigneeSessionID string               `json:"assignee_session_id"`
 	Subtasks          []tasks.SubtaskInput `json:"subtasks"`
 	WaitsFor          []int64              `json:"waits_for"`
-	Notify            *bool                `json:"notify"` // accepted for forward compatibility; notices are not sent yet
+	Notify            *bool                `json:"notify"`  // assigning always notifies; accepted for symmetry with PATCH
+	Deliver           string               `json:"deliver"` // "wake" | "hold" for a saved assignee; absent means hold
 }
 
 func handleCreateTask(m *Manager) http.HandlerFunc {
@@ -284,7 +323,7 @@ func handleCreateTask(m *Manager) http.HandlerFunc {
 		in := tasks.CreateInput{
 			Title: b.Title, Description: b.Description, Place: b.Place, Status: b.Status,
 			ProjectKey: b.ProjectKey, ProjectCWD: b.ProjectCWD, AssigneeSessionID: b.AssigneeSessionID,
-			Subtasks: b.Subtasks, WaitsFor: b.WaitsFor,
+			Subtasks: b.Subtasks, WaitsFor: b.WaitsFor, Deliver: b.Deliver,
 		}
 		if b.Place == tasks.PlaceAgent {
 			cwd, known := m.sessionCWD(b.AssigneeSessionID)
@@ -301,6 +340,7 @@ func handleCreateTask(m *Manager) http.HandlerFunc {
 			writeTaskError(w, err)
 			return
 		}
+		m.notices.nudge()
 		writeJSON(w, http.StatusCreated, rec)
 	}
 }
@@ -317,7 +357,8 @@ type patchTaskBody struct {
 	CompletionNote    *string               `json:"completion_note"`
 	Subtasks          *[]tasks.SubtaskInput `json:"subtasks"`
 	WaitsFor          *[]int64              `json:"waits_for"`
-	Notify            *bool                 `json:"notify"` // accepted for forward compatibility; notices are not sent yet
+	Notify            *bool                 `json:"notify"`  // "Save and notify"
+	Deliver           string                `json:"deliver"` // "wake" | "hold" for a saved recipient; absent means hold
 }
 
 func handlePatchTask(m *Manager) http.HandlerFunc {
@@ -334,6 +375,7 @@ func handlePatchTask(m *Manager) http.HandlerFunc {
 			Title: b.Title, Description: b.Description, Status: b.Status, Place: b.Place,
 			ProjectKey: b.ProjectKey, ProjectCWD: b.ProjectCWD, AssigneeSessionID: b.AssigneeSessionID,
 			CompletionNote: b.CompletionNote, Subtasks: b.Subtasks, WaitsFor: b.WaitsFor,
+			Notify: b.Notify != nil && *b.Notify, Deliver: b.Deliver,
 		}
 		if b.AssigneeSessionID != nil && *b.AssigneeSessionID != "" {
 			if _, known := m.sessionCWD(*b.AssigneeSessionID); !known {
@@ -368,6 +410,7 @@ func handlePatchTask(m *Manager) http.HandlerFunc {
 			writeTaskError(w, err)
 			return
 		}
+		m.notices.nudge()
 		writeJSON(w, http.StatusOK, rec)
 	}
 }
@@ -379,10 +422,37 @@ func handleDeleteTask(m *Manager) http.HandlerFunc {
 			return
 		}
 		rev, _ := strconv.ParseInt(r.URL.Query().Get("revision"), 10, 64)
-		if err := m.tasks.Delete(r.Context(), id, rev); err != nil {
+		deliver := r.URL.Query().Get("deliver")
+		// The body is optional: {"revision": N, "deliver": "wake"} works as
+		// well as the query string.
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body: " + err.Error()})
+			return
+		}
+		if len(bytes.TrimSpace(body)) > 0 {
+			var b struct {
+				Revision int64  `json:"revision"`
+				Deliver  string `json:"deliver"`
+			}
+			dec := json.NewDecoder(bytes.NewReader(body))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&b); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+				return
+			}
+			if b.Revision != 0 {
+				rev = b.Revision
+			}
+			if b.Deliver != "" {
+				deliver = b.Deliver
+			}
+		}
+		if err := m.tasks.Delete(r.Context(), id, rev, deliver); err != nil {
 			writeTaskError(w, err)
 			return
 		}
+		m.notices.nudge()
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

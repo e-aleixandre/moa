@@ -194,6 +194,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/tasks/{id}", handleGetTask(manager))
 	mux.HandleFunc("PATCH /api/tasks/{id}", handlePatchTask(manager))
 	mux.HandleFunc("DELETE /api/tasks/{id}", handleDeleteTask(manager))
+	mux.HandleFunc("POST /api/tasks/notices/{id}/deliver", handleDeliverNotice(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager, o.realtimeKey))
 	mux.HandleFunc("GET /api/preview/target", handlePreviewTarget(o.preview))
@@ -1135,6 +1136,11 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 		default:
 			ids := make([]string, 0, len(discarded))
 			for _, steer := range discarded {
+				// A task notice is not the owner's text: it is kept in the
+				// transcript instead, so it must not come back to the composer.
+				if isTaskNotice(steer.Custom) {
+					continue
+				}
 				ids = append(ids, steer.ID)
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"discarded_steer_ids": ids})
@@ -1161,7 +1167,9 @@ func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 		if r.Header.Get("X-Moa-Steers-Cancel-Response") == "discarded" {
 			steers := make([]PendingSteerData, 0, len(discarded))
 			for _, steer := range discarded {
-				if steer.Internal {
+				// Task notices stay in the transcript instead (see
+				// handleCancelAndRecall).
+				if steer.Internal || isTaskNotice(steer.Custom) {
 					continue
 				}
 				steers = append(steers, PendingSteerData{

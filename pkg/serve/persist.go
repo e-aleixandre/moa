@@ -30,6 +30,9 @@ type servePersister struct {
 	// sidecar summaries it read, so a fresh instance per call would decode
 	// every transcript header again on each WebSocket init.
 	subagents *session.SubagentStore
+	// onSaved runs after every successful save, outside the lock: task notices
+	// count as delivered once they are on disk.
+	onSaved func()
 }
 
 func newServePersister(persisted *session.Session, store *session.FileStore, titleState func() (string, string, bool)) *servePersister {
@@ -71,6 +74,7 @@ func (sp *servePersister) Snapshot(messages []core.AgentMessage, epoch int, meta
 		slog.Warn("session save failed", "error", err)
 		return err
 	}
+	sp.saved()
 	return nil
 }
 
@@ -102,7 +106,21 @@ func (sp *servePersister) SnapshotTree(entries []session.Entry, leafID string, m
 		slog.Warn("session save failed", "error", err)
 		return err
 	}
+	sp.saved()
 	return nil
+}
+
+func (sp *servePersister) saved() {
+	if sp.onSaved != nil {
+		sp.onSaved()
+	}
+}
+
+// has reports whether the last saved transcript satisfies fn.
+func (sp *servePersister) has(fn func(*session.Session) bool) bool {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	return sp.persisted != nil && fn(sp.persisted)
 }
 
 // saveTitle persists the session's current title out-of-band (e.g. background

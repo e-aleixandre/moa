@@ -64,6 +64,9 @@ type Record struct {
 	Subtasks           []Subtask `json:"subtasks,omitempty"`
 	WaitsFor           []int64   `json:"waits_for,omitempty"`
 	Unblocks           []int64   `json:"unblocks,omitempty"`
+	// NoticeState is set in listings when the task's latest notice has not
+	// reached its session (held, pending or failed).
+	NoticeState string `json:"notice_state,omitempty"`
 }
 
 // Task is the flat projection of a session checklist. Its JSON is what

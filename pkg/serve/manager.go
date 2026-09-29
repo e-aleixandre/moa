@@ -820,6 +820,8 @@ type Manager struct {
 	taskHub     *tasksHub
 	projectKeys sync.Map
 	tasksCancel context.CancelFunc
+	// notices delivers task notices; one dispatcher per serve process.
+	notices *noticeDispatcher
 	// reports batches the run outcomes of a project's sessions and delivers
 	// them to its owner. nil when owners are unavailable (no config dir).
 	reports *reportCoordinator
@@ -1085,6 +1087,10 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	}
 	m.attention.Start()
 	m.startTasksWatcher(tasksCtx)
+	if m.tasks != nil {
+		m.notices = newNoticeDispatcher(m)
+		go m.notices.run(tasksCtx)
+	}
 	// The coordinator reads its outbox at startup, so it must exist before any
 	// session is resumed and starts reporting.
 	m.reports = newReportCoordinator(ctx, m)
