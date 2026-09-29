@@ -2087,3 +2087,21 @@ test('an init with only outcomes keeps the title on the restored terminal card',
     id: 'sa-617bc98ea8ba', state: 'done', name: 'Review delivered files',
   })]);
 });
+
+test('a progress update reads as assistant text before its tool call; reasoning stays hidden', () => {
+  const rows = normalizeHistory([
+    { role: 'user', content: [{ type: 'text', text: 'go' }] },
+    {
+      role: 'assistant', msg_id: 'a1',
+      content: [
+        { type: 'thinking', thinking: 'private reasoning summary' },
+        { type: 'thinking', thinking: 'Reading the config first.', progress: true },
+        { type: 'tool_call', tool_call_id: 'tc1', tool_name: 'read', arguments: { path: 'a' } },
+      ],
+    },
+  ]);
+  const assistant = rows.filter((r) => r.role === 'assistant');
+  expect(assistant.map((r) => r.content[0].text)).toEqual(['Reading the config first.']);
+  const note = rows.findIndex((r) => r.role === 'assistant');
+  expect(rows[note + 1]._type).toBe('tool_start');
+});

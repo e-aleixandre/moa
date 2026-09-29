@@ -293,6 +293,12 @@ type AnthropicThinking struct {
 	DefaultEffort string
 	// XHigh reports whether effort "xhigh" exists for the model.
 	XHigh bool
+	// ProgressUpdates models write short notes for the user between tool
+	// calls as their own thinking blocks. Under the default display
+	// ("omitted") those blocks come back empty, so adaptive requests ask for
+	// display "updates": reasoning stays hidden and only the notes carry text.
+	// https://platform.claude.com/docs/en/build-with-claude/thinking#progress-updates
+	ProgressUpdates bool
 }
 
 // anthropicThinking is ordered: a prefix that is a substring of a later ID
@@ -302,12 +308,12 @@ var anthropicThinking = []struct {
 	ids  []string
 	spec AnthropicThinking
 }{
-	{[]string{"fable-5-1", "fable-5.1"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "high", XHigh: true}},
-	{[]string{"fable-5"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "high", XHigh: true}},
-	{[]string{"opus-5-5", "opus-5.5"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "medium", XHigh: true}},
+	{[]string{"fable-5-1", "fable-5.1"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "high", XHigh: true, ProgressUpdates: true}},
+	{[]string{"fable-5"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "high", XHigh: true, ProgressUpdates: true}},
+	{[]string{"opus-5-5", "opus-5.5"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "medium", XHigh: true, ProgressUpdates: true}},
 	{[]string{"opus-5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, DefaultEffort: "high", XHigh: true}},
 	{[]string{"opus-4-8", "opus-4.8"}, AnthropicThinking{Adaptive: true, DefaultEffort: "high", XHigh: true}},
-	{[]string{"sonnet-5-5", "sonnet-5.5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, OffType: "between_tools", DefaultEffort: "high", XHigh: true}},
+	{[]string{"sonnet-5-5", "sonnet-5.5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, OffType: "between_tools", DefaultEffort: "high", XHigh: true, ProgressUpdates: true}},
 	{[]string{"sonnet-5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, DefaultEffort: "high", XHigh: true}},
 	{[]string{"haiku-4-5", "haiku-4.5"}, AnthropicThinking{}},
 }

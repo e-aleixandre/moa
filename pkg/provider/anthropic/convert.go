@@ -73,8 +73,13 @@ type anthropicRequest struct {
 type thinkingConfig struct {
 	Type         string        `json:"type"`
 	BudgetTokens int           `json:"budget_tokens,omitempty"`
+	Display      string        `json:"display,omitempty"`
 	BlockBinding *blockBinding `json:"block_binding,omitempty"`
 }
+
+// thinkingDisplayUpdatesBeta gates thinking.display "updates"; without it the
+// API rejects the value as unknown.
+const thinkingDisplayUpdatesBeta = "thinking-display-updates-2026-08-18"
 
 // blockBinding tells the API what to do with a thinking block whose prefix no
 // longer matches. From Claude Fable 5.1 a signature is bound to the system
@@ -170,6 +175,10 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 		} else if t.BudgetTokens > maxBudget {
 			t.BudgetTokens = maxBudget
 		}
+	}
+
+	if displaysUpdates(req) {
+		ar.Thinking.Display = "updates"
 	}
 
 	// Ask the API to drop thinking blocks whose prefix no longer matches
@@ -575,6 +584,28 @@ func bindsThinkingPrefix(modelID string) bool {
 	id := strings.ToLower(modelID)
 	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1") ||
 		strings.Contains(id, "sonnet-5-5") || strings.Contains(id, "sonnet-5.5")
+}
+
+// displaysUpdates reports whether the request asks for display "updates":
+// on a model that writes progress updates, whenever it sends adaptive
+// thinking. between_tools, the other setting such a model may send, returns
+// the notes on its own and rejects any extra field.
+func displaysUpdates(req core.Request) bool {
+	spec, ok := core.AnthropicThinkingFor(req.Model)
+	return ok && spec.Adaptive && spec.ProgressUpdates &&
+		(spec.AlwaysOn || resolveEffort(req.Options.ThinkingLevel, spec) != "")
+}
+
+// readsProgressUpdates reports whether every non-empty thinking block in the
+// response is a progress update: under display "updates", and under
+// between_tools, which has no up-front reasoning to show.
+func readsProgressUpdates(req core.Request) bool {
+	if displaysUpdates(req) {
+		return true
+	}
+	spec, ok := core.AnthropicThinkingFor(req.Model)
+	return ok && spec.ProgressUpdates && spec.OffType == "between_tools" &&
+		!spec.AlwaysOn && resolveEffort(req.Options.ThinkingLevel, spec) == ""
 }
 
 // resolveEffort maps our thinking levels to Anthropic adaptive effort. An

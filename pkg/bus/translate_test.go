@@ -69,6 +69,34 @@ func TestTranslateAgentEvent_ParityWithBridge(t *testing.T) {
 			}},
 		},
 		{
+			// A progress update streamed as text, so FullText must hold it in
+			// order for the client to match what it already materialized.
+			name: "message_end_progress_update",
+			in: core.AgentEvent{
+				Type: core.AgentEventMessageEnd,
+				Message: core.AgentMessage{Message: core.Message{
+					Role: "assistant",
+					Content: []core.Content{
+						{Type: "thinking", ThinkingSignature: "s0"},
+						{Type: "thinking", Thinking: "Looking at X.", ThinkingSignature: "s1", Progress: true},
+						{Type: "tool_call", ToolCallID: "tc1", ToolName: "read"},
+					},
+				}},
+			},
+			want: []any{MessageEnded{
+				SessionID: sid, RunGen: gen,
+				Message: core.AgentMessage{Message: core.Message{
+					Role: "assistant",
+					Content: []core.Content{
+						{Type: "thinking", ThinkingSignature: "s0"},
+						{Type: "thinking", Thinking: "Looking at X.", ThinkingSignature: "s1", Progress: true},
+						{Type: "tool_call", ToolCallID: "tc1", ToolName: "read"},
+					},
+				}},
+				FullText: "Looking at X.",
+			}},
+		},
+		{
 			name: "tool_exec_start",
 			in: core.AgentEvent{
 				Type:       core.AgentEventToolExecStart,

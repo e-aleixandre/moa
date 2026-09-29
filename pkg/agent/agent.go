@@ -1268,8 +1268,13 @@ func stripThinkingFromHistory(msgs []core.AgentMessage) []core.AgentMessage {
 func withoutThinking(content []core.Content) []core.Content {
 	filtered := make([]core.Content, 0, len(content))
 	for _, c := range content {
-		if c.Type != "thinking" {
+		switch {
+		case c.Type != "thinking":
 			filtered = append(filtered, c)
+		case c.Progress && c.Thinking != "":
+			// A progress update is text the user has seen: keep it as text
+			// so it stays in the transcript without its signature.
+			filtered = append(filtered, core.TextContent(c.Thinking))
 		}
 	}
 	return filtered

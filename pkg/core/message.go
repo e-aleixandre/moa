@@ -36,6 +36,11 @@ type Content struct {
 	Thinking          string `json:"thinking,omitempty"`
 	ThinkingSignature string `json:"thinking_signature,omitempty"`
 	Redacted          bool   `json:"redacted,omitempty"`
+	// Progress marks a thinking block that is a note written for the user
+	// between tool calls rather than reasoning (Anthropic progress updates).
+	// It is shown like assistant text, and still replayed as the thinking
+	// block it is, signature and all.
+	Progress bool `json:"progress,omitempty"`
 
 	// image/document
 	Data     string `json:"data,omitempty"`

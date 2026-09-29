@@ -93,6 +93,9 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 			if bindsThinkingPrefix(req.Model.ID) {
 				betas += "," + thinkingBindingBeta
 			}
+			if displaysUpdates(req) {
+				betas += "," + thinkingDisplayUpdatesBeta
+			}
 			if fastMode {
 				betas += "," + fastModeBeta
 			}
@@ -104,6 +107,9 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 			var betas []string
 			if bindsThinkingPrefix(req.Model.ID) {
 				betas = append(betas, thinkingBindingBeta)
+			}
+			if displaysUpdates(req) {
+				betas = append(betas, thinkingDisplayUpdatesBeta)
 			}
 			if fastMode {
 				betas = append(betas, fastModeBeta)
@@ -162,6 +168,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	// would keep the whole request — every materialized image in base64 —
 	// reachable for as long as the SSE body is being consumed.
 	tools := req.Tools
+	progressUpdates := readsProgressUpdates(req)
 
 	go func() {
 		defer resp.Body.Close() //nolint:errcheck
@@ -170,7 +177,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 			ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl, Provider: "anthropic"}
 		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
-		a.consumeStream(ctx, body, ch, tools, oauthMode)
+		a.consumeStream(ctx, body, ch, tools, oauthMode, progressUpdates)
 	}()
 
 	return ch, nil
@@ -178,8 +185,8 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 
 // consumeStream parses SSE frames and emits normalized events.
 // Guarantees exactly one terminal event ("done" or "error") before returning.
-func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, tools []core.ToolSpec, oauthMode bool) {
-	state := &streamState{requestTools: tools, isOAuth: oauthMode}
+func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, tools []core.ToolSpec, oauthMode, progressUpdates bool) {
+	state := &streamState{requestTools: tools, isOAuth: oauthMode, progressUpdates: progressUpdates}
 	sentTerminal := false
 
 	defer func() {
@@ -234,17 +241,20 @@ func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<-
 
 // streamState tracks the evolving message across SSE events.
 type streamState struct {
-	message        core.Message
-	contentIdx     int
-	blockType      string // current block type being built
-	jsonAccum      string // accumulated JSON for tool_use input
-	toolCallID     string
-	toolCallName   string
-	requestTools   []core.ToolSpec // original tool specs for reverse name mapping
-	isOAuth        bool            // whether this request used OAuth (for tool name mapping)
-	textAccum      strings.Builder
-	thinkingAccum  strings.Builder
-	signatureAccum strings.Builder
+	message      core.Message
+	contentIdx   int
+	blockType    string // current block type being built
+	jsonAccum    string // accumulated JSON for tool_use input
+	toolCallID   string
+	toolCallName string
+	requestTools []core.ToolSpec // original tool specs for reverse name mapping
+	isOAuth      bool            // whether this request used OAuth (for tool name mapping)
+	// progressUpdates: every non-empty thinking block is a progress update,
+	// a note for the user rather than reasoning (see readsProgressUpdates).
+	progressUpdates bool
+	textAccum       strings.Builder
+	thinkingAccum   strings.Builder
+	signatureAccum  strings.Builder
 
 	// Partial JSON parsing for streaming tool call arguments.
 	partialParser jsonutil.PartialParser
@@ -470,6 +480,20 @@ func (a *Anthropic) handleContentBlockDelta(data string, state *streamState) *co
 	case "thinking_delta":
 		if idx < len(state.message.Content) {
 			state.thinkingAccum.WriteString(payload.Delta.Thinking)
+		}
+		if state.progressUpdates && payload.Delta.Thinking != "" {
+			// A progress update is the text a model used to write between
+			// tool calls: stream it as text so every surface shows it the
+			// same way. The block itself stays thinking, so it replays with
+			// its signature.
+			if idx < len(state.message.Content) {
+				state.message.Content[idx].Progress = true
+			}
+			return &core.AssistantEvent{
+				Type:         core.ProviderEventTextDelta,
+				ContentIndex: idx,
+				Delta:        payload.Delta.Thinking,
+			}
 		}
 		return &core.AssistantEvent{
 			Type:         core.ProviderEventThinkingDelta,

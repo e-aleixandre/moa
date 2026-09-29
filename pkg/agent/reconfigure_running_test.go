@@ -384,6 +384,21 @@ func TestStripThinkingFromHistory_CopyOnWrite(t *testing.T) {
 	}
 }
 
+func TestStripThinkingFromHistory_KeepsProgressUpdatesAsText(t *testing.T) {
+	orig := []core.AgentMessage{
+		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{
+			{Type: "thinking", ThinkingSignature: "s0"},
+			{Type: "thinking", Thinking: "Reading the config.", ThinkingSignature: "s1", Progress: true},
+			core.ToolCallContent("tc1", "read", nil),
+		}}),
+	}
+	out := stripThinkingFromHistory(orig)
+	got := out[0].Content
+	if len(got) != 2 || got[0].Type != "text" || got[0].Text != "Reading the config." || got[0].ThinkingSignature != "" || got[1].Type != "tool_call" {
+		t.Fatalf("content = %+v, want the update as text before the tool call", got)
+	}
+}
+
 func pausedTurn() core.Message {
 	return core.Message{
 		Role:       "assistant",

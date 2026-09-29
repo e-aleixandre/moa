@@ -166,6 +166,11 @@ model does with them differs:
 - **Claude Sonnet 5.5** cannot turn thinking fully off. `off` sends its lowest
   setting, `between_tools`: no up-front thinking, only short progress notes
   between tool calls, at the default `high` effort.
+- **Claude Fable 5.1, Fable 5, Opus 5.5 and Sonnet 5.5** can write a short
+  note between tool calls as a thinking block. Moa asks for it with
+  `display: "updates"` on every level except Sonnet 5.5's `off`, which returns
+  it anyway, and shows it as ordinary assistant text. The rest of the thinking
+  stays hidden.
 - **`xhigh`** is its own effort level on every Anthropic model except Haiku
   4.5, which caps it at `high`. OpenAI models accept `xhigh` as its own
   effort level. On **GPT-6 Astra**, the five UI positions map to `low`,

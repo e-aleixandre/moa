@@ -1265,8 +1265,13 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 	case core.AgentEventMessageEnd:
 		var fullText string
 		for _, c := range e.Message.Content {
-			if c.Type == "text" {
+			switch {
+			case c.Type == "text":
 				fullText += c.Text
+			case c.Type == "thinking" && c.Progress:
+				// Streamed as text (see the Anthropic provider), so the text
+				// the client already materialized includes it.
+				fullText += c.Thinking
 			}
 		}
 		return []any{MessageEnded{SessionID: sid, RunGen: gen, Message: e.Message, FullText: fullText}}

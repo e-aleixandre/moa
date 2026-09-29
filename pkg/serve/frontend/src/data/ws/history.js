@@ -41,6 +41,10 @@ export function normalizeHistory(raw, liveSubagents = []) {
       for (const c of (msg.content || [])) {
         if (c.type === 'text' && c.text) {
           textParts.push(c.text);
+        } else if (c.type === 'thinking' && c.progress && c.thinking) {
+          // A progress update: the model's note between tool calls, shown as
+          // the assistant text it used to be.
+          textParts.push(c.thinking);
         } else if (c.type === 'tool_call') {
           if (textParts.length > 0) {
             result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, requested_model: msg.requested_model, model: msg.model, content: [{ type: 'text', text: textParts.join('') }] });

@@ -2,8 +2,13 @@ package anthropic
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -221,15 +226,17 @@ func TestBuildRequestBody_Fable51OffStillSendsAdaptiveHigh(t *testing.T) {
 // "disabled", "enabled/<budget>", or "-" for no thinking field at all.
 func TestBuildRequestBody_ThinkingPerModelAndLevel(t *testing.T) {
 	levels := []string{"off", "low", "medium", "high", "xhigh"}
+	// "+updates" is thinking.display: only the models that write progress
+	// updates ask for it, and never with between_tools (a 400 there).
 	want := map[string][]string{
-		"claude-fable-5-1":          {"adaptive/high", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
-		"claude-fable-5":            {"adaptive/high", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
-		"claude-opus-5-5":           {"adaptive/medium", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
-		"opus":                      {"adaptive/medium", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
+		"claude-fable-5-1":          {"adaptive+updates/high", "adaptive+updates/low", "adaptive+updates/medium", "adaptive+updates/high", "adaptive+updates/xhigh"},
+		"claude-fable-5":            {"adaptive+updates/high", "adaptive+updates/low", "adaptive+updates/medium", "adaptive+updates/high", "adaptive+updates/xhigh"},
+		"claude-opus-5-5":           {"adaptive+updates/medium", "adaptive+updates/low", "adaptive+updates/medium", "adaptive+updates/high", "adaptive+updates/xhigh"},
+		"opus":                      {"adaptive+updates/medium", "adaptive+updates/low", "adaptive+updates/medium", "adaptive+updates/high", "adaptive+updates/xhigh"},
 		"claude-opus-5":             {"disabled", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-opus-4-8":           {"-", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
-		"claude-sonnet-5-5":         {"between_tools", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
-		"sonnet":                    {"between_tools", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
+		"claude-sonnet-5-5":         {"between_tools", "adaptive+updates/low", "adaptive+updates/medium", "adaptive+updates/high", "adaptive+updates/xhigh"},
+		"sonnet":                    {"between_tools", "adaptive+updates/low", "adaptive+updates/medium", "adaptive+updates/high", "adaptive+updates/xhigh"},
 		"claude-sonnet-5":           {"disabled", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-haiku-4-5-20251001": {"-", "enabled/4096", "enabled/10000", "enabled/30976", "enabled/30976"}, // budget capped by the default max_tokens,
 	}
@@ -251,6 +258,9 @@ func TestBuildRequestBody_ThinkingPerModelAndLevel(t *testing.T) {
 			got := "-"
 			if thinking, ok := body["thinking"].(map[string]any); ok {
 				got = fmt.Sprint(thinking["type"])
+				if display, ok := thinking["display"]; ok {
+					got += fmt.Sprintf("+%v", display)
+				}
 				if budget, ok := thinking["budget_tokens"]; ok {
 					got += fmt.Sprintf("/%v", budget)
 				}
@@ -1127,6 +1137,43 @@ func TestCacheBreakpoints_DefaultAndHourStillWrite(t *testing.T) {
 		}
 		if !bytes.Contains(data, []byte("cache_control")) {
 			t.Fatalf("CacheRetention %q dropped cache_control: conversation turns share a prefix and must keep caching", ttl)
+		}
+	}
+}
+
+func TestDisplayUpdatesBetaTravelsWithDisplay(t *testing.T) {
+	// The API rejects display "updates" without its beta header, and
+	// between_tools rejects any display: header and body must agree for every
+	// model and level, on both auth modes.
+	for _, key := range []string{"sk-ant-api03-test", "sk-ant-oat01-test"} {
+		for _, modelID := range []string{"claude-fable-5-1", "claude-fable-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"} {
+			for _, level := range []string{"off", "low", "high", "xhigh"} {
+				var beta string
+				var body map[string]any
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					beta = r.Header.Get("anthropic-beta")
+					raw, _ := io.ReadAll(r.Body)
+					_ = json.Unmarshal(raw, &body)
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = io.WriteString(w, `{"type":"error","error":{"type":"invalid_request_error","message":"stop"}}`)
+				}))
+				a := NewWithBaseURL(key, srv.URL)
+				_, _ = a.Stream(context.Background(), core.Request{
+					Model:    core.Model{ID: modelID, Provider: "anthropic"},
+					Messages: []core.Message{core.NewUserMessage("hi")},
+					Options:  core.StreamOptions{ThinkingLevel: level},
+				})
+				srv.Close()
+				thinking, _ := body["thinking"].(map[string]any)
+				display, _ := thinking["display"].(string)
+				hasBeta := strings.Contains(beta, thinkingDisplayUpdatesBeta)
+				if (display == "updates") != hasBeta {
+					t.Errorf("%s %s %s: display %q with beta header %v", key[:13], modelID, level, display, hasBeta)
+				}
+				if thinking["type"] == "between_tools" && len(thinking) != 1 {
+					t.Errorf("%s %s: between_tools carries extra fields: %v", modelID, level, thinking)
+				}
+			}
 		}
 	}
 }

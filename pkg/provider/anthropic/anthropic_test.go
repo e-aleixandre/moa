@@ -458,3 +458,139 @@ func TestMessageStart_NoCacheCreationBreakdown(t *testing.T) {
 		t.Errorf("CacheWrite1h = %d, want 0", u.CacheWrite1h)
 	}
 }
+
+// progressUpdateSSE is the shape display "updates" returns after a tool
+// result: an empty reasoning block, a progress update with text, the tool call.
+const progressUpdateSSE = `event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-5-5","usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"SIG_REASONING"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"Checking the config next."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"SIG_UPDATE"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_1","name":"read","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"a\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":42}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+
+func mapProgressSSE(t *testing.T, progressUpdates bool) []core.AssistantEvent {
+	t.Helper()
+	a := New("test-key")
+	state := &streamState{progressUpdates: progressUpdates}
+	var events []core.AssistantEvent
+	if err := parseSSEFrames(strings.NewReader(progressUpdateSSE), func(eventType, data string) {
+		if event := a.mapEvent(eventType, data, state); event != nil {
+			events = append(events, *event)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return events
+}
+
+func TestMapEvents_ProgressUpdateStreamsAsText(t *testing.T) {
+	events := mapProgressSSE(t, true)
+	var text, thinking string
+	for _, e := range events {
+		switch e.Type {
+		case core.ProviderEventTextDelta:
+			text += e.Delta
+		case core.ProviderEventThinkingDelta:
+			thinking += e.Delta
+		}
+	}
+	if text != "Checking the config next." || thinking != "" {
+		t.Fatalf("text %q thinking %q: the update must stream as text", text, thinking)
+	}
+	done := events[len(events)-1]
+	if done.Type != core.ProviderEventDone {
+		t.Fatalf("last event %q", done.Type)
+	}
+	content := done.Message.Content
+	if len(content) != 3 {
+		t.Fatalf("content %+v", content)
+	}
+	// The reasoning block stays empty and unmarked; the update stays a thinking
+	// block, signature intact, marked as progress.
+	if content[0].Progress || content[0].ThinkingSignature != "SIG_REASONING" {
+		t.Errorf("reasoning block %+v", content[0])
+	}
+	u := content[1]
+	if u.Type != "thinking" || !u.Progress || u.Thinking != "Checking the config next." || u.ThinkingSignature != "SIG_UPDATE" {
+		t.Errorf("progress block %+v", u)
+	}
+
+	// It replays exactly as received.
+	replayed := convertAssistantContent(content, false, false)
+	block, _ := replayed[1].(map[string]any)
+	if block["type"] != "thinking" || block["thinking"] != "Checking the config next." || block["signature"] != "SIG_UPDATE" || len(block) != 3 {
+		t.Errorf("replayed %v", block)
+	}
+}
+
+func TestMapEvents_ThinkingTextIsReasoningOutsideProgressMode(t *testing.T) {
+	// Under display "summarized" (older models' default) text is reasoning.
+	for _, e := range mapProgressSSE(t, false) {
+		if e.Type == core.ProviderEventTextDelta {
+			t.Fatalf("reasoning streamed as text: %q", e.Delta)
+		}
+		if e.Type == core.ProviderEventDone && e.Message.Content[1].Progress {
+			t.Fatal("reasoning marked as progress")
+		}
+	}
+}
+
+func TestReadsProgressUpdates(t *testing.T) {
+	cases := []struct {
+		model, level string
+		want         bool
+	}{
+		{"claude-sonnet-5-5", "off", true}, // between_tools
+		{"claude-sonnet-5-5", "high", true},
+		{"claude-opus-5-5", "off", true},
+		{"claude-fable-5-1", "low", true},
+		{"claude-fable-5", "xhigh", true},
+		{"claude-opus-5", "high", false},
+		{"claude-sonnet-5", "high", false},
+		{"claude-opus-4-8", "high", false},
+		{"claude-haiku-4-5-20251001", "high", false},
+	}
+	for _, tc := range cases {
+		got := readsProgressUpdates(core.Request{Model: core.Model{ID: tc.model}, Options: core.StreamOptions{ThinkingLevel: tc.level}})
+		if got != tc.want {
+			t.Errorf("%s %s: %v, want %v", tc.model, tc.level, got, tc.want)
+		}
+	}
+}
