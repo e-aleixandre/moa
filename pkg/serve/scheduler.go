@@ -22,6 +22,10 @@ type schedulerService struct {
 	stop    chan struct{}
 	stopped chan struct{}
 	once    sync.Once
+	// accepted maps a schedule ID to the occurrence whose prompt the runtime
+	// admitted but whose durable status is not yet saved. The history append is
+	// asynchronous, so history alone cannot prove acceptance; guarded by mu.
+	accepted map[string]string
 }
 
 func newSchedulerService(path string) (*schedulerService, error) {
@@ -32,7 +36,7 @@ func newSchedulerService(path string) (*schedulerService, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &schedulerService{store: store, stop: make(chan struct{}), stopped: make(chan struct{})}, nil
+	return &schedulerService{store: store, stop: make(chan struct{}), stopped: make(chan struct{}), accepted: make(map[string]string)}, nil
 }
 
 func (s *schedulerService) Start(m *Manager) {
@@ -84,7 +88,7 @@ func (s *schedulerService) cancel(sess *ManagedSession, id string) (schedule.Sch
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if record, ok := s.store.Get(id); ok && record.Status == schedule.StatusPending &&
-		scheduleOccurrenceExists(sess.History(), record.OccurrenceID) {
+		(s.isAccepted(id, record.OccurrenceID) || scheduleOccurrenceExists(sess.History(), record.OccurrenceID)) {
 		if err := s.markDelivered(id, time.Now()); err != nil {
 			slog.Error("recover schedule delivery", "schedule", id, "error", err)
 		}
@@ -96,7 +100,11 @@ func (s *schedulerService) cancel(sess *ManagedSession, id string) (schedule.Sch
 func (s *schedulerService) deleteSession(sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.store.DeleteSession(sessionID)
+	if err := s.store.DeleteSession(sessionID); err != nil {
+		return err
+	}
+	s.pruneAcceptedLocked()
+	return nil
 }
 
 func (s *schedulerService) purge(now time.Time) {
@@ -104,6 +112,21 @@ func (s *schedulerService) purge(now time.Time) {
 	defer s.mu.Unlock()
 	if _, err := s.store.PurgeSettled(now.Add(-schedule.RetainSettled)); err != nil {
 		slog.Warn("purge settled schedules", "error", err)
+		return
+	}
+	s.pruneAcceptedLocked()
+}
+
+func (s *schedulerService) isAccepted(id, occurrenceID string) bool {
+	got, ok := s.accepted[id]
+	return ok && got == occurrenceID
+}
+
+func (s *schedulerService) pruneAcceptedLocked() {
+	for id, occurrence := range s.accepted {
+		if record, ok := s.store.Get(id); !ok || record.OccurrenceID != occurrence {
+			delete(s.accepted, id)
+		}
 	}
 }
 
@@ -148,7 +171,8 @@ func (s *schedulerService) deliver(m *Manager, record schedule.Schedule, now tim
 	// Prompt persistence is the source of truth for exactly-once recovery.
 	// If a previous process accepted the prompt but crashed before marking
 	// this record delivered, do not ask the agent to perform it twice.
-	if scheduleOccurrenceExists(sess.History(), record.OccurrenceID) {
+	if current, _ := s.store.Get(record.ID); s.isAccepted(record.ID, current.OccurrenceID) ||
+		scheduleOccurrenceExists(sess.History(), record.OccurrenceID) {
 		if err := s.markDelivered(record.ID, now); err != nil {
 			slog.Error("recover schedule delivery", "schedule", record.ID, "error", err)
 		}
@@ -167,6 +191,7 @@ func (s *schedulerService) deliver(m *Manager, record schedule.Schedule, now tim
 	if err != nil {
 		return
 	}
+	s.accepted[record.ID] = record.OccurrenceID
 	if err := s.markDelivered(record.ID, now); err != nil {
 		// The prompt was accepted, so do not risk silently forgetting this
 		// persistence failure; it will be retried after restart.
@@ -175,8 +200,14 @@ func (s *schedulerService) deliver(m *Manager, record schedule.Schedule, now tim
 }
 
 func (s *schedulerService) markDelivered(id string, deliveredAt time.Time) error {
-	_, err := s.store.MarkDelivered(id, deliveredAt)
-	return err
+	record, err := s.store.MarkDelivered(id, deliveredAt)
+	if err != nil {
+		return err
+	}
+	if s.isAccepted(id, record.OccurrenceID) {
+		delete(s.accepted, id)
+	}
+	return nil
 }
 
 func scheduleOccurrenceExists(messages []core.AgentMessage, occurrenceID string) bool {
