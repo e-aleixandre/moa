@@ -31,7 +31,8 @@ import { formatShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast, stopRun } from "../../data/session-actions.js";
-import { toggleSessionPanel, sessionPanelView } from "../../data/session-panel.js";
+import { toggleSessionPanel, sessionPanelView, openSessionPanel, taskPanelPage } from "../../data/session-panel.js";
+import { PinnedTaskLine } from "../../components/Tasks/PinnedTaskLine.jsx";
 import { useOwnerStatusItem } from "../../components/Owners/OwnerChipEntry.jsx";
 import { cacheAlertLabel } from "../../data/cache-usage.js";
 import { setPopoverOpenFromClick } from "../../data/popover-click.js";
@@ -310,7 +311,12 @@ export function ConversationScreen() {
                   takes it only when the foreground is silent, and its tally is
                   the door to the panel. The panel's open state persists per
                   session (session.dockOpen). flex:none, so it pushes the stream
-                  up instead of overlaying the composer. */}
+                  up instead of overlaying the composer. Above it, what the
+                  session asked of you, pinned so it does not sink. */}
+              <PinnedTaskLine
+                sessionId={session.id}
+                onOpenTask={(id) => openSessionPanel(session.id, taskPanelPage(id))}
+              />
               <LiveBar
                 key={session.id}
                 session={session}

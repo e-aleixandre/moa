@@ -1,5 +1,6 @@
 // tile-actions.js — tile tree manipulation and visibility management
 
+import { closeTasksView } from './tasks-view.js';
 import { acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { armReadAnchor, __resetReadAnchorsForTests } from './stream-read-anchor.js';
@@ -140,6 +141,9 @@ export function setActiveSession(id) {
 export function openSession(id) {
   const state = store.get();
   if (!state.sessions[id]) return false;
+  // A session opened from anywhere (the sidebar, the palette, a toast, a
+  // task's "Asked by") is shown: the Tasks view gives the screen back.
+  if (state.view === 'tasks') closeTasksView();
   if (state.isMobile) setActiveSession(id);
   else assignToTile(state.focusedTile, id);
   return true;

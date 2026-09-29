@@ -16,6 +16,8 @@ import {
 } from "./data/session-actions.js";
 import { loadEvents, openInbox } from "./data/events.js"; // wake-on-event
 import { loadOwners } from "./data/owners.js";
+import { startTasksSync, resumeTasksSync } from "./data/tasks.js";
+import { TasksScreen } from "./components/Tasks/TasksScreen.jsx";
 import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
 import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
@@ -157,6 +159,9 @@ function useBootstrap() {
     // changes when the server does.
     loadModelCatalog();
     loadEvents(); // wake-on-event: paint the inbox on first load, not one tick later
+    // Tasks: the sidebar's count and every open task view read one slice,
+    // kept fresh by /api/tasks/ws (an invalidation; each one re-reads).
+    startTasksSync();
     // The owners are read with the first roster above and again on return,
     // like the model catalog: an owner is created by hand and their number is
     // one per project, so nothing is gained by polling them.
@@ -180,6 +185,7 @@ function useBootstrap() {
         reconnectAll();
         loadSessions();
         loadEvents(); // wake-on-event: an event may have arrived while away
+        resumeTasksSync();
         loadOwners();
         startPolling();
         // Also restarts the usage timer, and refreshes immediately so the
@@ -202,6 +208,7 @@ function useBootstrap() {
       if (document.visibilityState !== "visible") return;
       reconnectAll();
       loadSessions();
+      resumeTasksSync();
       ensureModelCatalog();
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -352,7 +359,7 @@ function App() {
   return (
     <>
       <DesktopShell version={version}>
-        {view === "grid" ? <PaneGridScreen /> : <ConversationScreen />}
+        {view === "grid" ? <PaneGridScreen /> : view === "tasks" ? <TasksScreen /> : <ConversationScreen />}
       </DesktopShell>
       <GlobalPalette />
       <GlobalSharePicker />

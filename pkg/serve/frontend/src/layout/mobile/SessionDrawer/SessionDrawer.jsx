@@ -51,6 +51,8 @@ export function SessionDrawer({
   onInbox,
   inboxCount = 0,
   inboxVisible = false,
+  onTasks,
+  tasksCount = 0,
   version = null,
   onCloseSession,
   onReopenSession,
@@ -227,6 +229,8 @@ export function SessionDrawer({
             inboxCount={inboxCount}
             inboxVisible={inboxVisible}
             onInbox={onInbox}
+            onTasks={onTasks}
+            tasksCount={tasksCount}
           />
         )}
       </div>

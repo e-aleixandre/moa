@@ -545,6 +545,27 @@ a.zl-ver.is-update:focus-visible {
   outline-offset: var(--focus-ring-offset, 2px);
 }
 
+/* The Tasks door wears the inbox's box. Its number is grey, not the inbox's
+   yellow: a request from an agent waits for you, but it is not an alarm. */
+.zl-inbox.tk-door svg { width: 16px; height: 16px; color: var(--zl-t3); }
+.tk-door-n { color: var(--zl-t3); }
+.zl-inbox.tk-door.is-on .tk-door-n { color: var(--zl-t2); }
+
+/* The version lives in Settings now; a newer release shows here only as a
+   dot on the gear (its name says it in words). */
+.zl-gear.has-update { position: relative; }
+.tk-gear-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--zl-yellow);
+  box-shadow: 0 0 0 2px var(--zl-sheet);
+  pointer-events: none;
+}
+
 /* The gear sits with the version: both are about the app, not the session.
    40px, not 32: the inbox opposite it is a 40px box whose 12px padding puts
    its glyph on the list's 20px text column. At 32 the gear's box could sit on

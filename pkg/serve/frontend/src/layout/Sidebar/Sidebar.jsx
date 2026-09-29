@@ -17,6 +17,7 @@ import {
 import { projectName } from "../../data/util/format.js";
 import { worstOwnerState } from "../../data/owners-model.js";
 import { OwnerRow, SectionHead } from "../../components/Owners/OwnerRow.jsx";
+import { TasksGlyph } from "../../components/Tasks/TasksGlyph.jsx";
 import "./Sidebar.css";
 
 // Sidebar — the other sessions. Markup and CSS are the catalogue's
@@ -38,7 +39,7 @@ import "./Sidebar.css";
 //   1. head — the wordmark and the search field
 //   2. list — the groups and their rows (or the inbox, on the desktop)
 //   3. new  — one labelled action, at the bottom, where the thumb is
-//   4. foot — the inbox, the version and settings: the things about the APP
+//   4. foot — the inbox, the tasks and settings: the things about the APP
 
 // The two ORDERS the sessions can take. The segmented says how the list is
 // SORTED, and nothing else: the project owners are a SECTION of that list
@@ -118,28 +119,74 @@ function ChevronIcon() {
   );
 }
 
-function SidebarVersion({ version }) {
-  if (!version?.current) return null;
-  // current/latest already arrive v-prefixed from the server (release
-  // DisplayVersion / cache), so use them verbatim — don't add another "v".
-  const current = version.current;
-  if (version.update_available && version.latest) {
-    return (
-      <a
-        class="zl-ver zl-data is-update"
-        href="https://github.com/e-aleixandre/moa/releases/latest"
-        target="_blank"
-        rel="noreferrer"
-        title={`Update available: ${version.latest}`}
-      >
-        {current} ↑ {version.latest}
-      </a>
-    );
-  }
+// updateAvailable — the build this server runs has a newer release. The
+// version itself lives in Settings (About); the foot only carries the hint.
+export function updateAvailable(version) {
+  return !!(version?.update_available && version?.latest);
+}
+
+// SidebarFoot — the foot is about the APP, not about a session: the inbox,
+// the tasks and settings. The version used to sit here too and, with a newer
+// release out, its chip ("v0.42.0-19-gfc45cedc ↑ v0.44.0") broke onto three
+// lines and pushed the doors aside. It moved to Settings; the gear carries a
+// dot when there is an update, and says so in its name, not only in colour.
+//
+// Tasks is a door like Inbox, always there (notes are yours to write even
+// when no agent asked for anything). Its number counts only the requests
+// agents made that are still open, in grey: a request is not an alarm.
+export function SidebarFoot({
+  inboxVisible = false, inboxOpen = false, inboxCount = 0, onInbox,
+  tasksCount = 0, tasksOpen = false, onTasks,
+  version = null, onSettings,
+}) {
+  const update = updateAvailable(version);
+  const gearLabel = update ? `Settings, update available: ${version.latest}` : "Settings";
   return (
-    <span class="zl-ver zl-data" title="moa version">
-      {current}
-    </span>
+    <div class="zl-side-foot">
+      {/* wake-on-event: the door appears once anything has ever arrived — a
+          permanent icon for someone with no hooks configured would be chrome
+          that never does anything. It also appears when the inbox could NOT
+          be read: with no list there is no way to know that nothing arrived,
+          and hiding the door would hide the failure too. */}
+      {inboxVisible && (
+        <button
+          type="button"
+          class={`zl-inbox${inboxOpen ? " is-on" : ""}`}
+          aria-pressed={inboxOpen}
+          aria-label={inboxCount > 0 ? `Inbox, ${inboxCount} waiting` : "Inbox"}
+          onClick={onInbox}
+        >
+          <InboxIcon />
+          Inbox
+          {inboxCount > 0 && <span class="zl-inbox-n zl-data">{inboxCount > 9 ? "9+" : inboxCount}</span>}
+        </button>
+      )}
+      {onTasks && (
+        <button
+          type="button"
+          class={`zl-inbox tk-door${tasksOpen ? " is-on" : ""}`}
+          aria-pressed={tasksOpen}
+          aria-label={tasksCount > 0 ? `Tasks, ${tasksCount} for you` : "Tasks"}
+          onClick={onTasks}
+        >
+          <TasksGlyph />
+          Tasks
+          {tasksCount > 0 && <span class="tk-door-n zl-data">{tasksCount}</span>}
+        </button>
+      )}
+      <div class="zl-side-app">
+        <button
+          type="button"
+          class={`zl-gear${update ? " has-update" : ""}`}
+          aria-label={gearLabel}
+          title={gearLabel}
+          onClick={onSettings}
+        >
+          <GearIcon />
+          {update && <span class="tk-gear-dot" aria-hidden="true" />}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -194,6 +241,10 @@ export function Sidebar({
   onNewSessionForEvent,
   onDismissEvent,
   onDismissEventSource,
+  // Tasks: the door beside Inbox. tasksCount is the open requests only.
+  tasksCount = 0,
+  tasksOpen = false,
+  onTasks,
   // The owners. They are a SECTION of this list rather than a mode of the
   // column: above everything in Recent, and the first row of their group in By
   // project. The column supplies the head and the foot either way.
@@ -536,39 +587,17 @@ export function Sidebar({
       )}
 
 
-      {/* The foot is about the APP, not about a session: the inbox, the build,
-          and the global settings. Same place both densities kept settings. */}
-      <div class="zl-side-foot">
-        {/* wake-on-event: the door appears once anything has ever arrived — a
-            permanent icon for someone with no hooks configured would be chrome
-            that never does anything. It also appears when the inbox could NOT
-            be read: with no list there is no way to know that nothing arrived,
-            and hiding the door would hide the failure too. */}
-        {inboxVisible && (
-          <button
-            type="button"
-            class={`zl-inbox${inboxOpen ? " is-on" : ""}`}
-            aria-pressed={inboxOpen}
-            aria-label={inboxCount > 0 ? `Inbox, ${inboxCount} waiting` : "Inbox"}
-            onClick={onInbox}
-          >
-            <InboxIcon />
-            Inbox
-            {inboxCount > 0 && <span class="zl-inbox-n zl-data">{inboxCount > 9 ? "9+" : inboxCount}</span>}
-          </button>
-        )}
-        {/* Version and settings are one group, and the foot used to read
-            action / fact / action -- with the version wedged between the two
-            buttons, belonging to neither. Both of these are about the app
-            rather than the session, so they sit together and the inbox keeps
-            the other end to itself. */}
-        <div class="zl-side-app">
-          <SidebarVersion version={version} />
-          <button type="button" class="zl-gear" aria-label="Settings" onClick={onSettings}>
-            <GearIcon />
-          </button>
-        </div>
-      </div>
+      <SidebarFoot
+        inboxVisible={inboxVisible}
+        inboxOpen={inboxOpen}
+        inboxCount={inboxCount}
+        onInbox={onInbox}
+        tasksCount={tasksCount}
+        tasksOpen={tasksOpen}
+        onTasks={onTasks}
+        version={version}
+        onSettings={onSettings}
+      />
     </aside>
   );
 }

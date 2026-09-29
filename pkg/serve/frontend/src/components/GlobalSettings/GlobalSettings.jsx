@@ -884,10 +884,6 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
 
   if (!open) return null;
 
-  const current = version?.current || null;
-  const latest = version?.latest || null;
-  const updateAvailable = !!(version?.update_available && latest);
-
   const sheet = (
     <div class={`zl-set-host${inline ? " is-inline" : ""}`}>
       <div class="zl-set-scrim" onClick={() => onClose?.()} />
@@ -996,17 +992,7 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
               />
             </div>
 
-            <div class="zl-set-sec">
-              <span class="zl-set-k">About</span>
-              <div class="zl-set-row is-static">
-                <span class="zl-set-l">Version</span>
-                <span class="zl-set-v">
-                  {current
-                    ? (updateAvailable ? `${current} ↑ ${latest}` : current)
-                    : "—"}
-                </span>
-              </div>
-            </div>
+            <AboutVersion version={version} />
           </div>
         )}
       </div>
@@ -1023,6 +1009,37 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
   if (inline) return sheet;
   if (typeof document === "undefined" || !document.body) return sheet;
   return createPortal(sheet, document.body);
+}
+
+export const RELEASES_URL = "https://github.com/e-aleixandre/moa/releases/latest";
+
+// AboutVersion — the build this server runs, in full, and the newer release
+// when there is one. It lived in the sidebar foot until the chip outgrew it;
+// the foot keeps only a dot on the gear that opens this.
+export function AboutVersion({ version }) {
+  const current = version?.current || null;
+  const latest = version?.latest || null;
+  const update = !!(version?.update_available && latest);
+  return (
+    <div class="zl-set-sec">
+      <span class="zl-set-k">About</span>
+      <div class="zl-set-row is-static">
+        <span class="zl-set-l">Version</span>
+        <span class="zl-set-v zl-data">{current || "—"}</span>
+      </div>
+      {update && (
+        <div class="zl-set-row is-static">
+          <span class="zl-set-l">
+            Update available
+            <em>{latest} is out.</em>
+          </span>
+          <a class="zl-set-v zl-set-link" href={RELEASES_URL} target="_blank" rel="noreferrer">
+            See {latest}
+          </a>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // The row's reading for the summarizing model: the model's NAME when one was

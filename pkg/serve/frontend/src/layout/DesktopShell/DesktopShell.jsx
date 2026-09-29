@@ -11,6 +11,9 @@ import { createOwner, openOwnerConversation } from "../../data/owners.js";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
 import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSession, routeEventToOwner, toggleInbox } from "../../data/events.js"; // wake-on-event
 import { selectDesktopChrome } from "../Sidebar/sessions.js";
+import { tasksSlice } from "../../data/tasks.js";
+import { openRequestCount } from "../../data/tasks-model.js";
+import { toggleTasksView } from "../../data/tasks-view.js";
 import "./DesktopShell.css";
 
 // DesktopShell — the desktop chrome, in THREE ZONES: the other sessions on the
@@ -27,6 +30,8 @@ import "./DesktopShell.css";
 
 export function DesktopShell({ version, children }) {
   const chrome = useStore(selectDesktopChrome);
+  const tasksOpen = useStore((s) => s.view === "tasks");
+  const tasksCount = useStore((s) => openRequestCount(tasksSlice(s).list));
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   // New owner is a centred modal here, not a page of the sidebar: the column
   // is where you look for your work, and a form that takes it over hides the
@@ -47,6 +52,9 @@ export function DesktopShell({ version, children }) {
            to know that nothing arrived, and hiding the door hides the failure. */
         inboxVisible={chrome.inbox.length > 0 || chrome.inboxHealth?.status === "error"}
         onInbox={toggleInbox}
+        tasksOpen={tasksOpen}
+        tasksCount={tasksCount}
+        onTasks={toggleTasksView}
         onRetryInbox={() => { retryEvents().catch(() => {}); }}
         onRouteEvent={(id, sessionId) => { routeEvent(id, sessionId).catch(() => {}); }}
         onRouteEventOwner={(id, ownerId) => { routeEventToOwner(id, ownerId).catch(() => {}); }}

@@ -2,9 +2,12 @@ import { useEffect, useRef } from "preact/hooks";
 import { useStore } from "../../hooks/useStore.js";
 import { registerOverlay } from "../../data/overlays.js";
 import {
-  PANEL_PAGES, artifactsVerdict, closeSessionPanel, mcpVerdict, panelPageParent, runFacts,
+  artifactsVerdict, closeSessionPanel, mcpVerdict, panelPageParent, panelPageTitle, parsePanelPage, runFacts,
   focusPanelSubpage, panelAccessibleName, setSessionPanelPage, usageVerdict,
 } from "../../data/session-panel.js";
+import { selectSessionTasks, watchSessionTasks } from "../../data/tasks.js";
+import { sessionTasksVerdict } from "../../data/tasks-model.js";
+import { SessionTasksPage } from "../Tasks/SessionTasksPage.jsx";
 import { artifactsSlice, listArtifactsInPanel, openArtifactsList } from "../../data/artifacts.js";
 import { UsagePage } from "./UsagePage.jsx";
 import { McpPage } from "./McpPage.jsx";
@@ -40,7 +43,13 @@ const PANEL_ICONS = {
   usage: <><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 8V4.5M8 8l2.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></>,
   mcp: <path d="M5 2v3M11 2v3M3.5 5h9v3a4.5 4.5 0 0 1-9 0zM8 12.5V15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />,
   artifacts: <path d="M3.5 2.5h6l3 3v8h-9z M9.5 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />,
+  tasks: <path d="M2.5 4.2l1.3 1.3 2.2-2.4M2.5 10.2l1.3 1.3 2.2-2.4M8.5 4.5H14M8.5 10.5H14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />,
 };
+
+// The pages that belong to the session's tasks: the list, a task, Move, and
+// a new task. They draw their own body (lists and the editor scroll on their
+// own, with the editor's foot pinned), so they are not wrapped like the rest.
+const TASK_PAGE_KINDS = new Set(["tasks", "task", "taskMove", "taskNew"]);
 
 function BackIcon() {
   return (
@@ -241,11 +250,11 @@ export function SessionPanel({
               onClick={() => goPage(parent)}
               aria-label={parent === "root"
                 ? (isOwner ? "Back to this owner" : "Back to this session")
-                : `Back to ${PANEL_PAGES[parent]}`}
+                : `Back to ${panelPageTitle(parent)}`}
             >
               <BackIcon />
             </button>
-            <h2 class="zl-side-title is-page" key={page}>{PANEL_PAGES[page]}</h2>
+            <h2 class="zl-side-title is-page" key={page}>{panelPageTitle(page)}</h2>
           </>
         ) : (
           <>
@@ -260,7 +269,9 @@ export function SessionPanel({
         </button>
       </div>
 
-      {sub ? (
+      {sub && TASK_PAGE_KINDS.has(parsePanelPage(page).kind) ? (
+        <SessionTasksPage key={page} session={session} page={page} sheet={sheet} goPage={goPage} />
+      ) : sub ? (
         <div class="zl-panel-body is-sub" key={page}>
           {page === "usage" && (
             <UsagePage
@@ -292,6 +303,7 @@ export function SessionPanel({
               </dl>
             )}
             <div class="zl-prows">
+              <TasksRow sessionId={session.id} onOpen={goPage} />
               {isOwner && <PanelRow id="overview" title="Overview" onOpen={goPage} />}
               {isOwner && <PanelRow id="book" title="Book" onOpen={goPage} />}
               <PanelRow
@@ -313,6 +325,15 @@ export function SessionPanel({
       )}
     </aside>
   );
+}
+
+// The Tasks row: what this session asked of you and how far its checklist
+// has got, read from the task database (not the transcript). It replaced the
+// "Tasks done/total" fact, so the count is said once, here.
+function TasksRow({ sessionId, onOpen }) {
+  const data = useStore((s) => selectSessionTasks(s, sessionId));
+  useEffect(() => (sessionId ? watchSessionTasks(sessionId) : undefined), [sessionId]);
+  return <PanelRow id="tasks" title="Tasks" verdict={data ? sessionTasksVerdict(data) : ""} onOpen={onOpen} />;
 }
 
 // The dossier's Artifacts row is a door to the drawer, not to a second list.

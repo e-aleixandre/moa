@@ -25,7 +25,45 @@ export const PANEL_PAGES = {
   book: 'Book',
   usage: 'Usage',
   mcp: 'MCP',
+  tasks: 'Tasks',
+  taskNew: 'New task',
 };
+
+// Pages that carry an id: one task of the session, and Move for that task.
+// They are pages of the same panel with a real parent (Tasks → task → Move),
+// so the ‹ and Escape walk back one level at a time and never close the panel
+// from a page. The id travels inside the page string ('task:12') because the
+// slice holds one page, and a second field would let the two disagree.
+const PANEL_PAGE_KINDS = {
+  task: { title: 'Task', parent: () => 'tasks' },
+  taskMove: { title: 'Move to', parent: (id) => `task:${id}` },
+};
+
+export function parsePanelPage(page) {
+  const m = /^(task|taskMove):(\d+)$/.exec(String(page || ''));
+  if (m) return { kind: m[1], id: Number(m[2]) };
+  return { kind: page || 'root', id: null };
+}
+
+export function taskPanelPage(id) {
+  return `task:${id}`;
+}
+
+export function taskMovePanelPage(id) {
+  return `taskMove:${id}`;
+}
+
+export function isPanelPage(page) {
+  if (page === 'root' || page in PANEL_PAGES) return true;
+  return parsePanelPage(page).id != null;
+}
+
+// panelPageTitle — the name a page wears in its head and in "Back to …".
+export function panelPageTitle(page) {
+  if (page in PANEL_PAGES) return PANEL_PAGES[page];
+  const { kind, id } = parsePanelPage(page);
+  return id != null ? PANEL_PAGE_KINDS[kind].title : '';
+}
 
 // The second level is not always one step deep. Edit owner is entered FROM
 // Overview, so its back has to land there and not on the root — it used to be
@@ -33,12 +71,16 @@ export const PANEL_PAGES = {
 // a second grabber and a second ✕ on top of the first one.
 export const PANEL_PAGE_PARENT = {
   ownerEdit: 'overview',
+  taskNew: 'tasks',
 };
 
 // panelPageParent — where "back" goes from a page. The root's parent is the
 // root: the panel itself is what closes from there.
 export function panelPageParent(page) {
-  return PANEL_PAGE_PARENT[page] || 'root';
+  if (PANEL_PAGE_PARENT[page]) return PANEL_PAGE_PARENT[page];
+  const { kind, id } = parsePanelPage(page);
+  if (id != null) return PANEL_PAGE_KINDS[kind].parent(id);
+  return 'root';
 }
 
 // sessionPanelBack — what Back does from `page` (the ‹, and Escape through its
@@ -51,7 +93,7 @@ export function sessionPanelBack(page) {
 // panelAccessibleName names the surface after the page currently in front of
 // the user. At the root, the dossier still names what it belongs to.
 export function panelAccessibleName(session, page) {
-  return PANEL_PAGES[page] || (session?.kind === 'owner' ? 'This owner' : 'This session');
+  return panelPageTitle(page) || (session?.kind === 'owner' ? 'This owner' : 'This session');
 }
 
 // A pushed page replaces the control that opened it. Put the keyboard at its
@@ -86,7 +128,7 @@ export function openSessionPanel(sessionId, page = 'root') {
   patch({
     ownerSessionId: sessionId,
     open: true,
-    page: page === 'root' || page in PANEL_PAGES ? page : 'root',
+    page: isPanelPage(page) ? page : 'root',
   });
 }
 
@@ -108,7 +150,7 @@ export function toggleSessionPanel(sessionId, page = 'root') {
 }
 
 export function setSessionPanelPage(page) {
-  patch({ page: page === 'root' || page in PANEL_PAGES ? page : 'root' });
+  patch({ page: isPanelPage(page) ? page : 'root' });
 }
 
 // closeSessionPanelForSession — a deleted conversation cannot keep a dossier
@@ -161,11 +203,9 @@ export function runFacts(session) {
     });
   }
 
-  const tasks = Array.isArray(s.tasks) ? s.tasks : [];
-  if (tasks.length > 0) {
-    const done = tasks.filter((t) => t.status === 'done').length;
-    facts.push({ id: 'tasks', label: 'Tasks', value: `${done}/${tasks.length}` });
-  }
+  // Tasks are not a fact any more: they have their own row and page (the
+  // Tasks row says the checklist's progress and what waits on you), and a
+  // second copy of the same count here would be one too many.
 
   return facts;
 }

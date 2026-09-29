@@ -1,0 +1,432 @@
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { Check, ChevronDown, Plus, Search, Trash2 } from "lucide-preact";
+import { useStore } from "../../hooks/useStore.js";
+import { hasBlockingOverlay } from "../../data/overlays.js";
+import { addToast } from "../../data/notifications.js";
+import {
+  createTask, deleteTaskAt, deliverNotice, loadTask, loadTaskProjects, patchTask, selectSessionDirectory, tasksSlice, watchTask,
+} from "../../data/tasks.js";
+import {
+  completeNotifies, conflictCurrent, createBody, deleteNotifies, deletePath, draftDirty, editorActions, editorDraft,
+  errorText, isOpen, isRequest, isTypingTarget, latestUndelivered, movePatch, noticeLine, placeLabel, projectLabelOf,
+  projectOptions, rebaseDraft, recipientFor, relAge, reopenPatch, savePatch, sessionName, sessionNoticeState, taskProjectName, completePatch,
+} from "../../data/tasks-model.js";
+import {
+  CheckRing, CloseIcon, CompletionFlow, DeliverChoice, Keycap, MOD_ENTER, MoveList, useEscape, useNotifyGesture,
+} from "./parts.jsx";
+
+function failed(title, error) {
+  addToast({ title, detail: errorText(error), type: "error" });
+}
+
+// useTaskLookup — a task by id from whatever the client already holds: the
+// details read so far, the global list, the sessions' own lists. Dependencies
+// can point anywhere ("also between places"), so ids nobody has read yet are
+// fetched once.
+export function useTaskLookup(ids = []) {
+  const slice = useStore(tasksSlice);
+  const map = useMemo(() => {
+    const m = new Map();
+    for (const data of Object.values(slice.bySession)) {
+      for (const t of [...(data.requests || []), ...(data.checklist || [])]) m.set(t.id, t);
+    }
+    for (const t of slice.list) m.set(t.id, t);
+    for (const t of Object.values(slice.details)) if (t && !t.gone) m.set(t.id, t);
+    return m;
+  }, [slice.bySession, slice.list, slice.details]);
+  const asked = useRef(new Set());
+  useEffect(() => {
+    for (const id of ids) {
+      if (!map.has(id) && !asked.current.has(id)) {
+        asked.current.add(id);
+        loadTask(id);
+      }
+    }
+  }, [ids.join(","), map]);
+  return (id) => map.get(id) || null;
+}
+
+function autosize(el) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+// DepPicker — "Add a task it waits for": open tasks the client holds, with a
+// field to find one.
+function DepPicker({ exclude, lookupList, sessions, onPick, onClose }) {
+  const [q, setQ] = useState("");
+  useEscape(true, onClose);
+  const needle = q.trim().toLowerCase();
+  const candidates = lookupList
+    .filter((t) => isOpen(t) && !exclude.includes(t.id) && (!needle || t.title.toLowerCase().includes(needle)))
+    .slice(0, 8);
+  return (
+    <div class="tk-pop is-dep" role="menu" onClick={(e) => e.stopPropagation()}>
+      <label class="tk-search">
+        <Search size={14} aria-hidden="true" />
+        <input class="tk-field" placeholder="Find a task" aria-label="Find a task" value={q} onInput={(e) => setQ(e.currentTarget.value)} autoFocus />
+      </label>
+      {candidates.map((c) => (
+        <button key={c.id} type="button" class="tk-pop-item is-two" onClick={() => onPick(c.id)}>
+          <span class="tk-pop-t">{c.title}</span>
+          <span class="tk-pop-sub">{placeLabel(c, sessions)}</span>
+        </button>
+      ))}
+      {candidates.length === 0 && <div class="tk-pop-none">No open task matches.</div>}
+    </div>
+  );
+}
+
+// TaskDetail — the detail IS the editor. Title, details, subtasks and
+// dependencies edit in place; a foot with Discard / Save / "Save and notify"
+// appears once something changed. Save never tells anyone; "Save and notify"
+// exists only when there is a session to tell. A stale revision (409) shows
+// the task as it is now and keeps what was typed.
+export function TaskDetail({
+  taskId, isNew = false, newDest = null, phone = false, keys = false,
+  onOpenTask, onOpenSession, onPushMove, onClose, onCreated, init = {},
+}) {
+  const slice = useStore(tasksSlice);
+  const sessions = useStore(selectSessionDirectory);
+  const rec = isNew ? null : (slice.details[taskId] || slice.list.find((t) => t.id === taskId) || null);
+
+  useEffect(() => (isNew ? undefined : watchTask(taskId)), [taskId, isNew]);
+
+  const [base, setBase] = useState(rec);
+  const [draft, setDraft] = useState(() => editorDraft(rec));
+  const [dest, setDest] = useState(newDest || { place: "you" });
+  const [menu, setMenu] = useState(!!init.menu);
+  const [dep, setDep] = useState(false);
+  const [sub, setSub] = useState("");
+  const [mode, setMode] = useState(null); // null | 'completing'
+  const [busy, setBusy] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const gesture = useNotifyGesture();
+
+  // Follow the task while nothing is being edited: another tab, the CLI or
+  // the agent may change it. With edits in progress the draft stays put and
+  // the revision check at Save decides.
+  const dirty = !isNew && !!base && draftDirty(draft, base);
+  useEffect(() => {
+    if (isNew || !rec || rec.gone) return;
+    if (!base || (!dirty && rec !== base)) { setBase(rec); setDraft(editorDraft(rec)); }
+  }, [rec, isNew]);
+
+  // What the detail shows is the task as it is now; Save still sends the
+  // revision the edits started from (base), which is what makes a 409 honest.
+  const task = isNew ? null : (rec || base);
+  const lookup = useTaskLookup([...(draft.waits_for || []), ...(task?.unblocks || [])]);
+  const recipient = task ? recipientFor(task, sessions) : null;
+  const done = !!task && task.status === "done";
+
+  const startDone = () => {
+    if (!task || !isOpen(task) || busy) return;
+    if (isRequest(task) || completeNotifies(task)) { setMode("completing"); return; }
+    patchTask(task.id, completePatch(task)).catch((error) => failed("Could not complete the task", error));
+  };
+  const openMove = () => (onPushMove && !isNew ? onPushMove() : setMenu(true));
+
+  const keysRef = useRef({});
+  keysRef.current = { startDone, openMove };
+  useEffect(() => {
+    if (!keys || isNew) return undefined;
+    const onKey = (e) => {
+      if (isTypingTarget(e.target) || hasBlockingOverlay() || e.defaultPrevented) return;
+      if (e.key === "Enter" && (e.metaKey || e.altKey)) { e.preventDefault(); keysRef.current.startDone(); return; }
+      if (!e.metaKey && !e.altKey && !e.ctrlKey && (e.key === "m" || e.key === "M")) { e.preventDefault(); keysRef.current.openMove(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [keys, isNew, taskId]);
+
+  useEscape(menu, () => setMenu(false));
+  useEffect(() => { if (menu) loadTaskProjects(); }, [menu]);
+
+  if (!isNew && rec?.gone) {
+    return <div class={`tk-detail${phone ? " is-phone" : ""}`}><div class="tk-detail-body"><p class="tk-empty-t">This task is no longer available.</p></div></div>;
+  }
+  if (!isNew && !task) return <div class={`tk-detail${phone ? " is-phone" : ""}`} aria-busy="true" />;
+
+  const set = (patch) => setDraft({ ...draft, ...patch });
+  const setSubAt = (i, p) => set({ subtasks: draft.subtasks.map((s, j) => (j === i ? { ...s, ...p } : s)) });
+
+  const save = async (notify, choice) => {
+    setBusy(true);
+    try {
+      const next = await patchTask(base.id, savePatch(draft, base, { notify, choice }));
+      setBase(next); setDraft(editorDraft(next)); setConflict(false);
+    } catch (error) {
+      const current = conflictCurrent(error);
+      if (current) {
+        setDraft(rebaseDraft(draft, base, current)); setBase(current); setConflict(true);
+      } else {
+        failed("Could not save the task", error);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const move = (to, choice) => {
+    setMenu(false);
+    if (isNew) { setDest(to); return; }
+    patchTask(task.id, movePatch(task, to, choice)).catch((error) => {
+      if (error?.status === 409) loadTask(task.id);
+      failed("Could not move the task", error);
+    });
+  };
+
+  const remove = () => {
+    const run = (choice) => deleteTaskAt(deletePath(task, choice), task.id)
+      .then(() => onClose?.())
+      .catch((error) => failed("Could not delete the task", error));
+    if (deleteNotifies(task)) gesture.run(recipient, run);
+    else run(null);
+  };
+
+  const create = () => {
+    if (!draft.title.trim() || busy) return;
+    const run = (choice) => {
+      setBusy(true);
+      createTask(createBody(draft, dest, choice))
+        .then((r) => onCreated?.(r?.id))
+        .catch((error) => failed("Could not add the task", error))
+        .finally(() => setBusy(false));
+    };
+    if (dest.place === "agent") gesture.run({ session_id: dest.sessionId, state: sessionNoticeState(sessions[dest.sessionId]) }, run);
+    else run(null);
+  };
+
+  const whereText = isNew
+    ? (dest.place === "you" ? "You" : dest.place === "backlog" ? `Backlog · ${projectLabelOf({ key: dest.key, cwd: dest.cwd })}` : sessionName(sessions, dest.sessionId))
+    : placeLabel(task, sessions);
+  const waits = draft.waits_for.map((id) => lookup(id) || { id, title: `#${id}`, status: "pending" });
+  const unblocks = (task?.unblocks || []).map((id) => lookup(id) || { id, title: `#${id}`, status: "pending" });
+  const notice = latestUndelivered(task?.notices);
+  const line = notice ? noticeLine(notice, sessionName(sessions, notice.recipient_session_id)) : null;
+  const actions = editorActions({ dirty, recipient });
+  const projects = projectOptions(slice.projects, slice.list);
+  const moveTask = isNew ? { place: dest.place, project_key: dest.key, assignee_session_id: dest.sessionId } : task;
+
+  let foot;
+  if (gesture.pending) {
+    foot = <DeliverChoice name={sessionName(sessions, gesture.pending.recipient.session_id)} phone={phone} onChoose={gesture.choose} onCancel={gesture.cancel} />;
+  } else if (isNew) {
+    foot = (
+      <>
+        <span class="tk-grow" />
+        <button type="button" class="zl-ask-btn is-primary" disabled={!draft.title.trim() || busy} onClick={create}>
+          {dest.place === "agent" ? "Assign and notify" : "Add task"}{!phone && <Keycap>{MOD_ENTER}</Keycap>}
+        </button>
+      </>
+    );
+  } else if (actions.length) {
+    foot = (
+      <>
+        <button type="button" class="zl-ask-btn is-quiet" disabled={busy} onClick={() => { setDraft(editorDraft(base)); setConflict(false); }}>Discard</button>
+        <span class="tk-grow" />
+        <button type="button" class={`zl-ask-btn${actions.includes("saveNotify") ? "" : " is-primary"}`} disabled={busy || !draft.title.trim()} onClick={() => save(false, null)}>Save</button>
+        {actions.includes("saveNotify") && (
+          <button
+            type="button"
+            class="zl-ask-btn is-primary"
+            disabled={busy || !draft.title.trim()}
+            title={`Tells ${sessionName(sessions, recipient.session_id)}`}
+            onClick={() => gesture.run(recipient, (choice) => save(true, choice))}
+          >
+            Save and notify
+          </button>
+        )}
+      </>
+    );
+  } else if (mode === "completing") {
+    foot = <CompletionFlow task={task} sessions={sessions} phone={phone} onDone={() => setMode(null)} onCancel={() => setMode(null)} />;
+  } else if (done) {
+    foot = (
+      <>
+        <span class="tk-foot-fact">Done{task.completed_at ? ` ${relAge(task.completed_at) === "now" ? "just now" : `${relAge(task.completed_at)} ago`}` : ""}</span>
+        <span class="tk-grow" />
+        <button type="button" class="zl-ask-btn" onClick={() => patchTask(task.id, reopenPatch(task)).catch((error) => failed("Could not reopen the task", error))}>Reopen</button>
+      </>
+    );
+  } else {
+    foot = (
+      <>
+        <button type="button" class="tk-icon" aria-label="Delete task" onClick={remove}><Trash2 size={15} aria-hidden="true" /></button>
+        <span class="tk-grow" />
+        <button type="button" class="zl-ask-btn" onClick={openMove}>Move{!phone && <Keycap>M</Keycap>}</button>
+        <button type="button" class="zl-ask-btn is-primary" onClick={startDone}>
+          <Check size={15} strokeWidth={2.4} aria-hidden="true" />Done{!phone && <Keycap>{MOD_ENTER}</Keycap>}
+        </button>
+      </>
+    );
+  }
+  const stacked = !!gesture.pending || mode === "completing";
+
+  return (
+    <div class={`tk-detail tk-root${phone ? " is-phone" : ""}`}>
+      <div class="tk-detail-body">
+        {conflict && <p class="tk-conflict" role="status">Changed elsewhere. This is the latest version, with your edits kept.</p>}
+        <textarea
+          class={`tk-field tk-title${done ? " is-done" : ""}`}
+          rows={1}
+          placeholder="Task title"
+          aria-label="Title"
+          value={draft.title}
+          onInput={(e) => { set({ title: e.currentTarget.value }); autosize(e.currentTarget); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.altKey || e.ctrlKey) && isNew) { e.preventDefault(); create(); }
+            else if (e.key === "Enter" && !e.shiftKey) e.preventDefault();
+          }}
+          ref={(el) => {
+            autosize(el);
+            if (el && isNew && !el.dataset.focused) { el.dataset.focused = "1"; el.focus({ preventScroll: true }); }
+          }}
+        />
+        <textarea
+          class="tk-field tk-desc"
+          rows={draft.description ? 4 : 1}
+          placeholder="Add details"
+          aria-label="Details"
+          value={draft.description}
+          onInput={(e) => set({ description: e.currentTarget.value })}
+        />
+
+        <dl class="tk-props">
+          <div class="tk-prop">
+            <dt>Where</dt>
+            <dd class="tk-anchor">
+              <button type="button" class="tk-prop-btn" aria-expanded={menu} aria-haspopup="menu" onClick={() => (menu ? setMenu(false) : openMove())}>
+                <span class="tk-prop-v">{whereText}</span>
+                {!phone && !isNew && <Keycap>M</Keycap>}
+                <ChevronDown size={13} aria-hidden="true" />
+              </button>
+              {menu && (
+                <div class="tk-pop is-move" role="menu">
+                  <MoveList
+                    task={moveTask}
+                    projects={projects}
+                    sessions={sessions}
+                    direct={isNew}
+                    pending={init.pending || null}
+                    onPick={move}
+                  />
+                </div>
+              )}
+            </dd>
+          </div>
+          {!isNew && isRequest(task) && (
+            <div class="tk-prop">
+              <dt>Asked by</dt>
+              <dd>
+                <button type="button" class="tk-link" onClick={() => onOpenSession?.(task.requester_session_id)}>
+                  <span class={`tk-sdot${sessions[task.requester_session_id]?.state === "running" ? " is-working" : ""}`} aria-hidden="true" />
+                  {sessionName(sessions, task.requester_session_id)}
+                </button>
+              </dd>
+            </div>
+          )}
+          {!isNew && task.project_key && task.place !== "backlog" && (
+            <div class="tk-prop"><dt>Project</dt><dd class="tk-prop-v">{taskProjectName(task)}</dd></div>
+          )}
+          {!isNew && task.created_at > 0 && (
+            <div class="tk-prop"><dt>Created</dt><dd class="tk-prop-v tk-data">{relAge(task.created_at) === "now" ? "now" : `${relAge(task.created_at)} ago`}</dd></div>
+          )}
+        </dl>
+
+        {line && (
+          <div class={`tk-notice${line.action ? "" : " is-failed"}`} role="status">
+            <span>{line.text}</span>
+            {line.action && (
+              <button type="button" class="tk-link is-accent" onClick={() => deliverNotice(notice.id).catch((error) => failed("Could not notify the session", error))}>
+                {line.action}
+              </button>
+            )}
+          </div>
+        )}
+
+        {done && task.completion_note && (
+          <div class="tk-sent"><span class="tk-sent-k">Your note</span><p>{task.completion_note}</p></div>
+        )}
+
+        <section class="tk-block" aria-label="Subtasks">
+          <div class="tk-block-h">Subtasks{draft.subtasks.length > 0 && <span class="tk-data">{draft.subtasks.filter((s) => s.done).length}/{draft.subtasks.length}</span>}</div>
+          {draft.subtasks.map((s, i) => (
+            <div key={i} class={`tk-sub${s.done ? " is-done" : ""}`}>
+              <CheckRing title={s.title} status={s.done ? "done" : "pending"} onToggle={() => setSubAt(i, { done: !s.done })} />
+              <span class="tk-sub-t">{s.title}</span>
+              <button type="button" class="tk-icon is-quiet" aria-label={`Remove ${s.title}`} onClick={() => set({ subtasks: draft.subtasks.filter((_, j) => j !== i) })}><CloseIcon /></button>
+            </div>
+          ))}
+          <label class="tk-sub is-add">
+            <Plus size={14} aria-hidden="true" />
+            <input
+              class="tk-field"
+              placeholder="Add subtask"
+              aria-label="Add subtask"
+              value={sub}
+              onInput={(e) => setSub(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && sub.trim()) {
+                  e.preventDefault();
+                  set({ subtasks: [...draft.subtasks, { title: sub.trim(), done: false }] });
+                  setSub("");
+                }
+              }}
+            />
+          </label>
+        </section>
+
+        <section class="tk-block" aria-label="Dependencies">
+          <div class="tk-block-h">Waits for</div>
+          {waits.map((b) => (
+            <div key={b.id} class="tk-dep">
+              <span class={`tk-dep-s${isOpen(b) ? "" : " is-done"}`}>{isOpen(b) ? "Open" : "Done"}</span>
+              <button type="button" class="tk-dep-t" onClick={() => onOpenTask?.(b.id)}>{b.title}</button>
+              <button type="button" class="tk-icon is-quiet" aria-label={`Stop waiting for ${b.title}`} onClick={() => set({ waits_for: draft.waits_for.filter((x) => x !== b.id) })}><CloseIcon /></button>
+            </div>
+          ))}
+          <div class="tk-anchor">
+            <button type="button" class="tk-sub is-add is-btn" aria-expanded={dep} onClick={() => setDep(!dep)}>
+              <Plus size={14} aria-hidden="true" /><span>Add a task it waits for</span>
+            </button>
+            {dep && (
+              <DepPicker
+                exclude={[task?.id, ...draft.waits_for]}
+                lookupList={slice.list}
+                sessions={sessions}
+                onClose={() => setDep(false)}
+                onPick={(id) => { set({ waits_for: [...draft.waits_for, id] }); setDep(false); }}
+              />
+            )}
+          </div>
+          {unblocks.length > 0 && (
+            <>
+              <div class="tk-block-h is-sub">Unblocks</div>
+              {unblocks.map((b) => (
+                <div key={b.id} class="tk-dep">
+                  <span class={`tk-dep-s${isOpen(b) ? "" : " is-done"}`}>{isOpen(b) ? "Open" : "Done"}</span>
+                  <button type="button" class="tk-dep-t" onClick={() => onOpenTask?.(b.id)}>{b.title}</button>
+                  <span class="tk-dep-w">{placeLabel(b, sessions)}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </section>
+      </div>
+
+      <div class={`tk-foot${stacked ? " is-stack" : ""}`}>{foot}</div>
+    </div>
+  );
+}
+
+// taskEyebrow — the dossier head over a task says which kind it is.
+export function taskEyebrow(task) {
+  if (!task) return "Task";
+  if (task.status === "done") return "Done";
+  if (isRequest(task)) return "For you";
+  if (task.place === "agent") return "Agent task";
+  if (task.place === "backlog") return "Backlog";
+  return "Your task";
+}

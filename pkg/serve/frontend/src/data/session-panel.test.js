@@ -117,14 +117,18 @@ test('every fact the status line sheds is printed when it has a datum', () => {
     goalIteration: 3,
     tasks: [{ status: 'done' }, { status: 'done' }, { status: 'pending' }],
   };
-  expect(factIds(session)).toEqual(['tokens', 'spend', 'turns', 'fast', 'goal', 'tasks']);
+  expect(factIds(session)).toEqual(['tokens', 'spend', 'turns', 'fast', 'goal']);
   // fmtTokens is the app's one token formatter and it rounds at 10k, so this
   // reads "12k", not "12.4k". Same number, same rule, as the status line.
   expect(factValue(session, 'tokens')).toBe('↑12k ↓1.8k');
   expect(factValue(session, 'spend')).toBe('$1.84');
   expect(factValue(session, 'turns')).toBe('2');
   expect(factValue(session, 'goal')).toBe('iteration 3');
-  expect(factValue(session, 'tasks')).toBe('2/3');
+});
+
+test('tasks are a row of the panel, not a second count among the facts', () => {
+  const session = { id: 'A', tasks: [{ status: 'done' }, { status: 'pending' }] };
+  expect(factIds(session)).not.toContain('tasks');
 });
 
 test('a truncated transcript reports no turn count rather than a wrong one', () => {

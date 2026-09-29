@@ -1,0 +1,518 @@
+import { useEffect, useRef, useState } from "preact/hooks";
+import { Check, ChevronDown, Link2, Plus, Search } from "lucide-preact";
+import { Kbd } from "../../primitives/Kbd/Kbd.jsx";
+import { formatShortcut } from "../../data/util/shortcut.js";
+import { projectName } from "../../data/util/format.js";
+import { addToast } from "../../data/notifications.js";
+import { loadTask, patchTask, isNewRequest } from "../../data/tasks.js";
+import {
+  completeNotifies, completePatch, errorText, isHere, isOpen, isRequest, needsDeliverChoice, noticeStateWords,
+  projectLabelOf, recipientFor, relAge, sessionName, taskProjectName,
+} from "../../data/tasks-model.js";
+import { TasksGlyph } from "./TasksGlyph.jsx";
+import "./Tasks.css";
+
+// The pieces the Tasks surfaces share: the row and its groups, completing
+// with a note, the wake-or-hold choice, Move and the filters. Everything that
+// DECIDES lives in data/tasks-model.js; these only draw and wire it.
+
+export const MOD_ENTER = formatShortcut("↵", { mod: true });
+
+export function Keycap({ children }) {
+  return <Kbd class="kbd tk-kbd">{children}</Kbd>;
+}
+
+export { TasksGlyph };
+
+export function BackIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
+export function CloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+export function CheckRing({ title, status, onToggle, big, disabled }) {
+  const done = status === "done";
+  return (
+    <button
+      type="button"
+      class={`tk-check${done ? " is-done" : ""}${status === "in_progress" ? " is-working" : ""}${big ? " is-big" : ""}`}
+      aria-label={done ? `Reopen ${title}` : `Complete ${title}`}
+      disabled={disabled}
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+    >
+      <Check size={10} strokeWidth={3.2} aria-hidden="true" />
+    </button>
+  );
+}
+
+// useEscape — while a transient piece of a gesture is showing, Escape backs
+// out of THAT piece and nothing under it (a panel, the detail) hears the key.
+export function useEscape(active, onEscape) {
+  const ref = useRef(onEscape);
+  ref.current = onEscape;
+  useEffect(() => {
+    if (!active) return undefined;
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      ref.current();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [active]);
+}
+
+// DeliverChoice — the notice is for a session saved on disk, so the owner
+// says what happens to it: wake the session now, or tell it when it is next
+// opened. Two answers of equal weight, in the place the gesture was made; no
+// default, and Escape backs out of the gesture.
+export function DeliverChoice({ name, onChoose, onCancel, phone, inline }) {
+  const ref = useRef(null);
+  useEffect(() => { ref.current?.focus({ preventScroll: true }); }, []);
+  useEscape(true, onCancel);
+  return (
+    <div
+      class={`tk-choice${inline ? " is-inline" : ""}${phone ? " is-phone" : ""}`}
+      role="group"
+      aria-label={`${name} is saved`}
+      tabIndex={-1}
+      ref={ref}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div class="tk-choice-q">
+        <span><b>{name}</b> is saved</span>
+        <button type="button" class="tk-icon is-quiet" aria-label="Cancel" onClick={onCancel}><CloseIcon /></button>
+      </div>
+      <div class="tk-choice-acts">
+        <button type="button" class="zl-ask-btn" onClick={() => onChoose("wake")}>Wake and notify</button>
+        <button type="button" class="zl-ask-btn" onClick={() => onChoose("hold")}>Notify when opened</button>
+      </div>
+    </div>
+  );
+}
+
+// useNotifyGesture — run a gesture that tells a session. When that session is
+// saved it first asks (DeliverChoice); otherwise it runs at once, with no
+// delivery choice at all.
+export function useNotifyGesture() {
+  const [pending, setPending] = useState(null);
+  const run = (recipient, perform) => {
+    if (needsDeliverChoice(recipient)) setPending({ recipient, perform });
+    else perform(null);
+  };
+  const cancel = () => setPending(null);
+  const choose = (choice) => {
+    const p = pending;
+    setPending(null);
+    p?.perform(choice);
+  };
+  return { pending, run, cancel, choose };
+}
+
+export function CompleteNote({ who, onCancel, onDone, inline, phone, preset = "", busy }) {
+  const [note, setNote] = useState(preset);
+  const ref = useRef(null);
+  useEffect(() => { ref.current?.focus({ preventScroll: true }); }, []);
+  useEscape(true, onCancel);
+  return (
+    <div class={`tk-note${inline ? " is-inline" : ""}${phone ? " is-phone" : ""}`} onClick={(e) => e.stopPropagation()}>
+      <textarea
+        ref={ref}
+        class="tk-field tk-note-field"
+        rows={2}
+        placeholder={who ? `Note for ${who} (optional)` : "Note (optional)"}
+        aria-label="Note"
+        value={note}
+        onInput={(e) => setNote(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.altKey || e.ctrlKey)) { e.preventDefault(); onDone(note); }
+        }}
+      />
+      <div class="tk-note-acts">
+        <button type="button" class="zl-ask-btn is-quiet" onClick={onCancel}>Cancel</button>
+        <button type="button" class="zl-ask-btn is-primary" disabled={busy} onClick={() => onDone(note)}>
+          Done{!phone && <Keycap>{MOD_ENTER}</Keycap>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function failed(title, error) {
+  addToast({ title, detail: errorText(error), type: "error" });
+}
+
+// CompletionFlow — completing a task that tells someone: a request asks for
+// an optional note first; then, if the session to tell is saved, the owner
+// picks wake or hold. The task is read fresh first, for its revision and for
+// whether that session is loaded right now.
+export function CompletionFlow({ task, sessions, phone, inline, preset, onDone, onCancel }) {
+  const request = isRequest(task);
+  const [stage, setStage] = useState(request ? "note" : "loading");
+  const [busy, setBusy] = useState(false);
+  const note = useRef(preset || "");
+  const rec = useRef(null);
+
+  const finish = async (choice) => {
+    setBusy(true);
+    try {
+      await patchTask(rec.current.id, completePatch(rec.current, { note: note.current, choice }));
+      onDone?.();
+    } catch (error) {
+      failed("Could not complete the task", error);
+      onCancel?.();
+    }
+  };
+  const proceed = async () => {
+    setBusy(true);
+    const fresh = await loadTask(task.id);
+    if (!fresh) {
+      addToast({ title: "Could not complete the task", detail: "It is no longer available.", type: "error" });
+      onCancel?.();
+      return;
+    }
+    rec.current = fresh;
+    if (needsDeliverChoice(recipientFor(fresh, sessions))) {
+      setBusy(false);
+      setStage("choice");
+      return;
+    }
+    finish(null);
+  };
+  useEffect(() => { if (!request) proceed(); }, []);
+
+  if (stage === "note") {
+    return (
+      <CompleteNote
+        who={sessionName(sessions, task.requester_session_id)}
+        inline={inline}
+        phone={phone}
+        preset={preset}
+        busy={busy}
+        onCancel={onCancel}
+        onDone={(text) => { note.current = text; proceed(); }}
+      />
+    );
+  }
+  if (stage === "choice") {
+    const r = recipientFor(rec.current, sessions);
+    return <DeliverChoice name={sessionName(sessions, r?.session_id)} inline={inline} phone={phone} onChoose={finish} onCancel={onCancel} />;
+  }
+  return null;
+}
+
+// ── Rows ─────────────────────────────────────────────────────────────────
+
+function rowMeta({ task, context, sessions, lookup }) {
+  const meta = [];
+  if (task.status === "in_progress") meta.push(<span class="tk-word-working">Working</span>);
+  const waiting = (task.waits_for || []).map(lookup).find((b) => b && isOpen(b));
+  if (waiting && isOpen(task)) meta.push(<span class="tk-meta-wait"><Link2 size={12} aria-hidden="true" />Waits for {waiting.title}</span>);
+  const notice = noticeStateWords(task.notice_state);
+  if (notice) meta.push(<span class="tk-meta-notice">{notice}</span>);
+  if (task.status === "done" && task.completion_note) meta.push(<span class="tk-meta-note">“{task.completion_note}”</span>);
+  if (isRequest(task) && context !== "session") meta.push(<span class="tk-meta-from">{sessionName(sessions, task.requester_session_id)}</span>);
+  if (context !== "session" && task.place === "you" && task.project_key) meta.push(<span>{taskProjectName(task)}</span>);
+  if (task.subtasks?.length) meta.push(<span class="tk-data">{task.subtasks.filter((s) => s.done).length}/{task.subtasks.length}</span>);
+  return meta;
+}
+
+function Meta({ items }) {
+  return <span class="tk-row-meta">{items.map((m, i) => <>{i > 0 && <span class="tk-sep">·</span>}{m}</>)}</span>;
+}
+
+export function TaskRow({ task, selected, onSelect, phone, context, sessions, lookup, newSince, completing, onCheck, completion, draggable, onDragStart, onDragEnd, dragging }) {
+  const meta = rowMeta({ task, context, sessions, lookup });
+  const age = relAge(task.status === "done" ? task.completed_at || task.updated_at : task.created_at);
+  return (
+    <div
+      class={`tk-row${selected ? " is-selected" : ""}${task.status === "done" ? " is-done" : ""}${completing ? " is-completing" : ""}${phone ? " is-phone" : ""}${dragging ? " is-dragging" : ""}`}
+      data-task={task.id}
+      role="option"
+      aria-selected={!!selected}
+      tabIndex={-1}
+      draggable={!!draggable && !completing}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onClick={() => !completing && onSelect(task.id)}
+    >
+      <div class="tk-row-line">
+        {isNewRequest(task, newSince) && <span class="tk-new" aria-label="New" />}
+        <CheckRing title={task.title} status={task.status} onToggle={() => onCheck(task)} big={phone && context !== "session"} />
+        <span class="tk-row-main">
+          <span class="tk-row-title">{task.title}</span>
+          {phone && meta.length > 0 && <Meta items={meta} />}
+        </span>
+        {!phone && meta.length > 0 && <Meta items={meta} />}
+        {age && <span class="tk-row-age tk-data">{age}</span>}
+      </div>
+      {completing && completion}
+    </div>
+  );
+}
+
+function GroupHead({ g, open, onToggle, dragging, onDrop }) {
+  const [over, setOver] = useState(false);
+  const live = !!g.drop && !!dragging;
+  const hint = g.drop?.place === "agent" ? "Assign" : g.drop?.place === "backlog" ? "Move to backlog" : "Move to You";
+  const body = (
+    <>
+      {g.collapsed && <ChevronDown size={13} class={`tk-group-chev${open ? "" : " is-closed"}`} aria-hidden="true" />}
+      <span class="tk-group-t">{g.title}</span>
+      {g.sub && <span class="tk-group-sub">{g.sub}</span>}
+      {g.working && <span class="tk-word-working">Working</span>}
+      {g.n > 0 && <span class="tk-group-n tk-data">{g.n}</span>}
+      {g.progress && <span class="tk-group-n tk-data">{g.progress}</span>}
+      {live && over && <span class="tk-drop-hint">{hint}</span>}
+    </>
+  );
+  const cls = `tk-group${g.agent ? " is-agent" : ""}${live ? " is-drop" : ""}${live && over ? " is-over" : ""}`;
+  const drag = {
+    onDragOver: (e) => { if (live) { e.preventDefault(); setOver(true); } },
+    onDragLeave: () => setOver(false),
+    onDrop: (e) => { e.preventDefault(); setOver(false); if (live) onDrop(g.drop); },
+  };
+  if (g.collapsed) {
+    return <button type="button" class={cls} aria-expanded={open} onClick={onToggle}>{body}</button>;
+  }
+  return <div class={cls} {...drag}>{body}</div>;
+}
+
+// TaskGroups — the list: group heads and their rows. Completing happens in
+// the row itself (CompletionFlow), and drag-and-drop onto a group head moves.
+export function TaskGroups({ groups, selected, onSelect, phone, context, sessions, lookup, newSince, completingId, setCompletingId, onCheck, onAdd, onDropTask, doneOpen, setDoneOpen, draggable }) {
+  const [dragging, setDragging] = useState(null);
+  const visible = groups.filter((g) => g.rows.length || g.add);
+  if (!visible.length) return null;
+  return (
+    <div class={`tk-list${phone ? " is-phone" : ""}`} role="listbox" aria-label="Tasks">
+      {visible.map((g) => {
+        const open = !g.collapsed || doneOpen;
+        return (
+          <section class="tk-sec" key={g.id} aria-label={g.sub ? `${g.title} ${g.sub}` : g.title}>
+            <GroupHead
+              g={g}
+              open={open}
+              onToggle={() => setDoneOpen?.(!doneOpen)}
+              dragging={dragging}
+              onDrop={(dest) => { const id = dragging; setDragging(null); onDropTask?.(id, dest); }}
+            />
+            {open && g.rows.map((t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                selected={selected === t.id}
+                onSelect={onSelect}
+                phone={phone}
+                context={context}
+                sessions={sessions}
+                lookup={lookup}
+                newSince={newSince}
+                completing={completingId === t.id}
+                completion={completingId === t.id && (
+                  <CompletionFlow
+                    task={t}
+                    sessions={sessions}
+                    phone={phone}
+                    inline
+                    onDone={() => setCompletingId(null)}
+                    onCancel={() => setCompletingId(null)}
+                  />
+                )}
+                onCheck={onCheck}
+                draggable={draggable}
+                dragging={dragging === t.id}
+                onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(t.id)); e.dataTransfer.effectAllowed = "move"; setDragging(t.id); }}
+                onDragEnd={() => setDragging(null)}
+              />
+            ))}
+            {g.add && onAdd && (
+              <button type="button" class={`tk-add${phone ? " is-phone" : ""}`} onClick={onAdd}>
+                <Plus size={14} aria-hidden="true" />Add a task
+              </button>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+// completesInline — the tasks whose ring opens a flow in the row instead of
+// completing at once: a request (optional note) and an agent's task (it tells
+// the agent, and a saved agent asks wake or hold).
+export function completesInline(task) {
+  return isRequest(task) || completeNotifies(task);
+}
+
+// useRowChecks — the ring on a row. Reopening and completing a plain task
+// happen at once; completing one that tells a session opens CompletionFlow in
+// the row.
+export function useRowChecks(inline = completesInline) {
+  const [completingId, setCompletingId] = useState(null);
+  const onCheck = async (task) => {
+    if (task.status === "done") {
+      const fresh = task.revision ? task : await loadTask(task.id);
+      if (!fresh) return;
+      patchTask(fresh.id, { revision: fresh.revision, status: "pending" }).catch((error) => failed("Could not reopen the task", error));
+      return;
+    }
+    if (inline(task)) {
+      setCompletingId(completingId === task.id ? null : task.id);
+      return;
+    }
+    const fresh = task.revision ? task : await loadTask(task.id);
+    if (!fresh) return;
+    patchTask(fresh.id, completePatch(fresh)).catch((error) => failed("Could not complete the task", error));
+  };
+  return { completingId, setCompletingId, onCheck };
+}
+
+export function Filters({ agents, setAgents, project, setProject, projects, phone }) {
+  const [menu, setMenu] = useState(false);
+  useEscape(menu, () => setMenu(false));
+  const current = projects.find((p) => p.key === project);
+  return (
+    <div class={`tk-filters${phone ? " is-phone" : ""}`}>
+      <div class="tk-anchor">
+        <button type="button" class={`tk-chip${project ? " is-on" : ""}`} aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)}>
+          {current ? projectLabelOf(current) : "All projects"}<ChevronDown size={13} aria-hidden="true" />
+        </button>
+        {menu && (
+          <div class="tk-pop is-narrow" role="menu">
+            {[null, ...projects].map((p) => (
+              <button
+                key={p?.key || "all"}
+                type="button"
+                role="menuitemradio"
+                aria-checked={(p?.key || null) === project}
+                class={`tk-pop-item${phone ? " is-phone" : ""}`}
+                onClick={() => { setProject(p?.key || null); setMenu(false); }}
+              >
+                <span class="tk-pop-t">{p ? projectLabelOf(p) : "All projects"}</span>
+                {(p?.key || null) === project && <Check size={14} class="tk-pop-on" aria-hidden="true" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <button type="button" class={`tk-chip${agents ? " is-on" : ""}`} aria-pressed={agents} onClick={() => setAgents(!agents)}>
+        Agents' tasks
+      </button>
+    </div>
+  );
+}
+
+export function EmptyState({ onNew, phone, compact, text = "Nothing pending." }) {
+  return (
+    <div class={`tk-empty${phone ? " is-phone" : ""}${compact ? " is-compact" : ""}`}>
+      <span class="tk-empty-mark" aria-hidden="true"><TasksGlyph /></span>
+      <p class="tk-empty-t">{text}</p>
+      {onNew && (
+        <button type="button" class="zl-ask-btn" onClick={onNew}>
+          <Plus size={15} aria-hidden="true" />New task{!phone && <Keycap>C</Keycap>}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Move ─────────────────────────────────────────────────────────────────
+
+// moveSessions — where a task can be assigned: loaded sessions first, then
+// saved ones, most recent first. Without a query the saved tail is capped;
+// finding one is what the search field is for.
+export function moveSessions(sessions, q) {
+  const all = Object.values(sessions || {});
+  const needle = q.trim().toLowerCase();
+  const hits = needle ? all.filter((s) => (s.title || "").toLowerCase().includes(needle)) : all;
+  const live = hits.filter((s) => s.state !== "saved").sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const saved = hits.filter((s) => s.state === "saved").sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  return [...live, ...(needle ? saved : saved.slice(0, 12))];
+}
+
+// MoveList — You, a project's backlog, or a session. Choosing a session is
+// not the move yet: it asks to confirm, because assigning tells that session
+// (and, when it is saved, asks wake or hold instead). `direct` is for a task
+// being written: there the choice only sets where it will go, and the
+// confirmation is the create button itself.
+export function MoveList({ task, projects, sessions, phone, onPick, direct = false, pending: pending0 = null }) {
+  const [q, setQ] = useState("");
+  const [pending, setPending] = useState(pending0);
+  const target = pending ? sessions[pending] : null;
+  const gesture = useNotifyGesture();
+  const confirm = () => {
+    if (!pending) return;
+    gesture.run({ session_id: pending, state: target?.state === "saved" ? "saved" : "live" }, (choice) => onPick({ place: "agent", sessionId: pending }, choice));
+  };
+  useEffect(() => {
+    if (!pending || phone) return undefined;
+    const onKey = (e) => {
+      if (e.key !== "Enter" || e.metaKey || e.altKey || gesture.pending) return;
+      if (String(e.target?.tagName).toUpperCase() === "BUTTON") return;
+      e.preventDefault();
+      confirm();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [pending, phone, gesture.pending]);
+  const Item = ({ dest, label, sub }) => (
+    <button
+      type="button"
+      class={`tk-pop-item${sub ? " is-two" : ""}${dest.place === "agent" && pending === dest.sessionId ? " is-pending" : ""}${phone ? " is-phone" : ""}`}
+      onClick={() => (dest.place === "agent" && !direct ? setPending(dest.sessionId) : onPick(dest, null))}
+    >
+      <span class="tk-pop-t">{label}</span>
+      {sub && <span class="tk-pop-sub">{sub}</span>}
+      {isHere(task, dest) && <Check size={14} class="tk-pop-on" aria-hidden="true" />}
+    </button>
+  );
+  const list = moveSessions(sessions, q);
+  const search = (
+    <label class={`tk-search${phone ? " is-phone" : ""}`}>
+      <Search size={phone ? 15 : 14} aria-hidden="true" />
+      <input class="tk-field" placeholder={phone ? "Find a session" : "Move to…"} aria-label="Find a session" value={q} onInput={(e) => setQ(e.currentTarget.value)} />
+    </label>
+  );
+  return (
+    <div class={`tk-move${phone ? " is-phone" : ""}`} onClick={(e) => e.stopPropagation()}>
+      {!phone && search}
+      {!q && <Item dest={{ place: "you" }} label="You" />}
+      {!q && projects.length > 0 && <div class="tk-pop-label">Backlog</div>}
+      {!q && projects.map((p) => <Item key={p.key} dest={{ place: "backlog", key: p.key, cwd: p.cwd }} label={projectLabelOf(p)} />)}
+      <div class="tk-pop-label">Assign to a session</div>
+      {phone && search}
+      {list.map((s) => (
+        <Item
+          key={s.id}
+          dest={{ place: "agent", sessionId: s.id }}
+          label={s.title || "Untitled"}
+          sub={<>{projectName(s.cwd)}{s.state === "running" && <> · <span class="tk-word-working">Working</span></>}{s.state === "saved" && " · saved"}</>}
+        />
+      ))}
+      {q && list.length === 0 && <div class="tk-pop-none">No session matches.</div>}
+      {pending && (
+        <div class="tk-move-confirm">
+          {gesture.pending ? (
+            <DeliverChoice name={target?.title || "The session"} phone={phone} onChoose={gesture.choose} onCancel={gesture.cancel} />
+          ) : (
+            <button type="button" class="zl-ask-btn is-primary tk-wide" onClick={confirm}>
+              Assign and notify{!phone && <Keycap>↵</Keycap>}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

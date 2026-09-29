@@ -1,0 +1,102 @@
+import { useEffect, useMemo } from "preact/hooks";
+import { useStore } from "../../hooks/useStore.js";
+import { openSession } from "../../data/tile-actions.js";
+import { addToast } from "../../data/notifications.js";
+import { parsePanelPage, taskMovePanelPage, taskPanelPage } from "../../data/session-panel.js";
+import { loadTask, loadTaskProjects, patchTask, selectSessionDirectory, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
+import { errorText, movePatch, projectOptions, sessionGroups } from "../../data/tasks-model.js";
+import { EmptyState, MoveList, TaskGroups, useRowChecks, completesInline } from "./parts.jsx";
+import { TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
+
+// SessionTasksPage — the session panel's Tasks pages. Tasks lists what this
+// session asked of you and its own checklist; a task opens as the next page,
+// and on the phone Move is the page after that. Every level is a page of the
+// same panel with a real parent (data/session-panel.js), so ‹ and Escape walk
+// back one step and a second sheet never opens over the first.
+export function SessionTasksPage({ session, page, sheet, goPage }) {
+  const slice = useStore(tasksSlice);
+  const sessions = useStore(selectSessionDirectory);
+  const { kind, id } = parsePanelPage(page);
+  const checks = useRowChecks(completesInline);
+  const lookup = useTaskLookup();
+  useEffect(() => watchSessionTasks(session.id), [session.id]);
+  useEffect(() => { if (kind === "taskMove") loadTaskProjects(); }, [kind]);
+
+  const data = slice.bySession[session.id];
+  const groups = useMemo(() => sessionGroups(data, session.id), [data, session.id]);
+
+  const openOther = (sid) => openSession(sid);
+
+  if (kind === "tasks") {
+    return (
+      <div class="zl-panel-body is-sub tk-panel-body tk-root">
+        {data?.loaded ? (
+          <TaskGroups
+            groups={groups}
+            phone
+            context="session"
+            sessions={sessions}
+            lookup={lookup}
+            onSelect={(tid) => goPage(taskPanelPage(tid))}
+            completingId={checks.completingId}
+            setCompletingId={checks.setCompletingId}
+            onCheck={checks.onCheck}
+            onAdd={() => goPage("taskNew")}
+          />
+        ) : <EmptyState compact text="Loading…" />}
+      </div>
+    );
+  }
+
+  if (kind === "taskNew") {
+    return (
+      <div class="zl-panel-body is-sub tk-panel-detail">
+        <TaskDetail
+          isNew
+          phone={sheet}
+          newDest={{ place: "agent", sessionId: session.id }}
+          onCreated={() => goPage("tasks")}
+        />
+      </div>
+    );
+  }
+
+  if (kind === "taskMove") {
+    const task = slice.details[id] || null;
+    return (
+      <div class="zl-panel-body is-sub tk-panel-body tk-root">
+        {task && !task.gone ? (
+          <MoveList
+            task={task}
+            phone
+            projects={projectOptions(slice.projects, slice.list)}
+            sessions={sessions}
+            onPick={(dest, choice) => {
+              patchTask(task.id, movePatch(task, dest, choice))
+                .then(() => goPage(taskPanelPage(task.id)))
+                .catch((error) => {
+                  if (error?.status === 409) loadTask(task.id);
+                  addToast({ title: "Could not move the task", detail: errorText(error), type: "error" });
+                });
+            }}
+          />
+        ) : <EmptyState compact text="This task is no longer available." />}
+      </div>
+    );
+  }
+
+  return (
+    <div class="zl-panel-body is-sub tk-panel-detail">
+      <TaskDetail
+        key={id}
+        taskId={id}
+        phone={sheet}
+        keys={!sheet}
+        onOpenTask={(tid) => goPage(taskPanelPage(tid))}
+        onOpenSession={openOther}
+        onPushMove={sheet ? () => goPage(taskMovePanelPage(id)) : undefined}
+        onClose={() => goPage("tasks")}
+      />
+    </div>
+  );
+}

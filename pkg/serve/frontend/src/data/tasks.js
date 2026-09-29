@@ -1,0 +1,271 @@
+// tasks.js — the global tasks on the client: one store slice, the REST calls,
+// and the /api/tasks/ws invalidation.
+//
+// The database is the authority. The socket only says "something changed"
+// (tasks_changed); every answer to it, and every reconnect, is a fresh GET, so
+// losing the socket loses nothing. What is on screen asks to be kept fresh:
+// the list is always loaded (the sidebar counts from it), a session's tasks
+// while its conversation or panel is showing, a task's detail while it is open.
+
+import { api } from './api.js';
+import { store, setState, TASKS_INITIAL } from './store.js';
+
+export { TASKS_INITIAL };
+
+export function tasksSlice(state) {
+  return state?.tasks || TASKS_INITIAL;
+}
+
+function patch(next) {
+  setState((s) => ({ tasks: { ...tasksSlice(s), ...(typeof next === 'function' ? next(tasksSlice(s)) : next) } }));
+}
+
+// ── Reads ─────────────────────────────────────────────────────────────────
+
+let listSeq = 0;
+export function loadTasks() {
+  const seq = ++listSeq;
+  const agents = tasksSlice(store.get()).agents;
+  return api('GET', `/api/tasks${agents ? '?include_agents=1' : ''}`)
+    .then((res) => {
+      if (seq !== listSeq) return;
+      patch({
+        list: Array.isArray(res?.tasks) ? res.tasks : [],
+        counts: res?.counts || TASKS_INITIAL.counts,
+        revision: res?.revision || 0,
+        loaded: true,
+        error: null,
+      });
+    })
+    .catch((error) => {
+      if (seq !== listSeq) return;
+      patch({ error: String(error?.message || error) });
+    });
+}
+
+export function setTasksAgents(on) {
+  patch({ agents: !!on });
+  return loadTasks();
+}
+
+export function loadTaskProjects() {
+  return api('GET', '/api/tasks/projects')
+    .then((res) => patch({ projects: Array.isArray(res?.projects) ? res.projects : [] }))
+    .catch(() => {});
+}
+
+export function loadSessionTasks(sessionId) {
+  if (!sessionId) return Promise.resolve();
+  return api('GET', `/api/sessions/${encodeURIComponent(sessionId)}/tasks`)
+    .then((res) => patch((t) => ({
+      bySession: { ...t.bySession, [sessionId]: { requests: res?.requests || [], checklist: res?.checklist || [], loaded: true } },
+    })))
+    .catch(() => {});
+}
+
+export function loadTask(id) {
+  if (!id) return Promise.resolve(null);
+  return api('GET', `/api/tasks/${id}`)
+    .then((rec) => {
+      storeTask(rec);
+      return rec;
+    })
+    .catch((error) => {
+      if (error?.status === 404) patch((t) => ({ details: { ...t.details, [id]: { id, gone: true } } }));
+      return null;
+    });
+}
+
+function storeTask(rec) {
+  if (!rec?.id) return;
+  patch((t) => ({
+    details: { ...t.details, [rec.id]: rec },
+    list: t.list.some((x) => x.id === rec.id) ? t.list.map((x) => (x.id === rec.id ? { ...x, ...rec } : x)) : t.list,
+  }));
+}
+
+// ── What stays fresh ─────────────────────────────────────────────────────
+
+const watchedSessions = new Map();
+const watchedTasks = new Map();
+
+function watch(map, key, load) {
+  map.set(key, (map.get(key) || 0) + 1);
+  load(key);
+  return () => {
+    const n = (map.get(key) || 1) - 1;
+    if (n <= 0) map.delete(key); else map.set(key, n);
+  };
+}
+
+export function watchSessionTasks(sessionId) {
+  if (!sessionId) return () => {};
+  return watch(watchedSessions, sessionId, loadSessionTasks);
+}
+
+export function watchTask(id) {
+  if (!id) return () => {};
+  return watch(watchedTasks, id, loadTask);
+}
+
+let refreshTimer = null;
+export function refreshTasks() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    loadTasks();
+    for (const id of watchedSessions.keys()) loadSessionTasks(id);
+    for (const id of watchedTasks.keys()) loadTask(id);
+  }, 120);
+}
+
+// ── The invalidation socket ──────────────────────────────────────────────
+
+let socket = null;
+let backoff = 1000;
+let retry = null;
+let started = false;
+
+function connect() {
+  clearTimeout(retry);
+  if (typeof WebSocket === 'undefined' || typeof location === 'undefined') return;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  let ws;
+  try {
+    ws = new WebSocket(`${proto}//${location.host}/api/tasks/ws`);
+  } catch (_) {
+    schedule();
+    return;
+  }
+  socket = ws;
+  ws.onmessage = (e) => {
+    if (socket !== ws) return;
+    backoff = 1000;
+    let evt = null;
+    try { evt = JSON.parse(e.data); } catch (_) { return; }
+    if (evt?.type === 'tasks_changed') refreshTasks();
+  };
+  ws.onclose = () => {
+    if (socket !== ws) return;
+    socket = null;
+    schedule();
+  };
+}
+
+function schedule() {
+  if (!started) return;
+  clearTimeout(retry);
+  retry = setTimeout(connect, backoff);
+  backoff = Math.min(backoff * 2, 30000);
+}
+
+// startTasksSync — once, at bootstrap. The server answers every connection
+// with the current revision, which is itself an invalidation: a reconnect
+// always re-reads.
+export function startTasksSync() {
+  if (started) return;
+  started = true;
+  patch({ newSince: readSeen() });
+  loadTasks();
+  connect();
+}
+
+// Back in the foreground: re-read, and redial at once if the socket died
+// while the app was away (a backgrounded PWA loses it).
+export function resumeTasksSync() {
+  if (!started) return;
+  refreshTasks();
+  if (!socket || socket.readyState > 1) {
+    backoff = 1000;
+    connect();
+  }
+}
+
+// ── Writes ────────────────────────────────────────────────────────────────
+// Each returns the server's answer and rejects with api()'s error, so the
+// caller can read a 409 (conflictCurrent) and keep what the owner typed.
+
+function after(rec) {
+  if (rec?.id) storeTask(rec);
+  refreshTasks();
+  return rec;
+}
+
+export function createTask(body) {
+  return api('POST', '/api/tasks', body).then(after);
+}
+
+export function patchTask(id, body) {
+  return api('PATCH', `/api/tasks/${id}`, body).then(after);
+}
+
+export function deleteTaskAt(path, id) {
+  return api('DELETE', path).then(() => {
+    patch((t) => {
+      const details = { ...t.details };
+      delete details[id];
+      return { details, list: t.list.filter((x) => x.id !== id) };
+    });
+    refreshTasks();
+  });
+}
+
+export function deliverNotice(noticeId) {
+  return api('POST', `/api/tasks/notices/${encodeURIComponent(noticeId)}/deliver`).then((n) => {
+    refreshTasks();
+    return n;
+  });
+}
+
+// ── What is new ──────────────────────────────────────────────────────────
+// A request is new until the owner has looked at the Tasks view once since it
+// arrived. The mark is per device, like the inbox's arrivals.
+
+const SEEN_KEY = 'moa-tasks-seen-at';
+
+function readSeen() {
+  try { return Number(localStorage.getItem(SEEN_KEY)) || 0; } catch (_) { return 0; }
+}
+
+// markTasksSeen — opening the view: what arrived before now stops being new
+// the NEXT time, so the dots survive the visit that shows them.
+export function markTasksSeen() {
+  const before = readSeen();
+  patch({ newSince: before });
+  try { localStorage.setItem(SEEN_KEY, String(Date.now())); } catch (_) { /* ignore */ }
+}
+
+export function isNewRequest(task, newSince) {
+  return !!task && task.place === 'you' && !!task.requester_session_id && task.status !== 'done'
+    && (task.created_at || 0) > (newSince || 0);
+}
+
+// ── The sessions a task can name ─────────────────────────────────────────
+// Rows name the session that asked, Move lists where a task can go, and a
+// notice needs to know whether that session is loaded. The roster changes on
+// every streamed token, so this keeps one reference until something a task
+// shows (id, title, state, folder, kind) actually changes.
+
+let directory = { sessions: null, sig: '', value: {} };
+
+export function selectSessionDirectory(state) {
+  const sessions = state?.sessions || {};
+  if (sessions === directory.sessions) return directory.value;
+  const rows = Object.values(sessions).filter((s) => s?.id)
+    .map((s) => [s.id, s.title || '', s.state || '', s.cwd || '', s.kind || '']);
+  const sig = JSON.stringify(rows);
+  if (sig !== directory.sig) {
+    const value = {};
+    for (const s of Object.values(sessions)) {
+      if (!s?.id) continue;
+      value[s.id] = { id: s.id, title: s.title || '', state: s.state || '', cwd: s.cwd || '', kind: s.kind || '', updated: s.updated || 0 };
+    }
+    directory = { sessions, sig, value };
+  } else {
+    directory = { ...directory, sessions };
+  }
+  return directory.value;
+}
+
+export function selectSessionTasks(state, sessionId) {
+  return tasksSlice(state).bySession[sessionId] || null;
+}

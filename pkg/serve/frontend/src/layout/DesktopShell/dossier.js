@@ -11,8 +11,9 @@
 //     had one; this keeps it that way rather than inventing an owner.
 //   - No focused session (still loading, or nothing open): nothing to hold a
 //     dossier for.
+//   - The Tasks view: its third zone is the open TASK, not a session.
 export function desktopDossierView({ view, session, panel }) {
-  if (view === 'grid') return null;
+  if (view === 'grid' || view === 'tasks') return null;
   if (!session) return null;
   return { open: !!panel?.open, page: panel?.page || 'root' };
 }

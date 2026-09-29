@@ -31,6 +31,8 @@ const ALLOWED_RAW = new Map([
   ["components/SessionPanel/SessionPanel.jsx", "the session name, whose chrome is the catalogue field (16px, iOS floor), not the Field primitive"],
   ["components/SessionPanel/UsagePage.jsx", "type=range slider for compact-at, not a text field"],
   ["layout/Sidebar/Sidebar.jsx", "the catalogue's search well (16px, iOS floor); Field's chrome is a different surface"],
+  ["components/Tasks/TaskDetail.jsx", "the task editor edits in place (title, details, subtasks, find-a-task): borderless tk-field at 16px, not Field's boxed chrome"],
+  ["components/Tasks/parts.jsx", "the completion note and Move's search well (tk-field, 16px), the same in-place surface as the task editor"],
   ["primitives/Field/Field.jsx", "the primitive itself"],
 ]);
 

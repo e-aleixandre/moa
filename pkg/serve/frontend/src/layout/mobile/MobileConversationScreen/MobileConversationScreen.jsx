@@ -22,7 +22,12 @@ import { SessionDrawer } from "../SessionDrawer/SessionDrawer.jsx";
 import { MobileSheet } from "../MobileSheet/MobileSheet.jsx";
 import { SessionPanel } from "../../../components/index.js";
 import { NewOwnerDialog } from "../../../components/Owners/NewOwnerDialog.jsx";
-import { panelAccessibleName, sessionPanelBack, sessionPanelView, closeSessionPanel, toggleSessionPanel } from "../../../data/session-panel.js";
+import { panelAccessibleName, sessionPanelBack, sessionPanelView, closeSessionPanel, toggleSessionPanel, openSessionPanel, taskPanelPage } from "../../../data/session-panel.js";
+import { tasksSlice } from "../../../data/tasks.js";
+import { openRequestCount } from "../../../data/tasks-model.js";
+import { closeTasksView, openTasksView } from "../../../data/tasks-view.js";
+import { PinnedTaskLine } from "../../../components/Tasks/PinnedTaskLine.jsx";
+import { MobileTasksView } from "../../../components/Tasks/MobileTasksView.jsx";
 import { cacheAlertLabel } from "../../../data/cache-usage.js";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
@@ -84,9 +89,10 @@ export function selectMobileDrawerSession(session, { resume, activate, close }) 
 export function MobileConversationScreen({ version = null, forceMobile = false }) {
   const drawerOpen = useStore((s) => s.drawerOpen);
   const inboxOpen = useStore((s) => s.inboxOpen);
+  const tasksOpen = useStore((s) => s.view === "tasks");
   const activeSession = useStore((s) => mobileFocusedSession(s, forceMobile).session);
   const panelOpen = useStore((s) => sessionPanelView(s, mobileFocusedSession(s, forceMobile).id).open);
-  const hasPushedView = !!(activeSession?.viewingSubagent || activeSession?.viewingBashJob || inboxOpen);
+  const hasPushedView = !!(activeSession?.viewingSubagent || activeSession?.viewingBashJob || inboxOpen || tasksOpen);
   const drawerGesture = useEdgeSwipeDrawer({
     open: drawerOpen,
     // A pushed view owns this edge for back navigation; modal surfaces own
@@ -316,6 +322,13 @@ function MobileConversationBody({ forceMobile = false }) {
             wins) without losing the stored preference. Inside the dock, so
             the fade stretches over the bar the way the catalogue drew it. */}
         <MobileComposer key={session.id} session={session} usage={usage} onSecret={setSecretAliases}>
+          {/* What this session asked of you, pinned where you would answer
+              it, in the gap above the live bar. */}
+          <PinnedTaskLine
+            phone
+            sessionId={session.id}
+            onOpenTask={(id) => openSessionPanel(session.id, taskPanelPage(id))}
+          />
           <LiveBar
             key={session.id}
             session={session}
@@ -465,6 +478,13 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
     inboxPendingRef.current = true;
     closeDrawer();
   };
+  // Tasks is the same handoff as the inbox: the drawer closes, then the Tasks
+  // screen is pushed.
+  const tasksPendingRef = useRef(false);
+  const onTasksFromDrawer = () => {
+    tasksPendingRef.current = true;
+    closeDrawer();
+  };
   const onNewOwnerFromDrawer = () => {
     newOwnerPendingRef.current = true;
     closeDrawer();
@@ -485,6 +505,11 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
       openInbox();
       return;
     }
+    if (tasksPendingRef.current) {
+      tasksPendingRef.current = false;
+      openTasksView();
+      return;
+    }
     if (newOwnerPendingRef.current) {
       newOwnerPendingRef.current = false;
       setNewOwnerOpen(true);
@@ -496,6 +521,8 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   };
 
   const inboxCount = inboxPendingCount(chrome.inbox);
+  const tasksCount = useStore((s) => openRequestCount(tasksSlice(s).list));
+  const tasksOpen = useStore((s) => s.view === "tasks");
   // The session the header is about, for the Owner chip. Read here rather than
   // taken from `chrome`: the chrome snapshot is deliberately the ROSTER, and
   // adding a whole session to it would rebuild the header on every token.
@@ -503,7 +530,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
 
   return (
     <>
-      {chrome.showChip && !chrome.inboxOpen && (
+      {chrome.showChip && !chrome.inboxOpen && !tasksOpen && (
         <MobileChrome
           title={chrome.title}
           attention={chrome.attention}
@@ -531,6 +558,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           onOpenSession={(id) => { if (openSession(id)) closeInbox(); }}
         />
       )}
+      {tasksOpen && !chrome.inboxOpen && <MobileTasksView onBack={closeTasksView} />}
       <SessionDrawer
         open={chrome.drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -549,6 +577,8 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         // there is nothing that proves nothing arrived, so hiding the button
         // would hide the failure with it.
         inboxVisible={chrome.inbox.length > 0 || chrome.inboxHealth?.status === "error"}
+        onTasks={onTasksFromDrawer}
+        tasksCount={tasksCount}
         version={version}
         onCloseSession={(id) => { closeSession(id).catch(() => {}); }}
         onReopenSession={(id) => { resumeSession(id).catch(() => {}); }}

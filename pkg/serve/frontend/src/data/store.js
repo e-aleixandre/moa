@@ -39,6 +39,21 @@ export const OWNERS_INITIAL = Object.freeze({
   openStatus: 'idle',
 });
 
+// The global tasks' slice (see data/tasks.js). Server state, never persisted:
+// the database is the authority and every invalidation re-reads it.
+export const TASKS_INITIAL = Object.freeze({
+  list: [],
+  counts: Object.freeze({ open_requests: 0, you: 0, backlog: 0, agents: 0 }),
+  revision: 0,
+  loaded: false,
+  error: null,
+  agents: false,
+  projects: [],
+  bySession: {},
+  details: {},
+  newSince: 0,
+});
+
 // The share picker's closed slice (see data/share.js). Same reason it lives
 // here rather than in the controller: the initial state must not import the
 // module that reads this store back.
@@ -211,6 +226,9 @@ let state = {
   // durable copy is the service worker's, and it is dropped the moment the
   // share lands in a composer or the picker is dismissed.
   share: SHARE_CLOSED,
+
+  // Global tasks (see data/tasks.js).
+  tasks: TASKS_INITIAL,
 
   // Payloads handed to a specific session's composer: { [sessionId]: { id,
   // text, files } }. Keyed by session because the composer is mounted per
