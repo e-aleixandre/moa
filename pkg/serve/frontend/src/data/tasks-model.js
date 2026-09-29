@@ -58,6 +58,18 @@ export function needsDeliverChoice(recipient) {
   return recipient?.state === 'saved';
 }
 
+// startNotifyGesture — a gesture that tells a session. A saved recipient
+// makes it wait for the owner's answer (ask); anything else runs it at once
+// with no delivery choice.
+export function startNotifyGesture(recipient, perform, ask) {
+  if (needsDeliverChoice(recipient)) {
+    ask((choice) => perform(choice));
+    return 'asked';
+  }
+  perform(null);
+  return 'ran';
+}
+
 // deliverFields turns the owner's choice into the request field. There is no
 // default: without an explicit choice nothing is sent, and the server holds.
 export function deliverFields(choice) {

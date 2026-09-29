@@ -286,11 +286,12 @@ export function TaskDetail({
         />
         <textarea
           class="tk-field tk-desc"
-          rows={draft.description ? 4 : 1}
+          rows={1}
           placeholder="Add details"
           aria-label="Details"
           value={draft.description}
-          onInput={(e) => set({ description: e.currentTarget.value })}
+          ref={autosize}
+          onInput={(e) => { set({ description: e.currentTarget.value }); autosize(e.currentTarget); }}
         />
 
         <dl class="tk-props">

@@ -7,7 +7,7 @@ import { addToast } from "../../data/notifications.js";
 import { loadTask, patchTask, isNewRequest } from "../../data/tasks.js";
 import {
   completeNotifies, completePatch, errorText, isHere, isOpen, isRequest, needsDeliverChoice, noticeStateWords,
-  projectLabelOf, recipientFor, relAge, sessionName, taskProjectName,
+  projectLabelOf, recipientFor, relAge, sessionName, startNotifyGesture, taskProjectName,
 } from "../../data/tasks-model.js";
 import { TasksGlyph } from "./TasksGlyph.jsx";
 import "./Tasks.css";
@@ -107,10 +107,7 @@ export function DeliverChoice({ name, onChoose, onCancel, phone, inline }) {
 // delivery choice at all.
 export function useNotifyGesture() {
   const [pending, setPending] = useState(null);
-  const run = (recipient, perform) => {
-    if (needsDeliverChoice(recipient)) setPending({ recipient, perform });
-    else perform(null);
-  };
+  const run = (recipient, perform) => startNotifyGesture(recipient, perform, () => setPending({ recipient, perform }));
   const cancel = () => setPending(null);
   const choose = (choice) => {
     const p = pending;
