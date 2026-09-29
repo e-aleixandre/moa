@@ -329,12 +329,12 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		if sctx.TaskStore == nil {
 			return fmt.Errorf("task store not available")
 		}
-		if err := sctx.TaskStore.MarkDoneErr(cmd.TaskID); err != nil {
+		if err := sctx.TaskStore.MarkDone(cmd.TaskID); err != nil {
 			return err
 		}
 		sctx.Bus.Publish(TasksUpdated{
 			SessionID: sctx.SessionID,
-			Tasks:     sctx.TaskStore.Tasks(),
+			Tasks:     sctx.TaskStore.Checklist(),
 		})
 		return nil
 	})
@@ -343,10 +343,12 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		if sctx.TaskStore == nil {
 			return fmt.Errorf("task store not available")
 		}
-		sctx.TaskStore.Reset()
+		if err := sctx.TaskStore.ResetChecklist(); err != nil {
+			return err
+		}
 		sctx.Bus.Publish(TasksUpdated{
 			SessionID: sctx.SessionID,
-			Tasks:     sctx.TaskStore.Tasks(),
+			Tasks:     sctx.TaskStore.Checklist(),
 		})
 		return nil
 	})
@@ -396,7 +398,14 @@ func registerSessionQueryHandlers(sctx *SessionContext) {
 		if sctx.TaskStore == nil {
 			return nil, nil
 		}
-		return sctx.TaskStore.Tasks(), nil
+		return sctx.TaskStore.Checklist(), nil
+	})
+
+	b.OnQuery(func(q GetTaskRequests) ([]tasks.Task, error) {
+		if sctx.TaskStore == nil {
+			return nil, nil
+		}
+		return sctx.TaskStore.Requests(), nil
 	})
 
 	b.OnQuery(func(q GetSessionCost) (float64, error) {

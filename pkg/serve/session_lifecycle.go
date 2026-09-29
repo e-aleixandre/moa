@@ -249,6 +249,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		CompactSummarizer: m.compactSummarizer,
 		MoaCfg:            &moaCfg,
 		SessionID:         id,
+		Tasks:             m.tasks,
 		MCPDisableSources: mcpSources,
 		ExtraMCPServers:   extraMCPServers,
 		Ctx:               sessionCtx,
@@ -1247,12 +1248,10 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 		}
 	}
 
-	// 4. Restore task/path metadata.
+	// 4. Restore path metadata. Tasks are not restored from the session: they
+	// live in the shared task database, and a checklist an older version left
+	// in the JSON stays inert there.
 	// Path policy uses bus commands for consistency.
-	sctx := sess.runtime.Context()
-	if sctx.TaskStore != nil && saved.Metadata != nil {
-		sctx.TaskStore.RestoreFromMetadata(saved.Metadata)
-	}
 	if saved.Metadata != nil {
 		savedScope, savedPaths := saved.PathMeta()
 		if savedScope != "" {
@@ -1294,6 +1293,9 @@ const shutdownDrainBudget = 5 * time.Second
 // captures the complete final turn rather than a partial one. If the budget
 // expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
+	if m.tasksCancel != nil {
+		m.tasksCancel()
+	}
 	if m.secretReaperCancel != nil {
 		m.secretReaperCancel()
 		if m.secretReaperDone != nil {

@@ -857,6 +857,20 @@ In a conversation, an event is a monochrome timestamped mark with its payload on
 the tool code surface: it neither impersonates you nor competes with the
 assistant. A session that an event created is marked as such in the session list.
 
+## Tasks
+
+Tasks live in one SQLite database, `tasks.sqlite` in the config directory, shared by every session, the CLI and `moa serve`. A change made in one process shows up in the others within about half a second. Each task sits in one of three places:
+
+- **You**: your own notes, and the requests agents file for you with `tasks ask`. An agent never sees your notes; a request is visible only to the session that asked.
+- **Backlog**: a project's shared pool (a project is a repository: all its worktrees share it). Agents of that project can read it and `claim` a pending task.
+- **Agents**: a session's own checklist, which is what `tasks create` adds to.
+
+A task can have one level of subtasks and can wait for other tasks (`Waits for` / `Unblocks`, across places; cycles are refused). Done tasks stay listed as done and are archived seven days after completion; archived tasks are left out of listings and counts.
+
+`/tasks` shows the current session's checklist and requests, `/tasks done <id>` completes one of them and `/tasks reset` clears only that session's checklist. Checklists that older versions kept inside the session file are not imported: they stay in the file, unused.
+
+If `tasks.sqlite` was written by a newer moa, this one reads it but refuses to change it, and says so.
+
 ## REST endpoints
 
 Beyond the per-session WebSocket, Serve exposes a few global read/write endpoints:
@@ -886,6 +900,8 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` · `POST /api/events/dismiss` | The [event inbox](#event-inbox): history, sending or dropping one, or dismissing a source |
 | `POST /api/sessions/{id}/steers/cancel` | Cancel every queued, not-yet-delivered message; with the header `X-Moa-Steers-Cancel-Response: discarded` the reply lists exactly what was discarded |
 | `POST /api/sessions/{id}/mcp/{server}/oauth/start` · `.../oauth/finish` · `.../oauth/signout` | Sign a session's remote MCP server in or out |
+| `GET /api/tasks?project=&include_agents=&include_archived=` · `POST /api/tasks` · `GET`/`PATCH`/`DELETE /api/tasks/{id}` · `GET /api/tasks/projects` · `GET /api/sessions/{id}/tasks` | The [task database](#tasks): the owner's view of every task. `PATCH` and `DELETE` need the `revision` you last read and answer `409` with the current task when it is stale |
+| `GET /api/tasks/ws` | WebSocket that sends `{"type":"tasks_changed","revision":N}` whenever any process (this server, the CLI) changes a task. It is only an invalidation: read `GET /api/tasks` again, on it and on every reconnect |
 | `POST /api/sessions/{id}/owner` | Detach a session from its project owner (`{"detached": true}`) or reattach it |
 | `/api/owners/...` | [Project owners](./owners.md#api) and their books |
 | `POST /api/voice/live/session` · `.../heartbeat` · `.../close` · `GET`/`POST .../ask` | A [live call](#talk-live): start it, keep it alive, end it, and relay the delegate's questions to the session |

@@ -82,6 +82,11 @@ type RunTokens struct {
 // Handler returns: []tasks.Task
 type GetTasks struct{ SessionID string }
 
+// GetTaskRequests returns the session's requests to the owner (open and
+// answered), in the same flat shape as GetTasks.
+// Handler returns: []tasks.Task
+type GetTaskRequests struct{ SessionID string }
+
 // GetGoal returns the current goal-mode state.
 // Handler returns: GoalInfo
 type GetGoal struct{ SessionID string }

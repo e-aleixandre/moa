@@ -32,7 +32,7 @@ func TestBuildSystemPrompt_MemoryAndCheckpointGuidanceWithoutIndex(t *testing.T)
 		"Never put credentials",
 		"canonical source",
 		"matching skill exists",
-		"Use tasks for task tracking",
+		"Keep your checklist in tasks; list before creating duplicates; use ask for something you need from the owner, then continue work; claim only from your project's backlog",
 		"checkpoint tool as a session-local ephemeral slot",
 		"when preparing to compact",
 	} {
@@ -335,7 +335,7 @@ func TestBuildSystemPrompt_MemoryGuideline(t *testing.T) {
 	if strings.Contains(prompt, "tmp/") {
 		t.Error("prompt must not prescribe a concrete journal directory")
 	}
-	if strings.Contains(prompt, "matching skill exists") || strings.Contains(prompt, "Use tasks for task tracking") {
+	if strings.Contains(prompt, "matching skill exists") || strings.Contains(prompt, "Keep your checklist in tasks; list before creating duplicates; use ask for something you need from the owner, then continue work; claim only from your project's backlog") {
 		t.Error("prompt must not recommend unavailable tools")
 	}
 	if !strings.Contains(prompt, "Use a tracker chosen by the user") {

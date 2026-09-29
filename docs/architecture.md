@@ -22,7 +22,7 @@
 | `pkg/permission/` | Gate for `yolo`/`ask`/`auto` tool approvals |
 | `pkg/checkpoint/` | File-level undo — snapshots before writes, pop to revert |
 | `pkg/memory/` | Cross-session persistent project memory |
-| `pkg/tasks/` | Task store and tool for plan execution |
+| `pkg/tasks/` | Shared SQLite task database (owner and agent-scoped access) and the `tasks` tool |
 | `pkg/subagent/` | Child agent execution and async job management |
 | `pkg/verify/` | Run project verification checks |
 | `pkg/skill/` | Skill file loading |

@@ -323,7 +323,7 @@ type MarkTaskDone struct {
 	TaskID    int
 }
 
-// ResetTasks clears all tasks.
+// ResetTasks clears the session's checklist (not its requests or the backlog).
 type ResetTasks struct{ SessionID string }
 
 // ---------------------------------------------------------------------------

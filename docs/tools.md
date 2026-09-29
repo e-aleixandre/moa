@@ -25,7 +25,7 @@ Always registered:
 | `subagent_wait` | Block until an async subagent job finishes and return its result |
 | `subagent_cancel` | Cancel a running async subagent |
 | `subagent_steer` | Send instructions or a correction to a subagent that is still running |
-| `tasks` | Track implementation tasks |
+| `tasks` | Your checklist, requests to the owner (`ask`, which does not block you) and your project's backlog (`claim`). Shared through the [task database](./serve.md#tasks); an agent only sees its own checklist and requests plus the project backlog |
 | `verify` | Run the project's [verification checks](#verify) |
 | `load_skill` | Load a [skill](./serve.md#skills-and-reload) by name. Skills are discovered per call, so one written mid-session is loadable. Most skills return their content; `context: fork` runs an isolated subagent instead |
 | `moa_docs` | Read moa's own documentation (this page included), embedded in the binary |

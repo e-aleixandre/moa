@@ -184,6 +184,16 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("HEAD /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/tasks", handleSessionTasks(manager))
+	// Global tasks: the owner sees and edits everything. Agents reach tasks only
+	// through the tasks tool, never through these routes.
+	mux.HandleFunc("GET /api/tasks", handleListTasks(manager))
+	mux.HandleFunc("POST /api/tasks", handleCreateTask(manager))
+	mux.HandleFunc("GET /api/tasks/projects", handleTaskProjects(manager))
+	mux.HandleFunc("GET /api/tasks/ws", handleTasksWebSocket(manager))
+	mux.HandleFunc("GET /api/tasks/{id}", handleGetTask(manager))
+	mux.HandleFunc("PATCH /api/tasks/{id}", handlePatchTask(manager))
+	mux.HandleFunc("DELETE /api/tasks/{id}", handleDeleteTask(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
 	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager, o.realtimeKey))
 	mux.HandleFunc("GET /api/preview/target", handlePreviewTarget(o.preview))

@@ -456,7 +456,8 @@ func cmdTasks(_ *Manager, sess *ManagedSession, args []string) (*CommandResult, 
 
 func cmdTasksList(b bus.EventBus) (*CommandResult, error) {
 	taskList, _ := bus.QueryTyped[bus.GetTasks, []tasks.Task](b, bus.GetTasks{})
-	if len(taskList) == 0 {
+	requests, _ := bus.QueryTyped[bus.GetTaskRequests, []tasks.Task](b, bus.GetTaskRequests{})
+	if len(taskList) == 0 && len(requests) == 0 {
 		return &CommandResult{OK: true, Message: "No tasks"}, nil
 	}
 	done := 0
@@ -469,7 +470,19 @@ func cmdTasksList(b bus.EventBus) (*CommandResult, error) {
 		}
 		lines = append(lines, fmt.Sprintf("%s #%d: %s", icon, t.ID, t.Title))
 	}
-	lines = append(lines, fmt.Sprintf("\n%d/%d complete", done, len(taskList)))
+	if len(taskList) > 0 {
+		lines = append(lines, fmt.Sprintf("\n%d/%d complete", done, len(taskList)))
+	}
+	if len(requests) > 0 {
+		lines = append(lines, "\nRequests to you:")
+		for _, t := range requests {
+			icon := "☐"
+			if t.Status == "done" {
+				icon = "☑"
+			}
+			lines = append(lines, fmt.Sprintf("%s #%d: %s", icon, t.ID, t.Title))
+		}
+	}
 	return &CommandResult{OK: true, Message: strings.Join(lines, "\n")}, nil
 }
 

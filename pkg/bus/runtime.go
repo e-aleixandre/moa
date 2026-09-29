@@ -25,7 +25,7 @@ type RuntimeConfig struct {
 	Bus               EventBus // optional pre-created bus; if nil, a new LocalBus is created
 	Agent             AgentController
 	Subscriber        AgentSubscriber // nil = use Agent if it implements AgentSubscriber
-	TaskStore         *tasks.Store
+	TaskStore         *tasks.Scope
 	Checkpoints       *checkpoint.Store
 	SessionCheckpoint *sessioncheckpoint.Slot
 	Goal              *goal.Goal

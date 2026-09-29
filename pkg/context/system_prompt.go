@@ -157,7 +157,7 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 			sb.WriteString("- When a matching skill exists for a reusable workflow, load it instead of recreating or remembering the procedure.\n")
 		}
 		if toolSet["tasks"] {
-			sb.WriteString("- Backlog, current task state, and handoffs are not memory. Use tasks for task tracking or a tracker chosen by the user.\n")
+			sb.WriteString("- Backlog, current task state, and handoffs are not memory. Keep your checklist in tasks; list before creating duplicates; use ask for something you need from the owner, then continue work; claim only from your project's backlog.\n")
 		} else {
 			sb.WriteString("- Backlog, current task state, and handoffs are not memory. Use a tracker chosen by the user.\n")
 		}

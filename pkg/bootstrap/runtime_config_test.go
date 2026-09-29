@@ -10,7 +10,7 @@ import (
 )
 
 func TestRuntimeConfig_CommonFields(t *testing.T) {
-	ts := tasks.NewStore()
+	ts := tasks.NewScope(tasks.New(""), "s", "/tmp")
 	pp := tool.NewPathPolicy("/tmp", nil, false)
 	ab := askuser.NewBridge()
 	bs := newTestBootstrapSession("medium")

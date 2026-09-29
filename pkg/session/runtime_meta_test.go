@@ -145,6 +145,12 @@ func TestPreservedMetadata(t *testing.T) {
 			map[string]any{"model": "m", MetaOrigin: "automation", MetaIdempotencyKey: "k1"},
 			map[string]any{MetaOrigin: "automation", MetaIdempotencyKey: "k1"},
 		},
+		{
+			// An old checklist stays in the JSON, inert, across every save.
+			"legacy tasks are kept",
+			map[string]any{"model": "m", MetaLegacyTasks: "old"},
+			map[string]any{MetaLegacyTasks: "old"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

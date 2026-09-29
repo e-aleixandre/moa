@@ -112,7 +112,7 @@ type SessionContext struct {
 	Tree       *session.Tree    // session entry tree; may be nil during migration
 
 	Goal              *goal.Goal              // may be nil
-	TaskStore         *tasks.Store            // may be nil
+	TaskStore         *tasks.Scope            // may be nil
 	Checkpoints       *checkpoint.Store       // may be nil
 	SessionCheckpoint *sessioncheckpoint.Slot // ephemeral pre-compaction state
 	PathPolicy        *tool.PathPolicy        // may be nil
@@ -1218,7 +1218,7 @@ func EndedLiveToolCall(e core.AgentEvent) LiveToolCall {
 // Note: this does NOT apply SessionContext.SteerFilter — callers that care
 // about filtering steer events (the session Bridge) must do so themselves
 // before/around calling this function.
-func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *tasks.Store) []any {
+func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *tasks.Scope) []any {
 	switch e.Type {
 	case core.AgentEventStart:
 		return []any{AgentStarted{SessionID: sid, RunGen: gen}}
@@ -1323,7 +1323,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		if e.ToolName == "tasks" && taskStore != nil {
 			events = append(events, TasksUpdated{
 				SessionID: sid,
-				Tasks:     taskStore.Tasks(),
+				Tasks:     taskStore.Checklist(),
 			})
 		}
 		return events

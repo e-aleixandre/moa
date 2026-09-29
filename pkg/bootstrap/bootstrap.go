@@ -58,6 +58,11 @@ type SessionConfig struct {
 	// right behavior for one-off agents that have no conversation to pin.
 	SessionID string
 
+	// Tasks is the shared task repository. nil = the process-wide one for the
+	// current config directory (tasks.Shared). Serve passes its own so tests
+	// and alternative session base directories stay isolated.
+	Tasks *tasks.Repo
+
 	// MCPDisableSources gives the provenance (global/project) of MCP disable
 	// vetoes when MoaCfg is injected. The merged MoaCfg.DisabledMCPServers loses
 	// which scope each name came from, so callers that inject MoaCfg should also
@@ -171,7 +176,7 @@ type SessionConfig struct {
 type Session struct {
 	Agent         *agent.Agent
 	ToolReg       *core.Registry
-	TaskStore     *tasks.Store
+	TaskStore     *tasks.Scope
 	Goal          *goal.Goal
 	AskBridge     *askuser.Bridge
 	Gate          *permission.Gate
@@ -358,8 +363,18 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		}
 	}
 
-	// 3. Task store — always available.
-	taskStore := tasks.NewStore()
+	// 3. Tasks — always available. One repository shared by every session, the
+	// CLI and serve; this session only gets a scope with its own identity, so
+	// the tool never trusts an ID or project the model supplies.
+	taskRepo := cfg.Tasks
+	if taskRepo == nil {
+		taskRepo = tasks.Shared()
+	}
+	taskSessionID := cfg.SessionID
+	if taskSessionID == "" {
+		taskSessionID = core.NewSteerID()
+	}
+	taskStore := tasks.NewScope(taskRepo, taskSessionID, cfg.CWD)
 	core.RegisterOrLog(toolReg, tasks.NewTool(taskStore))
 
 	// 3b. moa's own documentation, embedded in the binary. Always available:

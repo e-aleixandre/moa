@@ -31,6 +31,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/tool"
 	"github.com/e-aleixandre/moa/pkg/usage"
 )
@@ -812,6 +813,13 @@ type Manager struct {
 	// attention normalizes cross-session blocking state for future voice and
 	// digest clients. It owns no session state and is stopped on Shutdown.
 	attention *attention.Service
+	// tasks is the shared task database (also written by the CLI). taskHub fans
+	// its changes out to /api/tasks/ws; projectKeys memoizes CodebaseKey, which
+	// runs git.
+	tasks       *tasks.Repo
+	taskHub     *tasksHub
+	projectKeys sync.Map
+	tasksCancel context.CancelFunc
 	// reports batches the run outcomes of a project's sessions and delivers
 	// them to its owner. nil when owners are unavailable (no config dir).
 	reports *reportCoordinator
@@ -912,6 +920,9 @@ type ManagerConfig struct {
 	// nil, core.LoadMoaConfig preserves the normal global/project lookup.
 	ConfigLoader   func(cwd string) core.MoaConfig
 	SessionBaseDir string // root for session stores; empty = default
+	// Tasks overrides the shared task database. Empty follows SessionBaseDir
+	// (tasks.sqlite beside it) or, with no override at all, the config directory.
+	Tasks *tasks.Repo
 	// SchedulePath overrides the durable schedules file. Empty stores it beside
 	// the session base directory.
 	SchedulePath string
@@ -1004,7 +1015,19 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		// safe. Do not reuse a user-provided secret or persist transcript state.
 		slog.Warn("conversation cursor key unavailable", "error", err)
 	}
+	taskRepo := cfg.Tasks
+	if taskRepo == nil {
+		if cfg.SessionBaseDir != "" {
+			taskRepo = tasks.New(filepath.Join(filepath.Dir(cfg.SessionBaseDir), tasks.DatabaseName))
+		} else {
+			taskRepo = tasks.Shared()
+		}
+	}
+	tasksCtx, tasksCancel := context.WithCancel(ctx)
 	m := &Manager{
+		tasks:                       taskRepo,
+		taskHub:                     newTasksHub(),
+		tasksCancel:                 tasksCancel,
 		sessions:                    make(map[string]*ManagedSession),
 		resuming:                    make(map[string]struct{}),
 		serverInstance:              newServerInstanceID(),
@@ -1061,6 +1084,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		}()
 	}
 	m.attention.Start()
+	m.startTasksWatcher(tasksCtx)
 	// The coordinator reads its outbox at startup, so it must exist before any
 	// session is resumed and starts reporting.
 	m.reports = newReportCoordinator(ctx, m)

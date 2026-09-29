@@ -158,7 +158,7 @@ func TestPersistenceReactor_SavesOnCommandExecuted(t *testing.T) {
 	}
 }
 
-func TestPersistenceReactor_SavesOnTasksUpdated(t *testing.T) {
+func TestPersistenceReactor_IgnoresTasksUpdated(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 	fa := &fakeAgent{}
@@ -167,11 +167,13 @@ func TestPersistenceReactor_SavesOnTasksUpdated(t *testing.T) {
 
 	RegisterPersistenceReactor(b, sctx, fp)
 
+	// Tasks are not part of the session file any more: a checklist change is a
+	// UI signal, and saving on it rewrote the whole session (320-580 ms at 20 MB).
 	b.Publish(TasksUpdated{SessionID: "s1"})
 	b.Drain(time.Second)
 
-	if fp.count() != 1 {
-		t.Fatalf("expected 1 snapshot, got %d", fp.count())
+	if fp.count() != 0 {
+		t.Fatalf("TasksUpdated saved the session %d times", fp.count())
 	}
 }
 
@@ -207,8 +209,8 @@ func TestPersistenceReactor_MultipleTriggers(t *testing.T) {
 	b.Publish(TasksUpdated{})
 	b.Drain(time.Second)
 
-	if fp.count() != 3 {
-		t.Fatalf("expected 3 snapshots, got %d", fp.count())
+	if fp.count() != 2 {
+		t.Fatalf("expected 2 snapshots (TasksUpdated does not save), got %d", fp.count())
 	}
 }
 
@@ -276,6 +278,18 @@ func TestPersistenceReactor_CompactionMarkerKeepsLiveMsgIDAfterReload(t *testing
 	messages := tree.AllMessages()
 	if len(messages) != 1 || messages[0].MsgID != marker.MsgID {
 		t.Fatalf("reprojected marker ID = %#v, want %q", messages, marker.MsgID)
+	}
+}
+
+// Tasks live in the shared database: a session snapshot neither carries them
+// nor is triggered by them (a checklist change used to rewrite the whole JSON).
+func TestCollectMetadata_DoesNotCarryTasks(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContext(b, &fakeAgent{})
+	sctx.TaskStore = newTestTaskScope(t, "a task")
+	if _, ok := collectMetadata(sctx)[session.MetaLegacyTasks]; ok {
+		t.Fatal("session metadata still carries the task checklist")
 	}
 }
 

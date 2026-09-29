@@ -126,7 +126,7 @@ func actualToolNames(t *testing.T) map[string]bool {
 	}); err != nil {
 		t.Fatalf("register memory: %v", err)
 	}
-	if err := reg.Register(tasks.NewTool(tasks.NewStore())); err != nil {
+	if err := reg.Register(tasks.NewTool(tasks.NewScope(tasks.New(""), "s", workspace))); err != nil {
 		t.Fatalf("register tasks: %v", err)
 	}
 	if err := reg.Register(verify.NewTool(workspace, nil)); err != nil {

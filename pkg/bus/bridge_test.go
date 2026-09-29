@@ -1135,8 +1135,7 @@ func TestBridgeEvent_ToolExecEnd_EmitsTasksUpdated(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 
-	store := tasks.NewStore()
-	store.Create("task one", "", nil)
+	store := newTestTaskScope(t, "task one")
 	sctx := newTestSessionContext(b, nil)
 	sctx.TaskStore = store
 
@@ -1161,7 +1160,7 @@ func TestBridgeEvent_ToolExecEnd_NoTaskUpdate_WrongTool(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
 
-	store := tasks.NewStore()
+	store := newTestTaskScope(t)
 	sctx := newTestSessionContext(b, nil)
 	sctx.TaskStore = store
 
@@ -2246,8 +2245,7 @@ func TestHandler_MarkTaskDone(t *testing.T) {
 	fa := &fakeAgent{}
 	sctx := newTestSessionContext(b, fa)
 
-	store := tasks.NewStore()
-	store.Create("my task", "", nil)
+	store := newTestTaskScope(t, "my task")
 	sctx.TaskStore = store
 	RegisterHandlers(sctx)
 
@@ -2269,7 +2267,7 @@ func TestHandler_MarkTaskDone_NotFound(t *testing.T) {
 	defer b.Close()
 	fa := &fakeAgent{}
 	sctx := newTestSessionContext(b, fa)
-	sctx.TaskStore = tasks.NewStore()
+	sctx.TaskStore = newTestTaskScope(t)
 	RegisterHandlers(sctx)
 
 	err := b.Execute(MarkTaskDone{TaskID: 999})
@@ -2297,9 +2295,7 @@ func TestHandler_ResetTasks(t *testing.T) {
 	fa := &fakeAgent{}
 	sctx := newTestSessionContext(b, fa)
 
-	store := tasks.NewStore()
-	store.Create("task A", "", nil)
-	store.Create("task B", "", nil)
+	store := newTestTaskScope(t, "task A", "task B")
 	sctx.TaskStore = store
 	RegisterHandlers(sctx)
 
@@ -2427,8 +2423,7 @@ func TestQuery_GetTasks(t *testing.T) {
 	defer b.Close()
 	fa := &fakeAgent{}
 	sctx := newTestSessionContext(b, fa)
-	store := tasks.NewStore()
-	store.Create("task A", "", nil)
+	store := newTestTaskScope(t, "task A")
 	sctx.TaskStore = store
 	RegisterHandlers(sctx)
 
@@ -3922,4 +3917,19 @@ func TestProjectLiveCustomKeepsEventReportAndOwnerIdentity(t *testing.T) {
 	if owner["owner_name"] != "Winerim" {
 		t.Fatalf("owner name lost live: %v", owner)
 	}
+}
+
+// newTestTaskScope returns a scope on a real SQLite database in a temp dir,
+// with the given titles already in the session's checklist.
+func newTestTaskScope(t *testing.T, titles ...string) *tasks.Scope {
+	t.Helper()
+	repo := tasks.New(filepath.Join(t.TempDir(), "tasks.sqlite"))
+	t.Cleanup(func() { _ = repo.Close() })
+	sc := tasks.NewScope(repo, "s1", t.TempDir())
+	for _, title := range titles {
+		if _, err := repo.AgentCreate(context.Background(), sc.Actor(), tasks.AgentInput{Title: title}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return sc
 }

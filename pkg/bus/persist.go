@@ -52,11 +52,6 @@ func collectMetadata(sctx *SessionContext) map[string]any {
 	} else {
 		meta["permission_mode"] = "yolo"
 	}
-	if sctx.TaskStore != nil {
-		for k, v := range sctx.TaskStore.SaveToMetadata() {
-			meta[k] = v
-		}
-	}
 	if sctx.PathPolicy != nil {
 		meta["path_scope"] = sctx.PathPolicy.Scope()
 		if paths := sctx.PathPolicy.AllowedPaths(); len(paths) > 0 {
@@ -122,7 +117,6 @@ func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersi
 	}
 	// Metadata-only changes never mutate the tree → safe to persist directly.
 	b.Subscribe(func(e ConfigChanged) { save() })
-	b.Subscribe(func(e TasksUpdated) { save() })
 }
 
 // extractFinalAssistantText returns the text of the last assistant message

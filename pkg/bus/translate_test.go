@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/core"
-	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
 // TestTranslateAgentEvent_ParityWithBridge checks that TranslateAgentEvent
@@ -137,7 +136,7 @@ func TestTranslateAgentEvent_ParityWithBridge(t *testing.T) {
 // TasksUpdated side event fires only when ToolName=="tasks" and a non-nil
 // taskStore is supplied — mirroring the original bridgeEvent behavior.
 func TestTranslateAgentEvent_ToolExecEnd_TasksUpdate(t *testing.T) {
-	store := tasks.NewStore()
+	store := newTestTaskScope(t)
 
 	e := core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolName: "tasks"}
 

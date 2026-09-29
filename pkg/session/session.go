@@ -115,6 +115,11 @@ const (
 	// writing false, and binaries that predate it simply see an attached
 	// session.
 	MetaOwnerDetached = "owner_detached"
+	// MetaLegacyTasks is where versions before the shared task database kept a
+	// session's checklist. Nothing reads or writes it any more; it is carried
+	// forward untouched so saving a session never deletes what an old JSON
+	// held, and so rolling back to an older binary still finds it.
+	MetaLegacyTasks = "tasks"
 )
 
 // KindOwner marks the conversation of a project owner. Such a session is a
@@ -141,7 +146,7 @@ const OriginUser = "user"
 // does not know about. The persistence reactor rebuilds Metadata from scratch
 // on every snapshot, so persisters must carry these forward or they would be
 // dropped on the first save after creation.
-var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind, MetaOwnerDetached}
+var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind, MetaOwnerDetached, MetaLegacyTasks}
 
 // SetOrigin records who created the session (e.g. "user", "automation", or a
 // caller-chosen label such as "linear-webhook"). An empty origin is not stored:
