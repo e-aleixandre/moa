@@ -119,6 +119,18 @@ func (ts *TreeSyncer) DisplayMessages() []core.AgentMessage {
 	return ts.appendInFlightTail(ts.tree.AllMessages())
 }
 
+// CacheUsage is core.SummarizeCacheUsage over DisplayMessages, computed by
+// walking the tree and the in-flight tail without building the projection.
+func (ts *TreeSyncer) CacheUsage() core.CacheUsageSummary {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	var acc core.CacheUsageAccumulator
+	ts.tree.VisitDisplayMessages(acc.Add)
+	ts.visitInFlightTail(acc.Add)
+	return acc.Summary()
+}
+
 // SnapshotPath returns a private copy of the active tree branch plus the
 // unsynced, visible agent-message tail. Unlike syncMessages, this is a pure
 // projection: taking a snapshot while a run is in flight must not make that
@@ -191,13 +203,20 @@ func anchorTimestamp(tree *session.Tree, entryID string) time.Time {
 // appendInFlightTail appends the agent messages not yet synced to the tree
 // (the in-flight turn), skipping hidden internal prompts. Caller holds ts.mu.
 func (ts *TreeSyncer) appendInFlightTail(msgs []core.AgentMessage) []core.AgentMessage {
-	for i, msg := range ts.sctx.Agent.Messages() {
-		if _, ok := ts.synced[messageSyncID(msg, i)]; ok || isHiddenInternalPrompt(msg) {
+	ts.visitInFlightTail(func(msg *core.AgentMessage) { msgs = append(msgs, *msg) })
+	return msgs
+}
+
+// visitInFlightTail is appendInFlightTail's selection, without the copy.
+func (ts *TreeSyncer) visitInFlightTail(fn func(*core.AgentMessage)) {
+	agentMsgs := ts.sctx.Agent.Messages()
+	for i := range agentMsgs {
+		msg := &agentMsgs[i]
+		if _, ok := ts.synced[messageSyncID(*msg, i)]; ok || isHiddenInternalPrompt(*msg) {
 			continue
 		}
-		msgs = append(msgs, msg)
+		fn(msg)
 	}
-	return msgs
 }
 
 // HasMsgID reports whether this ID belongs to a message that exists anywhere in

@@ -16,37 +16,48 @@ type CacheUsageSummary struct {
 // input or cache tokens, so Ratio is not a synthetic percentage. Streak and
 // Alert describe only the current trailing sequence of writes without reads.
 func SummarizeCacheUsage(messages []AgentMessage) CacheUsageSummary {
-	var summary CacheUsageSummary
-	denominator := 0
+	var acc CacheUsageAccumulator
+	for i := range messages {
+		acc.Add(&messages[i])
+	}
+	return acc.Summary()
+}
 
-	for _, message := range messages {
-		if message.Role != "assistant" || message.StopReason == "error" {
-			continue
-		}
-		if message.Usage == nil {
-			continue
-		}
+// CacheUsageAccumulator is SummarizeCacheUsage fed one message at a time, so a
+// caller can aggregate a transcript it does not want to materialise.
+type CacheUsageAccumulator struct {
+	summary     CacheUsageSummary
+	denominator int
+}
 
-		usage := message.Usage
-		turnTokens := usage.CacheRead + usage.CacheWrite + usage.Input
-		if turnTokens <= 0 {
-			continue
-		}
-
-		summary.Available = true
-		summary.Read += usage.CacheRead
-		summary.Written += usage.CacheWrite
-		denominator += turnTokens
-
-		if usage.CacheWrite > 0 && usage.CacheRead == 0 {
-			summary.Streak++
-		} else {
-			summary.Streak = 0
-		}
+// Add folds one message, in transcript order, into the summary.
+func (a *CacheUsageAccumulator) Add(message *AgentMessage) {
+	if message.Role != "assistant" || message.StopReason == "error" || message.Usage == nil {
+		return
+	}
+	usage := message.Usage
+	turnTokens := usage.CacheRead + usage.CacheWrite + usage.Input
+	if turnTokens <= 0 {
+		return
 	}
 
+	a.summary.Available = true
+	a.summary.Read += usage.CacheRead
+	a.summary.Written += usage.CacheWrite
+	a.denominator += turnTokens
+
+	if usage.CacheWrite > 0 && usage.CacheRead == 0 {
+		a.summary.Streak++
+	} else {
+		a.summary.Streak = 0
+	}
+}
+
+// Summary returns the aggregate of everything added so far.
+func (a *CacheUsageAccumulator) Summary() CacheUsageSummary {
+	summary := a.summary
 	if summary.Available {
-		summary.Ratio = float64(summary.Read) / float64(denominator)
+		summary.Ratio = float64(summary.Read) / float64(a.denominator)
 	}
 	summary.Alert = summary.Streak >= 3
 	return summary

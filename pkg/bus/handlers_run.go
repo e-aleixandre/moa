@@ -382,7 +382,7 @@ func registerRunReactors(sctx *SessionContext) {
 	b.Subscribe(func(e RunEnded) {
 		sctx.Bus.Publish(CacheUsageUpdated{
 			SessionID: sctx.SessionID,
-			Summary:   core.SummarizeCacheUsage(sctx.displayMessages()),
+			Summary:   sctx.cacheUsage(),
 		})
 	})
 

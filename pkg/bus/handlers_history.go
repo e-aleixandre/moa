@@ -407,7 +407,7 @@ func registerSessionQueryHandlers(sctx *SessionContext) {
 	// so the ratio the panel prints is measured over exactly the conversation
 	// the user is looking at — including the in-flight turn.
 	b.OnQuery(func(q GetCacheUsage) (core.CacheUsageSummary, error) {
-		return core.SummarizeCacheUsage(sctx.displayMessages()), nil
+		return sctx.cacheUsage(), nil
 	})
 
 	b.OnQuery(func(q GetRunTokens) (RunTokens, error) {

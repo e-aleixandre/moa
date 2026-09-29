@@ -405,3 +405,44 @@ func containsMsgID(msgs []core.AgentMessage, id string) bool {
 	}
 	return false
 }
+
+// GetCacheUsage aggregates in place; it must stay equal to summarising what
+// GetDisplayMessages returns, in-flight turn included.
+func TestGetCacheUsage_MatchesSummaryOfDisplayMessages(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+
+	fa := &fakeAgent{}
+	sctx := newTestSessionContext(b, fa)
+	sctx.Tree = session.NewTree()
+	RegisterHandlers(sctx)
+	RegisterTreeSyncer(b, sctx)
+
+	turn := func(text string, u core.Usage) core.AgentMessage {
+		m := msg("assistant", text)
+		m.Usage = &u
+		return m
+	}
+	fa.mu.Lock()
+	fa.messages = []core.AgentMessage{
+		msg("user", "a"), turn("1", core.Usage{Input: 10, CacheWrite: 500}),
+		msg("user", "b"), turn("2", core.Usage{Input: 10, CacheWrite: 500}),
+	}
+	fa.mu.Unlock()
+	b.Publish(RunEnded{SessionID: "test-session"})
+	b.Drain(time.Second)
+
+	fa.mu.Lock()
+	fa.messages = append(fa.messages, msg("user", "c"), turn("3", core.Usage{Input: 10, CacheWrite: 500}))
+	fa.mu.Unlock()
+
+	got, err := QueryTyped[GetCacheUsage, core.CacheUsageSummary](b, GetCacheUsage{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	display, _ := QueryTyped[GetDisplayMessages, []core.AgentMessage](b, GetDisplayMessages{})
+	want := core.SummarizeCacheUsage(display)
+	if got != want || !got.Available || got.Streak != 3 || !got.Alert {
+		t.Fatalf("cache usage = %+v, want %+v (streak 3, alert)", got, want)
+	}
+}

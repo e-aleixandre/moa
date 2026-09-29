@@ -282,20 +282,42 @@ func (t *Tree) Path() []Entry {
 // pathToLocked returns entries from root to the given entry ID, in order.
 // Caller must hold at least a read lock.
 func (t *Tree) pathToLocked(id string) []Entry {
-	var stack []Entry
-	for id != "" {
-		idx, ok := t.index[id]
+	idxs := t.pathIndexesLocked(id)
+	if len(idxs) == 0 {
+		return nil
+	}
+	path := make([]Entry, len(idxs))
+	for i, idx := range idxs {
+		path[i] = t.entries[idx]
+	}
+	return path
+}
+
+// pathIndexesLocked returns the positions in t.entries of the root→id path.
+// It sizes the result exactly (one walk to count, one to fill) instead of
+// growing a stack by appends: on a long session the doubling copies of
+// 488-byte entries dominated the cost of opening it. Callers that only read a
+// projection of the path use the indexes and never copy an Entry.
+// Caller must hold at least a read lock.
+func (t *Tree) pathIndexesLocked(id string) []int {
+	n := 0
+	for cur := id; cur != ""; n++ {
+		idx, ok := t.index[cur]
 		if !ok {
 			break
 		}
-		stack = append(stack, t.entries[idx])
-		id = t.entries[idx].ParentID
+		cur = t.entries[idx].ParentID
 	}
-	// Reverse: stack is leaf→root, we want root→leaf
-	for i, j := 0, len(stack)-1; i < j; i, j = i+1, j-1 {
-		stack[i], stack[j] = stack[j], stack[i]
+	if n == 0 {
+		return nil
 	}
-	return stack
+	idxs := make([]int, n)
+	for cur, i := id, n-1; i >= 0; i-- {
+		idx := t.index[cur]
+		idxs[i] = idx
+		cur = t.entries[idx].ParentID
+	}
+	return idxs
 }
 
 // Children returns direct children of the given entry.
@@ -434,15 +456,44 @@ func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 // AllMessages returns ALL messages along the current path (for display).
 // Includes pre-compaction messages. Compaction entries become synthetic status messages.
 func (t *Tree) AllMessages() []core.AgentMessage {
-	// Snapshot path under lock, process outside
 	t.mu.RLock()
-	var path []Entry
-	if t.leafID != "" {
-		path = t.pathToLocked(t.leafID)
+	defer t.mu.RUnlock()
+	if t.leafID == "" {
+		return displayMessagesOf(nil)
 	}
-	t.mu.RUnlock()
+	return displayMessagesOf(t.pathPtrsLocked(t.leafID))
+}
 
-	return displayMessages(path)
+// pathPtrsLocked is the root→id path as pointers into t.entries: eight bytes a
+// step instead of a copied Entry. The pointers are only valid while the read
+// lock is held (an append may move the backing array), so the projection runs
+// under it; entries are never mutated in place.
+func (t *Tree) pathPtrsLocked(id string) []*Entry {
+	idxs := t.pathIndexesLocked(id)
+	ptrs := make([]*Entry, len(idxs))
+	for i, idx := range idxs {
+		ptrs[i] = &t.entries[idx]
+	}
+	return ptrs
+}
+
+// VisitDisplayMessages calls fn, in transcript order, with every message
+// entry of the current path. Compaction, trim and fresh markers are not
+// visited: they are session_event rows, never assistant turns. It lets an
+// aggregate over the transcript (see core.CacheUsageAccumulator) run without
+// materialising the projection. fn must not retain the pointer nor call back
+// into the tree.
+func (t *Tree) VisitDisplayMessages(fn func(*core.AgentMessage)) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if t.leafID == "" {
+		return
+	}
+	for _, idx := range t.pathIndexesLocked(t.leafID) {
+		if e := &t.entries[idx]; e.Type == EntryMessage {
+			fn(&e.Message)
+		}
+	}
 }
 
 // DisplayMessagesSince returns the display projection strictly after entryID
@@ -454,46 +505,50 @@ func (t *Tree) DisplayMessagesSince(entryID string) ([]core.AgentMessage, bool) 
 		return nil, false
 	}
 	t.mu.RLock()
+	defer t.mu.RUnlock()
 	if t.leafID == "" {
-		t.mu.RUnlock()
 		return nil, false
 	}
-	path := t.pathToLocked(t.leafID)
-	t.mu.RUnlock()
-
-	start := -1
+	path := t.pathPtrsLocked(t.leafID)
 	for i, entry := range path {
 		if entry.ID == entryID {
-			start = i + 1
-			break
+			return displayMessagesOf(path[i+1:]), true
 		}
 	}
-	if start < 0 {
-		return nil, false
-	}
-	return displayMessages(path[start:]), true
+	return nil, false
 }
 
-// displayMessages projects tree entries for display: messages pass through and
+// displayMessagesOf projects tree entries for display: messages pass through and
 // compactions become synthetic status markers.
-func displayMessages(entries []Entry) []core.AgentMessage {
+func displayMessagesOf(entries []*Entry) []core.AgentMessage {
 	// A fresh marker is drawn at the cut, right before the first message the
 	// model still sees, not where the entry was appended: the line has to say
 	// "the model's context starts here". When the cut point is not in this
 	// slice (a resume suffix), it falls back to the entry's own position.
-	freshAt := map[string][]Entry{}
-	present := map[string]bool{}
+	// The presence set is a map over every message ID; only fresh entries
+	// consult it, so it is built only when the slice has one.
+	var freshAt map[string][]Entry
+	var present map[string]bool
 	for _, e := range entries {
-		if e.Type == EntryMessage {
-			present[e.ID] = true
+		if e.Type == EntryFresh && !e.Fresh.IsEmpty() {
+			present = make(map[string]bool, len(entries))
+			for _, m := range entries {
+				if m.Type == EntryMessage {
+					present[m.ID] = true
+				}
+			}
+			break
 		}
 	}
-	for _, e := range entries {
-		if e.Type == EntryFresh && !e.Fresh.IsEmpty() && present[e.Fresh.FirstKeptEntryID] {
-			freshAt[e.Fresh.FirstKeptEntryID] = append(freshAt[e.Fresh.FirstKeptEntryID], e)
+	if present != nil {
+		freshAt = map[string][]Entry{}
+		for _, e := range entries {
+			if e.Type == EntryFresh && !e.Fresh.IsEmpty() && present[e.Fresh.FirstKeptEntryID] {
+				freshAt[e.Fresh.FirstKeptEntryID] = append(freshAt[e.Fresh.FirstKeptEntryID], *e)
+			}
 		}
 	}
-	var msgs []core.AgentMessage
+	msgs := make([]core.AgentMessage, 0, len(entries))
 	for _, e := range entries {
 		switch e.Type {
 		case EntryMessage:
@@ -529,8 +584,11 @@ func displayMessages(entries []Entry) []core.AgentMessage {
 			if e.Fresh.IsEmpty() || present[e.Fresh.FirstKeptEntryID] {
 				continue
 			}
-			msgs = append(msgs, freshMarker(e))
+			msgs = append(msgs, freshMarker(*e))
 		}
+	}
+	if len(msgs) == 0 {
+		return nil
 	}
 	return msgs
 }

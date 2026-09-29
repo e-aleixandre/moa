@@ -601,6 +601,15 @@ func (sctx *SessionContext) displayMessages() []core.AgentMessage {
 	return sctx.Agent.Messages()
 }
 
+// cacheUsage is core.SummarizeCacheUsage over displayMessages. With a
+// TreeSyncer it aggregates in place instead of materialising the transcript.
+func (sctx *SessionContext) cacheUsage() core.CacheUsageSummary {
+	if sctx.treeSyncer != nil {
+		return sctx.treeSyncer.CacheUsage()
+	}
+	return core.SummarizeCacheUsage(sctx.displayMessages())
+}
+
 // SnapshotTranscriptPath returns the active transcript branch, including a
 // visible in-flight turn when a TreeSyncer is present. It is a snapshot only:
 // it never mutates the tree or the sync baseline.
