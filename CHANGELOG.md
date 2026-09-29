@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.1] - 2026-09-29
+
+### Fixed
+
+- Opening a large session in the web UI no longer copies its whole history to
+  send the latest messages: on a 42 MB session the projection drops from about
+  111 MB and 40 ms to about 4 MB and 4 ms per open or reconnect.
+
 ## [0.44.0] - 2026-09-29
 
 ### Changed
