@@ -67,6 +67,23 @@ type Record struct {
 	// NoticeState is set in listings when the task's latest notice has not
 	// reached its session (held, pending or failed).
 	NoticeState string `json:"notice_state,omitempty"`
+
+	// Scheduled template fields, set only on a template.
+	When               *When       `json:"when,omitempty"`
+	TZ                 string      `json:"tz,omitempty"`
+	Target             *Target     `json:"target,omitempty"`
+	Delivery           *Delivery   `json:"delivery,omitempty"`
+	Next               int64       `json:"next,omitempty"`
+	ScheduleState      string      `json:"schedule_state,omitempty"`
+	CreatedBySessionID string      `json:"created_by_session_id,omitempty"`
+	LateCount          int         `json:"late_count,omitempty"`
+	Failure            *RunFailure `json:"failure,omitempty"`
+
+	// A run's child task links back to its template and occurrence.
+	ParentTaskID int64 `json:"parent_task_id,omitempty"`
+	OccurrenceID int64 `json:"occurrence_id,omitempty"`
+
+	template bool
 }
 
 // Task is the flat projection of a session checklist. Its JSON is what

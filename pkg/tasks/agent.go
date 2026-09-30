@@ -24,6 +24,12 @@ type AgentTask struct {
 	// usable ID.
 	PrivateBlockers int     `json:"private_blockers,omitempty"`
 	Unblocks        []int64 `json:"unblocks,omitempty"`
+
+	// A template the agent created for itself: when it runs.
+	When          *When  `json:"when,omitempty"`
+	TZ            string `json:"tz,omitempty"`
+	Next          int64  `json:"next,omitempty"`
+	ScheduleState string `json:"schedule_state,omitempty"`
 }
 
 // AgentView is the default listing of an agent.
@@ -31,6 +37,9 @@ type AgentView struct {
 	Checklist []AgentTask `json:"checklist"`
 	Requests  []AgentTask `json:"requests"`
 	Backlog   []AgentTask `json:"backlog"`
+	// Scheduled are the templates this session created for itself. They are
+	// not on its checklist: each run arrives as its own task.
+	Scheduled []AgentTask `json:"scheduled,omitempty"`
 }
 
 // AgentInput creates a checklist task or a request.
@@ -60,6 +69,10 @@ func (a Actor) reads(t *Record) bool {
 	case PlaceAgent:
 		return t.AssigneeSessionID == a.SessionID
 	case PlaceYou:
+		// A template is readable by the session that scheduled it for itself.
+		if t.template {
+			return t.CreatedBySessionID != "" && t.CreatedBySessionID == a.SessionID
+		}
 		// A private note has no requester and matches nobody.
 		return t.RequesterSessionID != "" && t.RequesterSessionID == a.SessionID
 	case PlaceBacklog:
@@ -71,7 +84,8 @@ func (a Actor) reads(t *Record) bool {
 // edits is narrower than reads: a checklist task, or a request still open
 // (to correct it). Backlog is only ever written through Claim.
 func (a Actor) edits(t *Record) bool {
-	if !a.reads(t) {
+	// A template changes only through the owner's schedule controls.
+	if !a.reads(t) || t.template {
 		return false
 	}
 	switch t.Place {
@@ -123,6 +137,7 @@ func (a Actor) project(ctx context.Context, q querier, recs []Record) ([]AgentTa
 		at := AgentTask{
 			ID: t.ID, Title: t.Title, Description: t.Description, Status: t.Status, Place: t.Place,
 			CompletionNote: t.CompletionNote, Subtasks: t.Subtasks,
+			When: t.When, TZ: t.TZ, Next: t.Next, ScheduleState: t.ScheduleState,
 		}
 		for _, id := range t.WaitsFor {
 			w := known[id]
@@ -178,6 +193,10 @@ func (r *Repo) AgentList(ctx context.Context, a Actor) (AgentView, error) {
 		if view.Backlog, err = load("place = 'backlog' AND project_key = ? AND status = 'pending' AND archived_at IS NULL", a.ProjectKey); err != nil {
 			return view, err
 		}
+	}
+	if view.Scheduled, err = load(`place = 'you' AND archived_at IS NULL
+		AND id IN (SELECT task_id FROM task_schedules WHERE created_by_session_id = ?)`, a.SessionID); err != nil {
+		return view, err
 	}
 	return view, nil
 }
@@ -533,6 +552,32 @@ func (r *Repo) ResetChecklist(ctx context.Context, sessionID string) error {
 		return err
 	}
 	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
+		// Runs whose child is on this checklist are settled first: a bulk
+		// delete must not leave an assignment that can still be delivered.
+		rows, err := tx.QueryContext(ctx, `SELECT o.id FROM task_occurrences o JOIN tasks t ON t.id = o.child_task_id
+			WHERE t.place = 'agent' AND t.assignee_session_id = ?`, sessionID)
+		if err != nil {
+			return false, err
+		}
+		var runs []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return false, err
+			}
+			runs = append(runs, id)
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return false, err
+		}
+		for _, id := range runs {
+			if err := r.settleRemovedChild(ctx, tx, id); err != nil {
+				return false, err
+			}
+		}
 		res, err := tx.ExecContext(ctx, "DELETE FROM tasks WHERE place = 'agent' AND assignee_session_id = ?", sessionID)
 		if err != nil {
 			return false, err
@@ -540,4 +585,41 @@ func (r *Repo) ResetChecklist(ctx context.Context, sessionID string) error {
 		n, _ := res.RowsAffected()
 		return n > 0, nil
 	})
+}
+
+// AgentSchedule schedules a task for the agent's own session: a template the
+// owner owns and sees, which this session can read and which runs here. The
+// target and the creator are the actor, never something the model says.
+func (r *Repo) AgentSchedule(ctx context.Context, a Actor, in AgentInput, when When, tz string) (Record, error) {
+	if a.SessionID == "" {
+		return Record{}, invalid("no session identity")
+	}
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return Record{}, invalid("title is required")
+	}
+	def := ScheduleDef{When: when, TZ: tz, Target: Target{Kind: TargetSession, ID: a.SessionID}, CreatedBySessionID: a.SessionID}
+	cin := CreateInput{Schedule: &def}
+	rec := Record{Title: title, Description: in.Description, Status: StatusPending,
+		ProjectKey: a.ProjectKey, ProjectCWD: a.ProjectCWD}
+	first, err := r.checkTemplateInput(&cin, &rec)
+	if err != nil {
+		return Record{}, err
+	}
+	var out Record
+	err = r.write(ctx, func(tx *sql.Tx) (bool, error) {
+		if err := a.visibleWaits(ctx, tx, in.DependsOn); err != nil {
+			return false, err
+		}
+		id, err := r.insertTask(ctx, tx, rec, in.Subtasks, in.DependsOn)
+		if err != nil {
+			return false, err
+		}
+		if err := r.createSchedule(ctx, tx, id, *cin.Schedule, first); err != nil {
+			return false, err
+		}
+		out, err = getRecord(ctx, tx, id)
+		return true, err
+	})
+	return out, err
 }

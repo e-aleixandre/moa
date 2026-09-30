@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -85,14 +86,66 @@ CREATE INDEX task_dependencies_waits ON task_dependencies(waits_for_id);`,
 );
 CREATE INDEX task_notifications_task ON task_notifications(task_id, created_at);
 CREATE INDEX task_notifications_open ON task_notifications(state, created_at);`,
+	// 3: scheduled templates and their runs. A template is an ordinary private
+	// task with one task_schedules row; each consumed slot is an occurrence.
+	// Occurrences have no foreign keys on purpose: an authorized run outlives
+	// its template, and its history outlives its child task. Live links are
+	// kept by unique columns and by the transactions that delete or complete.
+	`ALTER TABLE tasks_meta ADD COLUMN legacy_schedules_imported INTEGER NOT NULL DEFAULT 0
+  CHECK(legacy_schedules_imported IN (0,1));
+CREATE TABLE task_schedules (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  when_json TEXT NOT NULL CHECK(json_valid(when_json)),
+  tz TEXT NOT NULL CHECK(length(tz) > 0),
+  target_json TEXT NOT NULL CHECK(json_valid(target_json)),
+  busy TEXT NOT NULL DEFAULT 'steer' CHECK(busy IN ('steer','wait')),
+  saved TEXT NOT NULL DEFAULT 'wake' CHECK(saved IN ('wake','hold')),
+  late TEXT NOT NULL DEFAULT 'ask' CHECK(late IN ('ask','run','skip')),
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  next_due_at INTEGER CHECK(next_due_at IS NULL OR next_due_at > 0),
+  created_by_session_id TEXT,
+  CHECK(json_extract(when_json,'$.kind') IS 'once' OR json_extract(when_json,'$.kind') IS 'repeat'),
+  CHECK(json_extract(target_json,'$.kind') IS 'session' OR json_extract(target_json,'$.kind') IS 'owner'
+     OR json_extract(target_json,'$.kind') IS 'new')
+);
+CREATE INDEX task_schedules_due ON task_schedules(next_due_at, task_id) WHERE enabled = 1 AND next_due_at IS NOT NULL;
+CREATE INDEX task_schedules_creator ON task_schedules(created_by_session_id);
+CREATE TABLE task_occurrences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_task_id INTEGER NOT NULL,
+  due_at INTEGER NOT NULL CHECK(due_at > 0),
+  definition_revision INTEGER NOT NULL CHECK(definition_revision > 0),
+  spec_json TEXT NOT NULL CHECK(json_valid(spec_json)),
+  trigger TEXT NOT NULL CHECK(trigger IN ('timer','run_now','skip_next','legacy')),
+  observed_at INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('late','ready','assigned','done','failed','skipped')),
+  reason TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  confirmed_at INTEGER,
+  resolved_session_id TEXT,
+  child_task_id INTEGER UNIQUE,
+  notice_id TEXT UNIQUE,
+  admitted_at INTEGER,
+  completed_at INTEGER,
+  missed_count INTEGER NOT NULL DEFAULT 0 CHECK(missed_count >= 0),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+  UNIQUE(schedule_task_id, due_at),
+  CHECK(notice_id IS NULL OR (child_task_id IS NOT NULL AND resolved_session_id IS NOT NULL)),
+  CHECK(state <> 'assigned' OR notice_id IS NOT NULL),
+  CHECK(state <> 'late' OR (child_task_id IS NULL AND notice_id IS NULL AND confirmed_at IS NULL))
+);
+CREATE INDEX task_occurrences_work ON task_occurrences(state, due_at, id);
+CREATE INDEX task_occurrences_session ON task_occurrences(resolved_session_id, state);`,
 }
 
 // Repo is the shared task database. It opens lazily: a process that never
 // touches tasks never creates the file, and reads of a database that does not
 // exist yet see no tasks instead of creating one.
 type Repo struct {
-	path string
-	now  func() time.Time
+	path  string
+	clock atomic.Pointer[func() time.Time]
 
 	mu     sync.Mutex
 	w      *sql.DB // exactly one connection: this process's writer
@@ -101,11 +154,17 @@ type Repo struct {
 	closed bool
 
 	changed chan struct{} // nudges Watch after a local commit
+
+	// hookAfterPlan, when set by a test, runs between a slot consumption's
+	// calendar read and its write transaction.
+	hookAfterPlan func()
 }
 
 // New returns a repository on path. Nothing touches the disk until first use.
 func New(path string) *Repo {
-	return &Repo{path: path, now: time.Now, changed: make(chan struct{}, 1)}
+	r := &Repo{path: path, changed: make(chan struct{}, 1)}
+	r.SetClock(time.Now)
+	return r
 }
 
 var (
@@ -138,8 +197,11 @@ func (r *Repo) isClosed() bool {
 func (r *Repo) Path() string { return r.path }
 
 // SetClock replaces the clock; tests use it to age tasks past the archive
-// window without sleeping.
-func (r *Repo) SetClock(now func() time.Time) { r.now = now }
+// window and to cross schedule boundaries without sleeping. It is safe to call
+// while other goroutines use the repository.
+func (r *Repo) SetClock(now func() time.Time) { r.clock.Store(&now) }
+
+func (r *Repo) now() time.Time { return (*r.clock.Load())() }
 
 // Close releases the connections.
 func (r *Repo) Close() error {

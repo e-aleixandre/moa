@@ -29,6 +29,10 @@ type CreateInput struct {
 	// Deliver is the owner's choice for a saved recipient: DeliverWake or
 	// DeliverHold ("" means hold). A loaded recipient gets the notice at once.
 	Deliver string
+
+	// Schedule makes the task a scheduled template: a private task of yours
+	// that the scheduler turns into runs. It has no requester or assignee.
+	Schedule *ScheduleDef
 }
 
 // Patch is a partial owner edit; nil fields are left alone.
@@ -50,6 +54,10 @@ type Patch struct {
 	// to the requester of a request). Assigning or completing notifies anyway.
 	Notify  bool
 	Deliver string // see CreateInput.Deliver
+
+	// Schedule replaces a template's definition, from its next unconsumed
+	// slot on. Only a template accepts it.
+	Schedule *ScheduleDef
 }
 
 func validStatus(s string) bool {
@@ -109,6 +117,15 @@ func (r *Repo) Create(ctx context.Context, in CreateInput) (Record, error) {
 		ProjectKey: projectKeyFor(in.ProjectKey, in.ProjectCWD), ProjectCWD: in.ProjectCWD,
 		RequesterSessionID: in.RequesterSessionID, AssigneeSessionID: in.AssigneeSessionID,
 	}
+	var firstDue int64
+	if in.Schedule != nil {
+		def := *in.Schedule
+		in.Schedule = &def
+		var err error
+		if firstDue, err = r.checkTemplateInput(&in, &rec); err != nil {
+			return Record{}, err
+		}
+	}
 	if err := checkPlace(&rec); err != nil {
 		return Record{}, err
 	}
@@ -117,6 +134,11 @@ func (r *Repo) Create(ctx context.Context, in CreateInput) (Record, error) {
 		id, err := r.insertTask(ctx, tx, rec, in.Subtasks, in.WaitsFor)
 		if err != nil {
 			return false, err
+		}
+		if in.Schedule != nil {
+			if err := r.createSchedule(ctx, tx, id, *in.Schedule, firstDue); err != nil {
+				return false, err
+			}
 		}
 		out, err = getRecord(ctx, tx, id)
 		if err != nil {
@@ -200,8 +222,16 @@ func (r *Repo) Update(ctx context.Context, id, revision int64, p Patch) (Record,
 			return false, &ConflictError{Current: cur}
 		}
 		before := cur
+		if err := checkScheduledPatch(cur, p); err != nil {
+			return false, err
+		}
 		if err := r.applyPatch(&cur, p); err != nil {
 			return false, err
+		}
+		if p.Schedule != nil {
+			if err := r.editSchedule(ctx, tx, cur, *p.Schedule); err != nil {
+				return false, err
+			}
 		}
 		if err := r.saveTask(ctx, tx, cur, revision); err != nil {
 			return false, err
@@ -221,9 +251,37 @@ func (r *Repo) Update(ctx context.Context, id, revision int64, p Patch) (Record,
 			return false, err
 		}
 		kind, to := ownerNotice(&before, out, p.Notify)
+		if kind == NoticeAgentDone && out.OccurrenceID != 0 {
+			// A run completed before its assignment was reserved: the session
+			// never heard of it, so it hears nothing now either.
+			withdrawn, err := assignmentWithdrawn(ctx, tx, out.OccurrenceID)
+			if err != nil || withdrawn {
+				return true, err
+			}
+		}
 		return true, r.addNotice(ctx, tx, kind, to, p.Deliver, out)
 	})
 	return out, err
+}
+
+// checkScheduledPatch refuses owner edits that would bypass the scheduler: a
+// template is never moved, assigned, completed or notified by hand, and a
+// run's child only changes session through Send to another session.
+func checkScheduledPatch(cur Record, p Patch) error {
+	if cur.template {
+		if p.Place != nil && *p.Place != cur.Place || p.AssigneeSessionID != nil || p.Status != nil && *p.Status != cur.Status || p.Notify {
+			return invalid("a scheduled task runs from its schedule; it cannot be moved, assigned, completed or notified")
+		}
+		return nil
+	}
+	if p.Schedule != nil {
+		return invalid("task #%d is not scheduled", cur.ID)
+	}
+	if cur.OccurrenceID != 0 && (p.Place != nil && *p.Place != cur.Place ||
+		p.AssigneeSessionID != nil && *p.AssigneeSessionID != cur.AssigneeSessionID) {
+		return invalid("a scheduled run changes session only through Send to another session")
+	}
+	return nil
 }
 
 func (r *Repo) applyPatch(cur *Record, p Patch) error {
@@ -296,6 +354,11 @@ func (r *Repo) saveTask(ctx context.Context, tx *sql.Tx, t Record, revision int6
 		}
 		return &ConflictError{Current: cur}
 	}
+	if t.OccurrenceID != 0 {
+		// Every status path (owner, agent, /tasks) writes through here, so a
+		// run can never disagree with its child.
+		return r.settleChildStatus(ctx, tx, t)
+	}
 	return nil
 }
 
@@ -317,6 +380,16 @@ func (r *Repo) Delete(ctx context.Context, id, revision int64, deliver string) e
 		}
 		if cur.Revision != revision {
 			return false, &ConflictError{Current: cur}
+		}
+		if cur.OccurrenceID != 0 {
+			if err := r.settleRemovedChild(ctx, tx, cur.OccurrenceID); err != nil {
+				return false, err
+			}
+		}
+		if cur.template {
+			if err := r.settleDeletedTemplate(ctx, tx, id); err != nil {
+				return false, err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM tasks WHERE id = ?", id); err != nil {
 			return false, err
@@ -355,9 +428,14 @@ type Filter struct {
 // only requests agents made that are still open.
 type Counts struct {
 	OpenRequests int `json:"open_requests"`
-	You          int `json:"you"`
-	Backlog      int `json:"backlog"`
-	Agents       int `json:"agents"`
+	// LateOccurrences are runs waiting for the owner's Run or Skip, counted
+	// per run (a paused template's included); Attention adds them to the
+	// open requests for the footer.
+	LateOccurrences int `json:"late_occurrences"`
+	Attention       int `json:"attention"`
+	You             int `json:"you"`
+	Backlog         int `json:"backlog"`
+	Agents          int `json:"agents"`
 }
 
 // ListResult is an owner listing with the global revision it was read at.
@@ -416,6 +494,9 @@ func (r *Repo) List(ctx context.Context, f Filter) (ListResult, error) {
 			res.Tasks[i].NoticeState = st
 		}
 	}
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_occurrences WHERE state = 'late'").Scan(&res.Counts.LateOccurrences); err != nil {
+		return res, err
+	}
 	for _, t := range recs {
 		if t.ArchivedAt != 0 || t.Status == StatusDone {
 			continue
@@ -432,6 +513,7 @@ func (r *Repo) List(ctx context.Context, f Filter) (ListResult, error) {
 			res.Counts.Agents++
 		}
 	}
+	res.Counts.Attention = res.Counts.OpenRequests + res.Counts.LateOccurrences
 	return res, nil
 }
 

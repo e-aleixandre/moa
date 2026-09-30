@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -123,15 +124,24 @@ func (r *Repo) addNotice(ctx context.Context, tx *sql.Tx, kind NoticeKind, recip
 	if kind == "" || recipient == "" {
 		return nil
 	}
+	_, err := r.insertNotice(ctx, tx, rec.ID, kind, recipient, deliver, noticeTitle(kind, rec.ID), noticeText(kind, rec))
+	return err
+}
+
+// insertNotice writes one pending notice and returns its ID.
+func (r *Repo) insertNotice(ctx context.Context, tx *sql.Tx, taskID int64, kind NoticeKind, recipient, deliver, title, text string) (string, error) {
 	if deliver != DeliverWake {
 		deliver = DeliverHold
 	}
 	now := r.now().UnixMilli()
+	id := newNoticeID()
 	_, err := tx.ExecContext(ctx, `INSERT INTO task_notifications(id, task_id, kind, recipient_session_id, deliver, method,
 		title, body, state, reason, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,'',?,?)`,
-		newNoticeID(), rec.ID, string(kind), recipient, deliver, MethodRun,
-		noticeTitle(kind, rec.ID), noticeText(kind, rec), NoticePending, now, now)
-	return err
+		id, taskID, string(kind), recipient, deliver, MethodRun, title, text, NoticePending, now, now)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 func noticeTitle(kind NoticeKind, id int64) string {
@@ -280,6 +290,9 @@ type NoticeChange struct {
 	Reason  string
 	Method  string // "" keeps the current one
 	SteerID string
+	// Admitted records that the session accepted the notice's input. For a
+	// scheduled assignment it stamps the run's admitted_at; delivered implies it.
+	Admitted bool
 }
 
 // SetNoticeState applies c and reports whether it matched. A change bumps the
@@ -291,6 +304,14 @@ func (r *Repo) SetNoticeState(ctx context.Context, id string, c NoticeChange) (b
 		var delivered any
 		if c.State == NoticeDelivered {
 			delivered = now
+		}
+		var prev string
+		switch err := tx.QueryRowContext(ctx, "SELECT state FROM task_notifications WHERE id = ?", id).Scan(&prev); {
+		case errors.Is(err, sql.ErrNoRows):
+			matched = false
+			return false, nil
+		case err != nil:
+			return false, err
 		}
 		args := []any{c.State, c.Reason, c.Method, c.Method, nullStr(c.SteerID), now, delivered, id}
 		for _, f := range c.From {
@@ -305,15 +326,21 @@ func (r *Repo) SetNoticeState(ctx context.Context, id string, c NoticeChange) (b
 		}
 		n, _ := res.RowsAffected()
 		matched = n > 0
-		return matched, nil
+		if !matched {
+			return false, nil
+		}
+		return true, r.settleNotice(ctx, tx, id, prev, c)
 	})
 	return matched, err
 }
 
-// latestNoticeStates maps each task to the state of its newest notice.
+// latestNoticeStates maps each task to the state of its newest notice. A
+// scheduled assignment withdrawn because its run finished, was removed or was
+// re-gated is not a delivery failure, and is reported as nothing.
 func latestNoticeStates(ctx context.Context, q querier) (map[int64]string, error) {
-	rows, err := q.QueryContext(ctx, `SELECT task_id, state FROM task_notifications
-		WHERE rowid IN (SELECT MAX(rowid) FROM task_notifications GROUP BY task_id)`)
+	rows, err := q.QueryContext(ctx, `SELECT task_id, CASE WHEN state = 'failed' AND reason IN (?,?,?) THEN '' ELSE state END
+		FROM task_notifications WHERE rowid IN (SELECT MAX(rowid) FROM task_notifications GROUP BY task_id)`,
+		ReasonChildDone, ReasonChildRemoved, ReasonRegated)
 	if err != nil {
 		return nil, err
 	}

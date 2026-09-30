@@ -14,9 +14,17 @@ type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+// The last four columns come from the scheduling tables: whether the task is
+// a template (and which session created it), and the occurrence a run's child
+// belongs to. Every read of a task knows what it is, so no path can treat a
+// template or a scheduled child as an ordinary task by forgetting a join.
 const taskCols = `id, title, description, status, place, project_key, project_cwd,
 	requester_session_id, assignee_session_id, completion_note,
-	created_at, updated_at, completed_at, archived_at, revision`
+	created_at, updated_at, completed_at, archived_at, revision,
+	EXISTS(SELECT 1 FROM task_schedules s WHERE s.task_id = tasks.id),
+	(SELECT s.created_by_session_id FROM task_schedules s WHERE s.task_id = tasks.id),
+	(SELECT o.id FROM task_occurrences o WHERE o.child_task_id = tasks.id),
+	(SELECT o.schedule_task_id FROM task_occurrences o WHERE o.child_task_id = tasks.id)`
 
 func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var (
@@ -25,12 +33,18 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 		projKey, projCWD, requester sql.NullString
 		assignee                    sql.NullString
 		completedAt, archivedAt     sql.NullInt64
+		template                    bool
+		creator                     sql.NullString
+		occID, parentID             sql.NullInt64
 	)
 	if err := sc.Scan(&r.ID, &r.Title, &r.Description, &r.Status, &place, &projKey, &projCWD,
 		&requester, &assignee, &r.CompletionNote,
-		&r.CreatedAt, &r.UpdatedAt, &completedAt, &archivedAt, &r.Revision); err != nil {
+		&r.CreatedAt, &r.UpdatedAt, &completedAt, &archivedAt, &r.Revision,
+		&template, &creator, &occID, &parentID); err != nil {
 		return Record{}, err
 	}
+	r.template, r.CreatedBySessionID = template, creator.String
+	r.OccurrenceID, r.ParentTaskID = occID.Int64, parentID.Int64
 	r.Place = Place(place)
 	r.ProjectKey, r.ProjectCWD = projKey.String, projCWD.String
 	r.RequesterSessionID, r.AssigneeSessionID = requester.String, assignee.String
@@ -62,7 +76,10 @@ func loadRecords(ctx context.Context, q querier, where string, args ...any) ([]R
 	if err != nil {
 		return nil, err
 	}
-	return recs, attachRelations(ctx, q, recs)
+	if err := attachRelations(ctx, q, recs); err != nil {
+		return nil, err
+	}
+	return recs, attachSchedules(ctx, q, recs)
 }
 
 func getRecord(ctx context.Context, q querier, id int64) (Record, error) {
