@@ -128,6 +128,68 @@ func TestScheduleReviewOnceSecondRunNotPrematurelyDone(t *testing.T) {
 	}
 }
 
+// A ready run of a deleted template that is found late at restart cannot
+// become a decision nobody can reach: it is settled instead.
+func TestScheduleReviewDeletedReadyDoesNotRegateToOrphan(t *testing.T) {
+	r, clock := schedRepo(t, "2026-09-30T08:00:00Z")
+	tmpl := mkSchedule(t, r, "deleted pending", onceDef(utc("2026-09-30T09:00:00Z"), ""))
+	clock.Set(utc("2026-09-30T09:00:00Z"))
+	o := materializeOne(t, r)
+	cur := mustGet(t, r, tmpl.ID)
+	if err := r.Delete(bg, cur.ID, cur.Revision, ""); err != nil {
+		t.Fatal(err)
+	}
+	clock.Set(utc("2026-09-30T09:20:00Z"))
+	fresh := openRepo(t, r.Path())
+	fresh.SetClock(clock.Now)
+	if _, err := fresh.RegateOnRestart(bg); err != nil {
+		t.Fatal(err)
+	}
+	list, err := fresh.List(bg, Filter{IncludeAgents: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := mustOcc(t, fresh, o.ID)
+	if got.State == OccLate || list.Counts.LateOccurrences != 0 {
+		t.Errorf("restart left an unreachable decision: run %s/%s, late_occurrences=%d", got.State, got.Reason, list.Counts.LateOccurrences)
+	}
+	if got.State != OccSkipped || got.Reason != ReasonScheduleDeleted {
+		t.Errorf("run = %s/%s, want skipped/%s", got.State, got.Reason, ReasonScheduleDeleted)
+	}
+}
+
+// An orphan late left by an earlier binary is settled at the next restart.
+func TestScheduleReviewExistingOrphanLateIsSettledAtRestart(t *testing.T) {
+	r, clock := schedRepo(t, "2026-09-30T08:00:00Z")
+	tmpl := mkSchedule(t, r, "deleted pending", onceDef(utc("2026-09-30T09:00:00Z"), ""))
+	clock.Set(utc("2026-09-30T09:00:00Z"))
+	o := materializeOne(t, r)
+	cur := mustGet(t, r, tmpl.ID)
+	if err := r.Delete(bg, cur.ID, cur.Revision, ""); err != nil {
+		t.Fatal(err)
+	}
+	execSQL(t, r, "UPDATE task_occurrences SET state = 'late' WHERE id = ?", o.ID)
+	fresh := openRepo(t, r.Path())
+	fresh.SetClock(clock.Now)
+	if _, err := fresh.RegateOnRestart(bg); err != nil {
+		t.Fatal(err)
+	}
+	list, err := fresh.List(bg, Filter{IncludeAgents: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Counts.LateOccurrences != 0 || list.Counts.Attention != 0 {
+		t.Errorf("orphan late still counted: %+v", list.Counts)
+	}
+}
+
+func execSQL(t *testing.T, r *Repo, stmt string, args ...any) {
+	t.Helper()
+	if _, err := rawDB(t, r.Path()).Exec(stmt, args...); err != nil {
+		t.Fatalf("exec %q: %v", stmt, err)
+	}
+}
+
 // Q2 without a restart: an assignment still waiting in the outbox (held for a
 // closed session, say) is coalesced into the next slot's run.
 func TestScheduleReviewNextSlotSupersedesWaitingAssignment(t *testing.T) {

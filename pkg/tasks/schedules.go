@@ -1147,6 +1147,15 @@ func (r *Repo) RegateOnRestart(ctx context.Context) (int, error) {
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		n = 0
 		now := r.now().UnixMilli()
+		// A decision whose template is gone cannot be answered by anyone
+		// (left by an earlier binary): settle it like the template's delete.
+		res, err := tx.ExecContext(ctx, `UPDATE task_occurrences SET state = 'skipped', reason = ?, updated_at = ?, revision = revision + 1
+			WHERE state = 'late' AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = schedule_task_id)`, ReasonScheduleDeleted, now)
+		if err != nil {
+			return false, err
+		}
+		orphans, _ := res.RowsAffected()
+		n += int(orphans)
 		cands, err := queryOccurrences(ctx, tx, `state IN ('ready','assigned') AND admitted_at IS NULL AND confirmed_at IS NULL
 			AND trigger <> 'run_now' AND due_at <= ? ORDER BY id`, now-LateAfter.Milliseconds())
 		if err != nil {
@@ -1155,6 +1164,10 @@ func (r *Repo) RegateOnRestart(ctx context.Context) (int, error) {
 		for _, o := range cands {
 			if o.Spec.Delivery.Late == LateRun {
 				continue
+			}
+			var parent int
+			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE id = ?", o.ScheduleTaskID).Scan(&parent); err != nil {
+				return false, err
 			}
 			if o.NoticeID != "" {
 				var state string
@@ -1175,9 +1188,14 @@ func (r *Repo) RegateOnRestart(ctx context.Context) (int, error) {
 				}
 			}
 			o.ChildTaskID, o.NoticeID, o.SessionID = 0, "", ""
-			if o.Spec.Delivery.Late == LateSkip {
+			switch {
+			case parent == 0:
+				// Its template was deleted: nobody could answer the
+				// question, and it must not run without the owner's OK.
+				o.State, o.Reason = OccSkipped, ReasonScheduleDeleted
+			case o.Spec.Delivery.Late == LateSkip:
 				o.State, o.Reason = OccSkipped, ReasonLateSkip
-			} else {
+			default:
 				o.State, o.Reason = OccLate, ReasonRegated
 			}
 			if err := r.saveOccurrence(ctx, tx, o); err != nil {
