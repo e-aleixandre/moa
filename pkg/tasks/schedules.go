@@ -1267,3 +1267,28 @@ func legacyTitle(text string) string {
 	}
 	return line
 }
+
+// ScheduledFor lists the templates that concern a session: the ones that
+// target it, the ones it scheduled for itself, and the ones aimed at an owner
+// whose conversation it is (ownerIDs). They are not on its checklist; each
+// run arrives there as its own task.
+func (r *Repo) ScheduledFor(ctx context.Context, sessionID string, ownerIDs []string) ([]Record, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	r.archiveDue(ctx)
+	rd, err := r.reader()
+	if err != nil || rd == nil {
+		return nil, err
+	}
+	args := []any{sessionID, sessionID}
+	owners := ""
+	if len(ownerIDs) > 0 {
+		owners = " OR (json_extract(target_json, '$.kind') = 'owner' AND json_extract(target_json, '$.id') IN (" + placeholders(len(ownerIDs)) + "))"
+		for _, id := range ownerIDs {
+			args = append(args, id)
+		}
+	}
+	return loadRecords(ctx, rd, `archived_at IS NULL AND id IN (SELECT task_id FROM task_schedules
+		WHERE created_by_session_id = ? OR (json_extract(target_json, '$.kind') = 'session' AND json_extract(target_json, '$.id') = ?)`+owners+`)`, args...)
+}

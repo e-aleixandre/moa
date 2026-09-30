@@ -120,9 +120,12 @@ func (m *Manager) sessionCWD(id string) (cwd string, known bool) {
 
 func writeTaskError(w http.ResponseWriter, err error) {
 	var conflict *tasks.ConflictError
+	var occConflict *tasks.OccurrenceConflictError
 	switch {
 	case errors.As(err, &conflict):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "current": conflict.Current})
+	case errors.As(err, &occConflict):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "current": occConflict.Current})
 	case errors.Is(err, tasks.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 	case errors.Is(err, tasks.ErrInvalid):
@@ -194,7 +197,20 @@ func handleGetTask(m *Manager) http.HandlerFunc {
 		if notices == nil {
 			notices = []tasks.Notice{}
 		}
-		writeJSON(w, http.StatusOK, taskDetail{Record: rec, Recipient: m.noticeRecipientOf(rec), Notices: notices})
+		detail := taskDetail{Record: rec, Recipient: m.noticeRecipientOf(rec), Notices: notices}
+		if rec.When != nil {
+			before, _ := strconv.ParseInt(r.URL.Query().Get("runs_before"), 10, 64)
+			runs, err := m.tasks.Runs(r.Context(), id, before, runsPageSize)
+			if err != nil {
+				writeTaskError(w, err)
+				return
+			}
+			if runs == nil {
+				runs = []tasks.Occurrence{}
+			}
+			detail.Runs = &runs
+		}
+		writeJSON(w, http.StatusOK, detail)
 	}
 }
 
@@ -204,6 +220,9 @@ type taskDetail struct {
 	tasks.Record
 	Recipient *noticeRecipient `json:"recipient,omitempty"`
 	Notices   []tasks.Notice   `json:"notices"`
+	// Runs is a template's history, newest first (a page of runsPageSize;
+	// runs_before pages back). Ordinary tasks have none.
+	Runs *[]tasks.Occurrence `json:"runs,omitempty"`
 }
 
 // handleDeliverNotice is "Wake now" / "Retry" on a notice that has not
@@ -251,7 +270,15 @@ func handleSessionTasks(m *Manager) http.HandlerFunc {
 		if requests == nil {
 			requests = []tasks.Task{}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"checklist": checklist, "requests": requests})
+		scheduled, err := m.sessionScheduled(r.Context(), id)
+		if err != nil {
+			writeTaskError(w, err)
+			return
+		}
+		if scheduled == nil {
+			scheduled = []tasks.Record{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"checklist": checklist, "requests": requests, "scheduled": scheduled})
 	}
 }
 
@@ -273,52 +300,63 @@ type taskProject struct {
 	CWDs []string `json:"cwds,omitempty"`
 }
 
+// taskProjectList is every project the owner can pick, with the directories
+// this server knows for it: the projects of stored tasks, then the working
+// directories of the live and saved sessions.
+func (m *Manager) taskProjectList(ctx context.Context) ([]taskProject, error) {
+	known, err := m.tasks.TaskProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	index := map[string]int{}
+	out := []taskProject{}
+	add := func(p tasks.Project) *taskProject {
+		if p.Key == "" {
+			return nil
+		}
+		if i, ok := index[p.Key]; ok {
+			return &out[i]
+		}
+		index[p.Key] = len(out)
+		out = append(out, taskProject{Key: p.Key, CWD: p.CWD})
+		return &out[len(out)-1]
+	}
+	for _, p := range known {
+		add(p)
+	}
+	cwds := map[string]bool{}
+	m.mu.RLock()
+	for _, s := range m.sessions {
+		if s != nil && s.CWD != "" {
+			cwds[s.CWD] = true
+		}
+	}
+	m.mu.RUnlock()
+	saved, _ := m.loadSavedSessions()
+	for _, sum := range saved {
+		if c, _ := sum.Metadata[session.MetaCWD].(string); c != "" {
+			cwds[c] = true
+		}
+	}
+	sorted := make([]string, 0, len(cwds))
+	for cwd := range cwds {
+		sorted = append(sorted, cwd)
+	}
+	sort.Strings(sorted)
+	for _, cwd := range sorted {
+		if p := add(tasks.Project{Key: m.projectKey(cwd), CWD: cwd}); p != nil {
+			p.CWDs = append(p.CWDs, cwd)
+		}
+	}
+	return out, nil
+}
+
 func handleTaskProjects(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		known, err := m.tasks.TaskProjects(r.Context())
+		out, err := m.taskProjectList(r.Context())
 		if err != nil {
 			writeTaskError(w, err)
 			return
-		}
-		index := map[string]int{}
-		out := []taskProject{}
-		add := func(p tasks.Project) *taskProject {
-			if p.Key == "" {
-				return nil
-			}
-			if i, ok := index[p.Key]; ok {
-				return &out[i]
-			}
-			index[p.Key] = len(out)
-			out = append(out, taskProject{Key: p.Key, CWD: p.CWD})
-			return &out[len(out)-1]
-		}
-		for _, p := range known {
-			add(p)
-		}
-		cwds := map[string]bool{}
-		m.mu.RLock()
-		for _, s := range m.sessions {
-			if s != nil && s.CWD != "" {
-				cwds[s.CWD] = true
-			}
-		}
-		m.mu.RUnlock()
-		saved, _ := m.loadSavedSessions()
-		for _, sum := range saved {
-			if c, _ := sum.Metadata[session.MetaCWD].(string); c != "" {
-				cwds[c] = true
-			}
-		}
-		sorted := make([]string, 0, len(cwds))
-		for cwd := range cwds {
-			sorted = append(sorted, cwd)
-		}
-		sort.Strings(sorted)
-		for _, cwd := range sorted {
-			if p := add(tasks.Project{Key: m.projectKey(cwd), CWD: cwd}); p != nil {
-				p.CWDs = append(p.CWDs, cwd)
-			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"projects": out})
 	}
@@ -336,6 +374,7 @@ type createTaskBody struct {
 	WaitsFor          []int64              `json:"waits_for"`
 	Notify            *bool                `json:"notify"`  // assigning always notifies; accepted for symmetry with PATCH
 	Deliver           string               `json:"deliver"` // "wake" | "hold" for a saved assignee; absent means hold
+	scheduleFields
 }
 
 func handleCreateTask(m *Manager) http.HandlerFunc {
@@ -349,7 +388,22 @@ func handleCreateTask(m *Manager) http.HandlerFunc {
 			ProjectKey: b.ProjectKey, ProjectCWD: b.ProjectCWD, AssigneeSessionID: b.AssigneeSessionID,
 			Subtasks: b.Subtasks, WaitsFor: b.WaitsFor, Deliver: b.Deliver,
 		}
-		if b.Place == tasks.PlaceAgent {
+		def, err := m.scheduleFromBody(b.scheduleFields, nil)
+		if err != nil {
+			writeTaskError(w, err)
+			return
+		}
+		if def != nil {
+			if b.Notify != nil && *b.Notify {
+				writeTaskError(w, badRequest("a scheduled task is not notified when it is created"))
+				return
+			}
+			in.Schedule = def
+			if in.ProjectKey == "" && in.ProjectCWD == "" {
+				in.ProjectCWD = m.templateProject(def)
+			}
+		}
+		if b.Place == tasks.PlaceAgent && def == nil {
 			cwd, known := m.sessionCWD(b.AssigneeSessionID)
 			if !known {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown assignee session"})
@@ -365,6 +419,7 @@ func handleCreateTask(m *Manager) http.HandlerFunc {
 			return
 		}
 		m.notices.nudge()
+		m.planner.nudge()
 		writeJSON(w, http.StatusCreated, rec)
 	}
 }
@@ -383,6 +438,7 @@ type patchTaskBody struct {
 	WaitsFor          *[]int64              `json:"waits_for"`
 	Notify            *bool                 `json:"notify"`  // "Save and notify"
 	Deliver           string                `json:"deliver"` // "wake" | "hold" for a saved recipient; absent means hold
+	scheduleFields
 }
 
 func handlePatchTask(m *Manager) http.HandlerFunc {
@@ -400,6 +456,19 @@ func handlePatchTask(m *Manager) http.HandlerFunc {
 			ProjectKey: b.ProjectKey, ProjectCWD: b.ProjectCWD, AssigneeSessionID: b.AssigneeSessionID,
 			CompletionNote: b.CompletionNote, Subtasks: b.Subtasks, WaitsFor: b.WaitsFor,
 			Notify: b.Notify != nil && *b.Notify, Deliver: b.Deliver,
+		}
+		if b.present() {
+			cur, err := m.tasks.Get(r.Context(), id)
+			if err != nil {
+				writeTaskError(w, err)
+				return
+			}
+			def, err := m.scheduleFromBody(b.scheduleFields, &cur)
+			if err != nil {
+				writeTaskError(w, err)
+				return
+			}
+			p.Schedule = def
 		}
 		if b.AssigneeSessionID != nil && *b.AssigneeSessionID != "" {
 			if _, known := m.sessionCWD(*b.AssigneeSessionID); !known {
@@ -435,6 +504,7 @@ func handlePatchTask(m *Manager) http.HandlerFunc {
 			return
 		}
 		m.notices.nudge()
+		m.planner.nudge()
 		writeJSON(w, http.StatusOK, rec)
 	}
 }

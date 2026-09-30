@@ -933,6 +933,37 @@ A notice that cannot go in stays visible in the task's detail with the reason: t
 
 If you press **Stop** or pull the queue back before the agent read a queued notice, the notice stays in the conversation without starting a turn, and it does not come back to your message box. A notice counts as delivered once it is saved in the conversation; after a restart, one that was accepted but never saved is delivered again, and one already saved is not repeated.
 
+### Scheduled tasks
+
+A task can run later or repeat. Such a **template** is a private task of yours; when its time comes the scheduler turns each run into an ordinary task on the checklist of the session it targets, delivered as a [notice](#notices-to-sessions). The API adds these optional members to `POST /api/tasks` and `PATCH /api/tasks/{id}`; tasks without them look exactly as before:
+
+```json
+{"title": "…", "when": {"kind": "once", "at": 1790000000000},
+ "tz": "Europe/Madrid",
+ "target": {"kind": "session", "id": "…"},
+ "delivery": {"busy": "steer", "saved": "wake", "late": "ask"}}
+```
+
+- `when` is `{"kind":"once","at":<UTC ms>}` or `{"kind":"repeat","rule":{"freq":"daily|weekdays|weekly|monthly","dow":0-6,"dom":1-31,"h":0-23,"mi":0-59}}` (`dow` 0 is Sunday). A rule is read in `tz`, an IANA zone; a slot that falls in a DST gap moves forward by the gap, one that happens twice fires once.
+- `target` is `{"kind":"session","id"}`, `{"kind":"owner","id":<owner id>}` (resolved to the owner's conversation when the run is released) or `{"kind":"new","project":<key>,"project_cwd":<one of that project's directories>,"model":<model spec>,"thinking":<level>}`, which creates a session for each run. Projects and directories are the ones `GET /api/tasks/projects` lists; a project with several directories needs `project_cwd`. Read back, the directory is `cwd`.
+- `delivery` defaults to steer into a working session (`wait` waits for idle), wake a saved one (`hold` keeps the notice), and ask before running a run found 10 minutes or more late (`run`, `skip`). A `new` target ignores `busy` and `saved`.
+- A `PATCH` with any of these members needs `revision`, changes the schedule from its next run on, keeps the members it leaves out, and refuses `null`. A run already taken keeps what it was.
+
+A template's record also carries `next` (UTC ms of its next run, or absent), `schedule_state` (`scheduled`, `late`, `failed` or `paused`), `late_count` (runs waiting for your answer), `failure` (`occurrence_id`, `reason`, `note` of the newest unresolved failed run) and `created_by_session_id` when a session scheduled it for itself. A run's task links back with `parent_task_id` and `occurrence_id`. `GET /api/tasks/{id}` of a template adds `runs`, newest first, 20 at a time (`?runs_before=<run id>` for older ones). A run is `{id, schedule_task_id, revision, at, state, trigger, reason?, note?, child_task_id?, session_id?, notice_id?, observed_at, confirmed_at?, admitted_at?, completed_at?, missed_count?}`; states are `late`, `ready`, `assigned`, `done`, `failed` and `skipped`. Several missed slots of a recurring task become one run with `missed_count` earlier ones.
+
+Controls answer `409` with `current` (the task or run as it is now) when their `revision`, or the `due_at` they name, is stale, so a retried gesture never takes the following slot:
+
+| Route | Body | Effect |
+|---|---|---|
+| `POST /api/tasks/{id}/run-now` | `revision`, `due_at` | Runs the next slot now; it is that slot early, not an extra run. Answers the run |
+| `POST /api/tasks/{id}/skip` | `revision`, `due_at` | Recurring only: the next slot is skipped. Answers the run |
+| `POST /api/tasks/{id}/pause`, `/resume` | `revision` | Recurring only. Resume continues after now, without the paused dates. Answers the task |
+| `POST /api/tasks/occurrences/{id}/confirm` | `revision`, `action`: `run` or `skip` | Answers a `late` run. Answers the run |
+| `POST /api/tasks/occurrences/{id}/reroute` | `revision`, `session_id` | Sends a `failed` run that was never delivered to another existing session, reusing its task. Answers the run |
+| `POST /api/tasks/when/parse` | `text`, `tz` | Reads English or Spanish ("tomorrow at 9", "cada lunes a las 9", "in 20m") with the server's clock, changing nothing. Answers `{when, tz, next, alt?, adjusted?}`: `alt` is the same time in the other half of the day when the hour was not qualified, `adjusted` says the wall time moved because of a DST gap. Empty text answers `{tz}`; an unreadable one is `400` with `code` `unknown`, `repeat`, `invalid` or `past` |
+
+`GET /api/tasks` counts stay as they were and add `late_occurrences` (runs waiting for your answer, under any parent, paused ones included) and `attention` (`open_requests` plus `late_occurrences`), whatever the filters. `GET /api/sessions/{id}/tasks` keeps `checklist` and `requests` and adds `scheduled`: the templates that target the session, that it scheduled for itself, or that target the owner whose conversation it is. `POST /api/sessions` takes an optional `tz` (IANA): the zone the session's agent schedules in; without it the agent uses UTC and says so.
+
 ## Push notifications
 
 What is worth a notification is decided on the server, in one place
