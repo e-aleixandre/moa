@@ -84,21 +84,21 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 		pol.Handle(s)
 	}
 
-	// One subscriber sees the run's events in the order they happened, so what
-	// a run was (a digest of a report, how long it took) is learnt before the
-	// run ends and cannot be mixed up with the next run's.
-	var run struct {
-		active bool
-		gen    uint64
+	// One subscriber sees the run's events in the order they were published, so
+	// what a run was (a digest of a report, when it began) is learnt before it
+	// ends. Runs are told apart by generation, not by "the current one": the
+	// runtime can publish the next run's start before the previous run's end.
+	type runInfo struct {
 		start  time.Time
 		digest bool
 	}
+	runs := map[uint64]*runInfo{}
 	// An input that lands in a digest run and did not come from a report (the
 	// user's own instruction) makes it a turn somebody asked for.
-	landed := func(custom map[string]any) {
-		if run.active && run.digest {
+	landed := func(gen uint64, custom map[string]any) {
+		if r := runs[gen]; r != nil && r.digest {
 			if o := bus.OriginOfInput(custom); o.Explicit && o.Source != reportSource {
-				run.digest = false
+				r.digest = false
 			}
 		}
 	}
@@ -116,25 +116,23 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 			case bus.PermissionResolved:
 				pol.Resolved(push.KindPermission, sess.ID, e.ID)
 			case bus.RunStarted:
-				run.active, run.gen, run.start = true, e.RunGen, time.Now()
-				run.digest = e.Origin.Source == reportSource
+				runs[e.RunGen] = &runInfo{start: e.At, digest: e.Origin.Source == reportSource}
 			case bus.Steered:
-				landed(e.Custom)
+				landed(e.RunGen, e.Custom)
 			case bus.UserMessageAppended:
-				landed(e.Custom)
+				landed(e.RunGen, e.Custom)
 			case bus.RunEnded:
-				known := run.active && run.gen == e.RunGen
-				start, digest := run.start, known && run.digest
-				run.active = false
+				r := runs[e.RunGen]
+				delete(runs, e.RunGen)
 				if e.Err != nil || e.Cancelled || !allowed() {
 					return
 				}
 				switch {
-				case digest:
+				case r != nil && r.digest:
 					s := signal(push.KindDigest)
 					s.Project = sess.CWD
 					pol.Handle(s)
-				case known && time.Since(start) < minRunForPush:
+				case r != nil && !r.start.IsZero() && !e.At.IsZero() && e.At.Sub(r.start) < minRunForPush:
 					// quick answer — not worth a buzz
 				default:
 					pol.Handle(signal(push.KindDone))

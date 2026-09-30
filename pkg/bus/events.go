@@ -286,6 +286,10 @@ type RunStarted struct {
 	// persisted, never sent to clients) and additive: a consumer that ignores
 	// it behaves exactly as it did before.
 	Origin RunOrigin
+	// At is when the run was admitted. A consumer that handles the event late
+	// (a slow subscriber) must measure the run from this, not from when it got
+	// around to the event.
+	At time.Time
 }
 
 // RunOrigin is the provenance of a run, decided centrally at admission.
@@ -327,8 +331,9 @@ type RunEnded struct {
 	FinalText string
 	Err       error // non-nil for real errors (not cancellation)
 	Cancelled bool
-	HadEdits  bool    // true if edit/write/multiedit/apply_patch completed successfully
-	Cost      float64 // USD cost of this run (0 if the model has no pricing)
+	HadEdits  bool      // true if edit/write/multiedit/apply_patch completed successfully
+	Cost      float64   // USD cost of this run (0 if the model has no pricing)
+	At        time.Time // when the run ended, for the same reason as RunStarted.At
 }
 
 // HandoffSettled is the terminal outcome of an internal handoff run. Unlike

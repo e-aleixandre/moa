@@ -111,6 +111,11 @@ type PolicyConfig struct {
 	// Tests replace both.
 	After func(d time.Duration, f func()) (stop func() bool)
 	Now   func() time.Time
+	// Deliver runs a delivery. The default does it on its own goroutine: a
+	// transport may take seconds (a hung push endpoint), and the caller is the
+	// ordered event handler of a session, which must go on deciding meanwhile.
+	// Tests that assert right after Handle run it inline.
+	Deliver func(func())
 }
 
 // Policy turns signals into notifications for a Sender. Its timers (grace
@@ -124,6 +129,7 @@ type Policy struct {
 	dailyLimit int
 	after      func(d time.Duration, f func()) func() bool
 	now        func() time.Time
+	deliver    func(func())
 
 	mu      sync.Mutex
 	closed  bool
@@ -155,6 +161,7 @@ func NewPolicy(sender Sender, cfg PolicyConfig) *Policy {
 		dailyLimit: cfg.DailyLimit,
 		after:      cfg.After,
 		now:        cfg.Now,
+		deliver:    cfg.Deliver,
 		pending:    make(map[pendingKey]func() bool),
 		summary:    make(map[string]*summaryWait),
 	}
@@ -169,6 +176,9 @@ func NewPolicy(sender Sender, cfg PolicyConfig) *Policy {
 	}
 	if p.dailyLimit <= 0 {
 		p.dailyLimit = DefaultDailyLimit
+	}
+	if p.deliver == nil {
+		p.deliver = func(f func()) { go f() }
 	}
 	if p.now == nil {
 		p.now = time.Now
@@ -346,7 +356,7 @@ func (p *Policy) emit(n Notification) {
 		p.sent++
 	}
 	p.mu.Unlock()
-	p.sender.Notify(n)
+	p.deliver(func() { p.sender.Notify(n) })
 }
 
 // Close stops every timer and makes the policy inert.
@@ -375,7 +385,9 @@ func (p *Policy) Resolved(kind Kind, sessionID, requestID string) {
 	}
 }
 
-// CancelSession drops every grace timer of a session that is going away.
+// CancelSession drops every grace timer of a session that is going away, and
+// the waiting summary whose latest notification points at it: its destination
+// no longer exists.
 func (p *Policy) CancelSession(sessionID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -383,6 +395,12 @@ func (p *Policy) CancelSession(sessionID string) {
 		if key.sessionID == sessionID {
 			stop()
 			delete(p.pending, key)
+		}
+	}
+	for tag, w := range p.summary {
+		if w.n.SessionID == sessionID {
+			w.stop()
+			delete(p.summary, tag)
 		}
 	}
 }

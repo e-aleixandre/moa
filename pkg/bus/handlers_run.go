@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -610,7 +611,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 
 	// Notify subscribers of the run generation (single source of truth for
 	// runGen) and the provenance decided at admission.
-	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen, Origin: sctx.takePendingRunOrigin()})
+	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen, Origin: sctx.takePendingRunOrigin(), At: time.Now()})
 
 	go func() {
 		defer func() {
@@ -628,7 +629,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 				if settled != nil {
 					settled(false, err)
 				}
-				sctx.Bus.Publish(RunEnded{SessionID: sctx.SessionID, RunGen: gen, Err: err})
+				sctx.Bus.Publish(RunEnded{SessionID: sctx.SessionID, RunGen: gen, Err: err, At: time.Now()})
 				// Terminal barrier last, as in the normal path: a settle
 				// waiter must not be released before RunEnded is on the bus.
 				sctx.settleRun(gen)
@@ -721,6 +722,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 			Cancelled: cancelled,
 			HadEdits:  stats.hadEdits,
 			Cost:      stats.costUSD,
+			At:        time.Now(),
 		})
 		// The run's start anchor is released only now, after its terminal event
 		// is on the bus. Between the state going idle and this point the run is

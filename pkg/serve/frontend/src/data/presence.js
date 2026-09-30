@@ -17,11 +17,26 @@ export const PRESENCE_RENEW_MS = 15000;
 // focused conversation only — the other tiles of the tree stay connected but
 // are not being read.
 export function shownSessionIds(state) {
-  if (state.isMobile) return state.activeSession ? [state.activeSession] : [];
-  if (state.view === 'grid') return allSessionIds(state.tileTree);
-  if (state.view === 'tasks') return [];
-  const id = focusedSessionId(state);
-  return id ? [id] : [];
+  // Nothing is rendered but a placeholder until the session list has loaded.
+  if (state.sessionsLoaded === false) return [];
+  let ids;
+  if (state.isMobile) {
+    // Tasks and the inbox are full-screen pages over the conversation.
+    if (state.view === 'tasks' || state.inboxOpen) return [];
+    ids = state.activeSession ? [state.activeSession] : [];
+  } else if (state.view === 'grid') {
+    ids = allSessionIds(state.tileTree);
+  } else if (state.view === 'tasks') {
+    return [];
+  } else {
+    const id = focusedSessionId(state);
+    ids = id ? [id] : [];
+  }
+  // A subagent or bash detail replaces the conversation's own stream.
+  return ids.filter((id) => {
+    const s = state.sessions[id];
+    return !(s?.viewingSubagent || s?.viewingBashJob);
+  });
 }
 
 export function isPresent(state, sessionId, doc = globalThis.document) {

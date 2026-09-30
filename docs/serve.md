@@ -960,7 +960,8 @@ screen is rendering, once its history has been shown and while the page is
 visible; it is renewed every 15 s and lapses after 45 s, so a phone that was
 put away stops counting without sending anything. A connected socket does not
 count by itself: neither a session that is connected but not shown (the other
-tiles while one conversation is open, the Tasks screen) nor one still loading.
+tiles while one conversation is open; the Tasks screen, or the inbox on a
+phone; a subagent or bash detail covering it) nor one still loading.
 
 On the device, quiet notifications are `silent` and a notification replaces the
 previous one with the same `tag`; urgent and ordinary ones alert again when they

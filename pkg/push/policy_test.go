@@ -60,7 +60,7 @@ func (c *fakeClock) fire() {
 
 func newPolicy(mode Summaries) (*Policy, *recorder, *fakeClock) {
 	rec, clock := &recorder{}, &fakeClock{}
-	return NewPolicy(rec, PolicyConfig{Summaries: mode, After: clock.after}), rec, clock
+	return NewPolicy(rec, PolicyConfig{Summaries: mode, After: clock.after, Deliver: func(f func()) { f() }}), rec, clock
 }
 
 func TestQuestionNobodyWatchesGoesNowAsUrgent(t *testing.T) {
@@ -202,7 +202,7 @@ func TestSummaryTimerThatLostTheRaceSendsNothing(t *testing.T) {
 func TestDailyLimitCapsQuietAndAudibleButNeverQuestions(t *testing.T) {
 	rec, clock := &recorder{}, &fakeClock{}
 	now := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
-	p := NewPolicy(rec, PolicyConfig{After: clock.after, DailyLimit: 3, Now: func() time.Time { return now }})
+	p := NewPolicy(rec, PolicyConfig{After: clock.after, Deliver: func(f func()) { f() }, DailyLimit: 3, Now: func() time.Time { return now }})
 	for i := 0; i < 5; i++ {
 		p.Handle(Signal{Kind: KindDone, SessionID: "s"})
 	}
@@ -306,5 +306,68 @@ func TestAQuestionAndARunShareNoTag(t *testing.T) {
 	got := rec.all()
 	if got[0].Tag == got[1].Tag {
 		t.Fatalf("a finished run would replace the open question on the device (tag %q)", got[0].Tag)
+	}
+}
+
+// A transport that hangs must not stop the policy from deciding, nor a question
+// from going out behind it.
+type blockingSender struct {
+	release chan struct{}
+	entered chan struct{}
+	rec     recorder
+}
+
+func (b *blockingSender) Notify(n Notification) {
+	if n.Kind == KindDone {
+		close(b.entered)
+		<-b.release
+	}
+	b.rec.Notify(n)
+}
+
+func TestSlowTransportDoesNotBlockDecidingOrUrgentDelivery(t *testing.T) {
+	snd := &blockingSender{release: make(chan struct{}), entered: make(chan struct{})}
+	defer close(snd.release)
+	p := NewPolicy(snd, PolicyConfig{})
+	returned := make(chan struct{})
+	go func() {
+		p.Handle(Signal{Kind: KindDone, SessionID: "s1"})
+		p.Handle(Signal{Kind: KindAsk, SessionID: "s1", RequestID: "a1"})
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Handle waited for a delivery that was hanging")
+	}
+	<-snd.entered
+	deadline := time.After(2 * time.Second)
+	for {
+		if got := snd.rec.all(); len(got) == 1 && got[0].Kind == KindAsk {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("the question did not go out behind a hanging delivery: %+v", snd.rec.all())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func TestCancelSessionDropsItsWaitingSummaryButNotOthers(t *testing.T) {
+	p, rec, clock := newPolicy("")
+	p.Handle(Signal{Kind: KindDigest, SessionID: "gone", Project: "/a"})
+	p.Handle(Signal{Kind: KindDigest, SessionID: "alive", Project: "/b"})
+	p.Handle(Signal{Kind: KindEvent, Source: "x", Inbox: true}) // no session: nothing to cancel
+	p.CancelSession("gone")
+	clock.fire()
+	got := rec.all()
+	if len(got) != 2 {
+		t.Fatalf("sent %+v, want the other project's digest and the inbox event", got)
+	}
+	for _, n := range got {
+		if n.SessionID == "gone" {
+			t.Fatalf("a summary for a deleted session was sent: %+v", n)
+		}
 	}
 }

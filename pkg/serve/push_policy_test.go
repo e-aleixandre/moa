@@ -72,7 +72,7 @@ func (p *pushProbe) armed() int {
 // policy when a session is created.
 func probePush(mgr *Manager, summaries push.Summaries) *pushProbe {
 	probe := &pushProbe{}
-	mgr.pushPolicy = push.NewPolicy(probe, push.PolicyConfig{Summaries: summaries, After: probe.after})
+	mgr.pushPolicy = push.NewPolicy(probe, push.PolicyConfig{Summaries: summaries, After: probe.after, Deliver: func(f func()) { f() }})
 	return probe
 }
 
@@ -324,5 +324,76 @@ func TestEventsAreQuietAndOnePerSource(t *testing.T) {
 	}
 	if got[0].Tag == got[1].Tag {
 		t.Fatalf("tags %q %q: one per source", got[0].Tag, got[1].Tag)
+	}
+}
+
+func publishEnd(sess *ManagedSession, gen uint64, at time.Time) {
+	sess.runtime.Bus.Publish(bus.RunEnded{SessionID: sess.ID, RunGen: gen, At: at})
+}
+
+func publishStartAt(sess *ManagedSession, gen uint64, origin bus.RunOrigin, at time.Time) {
+	sess.runtime.Bus.Publish(bus.RunStarted{SessionID: sess.ID, RunGen: gen, Origin: origin, At: at})
+}
+
+// How long a run lasted is what the events say, whenever push handles them.
+func TestRunDurationIsMeasuredBetweenTheEventsNotTheirHandling(t *testing.T) {
+	old := minRunForPush
+	minRunForPush = time.Minute
+	t.Cleanup(func() { minRunForPush = old })
+	mgr := newOwnerTestManager(t, context.Background())
+	probe := probePush(mgr, "")
+	sess, err := mgr.CreateSession(CreateOpts{Title: "user session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Now().Add(-time.Hour)
+	publishStartAt(sess, 1, bus.RunOrigin{Explicit: true}, t0)
+	publishEnd(sess, 1, t0.Add(2*time.Minute)) // long, although both are handled at once
+	publishStartAt(sess, 2, bus.RunOrigin{Explicit: true}, t0.Add(3*time.Minute))
+	publishEnd(sess, 2, t0.Add(3*time.Minute+time.Second)) // quick
+	sess.runtime.Bus.Drain(5 * time.Second)
+	if got := probe.delivered(); len(got) != 1 || got[0].Kind != push.KindDone {
+		t.Fatalf("delivered = %+v, want one done, for the long run only", got)
+	}
+}
+
+// The runtime may publish the next run's start before the previous run's end.
+func TestOverlappingRunsKeepTheirOwnIdentity(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	probe := probePush(mgr, push.SummariesOff)
+	_, sess := ownerWithSession(t, mgr, t.TempDir(), "overlap")
+	report := bus.RunOrigin{Explicit: true, Source: reportSource}
+	now := time.Now()
+	publishStartAt(sess, 1, report, now)
+	publishStartAt(sess, 2, report, now)
+	publishEnd(sess, 1, now)
+	publishEnd(sess, 2, now)
+	sess.runtime.Bus.Drain(5 * time.Second)
+	probe.expire()
+	if got := probe.delivered(); len(got) != 0 {
+		t.Fatalf("two report runs with summaries off must stay silent, got %+v", got)
+	}
+}
+
+// Deleting a session drops the summary that was waiting to announce it.
+func TestDeleteDropsTheWaitingDigest(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	probe := probePush(mgr, "")
+	sess, err := mgr.CreateSession(CreateOpts{Title: "deleted session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishStartAt(sess, 1, bus.RunOrigin{Explicit: true, Source: reportSource}, time.Now())
+	publishEnd(sess, 1, time.Now())
+	sess.runtime.Bus.Drain(5 * time.Second)
+	if probe.armed() != 1 {
+		t.Fatal("no digest was waiting")
+	}
+	if err := mgr.Delete(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	probe.expire()
+	if got := probe.delivered(); len(got) != 0 {
+		t.Fatalf("a digest for a deleted session was sent: %+v", got)
 	}
 }

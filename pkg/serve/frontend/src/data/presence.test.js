@@ -24,6 +24,24 @@ describe('shownSessionIds', () => {
   test('the tasks screen shows no conversation', () => {
     expect(shownSessionIds(state({ view: 'tasks' }))).toEqual([]);
   });
+  test('mobile Tasks and Inbox cover the conversation; desktop Inbox does not', () => {
+    const mobile = { isMobile: true, activeSession: 'a' };
+    expect(shownSessionIds(state({ ...mobile, view: 'tasks' }))).toEqual([]);
+    expect(shownSessionIds(state({ ...mobile, inboxOpen: true }))).toEqual([]);
+    expect(shownSessionIds(state({ inboxOpen: true }))).toEqual(['a']);
+  });
+  test('a subagent or bash detail replaces the conversation, on desktop and mobile', () => {
+    const sessions = (over) => ({ a: { ...session(), ...over }, b: session() });
+    for (const over of [{ viewingSubagent: 'job' }, { viewingBashJob: 'job' }]) {
+      expect(shownSessionIds(state({ sessions: sessions(over) }))).toEqual([]);
+      expect(shownSessionIds(state({ isMobile: true, activeSession: 'a', sessions: sessions(over) }))).toEqual([]);
+      expect(shownSessionIds(state({ view: 'grid', sessions: sessions(over) }))).toEqual(['b']);
+    }
+  });
+  test('nothing is shown while the session list is still loading', () => {
+    expect(shownSessionIds(state({ sessionsLoaded: false }))).toEqual([]);
+    expect(shownSessionIds(state({ sessionsLoaded: false, isMobile: true, activeSession: 'a' }))).toEqual([]);
+  });
   test('mobile shows the active session, whatever the tree says', () => {
     expect(shownSessionIds(state({ isMobile: true, activeSession: 'b' }))).toEqual(['b']);
     expect(shownSessionIds(state({ isMobile: true }))).toEqual([]);
