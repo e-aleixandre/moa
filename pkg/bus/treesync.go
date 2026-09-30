@@ -145,7 +145,7 @@ func (ts *TreeSyncer) SnapshotPath() []session.Entry {
 		entries = append(entries, session.DeepCopyEntry(entry))
 	}
 	for i, msg := range ts.sctx.Agent.Messages() {
-		if _, ok := ts.synced[messageSyncID(msg, i)]; ok || isHiddenInternalPrompt(msg) {
+		if ts.isSyncedLocked(msg, i) || isHiddenInternalPrompt(msg) {
 			continue
 		}
 		entry := session.Entry{
@@ -212,7 +212,7 @@ func (ts *TreeSyncer) visitInFlightTail(fn func(*core.AgentMessage)) {
 	agentMsgs := ts.sctx.Agent.Messages()
 	for i := range agentMsgs {
 		msg := &agentMsgs[i]
-		if _, ok := ts.synced[messageSyncID(*msg, i)]; ok || isHiddenInternalPrompt(*msg) {
+		if ts.isSyncedLocked(*msg, i) || isHiddenInternalPrompt(*msg) {
 			continue
 		}
 		fn(msg)
@@ -251,7 +251,7 @@ func (ts *TreeSyncer) syncMessages() {
 	msgs := ts.sctx.Agent.Messages()
 	for i, msg := range msgs {
 		id := messageSyncID(msg, i)
-		if _, ok := ts.synced[id]; ok {
+		if ts.isSyncedLocked(msg, i) {
 			continue
 		}
 		if isHiddenInternalPrompt(msg) {
@@ -285,6 +285,22 @@ func isHiddenInternalPrompt(msg core.AgentMessage) bool {
 		return true
 	}
 	return false
+}
+
+// isSyncedLocked reports whether msg is already in the tree. Besides the IDs
+// this syncer appended or found at start, a message whose ID is already a tree
+// entry counts: the compaction summary a rebuild projects carries its
+// boundary's entry ID, and a branch can load a boundary the syncer never saw.
+// Caller holds ts.mu.
+func (ts *TreeSyncer) isSyncedLocked(msg core.AgentMessage, index int) bool {
+	if _, ok := ts.synced[messageSyncID(msg, index)]; ok {
+		return true
+	}
+	if msg.MsgID == "" {
+		return false
+	}
+	_, ok := ts.tree.Entry(msg.MsgID)
+	return ok
 }
 
 func messageSyncID(msg core.AgentMessage, index int) string {
@@ -407,7 +423,7 @@ func (ts *TreeSyncer) handleFresh(e ContextFreshStarted) {
 func (ts *TreeSyncer) appendOriginalsLocked(originals []core.AgentMessage) {
 	for i, msg := range originals {
 		id := messageSyncID(msg, i)
-		if _, ok := ts.synced[id]; ok {
+		if ts.isSyncedLocked(msg, i) {
 			continue
 		}
 		if isHiddenInternalPrompt(msg) {

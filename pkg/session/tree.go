@@ -431,9 +431,13 @@ func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 	if lastBoundary.Type == EntryCompaction {
 		// With compaction: summary + messages from firstKeptEntryID onward
 		firstKept = lastBoundary.Compaction.FirstKeptEntryID
+		// The summary takes the boundary's ID: the tree already holds it, so
+		// the syncer recognises the rebuilt summary instead of persisting it
+		// as a new message on every reopen.
 		msgs = append(msgs, core.AgentMessage{
 			Message: core.Message{
 				Role:    "compaction_summary",
+				MsgID:   lastBoundary.ID,
 				Content: []core.Content{core.TextContent(lastBoundary.Compaction.Summary)},
 			},
 		})
@@ -450,7 +454,38 @@ func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 		}
 	}
 
-	return core.ApplyTrims(msgs, trims), epoch
+	return withoutRepeatedSummaries(core.ApplyTrims(msgs, trims), path), epoch
+}
+
+// withoutRepeatedSummaries drops a compaction_summary message that repeats,
+// byte for byte, both a summary already emitted and the summary of a compaction
+// on the path. Before the boundary lent its ID to the rebuilt summary, every
+// reopened session could persist that projection as an ordinary message, once
+// per reopen. Those copies stay in the history; the model gets each summary
+// once. The first occurrence is kept, so a fresh cut that retains a copy (and
+// emits no summary of its own) keeps it, and a summary with any other text is
+// never touched. It runs after the trims so they replay over exactly the
+// messages they were planned on. msgs is owned by the caller and filtered in
+// place.
+func withoutRepeatedSummaries(msgs []core.AgentMessage, path []Entry) []core.AgentMessage {
+	compacted := map[string]bool{}
+	for i := range path {
+		if path[i].Type == EntryCompaction {
+			compacted[path[i].Compaction.Summary] = true
+		}
+	}
+	seen := map[string]bool{}
+	out := msgs[:0]
+	for _, m := range msgs {
+		if m.Role == "compaction_summary" && len(m.Content) == 1 && m.Content[0].Type == "text" && compacted[m.Content[0].Text] {
+			if seen[m.Content[0].Text] {
+				continue
+			}
+			seen[m.Content[0].Text] = true
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // AllMessages returns ALL messages along the current path (for display).
