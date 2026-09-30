@@ -1,200 +1,150 @@
-/* Owner faces · identity lab (?view=faces-id). Lab only. Every class is
-   prefixed `fi`. SVG elements animate in viewBox units: a CSS px inside the
-   <svg> is one user unit, so the same keyframes serve every size. */
+/* Owner faces · identity lab (?view=faces-id). Lab only. The faces are
+   prefixed `fv`, the page `fi`. Inside the <svg> a CSS px is one viewBox
+   unit, so the same keyframes serve every size. */
 
-.fi {
+.fv {
   position: relative;
   flex: none;
   display: inline-block;
   line-height: 0;
-  --fi-ink: #12121a;
-  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.45));
 }
-.fi svg { display: block; overflow: visible; }
-.fi .fi-body { fill: var(--fi-body); stroke: var(--fi-body); stroke-width: 1.2; stroke-linejoin: round; }
+.fv svg { display: block; overflow: visible; }
+.fv * { transform-box: view-box; }
 
 @media (prefers-reduced-motion: reduce) {
-  .fi * { animation: none !important; }
+  .fv * { animation: none !important; }
 }
 
-/* ── A · Visor ─────────────────────────────────────────────────────────── */
-.fi-visor .fi-v-slot { fill: rgba(8, 8, 16, 0.55); }
-.fi-visor .fi-v-trail { opacity: 0; }
+/* ── 1 · Canica ────────────────────────────────────────────────────────── */
+.fv-canica { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25)); }
+.fv-canica .fv-c-squint { opacity: 0; }
+.fv-canica .fv-c-hop { transform-origin: 16px 30.5px; }
+.fv-canica .fv-c-shadow { transform-origin: 16px 31.2px; }
+.fv-canica .fv-c-open { transform-box: fill-box; transform-origin: center; }
 
-.fi-visor.is-idle .fi-v-light {
-  opacity: 0.72;
-  animation: fi-v-drift 9s ease-in-out var(--fi-at) infinite;
+/* Idle: rolls to look somewhere, holds, rolls on. Long holds are what make it
+   calm; the easing overshoots a hair so the stop feels like mass. */
+.fv-canica.is-idle .fv-c-face { animation: fv-c-look 11s cubic-bezier(0.5, 0, 0.2, 1.15) var(--fv-at) infinite; }
+@keyframes fv-c-look {
+  0%, 16% { transform: translate(0, 0); }
+  22%, 40% { transform: translate(2.6px, -0.9px); }
+  46%, 62% { transform: translate(-2.4px, 0.4px); }
+  68%, 84% { transform: translate(0.8px, -1.6px); }
+  90%, 100% { transform: translate(0, 0); }
 }
-@keyframes fi-v-drift {
-  0%, 100% { transform: translateX(-3px); }
-  30% { transform: translateX(2.5px); }
-  55% { transform: translateX(1px); }
-  75% { transform: translateX(-1.5px); }
+/* A contented squint instead of a blink: the dots become two little arches. */
+.fv-canica.is-idle .fv-c-open { animation: fv-c-open 7.3s ease-in-out var(--fv-at) infinite; }
+.fv-canica.is-idle .fv-c-squint { animation: fv-c-squint 7.3s ease-in-out var(--fv-at) infinite; }
+@keyframes fv-c-open {
+  0%, 85%, 95.5%, 100% { opacity: 1; transform: scale(1); }
+  86.5%, 94% { opacity: 0; transform: scale(0.5); }
 }
-
-.fi-visor.is-working .fi-v-light,
-.fi-visor.is-working .fi-v-trail {
-  animation: fi-v-scan 1.5s cubic-bezier(0.45, 0, 0.55, 1) var(--fi-at) infinite alternate;
-}
-.fi-visor.is-working .fi-v-trail {
-  opacity: 0.35;
-  animation-delay: calc(var(--fi-at) - 0.12s);
-}
-@keyframes fi-v-scan {
-  from { transform: translateX(-8px); }
-  to { transform: translateX(8px); }
-}
-
-.fi-visor.is-asks .fi-v-slot { fill: rgba(8, 8, 16, 0.4); }
-.fi-visor.is-asks .fi-v-light {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: fi-v-call 1.6s ease-out infinite;
-}
-@keyframes fi-v-call {
-  0%, 100% { transform: scaleX(1.5); opacity: 0.85; }
-  18% { transform: scale(2, 1.2); opacity: 1; }
-  40% { transform: scaleX(1.5); opacity: 0.85; }
+@keyframes fv-c-squint {
+  0%, 85.5%, 95%, 100% { opacity: 0; }
+  86.5%, 94% { opacity: 1; }
 }
 
-/* ── B · Núcleo ────────────────────────────────────────────────────────── */
-.fi-nucleo .fi-n-core { fill: #fff; }
-.fi-nucleo .fi-n-tail { fill: #fff; opacity: 0; }
-.fi-nucleo .fi-n-orbit { transform-box: view-box; transform-origin: var(--fi-cx) var(--fi-cy); }
-.fi-nucleo .fi-n-halo,
-.fi-nucleo .fi-n-core { transform-box: fill-box; transform-origin: center; }
-
-.fi-nucleo.is-idle .fi-n-pos { animation: fi-n-wander 11s ease-in-out var(--fi-at) infinite; }
-.fi-nucleo.is-idle .fi-n-halo { animation: fi-n-breathe 5.5s ease-in-out var(--fi-at) infinite alternate; }
-.fi-nucleo.is-idle .fi-n-core { opacity: 0.7; }
-@keyframes fi-n-wander {
-  0%, 100% { transform: translate(-3px, -1px); }
-  25% { transform: translate(2.5px, -2.5px); }
-  50% { transform: translate(3px, 2px); }
-  75% { transform: translate(-1.5px, 2.5px); }
-}
-@keyframes fi-n-breathe {
-  from { opacity: 0.45; transform: scale(0.85); }
-  to { opacity: 0.8; transform: scale(1.05); }
+/* Working: eyes down, reading — a slow line left to right, a quick return. */
+.fv-canica.is-working .fv-c-face { animation: fv-c-read 1.9s var(--fv-at) infinite; }
+@keyframes fv-c-read {
+  0% { transform: translate(-2.2px, 1.6px); animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
+  78% { transform: translate(2.2px, 1.6px); animation-timing-function: cubic-bezier(0.5, 0, 0.3, 1); }
+  100% { transform: translate(-2.2px, 1.6px); }
 }
 
-.fi-nucleo.is-working .fi-n-pos { transform: translateY(-5.2px); }
-.fi-nucleo.is-working .fi-n-orbit { animation: fi-n-spin 1.4s linear var(--fi-at) infinite; }
-.fi-nucleo.is-working .fi-n-o1 { animation-delay: calc(var(--fi-at) + 0.09s); }
-.fi-nucleo.is-working .fi-n-o2 { animation-delay: calc(var(--fi-at) + 0.18s); }
-.fi-nucleo.is-working .fi-n-o1 .fi-n-tail { opacity: 0.55; }
-.fi-nucleo.is-working .fi-n-o2 .fi-n-tail { opacity: 0.28; }
-.fi-nucleo.is-working .fi-n-halo { transform: scale(0.75); opacity: 0.8; }
-@keyframes fi-n-spin {
-  to { transform: rotate(360deg); }
+/* Waiting on you: faces you, eyes a touch bigger, and hops — anticipation,
+   stretch, land, settle — every few seconds. */
+.fv-canica.is-asks .fv-c-open { transform: scale(1.14); }
+.fv-canica.is-asks .fv-c-face { transform: translate(0, -0.6px); }
+.fv-canica.is-asks .fv-c-hop { animation: fv-c-hop 2.6s infinite; }
+.fv-canica.is-asks .fv-c-shadow { animation: fv-c-shadow 2.6s infinite; }
+@keyframes fv-c-hop {
+  0%, 52% { transform: none; animation-timing-function: ease-in-out; }
+  60% { transform: scale(1.07, 0.9); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+  72% { transform: translateY(-4.5px) scale(0.95, 1.06); animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.4); }
+  82% { transform: scale(1.08, 0.9); animation-timing-function: cubic-bezier(0.3, 1.5, 0.5, 1); }
+  92%, 100% { transform: none; }
+}
+@keyframes fv-c-shadow {
+  0%, 52%, 92%, 100% { transform: none; opacity: 1; }
+  60%, 82% { transform: scaleX(1.1); }
+  72% { transform: scaleX(0.7); opacity: 0.55; }
 }
 
-.fi-nucleo.is-asks .fi-n-core,
-.fi-nucleo.is-asks .fi-n-halo { animation: fi-n-beat 1.5s ease-out infinite; }
-@keyframes fi-n-beat {
-  0%, 100% { transform: scale(1); opacity: 0.85; }
-  12% { transform: scale(1.45); opacity: 1; }
-  24% { transform: scale(1.1); }
-  36% { transform: scale(1.35); opacity: 1; }
-  60% { transform: scale(1); opacity: 0.85; }
+/* ── 2 · Aura ──────────────────────────────────────────────────────────── */
+.fv-aura { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.3)); }
+.fv-aura .fv-a-swirl { transform-origin: 16px 16px; }
+.fv-aura .fv-a-shut { opacity: 0; }
+.fv-aura .fv-a-open { transform-box: fill-box; transform-origin: center; transition: transform 240ms; }
+.fv-aura .fv-a-halo { opacity: 0; transform-origin: 16px 16px; }
+
+.fv-aura .fv-a-b1 { animation: fv-a-b1 9s ease-in-out var(--fv-at) infinite alternate; }
+.fv-aura .fv-a-b2 { animation: fv-a-b2 11s ease-in-out var(--fv-at) infinite alternate; }
+.fv-aura .fv-a-b3 { animation: fv-a-b3 13s ease-in-out var(--fv-at) infinite alternate; }
+@keyframes fv-a-b1 { to { transform: translate(8px, 7px); } }
+@keyframes fv-a-b2 { to { transform: translate(-9px, 6px); } }
+@keyframes fv-a-b3 { to { transform: translate(5px, -10px); } }
+
+.fv-aura.is-idle .fv-a-swirl { animation: fv-spin 40s linear var(--fv-at) infinite; }
+.fv-aura.is-idle .fv-a-face { animation: fv-a-drift 12s ease-in-out var(--fv-at) infinite; }
+@keyframes fv-a-drift {
+  0%, 100% { transform: translate(0, 0); }
+  30% { transform: translate(1.2px, -0.5px); }
+  65% { transform: translate(-1.1px, 0.3px); }
 }
 
-/* ── C · Tres puntos ───────────────────────────────────────────────────── */
-.fi-puntos .fi-p-dot { fill: #fff; transform-box: fill-box; transform-origin: center; }
+/* Working: eyes closed, the light goes round quickly. */
+.fv-aura.is-working .fv-a-open { opacity: 0; }
+.fv-aura.is-working .fv-a-shut { opacity: 1; }
+.fv-aura.is-working .fv-a-swirl { animation: fv-spin 3.2s linear var(--fv-at) infinite; }
+.fv-aura.is-working .fv-a-b1,
+.fv-aura.is-working .fv-a-b2,
+.fv-aura.is-working .fv-a-b3 { animation-duration: 2.2s; }
+.fv-aura.is-working .fv-a-face { transform: translateY(0.4px); }
 
-.fi-puntos.is-idle .fi-p-slot { animation: fi-p-float 6s ease-in-out var(--fi-at) infinite; }
-.fi-puntos.is-idle .fi-p-1 { animation-duration: 6.8s; }
-.fi-puntos.is-idle .fi-p-2 { animation-duration: 5.3s; animation-direction: reverse; }
-.fi-puntos.is-idle .fi-p-3 { animation-duration: 7.4s; }
-.fi-puntos.is-idle .fi-p-dot { opacity: 0.8; }
-@keyframes fi-p-float {
-  0%, 100% { transform: translate(0, -1.2px); }
-  33% { transform: translate(0.8px, 1px); }
-  66% { transform: translate(-0.7px, 0.2px); }
+/* Waiting on you: eyes open wide, and the light ripples out of the outline. */
+.fv-aura.is-asks .fv-a-open { transform: scale(1.18); }
+.fv-aura.is-asks .fv-a-swirl { animation: fv-spin 14s linear var(--fv-at) infinite; }
+.fv-aura.is-asks .fv-a-halo { animation: fv-a-ripple 2.2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite; }
+@keyframes fv-a-ripple {
+  0% { opacity: 0.9; transform: scale(0.8); }
+  70%, 100% { opacity: 0; transform: scale(1.18); }
+}
+@keyframes fv-spin { to { transform: rotate(360deg); } }
+
+/* ── 3 · Lente ─────────────────────────────────────────────────────────── */
+.fv-lente { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.4)); }
+.fv-lente .fv-l-spin { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.fv-lente .fv-l-pupil { transform-box: fill-box; transform-origin: center; }
+.fv-lente .fv-l-ring { transform-box: fill-box; transform-origin: center; }
+
+.fv-lente.is-idle .fv-l-pupil { animation: fv-l-look 10s cubic-bezier(0.5, 0, 0.2, 1) var(--fv-at) infinite; }
+@keyframes fv-l-look {
+  0%, 14% { transform: translate(0, 0); }
+  20%, 38% { transform: translate(1.5px, -0.6px); }
+  44%, 60% { transform: translate(-1.5px, 0.5px); }
+  66%, 84% { transform: translate(0.5px, 1.2px); }
+  90%, 100% { transform: translate(0, 0); }
 }
 
-.fi-puntos.is-working .fi-p-slot { animation: fi-p-type 1.2s ease-in-out infinite; }
-.fi-puntos.is-working .fi-p-2 { animation-delay: 0.15s; }
-.fi-puntos.is-working .fi-p-3 { animation-delay: 0.3s; }
-@keyframes fi-p-type {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.55; }
-  25% { transform: translateY(-2.6px); opacity: 1; }
-}
-.fi-puntos.is-working .fi-p-slot { opacity: 0.55; }
+/* Working: the ring's light gathers into an arc that spins; no pupil. */
+.fv-lente.is-working .fv-l-ring { stroke-opacity: 0.18; }
+.fv-lente.is-working .fv-l-pupil { opacity: 0; }
+.fv-lente.is-working .fv-l-spin { opacity: 1; animation: fv-spin 1.1s cubic-bezier(0.5, 0.15, 0.5, 0.85) var(--fv-at) infinite; }
+.fv-lente.is-working .fv-l-eye-r .fv-l-spin { animation-delay: calc(var(--fv-at) - 0.12s); }
 
-.fi-puntos.is-asks .fi-p-dot { animation: fi-p-knock 1.8s ease-out infinite; }
-@keyframes fi-p-knock {
+/* Waiting on you: pupils dilate on you, and the rings focus twice. */
+.fv-lente.is-asks .fv-l-pupil { animation: fv-l-dilate 2s cubic-bezier(0.3, 1.4, 0.5, 1) infinite; }
+.fv-lente.is-asks .fv-l-ring { animation: fv-l-focus 2s ease-out infinite; }
+@keyframes fv-l-dilate {
+  0%, 100% { transform: scale(1.6); }
+  12% { transform: scale(2.2); }
+  30% { transform: scale(1.6); }
+}
+@keyframes fv-l-focus {
   0%, 100% { transform: scale(1); }
-  8% { transform: scale(1.4); }
-  18% { transform: scale(1); }
-  26% { transform: scale(1.4); }
-  38% { transform: scale(1); }
-}
-
-/* ── D · Trazo ─────────────────────────────────────────────────────────── */
-.fi-trazo .fi-t-line,
-.fi-trazo .fi-t-wave,
-.fi-trazo .fi-t-ring { fill: none; stroke: #fff; stroke-linecap: round; stroke-linejoin: round; }
-.fi-trazo .fi-t-wave { animation: fi-t-travel 0.9s linear var(--fi-at) infinite; }
-@keyframes fi-t-travel {
-  from { transform: translateX(0); }
-  to { transform: translateX(7px); }
-}
-.fi-trazo .fi-t-ring {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: fi-t-call 1.6s ease-out infinite;
-}
-@keyframes fi-t-call {
-  0%, 100% { transform: scale(1); }
-  12% { transform: scale(1.3); }
-  26% { transform: scale(1); }
-  38% { transform: scale(1.2); }
-  55% { transform: scale(1); }
-}
-
-/* ── E · Moa ───────────────────────────────────────────────────────────── */
-.fi-moa .fi-m-beak { fill: rgba(8, 8, 16, 0.5); }
-.fi-moa .fi-m-white { fill: #fff; }
-.fi-moa .fi-m-pupil { fill: var(--fi-ink); }
-.fi-moa .fi-m-glint { fill: #fff; }
-.fi-moa .fi-m-lid { fill: var(--fi-body); transform: translateX(10px); }
-.fi-moa .fi-head { transform-box: view-box; transform-origin: 16px 29px; }
-.fi-moa .fi-m-eye { transform-box: fill-box; transform-origin: center; }
-
-.fi-moa.is-idle .fi-head { animation: fi-m-bob 5.2s ease-in-out var(--fi-at) infinite; }
-.fi-moa.is-idle .fi-m-lid { animation: fi-m-nictitate 6.5s ease-in-out var(--fi-at) infinite; }
-.fi-moa.is-idle .fi-m-pupil,
-.fi-moa.is-idle .fi-m-glint { transform: translateX(0.9px); }
-@keyframes fi-m-bob {
-  0%, 100% { transform: rotate(-2deg) translateY(0); }
-  50% { transform: rotate(2.5deg) translateY(-0.5px); }
-}
-/* The bird's third eyelid: sweeps across front to back, not top to bottom. */
-@keyframes fi-m-nictitate {
-  0%, 88%, 100% { transform: translateX(10px); }
-  92% { transform: translateX(0); }
-  96% { transform: translateX(-10px); }
-  96.01% { transform: translateX(10px); }
-}
-
-.fi-moa.is-working .fi-head { animation: fi-m-peck 1.5s ease-in var(--fi-at) infinite; }
-.fi-moa.is-working .fi-m-pupil,
-.fi-moa.is-working .fi-m-glint { transform: translate(1.4px, 1.2px); }
-@keyframes fi-m-peck {
-  0%, 44%, 100% { transform: rotate(0); }
-  10% { transform: rotate(13deg) translateY(1px); }
-  20% { transform: rotate(0); }
-  30% { transform: rotate(13deg) translateY(1px); }
-}
-
-.fi-moa.is-asks .fi-head { animation: fi-m-cock 3s cubic-bezier(0.3, 1.4, 0.5, 1) infinite; }
-.fi-moa.is-asks .fi-m-eye { transform: scale(1.12); }
-@keyframes fi-m-cock {
-  0%, 100% { transform: rotate(-14deg); }
-  40% { transform: rotate(-14deg); }
-  48% { transform: rotate(-4deg); }
-  58% { transform: rotate(-16deg); }
+  12% { transform: scale(1.12); }
+  30% { transform: scale(1); }
 }
 
 /* ── The page ──────────────────────────────────────────────────────────── */

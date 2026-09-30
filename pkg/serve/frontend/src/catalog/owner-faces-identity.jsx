@@ -1,72 +1,53 @@
 import { useMemo } from "preact/hooks";
-import { EYE_CENTER, SHAPE_PATHS } from "../components/Owners/avatar-identity.js";
-import { OwnerFace, faceBodyColor } from "../components/Owners/OwnerFace.jsx";
+import { EYE_CENTER, SHAPE_PATHS, bodyOklch } from "../components/Owners/avatar-identity.js";
+import { OwnerFace } from "../components/Owners/OwnerFace.jsx";
 import "./owner-faces-identity.css";
 
 /* Owner faces · identity (?view=faces-id). Lab only: nothing here reaches the
    product bundle.
 
-   The owner's complaint: the Mirada face reads as Grok's bot. Not the outline
-   — the gaze. What Grok and Mirada share is exactly:
-     1. two short vertical white capsules as eyes, symmetric, high on a flat body;
-     2. a vertical squash blink every few seconds;
-     3. the pair sliding together in saccades to "look around";
-     4. mood said by resizing the capsules (narrow = focused, wide = at you).
-   None of the five directions below uses any of the four. Each keeps the
-   identity system (shape × colour × tone) and replaces only the gaze, so one
-   face per direction is enough to judge it. They are drawn with plain CSS and
-   SMIL loops, which is fine for judging motion; the chosen one would then be
-   rebuilt on faceMotion's compositor-friendly scheduler. */
+   Why Mirada reads as Grok's bot: the gaze, not the outline — two vertical
+   white capsules, a blink that squashes them, the pair sliding in saccades,
+   and mood said by narrowing or widening them. None of that is used here.
 
-export const DIRECTIONS = [
+   Second round. The first five (visor, core, dots, stroke, bird) were turned
+   down as ugly; the bar now is product quality — charm, simplicity, beauty —
+   so there are three proposals, each with its own material:
+     Canica  — a glossy ball with ink-dot eyes that moves like a physical toy;
+     Aura    — living light, calm eyes that close to concentrate;
+     Lente   — dark glass with luminous ring eyes whose pupils do the looking.
+   Drawn with CSS keyframes and SVG gradients to judge the motion; the chosen
+   one would be rebuilt on faceMotion's compositor-friendly scheduler. */
+
+export const PROPOSALS = [
   {
-    id: "visor",
-    name: "A · Visor",
-    idea: "One horizontal slot with a light inside. Attention is where the light is; no eyes, no blink.",
+    id: "canica",
+    name: "1 · Canica",
+    idea: "A glossy ball with a light of its own and two ink eyes set low. It moves like a physical toy: it rolls to look, reads when it works, hops when it needs you.",
     states: {
-      idle: "the light drifts slowly, half dimmed",
-      working: "the light scans the slot end to end, leaving a trail",
-      asks: "the light stops in the middle, widens and pulses at you",
+      idle: "looks around by rolling; now and then a contented squint",
+      working: "eyes down, reading line after line",
+      asks: "faces you, eyes bright, a little hop",
     },
   },
   {
-    id: "nucleo",
-    name: "B · Núcleo",
-    idea: "No features: a glowing core under the skin. The gaze is made of light.",
+    id: "aura",
+    name: "2 · Aura",
+    idea: "Living light in the owner's colours, with a calm face. The colour does the work; the eyes say whether it needs you.",
     states: {
-      idle: "the glow wanders under the surface and breathes",
-      working: "the glow orbits fast with a comet tail",
-      asks: "the glow comes to the front and beats like a heart",
+      idle: "the colours drift slowly; the eyes rest open",
+      working: "eyes closed in concentration, the light swirls",
+      asks: "eyes open wide at you; the light ripples out",
     },
   },
   {
-    id: "puntos",
-    name: "C · Tres puntos",
-    idea: "Three dots, the chat's own sign. The face is a conversation, not a pair of eyes.",
+    id: "lente",
+    name: "3 · Lente",
+    idea: "Dark glass lit from the edge in the owner's colour. The eyes are rings; a pupil inside each one does the looking.",
     states: {
-      idle: "three dots float loose, each on its own",
-      working: "the dots line up and ripple, like someone writing",
-      asks: "the dots knock twice together: your turn",
-    },
-  },
-  {
-    id: "trazo",
-    name: "D · Trazo",
-    idea: "One expressive line, no eyes. It says everything with its shape.",
-    states: {
-      idle: "a quiet smile that breathes",
-      working: "the line becomes a travelling wave",
-      asks: "the line closes into an “o” that calls you",
-    },
-  },
-  {
-    id: "moa",
-    name: "E · Moa",
-    idea: "The moa is a bird: seen in profile, one round eye and a beak. Moves like a bird, not like a screen.",
-    states: {
-      idle: "slow bob; a sideways blink, like a bird's third eyelid",
-      working: "pecks at its work",
-      asks: "cocks its head and looks straight at you",
+      idle: "the pupils wander inside the rings",
+      working: "the rings turn into two small spinners",
+      asks: "the pupils dilate and centre on you; the rings brighten",
     },
   },
 ];
@@ -74,179 +55,217 @@ export const DIRECTIONS = [
 const STATES = ["idle", "working", "asks"];
 const STATE_LABEL = { idle: "At rest", working: "Working", asks: "Waiting on you" };
 
-// A small deterministic hash so each owner gets its own phase and a column of
-// faces never moves in unison.
 function seedOf(key) {
   let h = 2166136261;
   for (const ch of String(key)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
   return (h >>> 0) % 10000;
 }
 
+const ok = (l, c, h, a = 1) => `oklch(${Math.max(0, Math.min(1, l)).toFixed(3)} ${Math.max(0, c).toFixed(3)} ${h}${a < 1 ? ` / ${a}` : ""})`;
+
 let uidSeq = 0;
 
-export function IdFace({ dir, shape = "circle", color = "peach", tone = "deep", state = "idle", size = 32, seedKey }) {
-  const uid = useMemo(() => `fi${++uidSeq}`, []);
+export function FaceV2({ dir, shape = "circle", color = "peach", tone = "deep", state = "idle", size = 32, seedKey }) {
+  const uid = useMemo(() => `fv${++uidSeq}`, []);
   const d = SHAPE_PATHS[shape] || SHAPE_PATHS.circle;
   const [cx, cy0] = EYE_CENTER[shape] || EYE_CENTER.circle;
-  const cy = cy0 + 1;
   const seed = seedOf(seedKey ?? `${shape}:${color}`);
-  const body = faceBodyColor(color, tone);
+  const [l, c, h] = bodyOklch(color, tone);
+  const small = size <= 20;
   const style = {
     width: `${size}px`,
     height: `${size}px`,
-    "--fi-body": body,
-    "--fi-at": `-${(seed % 7000) / 1000}s`,
-    "--fi-cx": `${cx}px`,
-    "--fi-cy": `${cy}px`,
+    "--fv-at": `-${(seed % 9000) / 1000}s`,
+    "--fv-cx": `${cx}px`,
+    "--fv-cy": `${cy0}px`,
   };
-  const small = size <= 20;
+  const Body = { canica: Canica, aura: Aura, lente: Lente }[dir];
   return (
-    <span class={`fi fi-${dir} is-${state}${small ? " is-small" : ""}`} style={style} aria-hidden="true">
+    <span class={`fv fv-${dir} is-${state}${small ? " is-small" : ""}${size >= 64 ? " is-large" : ""}`} style={style} aria-hidden="true">
       <svg viewBox="0 0 32 32" width={size} height={size}>
-        <defs>
-          <clipPath id={`${uid}b`}><path d={d} /></clipPath>
-        </defs>
-        <g class="fi-head">
-          <path class="fi-body" d={d} />
-          <g clip-path={`url(#${uid}b)`}>
-            {dir === "visor" && <Visor uid={uid} cx={cx} cy={cy} state={state} small={small} />}
-            {dir === "nucleo" && <Nucleo uid={uid} cx={cx} cy={cy} state={state} />}
-            {dir === "puntos" && <Puntos cx={cx} cy={cy} state={state} small={small} />}
-            {dir === "trazo" && <Trazo uid={uid} cx={cx} cy={cy} state={state} small={small} />}
-            {dir === "moa" && <Moa uid={uid} cx={cx} cy={cy} state={state} small={small} />}
-          </g>
-        </g>
+        <Body uid={uid} d={d} cx={cx} cy={cy0} l={l} c={c} h={h} tone={tone} small={small} size={size} />
       </svg>
     </span>
   );
 }
 
-/* A · Visor — a slot across the face; the light inside is the attention. */
-function Visor({ uid, cx, cy, small }) {
-  // A band, square-ended, not a pill: with a round knob in a capsule it read
-  // as a toggle switch.
-  const w = 23;
-  const h = small ? 7.4 : 6.2;
+/* ── 1 · Canica ───────────────────────────────────────────────────────────
+   The light is fixed (top-left) while the face moves under it, which is what
+   makes the ball read as rolling rather than as eyes sliding on a sticker. */
+function Canica({ uid, d, cx, cy, l, c, h, small, size }) {
+  const ink = ok(0.23, 0.045, h);
+  const er = small ? 3.1 : 2.65;
+  const gap = small ? 5.4 : 5;
+  const ey = cy + 2.2;
+  const eye = (side) => (
+    <g class={`fv-c-eye fv-c-eye-${side < 0 ? "l" : "r"}`}>
+      <g class="fv-c-open">
+        <circle cx={cx + side * gap} cy={ey} r={er} fill={ink} />
+        {!small && <circle class="fv-c-glint" cx={cx + side * gap - 0.8} cy={ey - 0.85} r="0.78" fill="#fff" />}
+      </g>
+      <path class="fv-c-squint" d={`M${cx + side * gap - er} ${ey + 0.3} q${er} ${-er * 1.3} ${er * 2} 0`}
+        fill="none" stroke={ink} stroke-width={small ? 1.9 : 1.5} stroke-linecap="round" />
+    </g>
+  );
   return (
     <g>
       <defs>
-        <radialGradient id={`${uid}l`}>
-          <stop offset="0" stop-color="#fff" stop-opacity="1" />
-          <stop offset="0.45" stop-color="#fff" stop-opacity="0.85" />
+        <linearGradient id={`${uid}b`} x1="0.2" y1="0" x2="0.6" y2="1">
+          <stop offset="0" stop-color={ok(l + 0.1, c * 0.95, h - 6)} />
+          <stop offset="0.55" stop-color={ok(l, c, h)} />
+          <stop offset="1" stop-color={ok(l - 0.13, c * 1.05, h + 8)} />
+        </linearGradient>
+        <radialGradient id={`${uid}s`} cx="0.34" cy="0.2" r="0.5">
+          <stop offset="0" stop-color="#fff" stop-opacity="0.7" />
+          <stop offset="0.4" stop-color="#fff" stop-opacity="0.18" />
           <stop offset="1" stop-color="#fff" stop-opacity="0" />
         </radialGradient>
+        <radialGradient id={`${uid}r`} cx="0.62" cy="1.05" r="0.55">
+          <stop offset="0" stop-color={ok(l + 0.16, c * 0.7, h + 25)} stop-opacity="0.55" />
+          <stop offset="1" stop-color={ok(l + 0.16, c * 0.7, h + 25)} stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id={`${uid}k`}>
+          <stop offset="0" stop-color={ok(0.72, 0.16, h + 10)} stop-opacity="0.55" />
+          <stop offset="1" stop-color={ok(0.72, 0.16, h + 10)} stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id={`${uid}sh`}>
+          <stop offset="0" stop-color="#000" stop-opacity="0.5" />
+          <stop offset="1" stop-color="#000" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id={`${uid}hl`}>
+          <stop offset="0" stop-color="#fff" stop-opacity="0.8" />
+          <stop offset="1" stop-color="#fff" stop-opacity="0" />
+        </radialGradient>
+        <clipPath id={`${uid}c`}><path d={d} /></clipPath>
       </defs>
-      <rect class="fi-v-slot" x={cx - w / 2} y={cy - h / 2} width={w} height={h} rx="1.3" />
-      <clipPath id={`${uid}v`}>
-        <rect x={cx - w / 2} y={cy - h / 2} width={w} height={h} rx="1.3" />
-      </clipPath>
-      <g clip-path={`url(#${uid}v)`}>
-        <ellipse class="fi-v-trail" cx={cx} cy={cy} rx="6" ry={h * 0.6} fill={`url(#${uid}l)`} />
-        <ellipse class="fi-v-light" cx={cx} cy={cy} rx="4.2" ry={h * 0.62} fill={`url(#${uid}l)`} />
+      <ellipse class="fv-c-shadow" cx="16" cy="31.2" rx="10" ry="1.9" fill={`url(#${uid}sh)`} />
+      <g class="fv-c-hop">
+        <path d={d} fill={`url(#${uid}b)`} />
+        <g clip-path={`url(#${uid}c)`}>
+          <path d={d} fill={`url(#${uid}r)`} />
+          <g class="fv-c-face">
+            {size >= 28 && (
+              <g class="fv-c-cheeks">
+                <ellipse cx={cx - gap - 2.6} cy={ey + 3.2} rx="2" ry="1.15" fill={`url(#${uid}k)`} />
+                <ellipse cx={cx + gap + 2.6} cy={ey + 3.2} rx="2" ry="1.15" fill={`url(#${uid}k)`} />
+              </g>
+            )}
+            {eye(-1)}
+            {eye(1)}
+          </g>
+          <path d={d} fill={`url(#${uid}s)`} />
+          {size >= 28 && (
+            <ellipse cx="10.4" cy="7.4" rx="3.4" ry="1.7" transform="rotate(-32 10.4 7.4)" fill={`url(#${uid}hl)`} />
+          )}
+        </g>
       </g>
     </g>
   );
 }
 
-/* B · Núcleo — a light under the skin. */
-function Nucleo({ uid, cx, cy }) {
+/* ── 2 · Aura ─────────────────────────────────────────────────────────────
+   Three soft lights in neighbouring hues move inside the outline; glass on
+   top. The eyes are small, round and white: open, closed, or wide. */
+function Aura({ uid, d, cx, cy, l, c, h, small }) {
+  const cc = Math.max(c, 0.12);
+  const blob = (id, hue, dl) => (
+    <radialGradient id={`${uid}${id}`}>
+      <stop offset="0" stop-color={ok(l + dl, cc + 0.05, hue)} stop-opacity="1" />
+      <stop offset="0.5" stop-color={ok(l + dl, cc + 0.04, hue)} stop-opacity="0.55" />
+      <stop offset="1" stop-color={ok(l + dl, cc + 0.03, hue)} stop-opacity="0" />
+    </radialGradient>
+  );
+  const er = small ? 2.5 : 2.05;
+  const gap = small ? 5 : 4.5;
+  const ey = cy + 1.4;
+  const eye = (side) => (
+    <g class="fv-a-eye">
+      <circle class="fv-a-open" cx={cx + side * gap} cy={ey} r={er} fill="#fff" />
+      <path class="fv-a-shut" d={`M${cx + side * gap - er * 1.05} ${ey - 0.4} q${er * 1.05} ${er * 1.2} ${er * 2.1} 0`}
+        fill="none" stroke="#fff" stroke-width={small ? 1.9 : 1.45} stroke-linecap="round" />
+    </g>
+  );
   return (
     <g>
       <defs>
-        <radialGradient id={`${uid}g`}>
-          <stop offset="0" stop-color="#fff" stop-opacity="0.95" />
-          <stop offset="0.35" stop-color="#fff" stop-opacity="0.55" />
+        {blob("1", h, 0.1)}
+        {blob("2", (h + 48) % 360, 0.06)}
+        {blob("3", (h + 322) % 360, 0.02)}
+        <linearGradient id={`${uid}g`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#fff" stop-opacity="0.38" />
+          <stop offset="0.42" stop-color="#fff" stop-opacity="0.04" />
           <stop offset="1" stop-color="#fff" stop-opacity="0" />
+        </linearGradient>
+        <radialGradient id={`${uid}h`}>
+          <stop offset="0.55" stop-color={ok(l + 0.12, cc, h)} stop-opacity="0.55" />
+          <stop offset="1" stop-color={ok(l + 0.12, cc, h)} stop-opacity="0" />
         </radialGradient>
+        <clipPath id={`${uid}c`}><path d={d} /></clipPath>
       </defs>
-      <g class="fi-n-orbit fi-n-o2"><g class="fi-n-pos"><circle class="fi-n-tail" cx={cx} cy={cy} r="1.6" /></g></g>
-      <g class="fi-n-orbit fi-n-o1"><g class="fi-n-pos"><circle class="fi-n-tail" cx={cx} cy={cy} r="2.1" /></g></g>
-      <g class="fi-n-orbit">
-        <g class="fi-n-pos">
-          <circle class="fi-n-halo" cx={cx} cy={cy} r="9" fill={`url(#${uid}g)`} />
-          <circle class="fi-n-core" cx={cx} cy={cy} r="2.8" />
+      <circle class="fv-a-halo" cx="16" cy="16" r="17" fill={`url(#${uid}h)`} />
+      <path d={d} fill={ok(l - 0.14, cc, h)} />
+      <g clip-path={`url(#${uid}c)`}>
+        <g class="fv-a-swirl">
+          <circle class="fv-a-b1" cx="10" cy="10" r="14" fill={`url(#${uid}1)`} />
+          <circle class="fv-a-b2" cx="23" cy="13" r="13" fill={`url(#${uid}2)`} />
+          <circle class="fv-a-b3" cx="15" cy="25" r="13" fill={`url(#${uid}3)`} />
+        </g>
+        <path d={d} fill={`url(#${uid}g)`} />
+        <g class="fv-a-face">
+          {eye(-1)}
+          {eye(1)}
         </g>
       </g>
+      <path d={d} fill="none" stroke="#fff" stroke-opacity="0.16" stroke-width="0.6" />
     </g>
   );
 }
 
-/* C · Tres puntos — the chat's own sign. */
-function Puntos({ cx, cy, small }) {
-  const r = small ? 2.6 : 2.2;
-  const gap = small ? 6.4 : 5.6;
-  return (
-    <g class="fi-p">
-      {[-1, 0, 1].map((i) => (
-        <g class={`fi-p-slot fi-p-${i + 1}`} key={i}>
-          <circle class="fi-p-dot" cx={cx + i * gap} cy={cy} r={r} />
-        </g>
-      ))}
+/* ── 3 · Lente ────────────────────────────────────────────────────────────
+   The ring is the eye and it never changes shape; only the pupil moves. */
+function Lente({ uid, d, cx, cy, h, small }) {
+  const edge = ok(0.8, 0.14, h);
+  const lit = ok(0.93, 0.07, h);
+  const rr = small ? 3.7 : 3.2;
+  const sw = small ? 2.1 : 1.55;
+  const pr = small ? 1.3 : 1.05;
+  const gap = small ? 5.6 : 5.3;
+  const ey = cy + 1.2;
+  const circ = 2 * Math.PI * rr;
+  const eye = (side) => (
+    <g class={`fv-l-eye fv-l-eye-${side < 0 ? "l" : "r"}`}>
+      <circle class="fv-l-ring" cx={cx + side * gap} cy={ey} r={rr} fill={ok(0.16, 0.02, h)} stroke={lit} stroke-width={sw} />
+      <circle class="fv-l-spin" cx={cx + side * gap} cy={ey} r={rr} fill="none" stroke={lit} stroke-width={sw}
+        stroke-linecap="round" stroke-dasharray={`${circ * 0.62} ${circ}`} />
+      <circle class="fv-l-pupil" cx={cx + side * gap} cy={ey} r={pr} fill={lit} />
     </g>
   );
-}
-
-/* D · Trazo — one line. SMIL for the smile (Safari animates `d` only that
-   way); the wave is a long sine slid under a fading window. */
-function Trazo({ uid, cx, cy, state, small }) {
-  const sw = small ? 3.6 : 2.8;
-  const y = cy + 1.5;
-  if (state === "asks") {
-    return <circle class="fi-t-ring" cx={cx} cy={y} r="3.8" stroke-width={sw} />;
-  }
-  if (state === "working") {
-    const L = 7; // wavelength
-    const a = small ? 2 : 1.8;
-    let p = `M${cx - 21} ${y}`;
-    for (let x = cx - 21; x < cx + 21; x += L) {
-      p += ` q${L / 4} ${-a * 1.3} ${L / 2} 0 q${L / 4} ${a * 1.3} ${L / 2} 0`;
-    }
-    return (
-      <g>
-        <defs>
-          <linearGradient id={`${uid}f`} x1="0" x2="1">
-            <stop offset="0" stop-color="#fff" stop-opacity="0" />
-            <stop offset="0.25" stop-color="#fff" stop-opacity="1" />
-            <stop offset="0.75" stop-color="#fff" stop-opacity="1" />
-            <stop offset="1" stop-color="#fff" stop-opacity="0" />
-          </linearGradient>
-          <mask id={`${uid}m`} maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
-            <rect x={cx - 10} y={y - 6} width="20" height="12" fill={`url(#${uid}f)`} />
-          </mask>
-        </defs>
-        <g mask={`url(#${uid}m)`}>
-          <path class="fi-t-wave" d={p} stroke-width={sw} />
-        </g>
-      </g>
-    );
-  }
-  const a = `M${cx - 6.5} ${y - 0.6} Q${cx} ${y + 4.2} ${cx + 6.5} ${y - 0.6}`;
-  const b = `M${cx - 6.5} ${y} Q${cx} ${y + 2.6} ${cx + 6.5} ${y}`;
-  return (
-    <path class="fi-t-line" d={a} stroke-width={sw}>
-      <animate attributeName="d" dur="5.6s" repeatCount="indefinite" values={`${a};${b};${a}`}
-        calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />
-    </path>
-  );
-}
-
-/* E · Moa — a bird in profile: one round eye, a beak, bird manners. */
-function Moa({ uid, cx, cy, small }) {
-  const ex = cx + 3.2;
-  const ey = cy - 1.8;
-  const er = small ? 4.6 : 4.1;
-  const pr = small ? 2.3 : 1.9;
   return (
     <g>
-      <path class="fi-m-beak" d={`M${cx + 9} ${cy + 0.6} L${cx + 16} ${cy + 2.6} L${cx + 9} ${cy + 4.6} Z`} />
-      <clipPath id={`${uid}e`}><circle cx={ex} cy={ey} r={er} /></clipPath>
-      <g class="fi-m-eye">
-        <circle class="fi-m-white" cx={ex} cy={ey} r={er} />
-        <circle class="fi-m-pupil" cx={ex} cy={ey} r={pr} />
-        <circle class="fi-m-glint" cx={ex - 0.9} cy={ey - 1.1} r={small ? 0 : 0.7} />
-        <g clip-path={`url(#${uid}e)`}>
-          <rect class="fi-m-lid" x={ex - er} y={ey - er} width={er * 2} height={er * 2} />
-        </g>
+      <defs>
+        <linearGradient id={`${uid}b`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color={ok(0.34, 0.035, h)} />
+          <stop offset="1" stop-color={ok(0.2, 0.025, h)} />
+        </linearGradient>
+        <linearGradient id={`${uid}e`} x1="0" y1="0" x2="0.4" y2="1">
+          <stop offset="0" stop-color={edge} stop-opacity="1" />
+          <stop offset="0.6" stop-color={edge} stop-opacity="0.35" />
+          <stop offset="1" stop-color={edge} stop-opacity="0.7" />
+        </linearGradient>
+        <radialGradient id={`${uid}g`} cx="0.5" cy="0.05" r="0.7">
+          <stop offset="0" stop-color={edge} stop-opacity="0.35" />
+          <stop offset="1" stop-color={edge} stop-opacity="0" />
+        </radialGradient>
+        <clipPath id={`${uid}c`}><path d={d} /></clipPath>
+      </defs>
+      <path class="fv-l-body" d={d} fill={`url(#${uid}b)`} />
+      <g clip-path={`url(#${uid}c)`}>
+        <path d={d} fill={`url(#${uid}g)`} />
+      </g>
+      <path d={d} fill="none" stroke={`url(#${uid}e)`} stroke-width={small ? 1.6 : 1.1} />
+      <g class="fv-l-face">
+        {eye(-1)}
+        {eye(1)}
       </g>
     </g>
   );
@@ -254,16 +273,14 @@ function Moa({ uid, cx, cy, small }) {
 
 /* ── The page ──────────────────────────────────────────────────────────── */
 
-// One owner stands for every direction, so the only thing that changes from
-// section to section is the gaze. The roster is only for the phone grid.
-const HERO = { name: "Moa", shape: "squircle", color: "azure", tone: "deep", key: "moa" };
+const HERO = { name: "Moa", shape: "circle", color: "azure", tone: "deep", key: "moa" };
 const ROSTER = [
-  { name: "Autowow", shape: "blob", color: "mint", tone: "deep", key: "autowow", state: "working" },
-  { name: "Glitxapp", shape: "hexagon", color: "mauve", tone: "deep", key: "glitxapp", state: "asks" },
-  { name: "Infra", shape: "shield", color: "sage", tone: "dark", key: "infra", state: "idle" },
-  { name: "Moa", shape: "squircle", color: "azure", tone: "deep", key: "moa", state: "working" },
-  { name: "Quolli", shape: "circle", color: "rose", tone: "deep", key: "quolli", state: "idle" },
-  { name: "Winerim", shape: "drop", color: "lilac", tone: "pale", key: "winerim", state: "working" },
+  { name: "Autowow", shape: "circle", color: "mint", tone: "deep", key: "autowow", state: "working" },
+  { name: "Glitxapp", shape: "squircle", color: "mauve", tone: "deep", key: "glitxapp", state: "asks" },
+  { name: "Infra", shape: "hexagon", color: "sage", tone: "dark", key: "infra", state: "idle" },
+  { name: "Moa", shape: "circle", color: "azure", tone: "deep", key: "moa", state: "working" },
+  { name: "Quolli", shape: "blob", color: "rose", tone: "deep", key: "quolli", state: "idle" },
+  { name: "Winerim", shape: "drop", color: "peach", tone: "deep", key: "winerim", state: "working" },
 ];
 
 const ROW_TEXT = {
@@ -276,7 +293,7 @@ function Face({ dir, o, state, size }) {
   if (dir === "today") {
     return <OwnerFace shape={o.shape} color={o.color} tone={o.tone} seedKey={o.key} state={state} size={size} />;
   }
-  return <IdFace dir={dir} shape={o.shape} color={o.color} tone={o.tone} seedKey={o.key} state={state} size={size} />;
+  return <FaceV2 dir={dir} shape={o.shape} color={o.color} tone={o.tone} seedKey={o.key} state={state} size={size} />;
 }
 
 function Section({ d }) {
@@ -338,14 +355,14 @@ function Section({ d }) {
 const TODAY = {
   id: "today",
   name: "Today · Mirada (the Grok look)",
-  idea: "Two vertical white capsules, squash blink, the pair sliding in saccades, narrowed when working and wide at you.",
+  idea: "Two vertical white capsules, a squash blink, the pair sliding in saccades, narrowed when working and wide at you.",
   states: { idle: "looks around, blinks", working: "narrowed, looking low and aside", asks: "wide open, straight at you" },
 };
 
 export function OwnerFacesIdentityLab() {
   const q = new URLSearchParams(location.search);
   const only = q.get("dir");
-  const all = [TODAY, ...DIRECTIONS];
+  const all = [TODAY, ...PROPOSALS];
   const list = only ? all.filter((d) => d.id === only) : all;
   return (
     <div class={`fi-lab${only ? " is-solo" : ""}`}>
@@ -353,10 +370,9 @@ export function OwnerFacesIdentityLab() {
         <header class="fi-lab-head">
           <h1>Owner faces · a gaze of our own</h1>
           <p>
-            What makes Mirada read as Grok is the gaze, not the outline: two vertical white capsules,
-            a squash blink, the pair sliding in saccades, and mood said by resizing them. None of the
-            five directions uses any of the four. Same owner, same shape and colour in every section;
-            only the gaze changes.
+            What makes Mirada read as Grok is the gaze: two vertical white capsules, a squash blink,
+            saccades, and mood said by resizing them. Three proposals that use none of it, each with its
+            own material. Same owner in every hero; the grid shows other shapes and colours.
           </p>
           <nav class="fi-nav">
             {all.map((d) => <a key={d.id} href={`?view=faces-id&dir=${d.id}`}>{d.name}</a>)}
