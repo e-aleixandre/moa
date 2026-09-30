@@ -1,6 +1,6 @@
 import { createPortal } from "preact/compat";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { ChevronRight, Pin, PinOff, EyeOff, Eye, MessageSquare, Pencil } from "lucide-preact";
+import { Archive, ChevronRight, Pin, PinOff, EyeOff, Eye, MessageSquare, Pencil } from "lucide-preact";
 import { DesktopShell, ConversationScreen, MobileConversationScreen } from "../layout/index.js";
 import { ScreenLab, DESKTOP_LAB_WIDTH, DESKTOP_LAB_HEIGHT, PHONE_LAB_WIDTH, PHONE_LAB_HEIGHT } from "./desktop-lab.jsx";
 import { MobileSheet } from "../layout/mobile/MobileSheet/MobileSheet.jsx";
@@ -58,7 +58,7 @@ const OWNERS = [
   O("moa", "moa", "moa", { shape: "squircle", color: "mauve" }, 0, { session_state: "running", lastUsed: ago(2 * MIN), ownReason: "Reading 2 reports" }),
   O("winerim", "Winerim", "winerim-backend", { shape: "circle", color: "rose" }, 0, { session_state: "idle", lastUsed: ago(4 * MIN) }),
   O("ourown", "Ourown Studio", "ourown-studio", { shape: "blob", color: "sage" }, 0, { session_state: "idle", lastUsed: ago(2 * 60 * MIN) }),
-  O("landing", "letmoa.run", "letmoa-landing", { shape: "pill", color: "sky" }, 2),
+  O("landing", "letmoa.run", "letmoa-landing", { shape: "pill", color: "sky" }, 2, { session_state: "idle" }),
   O("pulse", "Pulse", "moa-companion-ios", { shape: "drop", color: "azure" }, 6),
   O("kiru", "Kiru", "kiru-api", { shape: "hexagon", color: "peach" }, 5),
   O("dotfiles", "dotfiles", "dotfiles", { shape: "circle", color: "lilac", tone: "dark" }, 9),
@@ -128,6 +128,7 @@ let ui = {
   event: null, // owner id an event just woke
   active: "moa",
   menu: null, // { id, x, y } on desktop, { id } on the phone
+  used: {}, // id → when it was last opened in this page (opening = using)
   drag: null, // { id, over: "top" | "fold" | ownerId }
 };
 const listeners = new Set();
@@ -147,7 +148,7 @@ function useOwners() {
   return ownerRows(s.owners.list, s.sessions).map((o) => ({
     ...o,
     ownReason: o.ownReason || OWNER_REASON[o.id] || "",
-    lastUsed: LAST_USED[o.id],
+    lastUsed: ui.used[o.id] || LAST_USED[o.id],
   }));
 }
 
@@ -209,11 +210,36 @@ const pin = (id, before = null) => setUI((u) => {
 const unpin = (id) => setUI((u) => ({ pinned: u.pinned.filter((x) => x !== id), menu: null, drag: null }));
 const quiet = (id) => setUI((u) => ({ pinned: u.pinned.filter((x) => x !== id), quiet: [...new Set([...u.quiet, id])], menu: null, drag: null }));
 const unquiet = (id) => setUI((u) => ({ quiet: u.quiet.filter((x) => x !== id), menu: null }));
-const openOwner = (o) => setUI({ active: o.id, menu: null });
+// Opening is using: a folded owner comes back to the column as if it had just
+// been used, and a hand-hidden one stops being hidden. A closed owner is
+// reopened (its conversation loads again), as a saved session is.
+const openOwner = (o) => {
+  if (ownerState(o) === "saved") setOwnerState(o.id, "idle");
+  setUI((u) => ({ active: o.id, menu: null, quiet: u.quiet.filter((x) => x !== o.id), used: { ...u.used, [o.id]: Date.now() } }));
+};
+// Close = what "Close session" does to a session (POST /api/sessions/{id}/close):
+// the conversation is unloaded and stays on disk, eyes shut. In the sidebar
+// it also folds — a closed owner is one you said you are not using — until
+// something needs you or you open it.
+const closeOwner = (o) => {
+  setOwnerState(o.id, "saved");
+  setUI((u) => ({
+    pinned: u.pinned.filter((x) => x !== o.id),
+    quiet: [...new Set([...u.quiet, o.id])],
+    active: u.active === o.id ? null : u.active,
+    menu: null,
+  }));
+};
+function setOwnerState(id, state, patch = {}) {
+  setState((s) => ({
+    owners: { ...s.owners, list: s.owners.list.map((x) => (x.id === id ? { ...x, session_state: state, ...patch } : x)) },
+  }));
+}
 
 function menuItems(o, variant, placement, u) {
   const pinnedNow = u.pinned.includes(o.id);
-  const items = [{ icon: MessageSquare, label: "Open", run: () => openOwner(o) }];
+  const closed = ownerState(o) === "saved";
+  const items = [{ icon: MessageSquare, label: closed ? "Reopen owner" : "Open", run: () => openOwner(o) }];
   if (variant === "a") {
     if (pinnedNow) items.push({ icon: PinOff, label: "Move to More", run: () => unpin(o.id) });
     else items.push({ icon: Pin, label: "Pin to top", run: () => pin(o.id) });
@@ -222,6 +248,14 @@ function menuItems(o, variant, placement, u) {
     else items.push({ icon: Pin, label: "Always show", run: () => pin(o.id) });
     if (placement === "top") items.push({ icon: EyeOff, label: "Move to Quiet", run: () => quiet(o.id) });
     else if (u.quiet.includes(o.id)) items.push({ icon: Eye, label: "Show when active", run: () => unquiet(o.id) });
+  }
+  if (!closed) {
+    // The server refuses to close a conversation mid-run (409), so the item
+    // says what to do instead of failing after the tap.
+    const busy = ownerState(o) === "working";
+    items.push(busy
+      ? { icon: Archive, label: "Close owner", hint: "Stop its run first", disabled: true }
+      : { icon: Archive, label: "Close owner", run: () => closeOwner(o) });
   }
   items.push({ icon: Pencil, label: "Edit owner…", run: () => setUI({ menu: null }) });
   return items;
@@ -348,6 +382,11 @@ function FoldedRow({ o, phone, variant, u }) {
       >
         <OwnerAvatarFor owner={o} state={st} size={phone ? 24 : 20} />
         <span class="ofl-crow-name">{o.name}</span>
+        {/* Hidden by hand (and not closed, whose shut eyes already say it):
+            a quiet mark, so "why is this here" has an answer on the row. */}
+        {u.quiet.includes(o.id) && st !== "saved" && (
+          <EyeOff class="ofl-crow-hidden" size={13} aria-label="Hidden by you" />
+        )}
         {working
           ? <span class="ofl-crow-state">working</span>
           : <span class="ofl-crow-age zl-data">{age(o.lastUsed)}</span>}
@@ -508,9 +547,10 @@ function DesktopMenu({ owners, variant }) {
         <span>{o.name}</span>
       </div>
       {menuItems(o, variant, placement, u).map((it) => (
-        <button type="button" role="menuitem" class="ofl-menu-item" onClick={it.run} key={it.label}>
+        <button type="button" role="menuitem" class="ofl-menu-item" onClick={it.run} disabled={it.disabled} key={it.label}>
           <it.icon size={15} aria-hidden="true" />
           {it.label}
+          {it.hint && <span class="ofl-menu-hint">{it.hint}</span>}
         </button>
       ))}
     </div>,
@@ -531,9 +571,10 @@ function PhoneMenu() {
       {o && (
         <div class="ofl-sheet">
           {menuItems(o, variant, placement, u).map((it) => (
-            <button type="button" class="ofl-sheet-item" onClick={it.run} key={it.label}>
+            <button type="button" class="ofl-sheet-item" onClick={it.run} disabled={it.disabled} key={it.label}>
               <it.icon size={18} aria-hidden="true" />
               {it.label}
+              {it.hint && <span class="ofl-menu-hint">{it.hint}</span>}
             </button>
           ))}
         </div>
@@ -603,7 +644,7 @@ function seed() {
   const v = lab.v;
   ui = {
     ...ui,
-    foldOpen: scene === "open" || scene === "menu" || scene === "drag",
+    foldOpen: ["open", "menu", "drag", "closed", "reading"].includes(scene),
     event: scene === "event" ? "albeniz" : null,
     menu: null,
     drag: null,
@@ -611,12 +652,20 @@ function seed() {
   if (scene === "menu") {
     ui.menu = phone ? { id: v === "a" ? "pulse" : "ourown" } : { id: v === "a" ? "pulse" : "ourown", x: 170, y: v === "a" ? 560 : 330 };
   }
+  if (scene === "menubusy") ui.menu = phone ? { id: "moa" } : { id: "moa", x: 170, y: 150 };
+  if (scene === "closed") ui.quiet = ["landing"];
   if (scene === "drag") ui.drag = { id: "pulse", over: "top", from: "fold" };
   const ss = sessions();
-  const owners = OWNERS.map((o) => (scene === "event" && o.id === "albeniz"
-    ? { ...o, session_state: "running", lastUsed: LAST_USED.albeniz }
-    : o));
+  const owners = OWNERS.map((o) => {
+    if (scene === "event" && o.id === "albeniz") return { ...o, session_state: "running" };
+    if (scene === "closed" && o.id === "landing") return { ...o, session_state: "saved" };
+    if (scene === "reading" && o.id === "pulse") return { ...o, session_state: "running" };
+    if (scene === "wrote" && o.id === "pulse") return { ...o, session_state: "idle", unseen: true };
+    return o;
+  });
   if (scene === "event") OWNER_REASON.albeniz = "Email from Laura Gil · reading";
+  if (scene === "reading") OWNER_REASON.pulse = "Reading a report · Push nativo con APNs";
+  if (scene === "wrote") OWNER_REASON.pulse = "APNs works in staging · wrote to you";
   setState((s) => ({
     sessions: ss,
     sessionsLoaded: true,
@@ -641,7 +690,10 @@ function useNoToasts() {
 
 const VARIANTS = [["now", "Today"], ["a", "A · Pinned + More"], ["b", "B · Quiet after N days"], ["c", "C · Face shelf"]];
 const DEVICES = [["desktop", "Desktop"], ["phone", "Phone"]];
-const SCENES = [["rest", "At rest"], ["open", "Fold open"], ["event", "Client email arrives"], ["menu", "Menu"], ["drag", "Dragging"]];
+const SCENES = [
+  ["rest", "At rest"], ["open", "Fold open"], ["event", "Client email arrives"], ["menu", "Menu"], ["menubusy", "Menu · working"],
+  ["drag", "Dragging"], ["closed", "letmoa closed"], ["reading", "Closed Pulse gets a report"], ["wrote", "…and writes to you"],
+];
 const DAYS = [["2", "2 days"], ["3", "3 days"], ["7", "7 days"]];
 
 // Live: a client's email lands on a folded owner, or the owner is done with it.
@@ -653,6 +705,18 @@ function toggleEmail() {
     owners: { ...s.owners, list: s.owners.list.map((o) => (o.id === "albeniz" ? { ...o, session_state: on ? "running" : "saved" } : o)) },
   }));
   setUI({ event: on ? "albeniz" : null });
+}
+
+// Live: a child reports to Pulse, which is closed. Today's server resumes it
+// (reports.go deliverReportsIfIdle): it reads in the fold, then writes to you
+// and rises.
+function reportToPulse() {
+  OWNER_REASON.pulse = "Reading a report · Push nativo con APNs";
+  setOwnerState("pulse", "running");
+  setTimeout(() => {
+    OWNER_REASON.pulse = "APNs works in staging · wrote to you";
+    setOwnerState("pulse", "idle", { unseen: true });
+  }, 3000);
 }
 
 function EmailButton() {
@@ -681,7 +745,12 @@ function LabBar() {
       <Seg k="device" cur={lab.device} items={DEVICES} />
       <Seg k="scene" cur={lab.scene} items={SCENES} />
       {(lab.v === "b" || lab.v === "c") && <Seg k="days" cur={String(lab.days)} items={DAYS} />}
-      {lab.v !== "now" && <div class="ofl-lab-seg"><EmailButton /></div>}
+      {lab.v !== "now" && (
+        <div class="ofl-lab-seg">
+          <EmailButton />
+          <button type="button" class="ofl-lab-opt ofl-lab-btn" onClick={reportToPulse}>Live: report to closed Pulse</button>
+        </div>
+      )}
     </div>
   );
 }

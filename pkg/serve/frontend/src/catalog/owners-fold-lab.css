@@ -84,6 +84,7 @@ body:has(.ofl-lab) .catalog-nav { display: none; }
 .is-phone .zl-row.ofl-crow { min-height: 44px; }
 .ofl-crow-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--zl-t2); font-size: var(--zl-fs-body); }
 .ofl-crow-age { flex: none; color: var(--zl-t4); }
+.ofl-crow-hidden { flex: none; color: var(--zl-t4); }
 .ofl-crow-state { flex: none; color: var(--blue); font-size: var(--zl-fs-meta); font-weight: 500; }
 .zl-row.ofl-crow.is-current { background: var(--zl-raised); box-shadow: var(--zl-rim); }
 .ofl-cslot .ofl-pin { right: 6px; }
@@ -131,6 +132,9 @@ body:has(.ofl-lab) .catalog-nav { display: none; }
   font: inherit; text-align: left; cursor: pointer;
 }
 .ofl-menu-item svg { color: var(--zl-t4); flex: none; }
+.ofl-menu-item:disabled, .ofl-sheet-item:disabled { color: var(--zl-t4); cursor: default; }
+.ofl-menu-item:disabled:hover { background: none; color: var(--zl-t4); }
+.ofl-menu-hint { margin-left: auto; padding-left: 12px; color: var(--zl-t4); font-size: var(--zl-fs-meta); }
 .ofl-menu-item:hover, .ofl-menu-item:focus-visible { background: var(--zl-hi); color: var(--zl-t1); outline: 0; }
 .ofl-menu-item:hover svg { color: var(--zl-t2); }
 
