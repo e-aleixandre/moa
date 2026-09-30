@@ -1046,7 +1046,13 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 			return partialMessage(), ctx.Err()
 		case event, ok := <-ch:
 			if !ok {
-				// Channel closed
+				// Channel closed. A provider can deliver its Done and close
+				// after the run was cancelled; select picks among ready cases
+				// at random, so cancellation must win here too or the caller
+				// would execute the tool calls of a stopped run.
+				if err := ctx.Err(); err != nil {
+					return partialMessage(), err
+				}
 				if finalMsg == nil {
 					return partialMessage(), fmt.Errorf("stream ended without final message")
 				}
@@ -1447,6 +1453,13 @@ func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, repor
 			ToolName:   tc.ToolName,
 			Result:     &partial,
 		})
+	}
+
+	// A Stop can land after the stream was accepted: during pre-flight or while
+	// an earlier call in the batch holds the shell/path barrier. A tool of a
+	// stopped run must not start at all, since many tools ignore ctx.
+	if ctx.Err() != nil {
+		return core.ErrorResult("Tool result unavailable: the run was cancelled before a result was recorded."), true
 	}
 
 	ctx = core.WithToolCallID(ctx, tc.ToolCallID)
