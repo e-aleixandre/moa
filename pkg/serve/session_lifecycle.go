@@ -1951,8 +1951,17 @@ func (m *Manager) settleScheduledWork(id string, sess *ManagedSession) error {
 			meta = s.Metadata
 			return true
 		})
-	} else if saved, _, err := session.FindSessionReadOnly(m.sessionBaseDir, id); err == nil {
-		meta = saved.Metadata
+	} else {
+		// The header alone carries the marker: a damaged transcript body must
+		// not turn a marked session into an unmarked one. A header that
+		// cannot be read refuses the delete; an absent file has no marker.
+		sum, err := session.FindSummaryReadOnly(m.sessionBaseDir, id)
+		switch {
+		case err == nil:
+			meta = sum.Metadata
+		case !errors.Is(err, session.ErrNotFound):
+			return fmt.Errorf("settle scheduled work of session %s: %w", id, err)
+		}
 	}
 	var marker int64
 	if v, _ := meta[session.MetaScheduledOccurrenceID].(string); v != "" {

@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -93,5 +95,54 @@ func TestReview2MoaDeleteStatFailureRefusesRemoval(t *testing.T) {
 	t.Logf("database stat=EACCES; Delete=%v file=%v run=%s/%s", deleteErr, fileErr, after.State, after.Reason)
 	if deleteErr == nil || fileErr != nil || after.State != tasks.OccReady {
 		t.Errorf("database stat error did not refuse Delete intact: Delete=%v file=%v run=%s/%s", deleteErr, fileErr, after.State, after.Reason)
+	}
+}
+
+// A readable marked header is enough to keep Delete from recreating its run;
+// a damaged transcript body must not silently discard that marker.
+func TestReview2MoaMarkedSavedDeleteReadsHeader(t *testing.T) {
+	h := newSchedHarness(t, newMockProvider(simpleResponseHandler("ok")), "2026-09-30T08:00:00Z")
+	m := h.start()
+	schedReviewStopWorkers(t, m)
+	r := h.repo()
+	o := readyNewRun(t, h, r, newTarget(t, h.root))
+	sid := markedSession(t, h, o.ID, o.ScheduleTaskID)
+	saved, store, err := session.FindSessionReadOnly(h.base, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, err := json.Marshal(struct {
+		ID       string         `json:"id"`
+		Metadata map[string]any `json:"metadata"`
+	}{ID: saved.ID, Metadata: saved.Metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store.Dir(), sid+".json")
+	broken := append(bytes.TrimSuffix(header, []byte("}")), []byte(",\"entries\":[")...)
+	if err := os.WriteFile(path, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := session.FindSessionReadOnly(h.base, sid); err == nil {
+		t.Fatal("test setup: transcript body was not damaged")
+	}
+	if got := markedSessions(t, h.base, o.ID); len(got) != 1 || got[0].ID != sid {
+		t.Fatalf("test setup: header marker is not readable: %+v", got)
+	}
+	deleteErr := m.Delete(sid)
+	if deleteErr != nil {
+		if _, err := os.Stat(path); err != nil || occNow(t, r, o.ID).State != tasks.OccReady {
+			t.Fatalf("refused Delete changed its file or run: %v", err)
+		}
+		return
+	}
+	if after := occNow(t, r, o.ID); after.State != tasks.OccFailed || after.Reason != tasks.ReasonSessionDeleted {
+		t.Errorf("successful Delete ignored the readable marker: run=%s/%s", after.State, after.Reason)
+	}
+	recreated := m.planner.provisionNew(bgc, o)
+	after := occNow(t, r, o.ID)
+	t.Logf("Delete=%v old session=%s provision=%t new session=%s run=%s/%s", deleteErr, sid, recreated, after.SessionID, after.State, after.Reason)
+	if recreated || countSessions(t, h.base) != 0 {
+		t.Errorf("planner recreated the explicitly deleted marked session as %s", after.SessionID)
 	}
 }

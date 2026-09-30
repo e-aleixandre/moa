@@ -805,6 +805,22 @@ func FindSessionStoreReadOnly(baseDir, id string) (*FileStore, error) {
 	return nil, fmt.Errorf("session %s: %w", id, ErrNotFound)
 }
 
+// FindSummaryReadOnly returns a saved session's header (ID and metadata)
+// without decoding its transcript, so a damaged conversation body does not
+// hide what the header says. Errors are those of FindSessionStoreReadOnly,
+// plus an unreadable header.
+func FindSummaryReadOnly(baseDir, id string) (Summary, error) {
+	store, err := FindSessionStoreReadOnly(baseDir, id)
+	if err != nil {
+		return Summary{}, err
+	}
+	sum, err := readSummary(store.path(id))
+	if err != nil {
+		return Summary{}, fmt.Errorf("session %s: %w", id, err)
+	}
+	return sum, nil
+}
+
 // DeleteByID searches all project stores under baseDir and deletes the session.
 func DeleteByID(baseDir, id string) error {
 	if err := ValidateID(id); err != nil {
