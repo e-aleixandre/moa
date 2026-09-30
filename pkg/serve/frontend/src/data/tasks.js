@@ -269,7 +269,7 @@ export function selectSessionDirectory(state) {
   for (const own of ownerOf.values()) {
     if (!sessions[own.session_id]) all.push({ ...entry({ id: own.session_id }), state: own.session_state || 'saved' });
   }
-  const rows = all.map((s) => [s.id, s.title, s.state, s.cwd, s.kind]);
+  const rows = all.map((s) => [s.id, s.title, s.state, s.cwd, s.kind, s.updated]);
   const sig = JSON.stringify(rows);
   if (sig !== directory.sig) {
     const value = {};

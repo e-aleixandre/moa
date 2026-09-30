@@ -89,6 +89,7 @@ export function MobileTasksView({ onBack }) {
       <TaskDetail
         isNew
         phone
+        newDest={only ? { place: "agent", sessionId: only } : null}
         onPushDeps={() => push({ kind: "deps", id: null })}
         onPushMove={() => push({ kind: "move", id: null })}
         onCreated={(id) => setStack(id ? [{ kind: "task", id }] : [])}

@@ -665,6 +665,7 @@ export function MoveList({
         {!needle && backlog(project)}
         {project.sessions.length > 0 && <div class="tk-pop-label">Sessions</div>}
         {needle ? hits.sessions.map((s) => <SessionItem key={s.id} s={s} withProject={false} />) : sessionsOf(project)}
+        {needle && hits.more > 0 && <div class="tk-pop-none">{hits.more} more. Keep typing to narrow it.</div>}
         {needle && hits.sessions.length === 0 && <div class="tk-pop-none">No session matches.</div>}
       </>
     );

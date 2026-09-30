@@ -19,6 +19,10 @@ mock.module("preact/hooks", () => ({
 }));
 
 const { MoveList, CompleteNote } = await import("./parts.jsx");
+const { MobileTasksView } = await import("./MobileTasksView.jsx");
+const { TaskDetail } = await import("./TaskDetail.jsx");
+const { store, setState, TASKS_INITIAL } = await import("../../data/store.js");
+const { peekDraft, takeDraft } = await import("../../data/tasks.js");
 
 function expand(node, depth = 0) {
   if (node == null || typeof node !== "object" || depth > 12) return node;
@@ -53,6 +57,65 @@ function renderMove(pending, onPick = () => {}) {
   pick = (i) => (i === 1 ? pending : undefined);
   return expand(MoveList({ task: TASK, projects: [], sessions: SESSIONS, phone: true, onPick }));
 }
+
+test("phone creation inside a session filter targets that session, like desktop", () => {
+  const previous = store.get();
+  setState({ tasks: { ...TASKS_INITIAL, session: "live" }, sessions: SESSIONS });
+  calls = 0;
+  // The first three states subscribe to tasks, the directory and owners.
+  pick = (i) => (i === 3 ? [{ kind: "new" }] : undefined);
+  try {
+    const editor = flat(MobileTasksView({ onBack() {} })).find((n) => n.type === TaskDetail);
+    expect(editor).toBeDefined();
+    expect(editor.props.newDest).toEqual({ place: "agent", sessionId: "live" });
+  } finally {
+    setState(previous);
+    pick = () => undefined;
+  }
+});
+
+test("opening Where on an existing phone task stashes its unsaved edits", () => {
+  const previous = store.get();
+  const draft = { title: "Unsaved title", description: "Unsaved details", subtasks: [{ title: "Keep it", done: false }], waits_for: [] };
+  setState({ tasks: { ...TASKS_INITIAL, details: { [TASK.id]: TASK } }, sessions: SESSIONS });
+  calls = 0;
+  // After the three store subscriptions: stash, base, then the draft.
+  pick = (i) => (i === 5 ? draft : undefined);
+  let pushed = false;
+  try {
+    const tree = TaskDetail({ taskId: TASK.id, phone: true, onPushMove: () => { pushed = true; } });
+    flat(tree).find((n) => n.type === "button" && n.props.class === "tk-prop-btn").props.onClick();
+    expect(pushed).toBe(true);
+    expect(peekDraft(TASK.id)?.draft).toEqual(draft);
+    expect(takeDraft(TASK.id)?.base).toEqual(TASK);
+  } finally {
+    takeDraft(TASK.id);
+    setState(previous);
+    pick = () => undefined;
+  }
+});
+
+test("project search reports the matches beyond its result cap", () => {
+  const sessions = Object.fromEntries(Array.from({ length: 45 }, (_, i) => {
+    const id = `s${i}`;
+    return [id, { id, title: `Matching session ${i}`, state: "saved", cwd: "/d/project" }];
+  }));
+  calls = 0;
+  pick = (i) => (i === 0 ? "Matching" : i === 2 ? "p" : undefined);
+  const tree = expand(MoveList({ task: TASK, projects: [{ key: "p", cwd: "/d/project" }], sessions, onPick() {} }));
+  expect(buttons(tree).filter((b) => b.label.startsWith("Matching session"))).toHaveLength(40);
+  expect(text(tree)).toContain("5 more. Keep typing to narrow it.");
+});
+
+test("a new task picks a saved destination directly; creation owns the delivery choice", () => {
+  const picks = [];
+  calls = 0;
+  pick = (i) => (i === 0 ? "Saved one" : undefined);
+  const tree = expand(MoveList({ task: TASK, projects: [], sessions: SESSIONS, direct: true, phone: true, onPick: (...args) => picks.push(args) }));
+  buttons(tree).find((b) => b.label.startsWith("Saved one")).node.props.onClick();
+  expect(picks).toEqual([[{ place: "agent", sessionId: "gone" }, null]]);
+  expect(text(tree)).not.toContain("Assign and wake");
+});
 
 test("assigning to a saved session confirms once, with wake and hold as the confirmation", () => {
   const picks = [];

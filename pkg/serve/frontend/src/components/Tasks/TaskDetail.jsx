@@ -145,7 +145,7 @@ export function TaskDetail({
   // draft waits in the stash, as it does for "Waits for".
   const openMove = () => {
     if (!onPushMove) { setMenu(true); return; }
-    if (isNew) stashDraft(draftKey, { base, draft, dest });
+    stashDraft(draftKey, { base, draft, dest });
     onPushMove();
   };
 
