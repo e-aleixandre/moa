@@ -52,14 +52,19 @@ func registerRunControlHandlers(sctx *SessionContext) {
 		if expectedGen != 0 && sctx.RunGenAtomic.Load() != expectedGen {
 			return ErrSessionBusy
 		}
-		// Agent.Abort takes the same lock as the post-tool delivery boundary, so
-		// no queued steer can cross into history after Stop has claimed it.
-		sctx.Agent.Abort()
-		sctx.cancelRun()
-		// Claim the remaining queue after cancellation. A steer that already
-		// crossed into history is not returned here, so clients must not restore
-		// and send it a second time after Stop.
+		// Claim the queue before anything cancels the run. Once cancelled, the
+		// run's own unwind clears whatever is still queued and reports no steer
+		// IDs, so a later claim would find it empty: the client could not
+		// restore its text and a task notice would be left as sent. Every
+		// producer enqueues under abortMu, so nothing is added after this claim;
+		// a steer the run drains concurrently crosses into history and is not
+		// returned, so clients must not restore and send it a second time.
 		discarded := sctx.Agent.CancelSteer()
+		// Cancel the bus context before the agent's own. The run settles as
+		// cancelled only if its bus context is already done when it decides;
+		// cancelling the agent first lets it unwind and settle as an error.
+		sctx.cancelRun()
+		sctx.Agent.Abort()
 		if discardedOut != nil {
 			*discardedOut = discarded
 		}

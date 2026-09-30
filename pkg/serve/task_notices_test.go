@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -582,6 +583,62 @@ func TestNoticeSteerDiscardedByStopIsAppendedNotRecalled(t *testing.T) {
 	}
 	pollUntil(t, 5*time.Second, "idle", func() bool { return sessState(sess) == StateIdle })
 	assertAppendedWithoutTurn(t, mgr, prov, sess, rec.ID, prov.calls.Load())
+}
+
+// abortAfterUnwind keeps the real agent and only delays Abort's return until
+// the stopped run has published RunEnded. That forces a legal but adverse
+// order: the run's own unwind (which clears the queue) finishes before Stop
+// continues past Agent.Abort.
+type abortAfterUnwind struct {
+	bus.AgentController
+	ended <-chan struct{}
+}
+
+func (a *abortAfterUnwind) Abort() {
+	a.AgentController.Abort()
+	select {
+	case <-a.ended:
+	case <-time.After(5 * time.Second):
+	}
+}
+
+// Stop must claim the queue before the stopped run can unwind and drop it:
+// otherwise the notice stays sent/run and is later delivered again with a
+// turn, the owner's steer is not returned to the composer, and the run
+// settles as an error instead of idle.
+func TestNoticeSteerDiscardedByStopSurvivesUnwindFirst(t *testing.T) {
+	prov := newMockProvider(delayedResponseHandler(5*time.Second, "slow"))
+	srv, mgr := newNoticeTestServer(t, prov)
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{})
+	var once sync.Once
+	unsub := sess.runtime.Bus.Subscribe(func(bus.RunEnded) { once.Do(func() { close(ended) }) })
+	defer unsub()
+	sctx := sess.runtime.Context()
+	sctx.Agent = &abortAfterUnwind{AgentController: sctx.Agent, ended: ended}
+
+	rec, n := startAndSteerNotice(t, srv, mgr, sess)
+	if _, id, _, err := mgr.Send(sess.ID, "mine", nil, "q-owner", ""); err != nil || id != "q-owner" {
+		t.Fatalf("owner steer = %q, %v", id, err)
+	}
+	calls := prov.calls.Load()
+
+	resp := mustAPI(t, srv, "POST", "/api/sessions/"+sess.ID+"/cancel-and-recall", "", http.StatusOK)
+	out := decode[map[string][]string](t, resp)
+	if ids := out["discarded_steer_ids"]; len(ids) != 1 || ids[0] != "q-owner" {
+		t.Errorf("recalled = %v, want only the owner's steer (notice steer %s)", ids, n.SteerID)
+	}
+	sess.runtime.Bus.Drain(5 * time.Second)
+	if st := sessState(sess); st != StateIdle {
+		t.Errorf("Stop settled as %s, want idle", st)
+	}
+	if got, _ := latestNotice(t, mgr, rec.ID); got.Method != tasks.MethodAppend {
+		t.Fatalf("Stop lost the notice steer: state=%s method=%s", got.State, got.Method)
+	}
+	assertAppendedWithoutTurn(t, mgr, prov, sess, rec.ID, calls)
 }
 
 // Recalling the queue while the run goes on: the notice is not returned to
