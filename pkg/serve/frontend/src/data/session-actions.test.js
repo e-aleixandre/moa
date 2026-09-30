@@ -12,10 +12,13 @@ const { store, setState, updateSession } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
 const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, recallQueuedSteers, sendMessage, setOwnerDetached, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
 const { getToasts, removeToast } = await import('./notifications.js');
+const { __resetSteerRestoreForTests } = await import('./steer-restore.js');
+const { consumeComposerDrop } = await import('./share.js');
 const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange, handleWsSteersCanceled } = await import('./ws-handlers.js');
 
 beforeEach(() => {
   apiResponse = [];
+  __resetSteerRestoreForTests();
   globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify(apiResponse), { status: 200 }));
   setState({ sessions: {}, tileTree: null, activeSession: null });
   getToasts().forEach(({ id }) => removeToast(id));
@@ -1420,6 +1423,10 @@ test('stopRun with nothing discarded leaves the composer alone', async () => {
   expect(store.get().sessions.s1.pendingSteers).toEqual([{ id: 'q1', text: 'delivered' }]);
 });
 
+function stopReply(ids, steers) {
+  return new Response(JSON.stringify({ discarded_steer_ids: ids, ...(steers ? { discarded_steers: steers } : {}) }), { status: 200 });
+}
+
 test('stopRun restores a steer queued after its snapshot, once, when the WebSocket clears it first', async () => {
   setState({ composerDrops: {} });
   let resolveStop;
@@ -1432,7 +1439,7 @@ test('stopRun restores a steer queued after its snapshot, once, when the WebSock
     { id: 'q2', text: 'second from another tab', confirmed: true },
   ] });
   handleWsSteersCanceled('s1', ['q1', 'q2']);
-  resolveStop(new Response(JSON.stringify({ discarded_steer_ids: ['q1', 'q2'] }), { status: 200 }));
+  resolveStop(stopReply(['q1', 'q2']));
   await stopping;
 
   expect(store.get().composerDrops.s1?.text).toBe('first\nsecond from another tab');
@@ -1441,10 +1448,7 @@ test('stopRun restores a steer queued after its snapshot, once, when the WebSock
 
 test('stopRun restores a discarded steer this client never saw, from the server reply', async () => {
   setState({ composerDrops: {} });
-  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
-    discarded_steer_ids: ['q1', 'q2'],
-    discarded_steers: [{ id: 'q1', text: 'first' }, { id: 'q2', text: 'not yet announced here' }],
-  }), { status: 200 }));
+  globalThis.fetch = () => Promise.resolve(stopReply(['q1', 'q2'], [{ id: 'q1', text: 'first' }, { id: 'q2', text: 'not yet announced here' }]));
   setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'q1', text: 'first' }] } } });
 
   await stopRun('s1');
@@ -1466,6 +1470,75 @@ test('a Stop whose reply is lost still restores what the server announced as dis
   await expect(stopRun('s1')).rejects.toThrow('network lost');
 
   expect(store.get().composerDrops.s1?.text).toBe('preserve this text');
+});
+
+test('a Stop whose reply is lost before the broadcast still restores it when the broadcast arrives', async () => {
+  setState({ composerDrops: {} });
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'q1', text: 'first', confirmed: true }] } } });
+  globalThis.fetch = () => Promise.reject(new TypeError('network lost'));
+
+  await expect(stopRun('s1')).rejects.toThrow('network lost');
+  expect(store.get().composerDrops.s1).toBeUndefined();
+  handleWsSteersCanceled('s1', ['q1']);
+
+  expect(store.get().composerDrops.s1?.text).toBe('first');
+  expect(store.get().sessions.s1.pendingSteers).toBeNull();
+});
+
+test('two Stops in one run restore the single discard once, even when the second is rejected', async () => {
+  setState({ composerDrops: {} });
+  const resolves = [];
+  globalThis.fetch = () => new Promise((resolve) => resolves.push(resolve));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'q1', text: 'first', confirmed: true }] } } });
+
+  const first = stopRun('s1');
+  const second = stopRun('s1');
+  handleWsSteersCanceled('s1', ['q1']);
+  resolves[0](stopReply(['q1'], [{ id: 'q1', text: 'first' }]));
+  await first;
+  expect(store.get().composerDrops.s1?.text).toBe('first');
+  consumeComposerDrop('s1');
+  resolves[1](new Response('session is not running', { status: 400 }));
+  await expect(second).rejects.toThrow('400');
+
+  expect(store.get().composerDrops.s1).toBeUndefined();
+});
+
+test('two Stops with different discards append to an unconsumed drop instead of replacing it', async () => {
+  setState({ composerDrops: {} });
+  const resolves = [];
+  globalThis.fetch = () => new Promise((resolve) => resolves.push(resolve));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'q1', text: 'first' }] } } });
+
+  const first = stopRun('s1');
+  updateSession('s1', { pendingSteers: [{ id: 'q1', text: 'first' }, { id: 'q2', text: 'second' }] });
+  const second = stopRun('s1');
+  resolves[0](stopReply(['q1'], [{ id: 'q1', text: 'first' }]));
+  await first;
+  resolves[1](stopReply(['q2'], [{ id: 'q2', text: 'second' }]));
+  await second;
+
+  expect(store.get().composerDrops.s1?.text).toBe('first\nsecond');
+});
+
+test('a broadcast with no Stop of this client pending restores nothing', async () => {
+  setState({ composerDrops: {} });
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'q1', text: 'someone else stopped' }] } } });
+
+  handleWsSteersCanceled('s1', ['q1']);
+
+  expect(store.get().composerDrops.s1).toBeUndefined();
+});
+
+test('a Stop the server rejected does not restore a later broadcast from someone else', async () => {
+  setState({ composerDrops: {} });
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'q1', text: 'another tab recalls this' }] } } });
+  globalThis.fetch = () => Promise.resolve(new Response('session is not running', { status: 400 }));
+
+  await expect(stopRun('s1')).rejects.toThrow('400');
+  handleWsSteersCanceled('s1', ['q1']);
+
+  expect(store.get().composerDrops.s1).toBeUndefined();
 });
 
 test('a failed Stop with no discard announced restores nothing', async () => {

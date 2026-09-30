@@ -13,8 +13,7 @@ import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } fro
 import { loadEvents } from './events.js'; // wake-on-event
 import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 import { closeSessionPanelForSession } from './session-panel.js';
-import { combineQueueText, droppedImageCount } from './composer-queue.js';
-import { wsState } from './ws/shared.js';
+import { beginStop, endStop, restoreSteers } from './steer-restore.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -802,53 +801,32 @@ export async function cancelRun(id) {
 // Queued images cannot be pulled back (only their count was ever tracked
 // client-side), so they are reported instead.
 export async function stopRun(id) {
-  const snapshot = store.get().sessions[id]?.pendingSteers || [];
-  const announced = new Map();
-  const collectors = wsState.stopCollectors[id] || (wsState.stopCollectors[id] = new Set());
-  collectors.add(announced);
+  beginStop(id);
   let result;
   try {
     result = await cancelRun(id);
   } catch (err) {
-    // The server may have stopped and announced its discards over the
-    // WebSocket even though the reply was lost: those chips are gone, so
-    // their text must still come back.
-    restoreStoppedSteers(id, [...announced.values()].filter((s) => !s.non_recallable));
+    // A 4xx is moa refusing the Stop, so nothing was discarded. Anything else
+    // (network, timeout, a proxy's 5xx) may hide a Stop the server did apply.
+    endStop(id, { answered: err?.status >= 400 && err?.status < 500 });
     throw err;
-  } finally {
-    collectors.delete(announced);
-    if (collectors.size === 0) delete wsState.stopCollectors[id];
   }
-  const discarded = new Set(result?.discarded_steer_ids || []);
-  // The server's own items come last so they win: a steer admitted after the
-  // snapshot, or from another tab, is known only to them.
+  endStop(id, { answered: true });
+  const discarded = result?.discarded_steer_ids || [];
+  // The server's own items win: a steer admitted from another tab may have no
+  // chip here yet.
   const known = new Map([
-    ...snapshot,
     ...(store.get().sessions[id]?.pendingSteers || []),
-    ...announced.values(),
     ...(result?.discarded_steers || []),
   ].map((s) => [s.id, s]));
-  const restored = [...discarded].map((sid) => known.get(sid)).filter(Boolean);
-  if (restored.length === 0) return result;
-  restoreStoppedSteers(id, restored);
+  restoreSteers(id, discarded.map((sid) => known.get(sid)).filter(Boolean));
   const current = store.get().sessions[id];
-  if (current?.pendingSteers) {
-    const kept = current.pendingSteers.filter((s) => !discarded.has(s.id));
+  if (discarded.length > 0 && current?.pendingSteers) {
+    const gone = new Set(discarded);
+    const kept = current.pendingSteers.filter((s) => !gone.has(s.id));
     updateSession(id, { pendingSteers: kept.length > 0 ? kept : null });
   }
   return result;
-}
-
-function restoreStoppedSteers(id, restored) {
-  if (restored.length === 0) return;
-  const text = restored.map((s) => s.text).join('\n');
-  setState((state) => ({
-    composerDrops: { ...state.composerDrops, [id]: { id: `stop-${Date.now()}`, text, files: [], focus: true } },
-  }));
-  const dropped = restored.reduce((n, s) => n + (s.images || 0), 0);
-  if (dropped > 0) {
-    addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'info' });
-  }
 }
 
 // cancelSteers drops every steer message still queued (not yet delivered) on
@@ -885,28 +863,14 @@ export function recallQueuedSteers(id) {
   let recall = queuedRecalls.get(id);
   if (recall?.pending) return false;
   if (!recall) {
-    recall = { pending: false, restoredIDs: new Set() };
+    recall = { pending: false };
     queuedRecalls.set(id, recall);
   }
   recall.pending = true;
   cancelSteers(id)
     .then((result) => {
       const discarded = result?.discarded_steers || [];
-      const restored = discarded.filter((steer) => !recall.restoredIDs.has(steer.id));
-      if (restored.length > 0) {
-        restored.forEach((steer) => recall.restoredIDs.add(steer.id));
-        setState((state) => ({
-          composerDrops: {
-            ...state.composerDrops,
-            [id]: { id: `recall-${Date.now()}`, text: combineQueueText('', restored), files: [], focus: true },
-          },
-        }));
-
-        const dropped = droppedImageCount(restored);
-        if (dropped > 0) {
-          addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'info' });
-        }
-      }
+      restoreSteers(id, discarded);
 
       const discardedIDs = new Set(result?.discarded_steer_ids || discarded.map((steer) => steer.id));
       const current = store.get().sessions[id];
@@ -918,20 +882,7 @@ export function recallQueuedSteers(id) {
     })
     .catch((e) => {
       recall.pending = false;
-      const fallback = queued.filter((steer) => !steer.non_recallable && !recall.restoredIDs.has(steer.id));
-      if (fallback.length > 0) {
-        fallback.forEach((steer) => recall.restoredIDs.add(steer.id));
-        setState((state) => ({
-          composerDrops: {
-            ...state.composerDrops,
-            [id]: { id: `recall-${Date.now()}`, text: combineQueueText('', fallback), files: [], focus: true },
-          },
-        }));
-        const dropped = droppedImageCount(fallback);
-        if (dropped > 0) {
-          addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'info' });
-        }
-      }
+      restoreSteers(id, queued);
       console.error('cancelSteers failed:', e);
       addToast({ sessionId: id, title: 'Could not cancel queued messages', detail: e.message, type: 'error' });
     });

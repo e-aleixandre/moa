@@ -5,6 +5,7 @@ import { store, setState, updateSession } from '../store.js';
 import { markUnseen, acknowledgeVisibleLiveAttention } from './attention.js';
 import { parseSubagentNotification, skillForkLaunchRow } from './history.js';
 import { nextRunEpoch } from './init.js';
+import { restoreBroadcastDiscards } from '../steer-restore.js';
 
 export function scheduleFlush() {
   if (wsState.flushScheduled) return;
@@ -394,14 +395,9 @@ export function handleWsSteersCanceled(id, discardedSteerIDs) {
   if (!sess || !sess.pendingSteers) return;
   if (Array.isArray(discardedSteerIDs)) {
     const discarded = new Set(discardedSteerIDs);
-    // A Stop in flight keeps what the server discarded: this chip is the last
-    // copy of its text if the Stop's HTTP reply never arrives.
-    const collectors = wsState.stopCollectors[id];
-    if (collectors) {
-      for (const steer of sess.pendingSteers) {
-        if (discarded.has(steer.id)) collectors.forEach((c) => c.set(steer.id, steer));
-      }
-    }
+    // For a Stop of this client these chips may be the last copy of the text:
+    // its reply can come later, or never.
+    restoreBroadcastDiscards(id, sess.pendingSteers.filter((steer) => discarded.has(steer.id)));
     const pendingSteers = sess.pendingSteers.filter((steer) => !discarded.has(steer.id));
     updateSession(id, { pendingSteers: pendingSteers.length > 0 ? pendingSteers : null });
     return;
