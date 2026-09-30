@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/e-aleixandre/moa/pkg/schedule"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
@@ -43,12 +44,14 @@ func (m *Manager) importLegacySchedules(ctx context.Context) {
 			return
 		}
 		var items []tasks.LegacySchedule
+		transcripts := map[string]*session.Session{}
 		for _, rec := range store.List() {
 			if rec.Status != schedule.StatusPending {
 				continue
 			}
 			items = append(items, tasks.LegacySchedule{ID: rec.ID, SessionID: rec.SessionID, Text: rec.Text,
-				DueAt: rec.DueAt.UnixMilli(), TZ: rec.TimeZone, CreatedAt: rec.CreatedAt.UnixMilli()})
+				DueAt: rec.DueAt.UnixMilli(), TZ: rec.TimeZone, CreatedAt: rec.CreatedAt.UnixMilli(),
+				Delivered: m.legacyPromptSaved(transcripts, rec.SessionID, rec.OccurrenceID)})
 		}
 		imported, err := m.tasks.ImportLegacySchedules(ctx, items)
 		if err != nil {
@@ -71,4 +74,43 @@ func (m *Manager) importLegacySchedules(ctx context.Context) {
 		_ = dir.Sync()
 		_ = dir.Close()
 	}
+}
+
+// legacyPromptSaved reports whether the old scheduler already put a record's
+// prompt in its session: it marked each prompt with the record's occurrence
+// ID and deduplicated by it after a crash. Transcripts are read once per
+// session (cache). An unreadable one proves nothing: the record is imported
+// as a run that waits for the owner's OK.
+func (m *Manager) legacyPromptSaved(cache map[string]*session.Session, sessionID, occurrenceID string) bool {
+	if occurrenceID == "" || sessionID == "" {
+		return false
+	}
+	s, seen := cache[sessionID]
+	if !seen {
+		saved, _, err := session.FindSessionReadOnly(m.sessionBaseDir, sessionID)
+		if err != nil && !errors.Is(err, session.ErrNotFound) {
+			slog.Warn("legacy schedules: cannot read the session to check for a delivered prompt", "session", sessionID, "error", err)
+		}
+		s = saved
+		cache[sessionID] = s
+	}
+	if s == nil {
+		return false
+	}
+	marked := func(c map[string]any) bool {
+		src, _ := c["source"].(string)
+		occ, _ := c["occurrence_id"].(string)
+		return src == "schedule" && occ == occurrenceID
+	}
+	for _, e := range s.Entries {
+		if marked(e.Message.Custom) {
+			return true
+		}
+	}
+	for _, msg := range s.Messages {
+		if marked(msg.Custom) {
+			return true
+		}
+	}
+	return false
 }

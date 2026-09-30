@@ -1266,14 +1266,19 @@ type LegacySchedule struct {
 	DueAt     int64 // Unix ms
 	TZ        string
 	CreatedAt int64 // Unix ms, 0 for now
+	// Delivered: the old scheduler's prompt for it is already in the
+	// session's transcript. It is imported as settled, never offered again.
+	Delivered bool
 }
 
 // ImportLegacySchedules turns every pending legacy record into a once
 // template for its session, all in one transaction with the installation's
 // import flag. A record already due becomes a late run straight away,
 // however little it is overdue, so a prompt the old scheduler may have been
-// sending when it stopped is never re-sent without the owner's OK. It
-// returns false when the import had already happened.
+// sending when it stopped is never re-sent without the owner's OK; one whose
+// prompt is known to be in its session (Delivered) is imported as a skipped
+// run of a finished template. It returns false when the import had already
+// happened.
 func (r *Repo) ImportLegacySchedules(ctx context.Context, items []LegacySchedule) (bool, error) {
 	var imported bool
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
@@ -1309,7 +1314,7 @@ func (r *Repo) ImportLegacySchedules(ctx context.Context, items []LegacySchedule
 				}
 			}
 			next := it.DueAt
-			if it.DueAt <= now.UnixMilli() {
+			if it.DueAt <= now.UnixMilli() || it.Delivered {
 				next = 0
 			}
 			if err := r.createSchedule(ctx, tx, id, def, next); err != nil {
@@ -1322,8 +1327,16 @@ func (r *Repo) ImportLegacySchedules(ctx context.Context, items []LegacySchedule
 				}
 				o := Occurrence{ScheduleTaskID: id, DueAt: it.DueAt, DefinitionRevision: cur.Revision, Spec: specOf(cur, def),
 					Trigger: TriggerLegacy, ObservedAt: now.UnixMilli(), State: OccLate, Note: "Imported from /schedule " + it.ID}
-				if _, err := r.insertOccurrence(ctx, tx, o); err != nil {
+				if it.Delivered {
+					o.State, o.Reason, o.Note = OccSkipped, ReasonLegacyDelivered, "Already sent before migration"
+				}
+				if o.ID, err = r.insertOccurrence(ctx, tx, o); err != nil {
 					return false, err
+				}
+				if it.Delivered {
+					if err := r.touchTemplate(ctx, tx, cur, o); err != nil {
+						return false, err
+					}
 				}
 			}
 		}

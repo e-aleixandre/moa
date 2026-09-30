@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
@@ -285,5 +286,51 @@ func TestScheduleReviewDeleteRacingResumeSettlesOnlyWhenDeleted(t *testing.T) {
 		}
 	default:
 		t.Fatalf("Delete = %v", deleteErr)
+	}
+}
+
+// A legacy record whose prompt the old scheduler already persisted (its
+// occurrence marker is in the transcript) is not offered again.
+func TestScheduleReviewLegacyAlreadyDeliveredIsNotReoffered(t *testing.T) {
+	h := newSchedHarness(t, newMockProvider(simpleResponseHandler("old schedule completed")), "2026-09-30T08:00:00Z")
+	h.start()
+	sess := h.session()
+	now := h.clock.Now()
+	old := legacyRecord{ID: "legacy-crash", SessionID: sess.ID, Text: "deploy the same release", DueAt: now.Add(-time.Minute),
+		TimeZone: "UTC", Status: "pending", CreatedAt: now.Add(-time.Hour), OccurrenceID: "legacy-persisted-occurrence"}
+	fresh := legacyRecord{ID: "legacy-fresh", SessionID: sess.ID, Text: "not sent yet", DueAt: now.Add(-time.Minute),
+		TimeZone: "UTC", Status: "pending", CreatedAt: now.Add(-time.Hour), OccurrenceID: "legacy-other-occurrence"}
+	if err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: old.Text, Custom: map[string]any{
+		"source": "schedule", "schedule_id": old.ID, "occurrence_id": old.OccurrenceID}}); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 10*time.Second, "old prompt persisted", func() bool {
+		for _, msg := range sess.History() {
+			if msg.Custom["occurrence_id"] == old.OccurrenceID {
+				return sessState(sess) == StateIdle
+			}
+		}
+		return false
+	})
+	h.stop()
+	writeLegacy(t, h.schedulePath(), []legacyRecord{old, fresh})
+	h.start()
+	r := h.repo()
+	got := templatesByTitle(t, r)
+	for title, tmpl := range got {
+		o := oneRun(t, r, tmpl.ID)
+		switch title {
+		case old.Text:
+			if o.State != tasks.OccSkipped || o.Reason != tasks.ReasonLegacyDelivered || tmpl.Status != tasks.StatusDone {
+				t.Errorf("already delivered legacy record became run %s/%s under a %s template", o.State, o.Reason, tmpl.Status)
+			}
+		case fresh.Text:
+			if o.State != tasks.OccLate {
+				t.Errorf("undelivered legacy record = %s, want late", o.State)
+			}
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("imported %d templates, want 2", len(got))
 	}
 }
