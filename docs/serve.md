@@ -948,7 +948,11 @@ What is worth a notification is decided on the server, in one place
 | A run you cancelled; sessions an owner launched | Nothing (the owner reports on them) |
 
 Everything except questions and permissions stops after 150 notifications a
-day. Waiting summaries are kept in memory only: a restart forgets them.
+day. Waiting summaries and notifications not yet sent are kept in memory only: a
+restart forgets them. Delivery uses four workers, one of them only for
+questions and permissions; a tag is never sent twice at once and a newer
+notification replaces an older one still waiting, and at most 64 quiet ones wait
+(the oldest is dropped). Questions and permissions are never dropped.
 
 The two quiet rows are provisional and set by [`push_summaries`](./configuration.md)
 (`passive` by default, `active` or `off`). Quiet hours are iOS's own (Focus and

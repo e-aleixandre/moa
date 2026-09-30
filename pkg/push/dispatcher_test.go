@@ -1,6 +1,7 @@
 package push
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
@@ -59,7 +60,7 @@ func TestDispatcher_NotifySends(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newTestDispatcher(t, store).Notify(Notification{Title: "moa", Body: "test"})
+	newTestDispatcher(t, store).Notify(context.Background(), Notification{Title: "moa", Body: "test"})
 
 	if hits.Load() != 1 {
 		t.Fatalf("expected 1 push delivered, got %d", hits.Load())
@@ -83,7 +84,7 @@ func TestDispatcher_PrunesGoneSubscription(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newTestDispatcher(t, store).Notify(Notification{Title: "moa"})
+	newTestDispatcher(t, store).Notify(context.Background(), Notification{Title: "moa"})
 
 	if store.Len() != 0 {
 		t.Fatalf("gone subscription should be pruned, got len %d", store.Len())
@@ -108,8 +109,8 @@ func TestDispatcher_UrgencyFollowsLevel(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := newTestDispatcher(t, store)
-	d.Notify(Notification{Title: "q", Level: LevelUrgent})
-	d.Notify(Notification{Title: "digest", Level: LevelPassive})
+	d.Notify(context.Background(), Notification{Title: "q", Level: LevelUrgent})
+	d.Notify(context.Background(), Notification{Title: "digest", Level: LevelPassive})
 	if got := <-urgencies; got != "high" {
 		t.Fatalf("urgent notification Urgency = %q, want high", got)
 	}

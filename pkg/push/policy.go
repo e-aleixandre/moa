@@ -1,6 +1,7 @@
 package push
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -73,7 +74,8 @@ const DefaultGrace = 60 * time.Second
 // Sender is a transport: it delivers a notification the policy already decided
 // on. The Web Push Dispatcher is one.
 type Sender interface {
-	Notify(Notification)
+	// Notify delivers n, giving up when ctx is cancelled.
+	Notify(ctx context.Context, n Notification)
 }
 
 // Signal is something that happened, as the policy needs to know it.
@@ -111,11 +113,9 @@ type PolicyConfig struct {
 	// Tests replace both.
 	After func(d time.Duration, f func()) (stop func() bool)
 	Now   func() time.Time
-	// Deliver runs a delivery. The default does it on its own goroutine: a
-	// transport may take seconds (a hung push endpoint), and the caller is the
-	// ordered event handler of a session, which must go on deciding meanwhile.
-	// Tests that assert right after Handle run it inline.
-	Deliver func(func())
+	// Inline delivers on the calling goroutine instead of through the delivery
+	// stage (see delivery.go). For tests that assert right after Handle.
+	Inline bool
 }
 
 // Policy turns signals into notifications for a Sender. Its timers (grace
@@ -129,7 +129,7 @@ type Policy struct {
 	dailyLimit int
 	after      func(d time.Duration, f func()) func() bool
 	now        func() time.Time
-	deliver    func(func())
+	out        *deliverer // nil when Inline
 
 	mu      sync.Mutex
 	closed  bool
@@ -161,7 +161,6 @@ func NewPolicy(sender Sender, cfg PolicyConfig) *Policy {
 		dailyLimit: cfg.DailyLimit,
 		after:      cfg.After,
 		now:        cfg.Now,
-		deliver:    cfg.Deliver,
 		pending:    make(map[pendingKey]func() bool),
 		summary:    make(map[string]*summaryWait),
 	}
@@ -177,8 +176,8 @@ func NewPolicy(sender Sender, cfg PolicyConfig) *Policy {
 	if p.dailyLimit <= 0 {
 		p.dailyLimit = DefaultDailyLimit
 	}
-	if p.deliver == nil {
-		p.deliver = func(f func()) { go f() }
+	if !cfg.Inline {
+		p.out = newDeliverer(sender)
 	}
 	if p.now == nil {
 		p.now = time.Now
@@ -356,11 +355,19 @@ func (p *Policy) emit(n Notification) {
 		p.sent++
 	}
 	p.mu.Unlock()
-	p.deliver(func() { p.sender.Notify(n) })
+	if p.out != nil {
+		p.out.submit(n)
+		return
+	}
+	p.sender.Notify(context.Background(), n)
 }
 
-// Close stops every timer and makes the policy inert.
+// Close stops every timer, drops what waits for delivery, cancels what is being
+// delivered and makes the policy inert.
 func (p *Policy) Close() {
+	if p.out != nil {
+		p.out.close()
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.closed = true

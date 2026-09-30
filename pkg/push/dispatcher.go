@@ -57,7 +57,7 @@ func (d *Dispatcher) VAPIDPublicKey() string { return d.vapid.Public }
 // Notify fans n out to all subscriptions, pruning any the push service reports
 // as gone (404/410). Best-effort: per-subscription failures are logged, not
 // returned.
-func (d *Dispatcher) Notify(n Notification) {
+func (d *Dispatcher) Notify(ctx context.Context, n Notification) {
 	payload, err := json.Marshal(n)
 	if err != nil {
 		slog.Warn("push: marshal notification", "error", err)
@@ -69,12 +69,15 @@ func (d *Dispatcher) Notify(n Notification) {
 		urgency = webpush.UrgencyNormal
 	}
 	for _, sub := range d.store.All() {
-		d.send(payload, sub, urgency)
+		if ctx.Err() != nil {
+			return
+		}
+		d.send(ctx, payload, sub, urgency)
 	}
 }
 
-func (d *Dispatcher) send(payload []byte, sub webpush.Subscription, urgency webpush.Urgency) {
-	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+func (d *Dispatcher) send(parent context.Context, payload []byte, sub webpush.Subscription, urgency webpush.Urgency) {
+	ctx, cancel := context.WithTimeout(parent, sendTimeout)
 	defer cancel()
 
 	s := sub // SendNotificationWithContext takes a pointer; avoid aliasing the loop var

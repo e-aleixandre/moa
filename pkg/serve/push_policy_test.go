@@ -27,7 +27,7 @@ type probeTimer struct {
 	stopped bool
 }
 
-func (p *pushProbe) Notify(n push.Notification) {
+func (p *pushProbe) Notify(_ context.Context, n push.Notification) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.sent = append(p.sent, n)
@@ -72,7 +72,7 @@ func (p *pushProbe) armed() int {
 // policy when a session is created.
 func probePush(mgr *Manager, summaries push.Summaries) *pushProbe {
 	probe := &pushProbe{}
-	mgr.pushPolicy = push.NewPolicy(probe, push.PolicyConfig{Summaries: summaries, After: probe.after, Deliver: func(f func()) { f() }})
+	mgr.pushPolicy = push.NewPolicy(probe, push.PolicyConfig{Summaries: summaries, After: probe.after, Inline: true})
 	return probe
 }
 

@@ -1,6 +1,7 @@
 package push
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ type recorder struct {
 	sent []Notification
 }
 
-func (r *recorder) Notify(n Notification) {
+func (r *recorder) Notify(_ context.Context, n Notification) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sent = append(r.sent, n)
@@ -60,7 +61,7 @@ func (c *fakeClock) fire() {
 
 func newPolicy(mode Summaries) (*Policy, *recorder, *fakeClock) {
 	rec, clock := &recorder{}, &fakeClock{}
-	return NewPolicy(rec, PolicyConfig{Summaries: mode, After: clock.after, Deliver: func(f func()) { f() }}), rec, clock
+	return NewPolicy(rec, PolicyConfig{Summaries: mode, After: clock.after, Inline: true}), rec, clock
 }
 
 func TestQuestionNobodyWatchesGoesNowAsUrgent(t *testing.T) {
@@ -202,7 +203,7 @@ func TestSummaryTimerThatLostTheRaceSendsNothing(t *testing.T) {
 func TestDailyLimitCapsQuietAndAudibleButNeverQuestions(t *testing.T) {
 	rec, clock := &recorder{}, &fakeClock{}
 	now := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
-	p := NewPolicy(rec, PolicyConfig{After: clock.after, Deliver: func(f func()) { f() }, DailyLimit: 3, Now: func() time.Time { return now }})
+	p := NewPolicy(rec, PolicyConfig{After: clock.after, Inline: true, DailyLimit: 3, Now: func() time.Time { return now }})
 	for i := 0; i < 5; i++ {
 		p.Handle(Signal{Kind: KindDone, SessionID: "s"})
 	}
@@ -317,12 +318,12 @@ type blockingSender struct {
 	rec     recorder
 }
 
-func (b *blockingSender) Notify(n Notification) {
+func (b *blockingSender) Notify(ctx context.Context, n Notification) {
 	if n.Kind == KindDone {
 		close(b.entered)
 		<-b.release
 	}
-	b.rec.Notify(n)
+	b.rec.Notify(ctx, n)
 }
 
 func TestSlowTransportDoesNotBlockDecidingOrUrgentDelivery(t *testing.T) {
