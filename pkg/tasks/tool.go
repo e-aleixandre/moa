@@ -20,7 +20,10 @@ func NewTool(scope *Scope) core.Tool {
 		Description: "Your task checklist, your requests to the owner, and your project's shared backlog. " +
 			"create adds to your checklist; ask files a request to the owner without blocking you (ask_user does block); " +
 			"claim takes a pending backlog task of your project; list before creating to avoid duplicates. " +
-			"You only ever see your own checklist and requests plus the project's backlog.",
+			"create with when schedules the task to run later or repeat, in this session only: when is plain text such as " +
+			"\"in 20m\", \"tomorrow at 09:00\", \"monday at 09:00\", \"2026-10-05 15:30\" or \"every weekday at 08:30\" " +
+			"(use 09:00-style hours: a bare \"at 9\" is ambiguous and nothing is scheduled). Each run arrives in this session as a new task. " +
+			"You only ever see your own checklist and requests plus the project's backlog and the tasks you scheduled.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -40,6 +43,15 @@ func NewTool(scope *Scope) core.Tool {
 				"description": {
 					"type": "string",
 					"description": "Task description (optional)"
+				},
+				"when": {
+					"type": "string",
+					"description": "create only: when the task runs, in plain text (\"in 20m\", \"tomorrow at 09:00\", \"every monday at 09:00\"). Read in the session's timezone (UTC when unknown). Omit for an ordinary task"
+				},
+				"target": {
+					"type": "string",
+					"enum": ["this session"],
+					"description": "create with when only: the session that receives each run. Always this session; omit it"
 				},
 				"status": {
 					"type": "string",
@@ -69,6 +81,9 @@ func NewTool(scope *Scope) core.Tool {
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			action, _ := params["action"].(string)
 			repo, actor := scope.Repo(), scope.Actor()
+			if err := checkScheduleParams(action, params); err != nil {
+				return core.ErrorResult(toolErrorText(err)), nil
+			}
 			var (
 				res core.Result
 				err error
@@ -172,6 +187,9 @@ func toolCreate(ctx context.Context, repo *Repo, actor Actor, ask bool, params m
 		return core.Result{}, err
 	} else if subs != nil {
 		in.Subtasks = *subs
+	}
+	if text, ok := params["when"].(string); ok {
+		return toolSchedule(ctx, repo, actor, in, text)
 	}
 	var (
 		t   AgentTask
@@ -318,7 +336,7 @@ func toolList(ctx context.Context, repo *Repo, actor Actor) (core.Result, error)
 	if err != nil {
 		return core.Result{}, err
 	}
-	if len(view.Checklist)+len(view.Requests)+len(view.Backlog) == 0 {
+	if len(view.Checklist)+len(view.Requests)+len(view.Backlog)+len(view.Scheduled) == 0 {
 		return core.TextResult("No tasks yet."), nil
 	}
 	var sb strings.Builder
@@ -341,6 +359,12 @@ func toolList(ctx context.Context, repo *Repo, actor Actor) (core.Result, error)
 			writeTask(&sb, t)
 		}
 	}
+	if len(view.Scheduled) > 0 {
+		sb.WriteString("\n\nYour scheduled tasks (each run arrives here as a new task):")
+		for _, t := range view.Scheduled {
+			fmt.Fprintf(&sb, "\n- #%d: %s — %s", t.ID, t.Title, describeSchedule(t))
+		}
+	}
 	return core.TextResult(strings.TrimSpace(sb.String())), nil
 }
 
@@ -357,6 +381,9 @@ func toolGet(ctx context.Context, repo *Repo, actor Actor, params map[string]any
 	fmt.Fprintf(&sb, "Task #%d: %s\nStatus: %s\nPlace: %s", t.ID, t.Title, t.Status, t.Place)
 	if t.Description != "" {
 		fmt.Fprintf(&sb, "\nDescription: %s", t.Description)
+	}
+	if t.When != nil {
+		fmt.Fprintf(&sb, "\nSchedule: %s", describeSchedule(t))
 	}
 	if len(t.WaitsFor) > 0 {
 		fmt.Fprintf(&sb, "\nDepends on: %s", joinIDs(t.WaitsFor))
