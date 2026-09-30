@@ -3,7 +3,9 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +52,7 @@ type noticeDispatcher struct {
 	trigMu       sync.Mutex
 	retryAll     bool
 	reconcileAll bool
+	retryWaiting bool // the periodic tick: retry notices waiting on purpose
 	retry        map[string]bool // sessions whose held or undeliverable notices get another attempt
 	reconcile    map[string]bool // sessions whose sent notices are looked for in the saved transcript
 	waitingIdle  map[string]bool // sessions with a notice waiting for them to become idle
@@ -71,8 +74,8 @@ func newNoticeDispatcher(m *Manager) *noticeDispatcher {
 }
 
 type noticeTriggers struct {
-	retryAll, reconcileAll bool
-	retry, reconcile       map[string]bool
+	retryAll, reconcileAll, retryWaiting bool
+	retry, reconcile                     map[string]bool
 }
 
 func (d *noticeDispatcher) nudge() {
@@ -98,8 +101,8 @@ func (d *noticeDispatcher) trigger(fn func()) {
 func (d *noticeDispatcher) takeTriggers() noticeTriggers {
 	d.trigMu.Lock()
 	defer d.trigMu.Unlock()
-	t := noticeTriggers{retryAll: d.retryAll, reconcileAll: d.reconcileAll, retry: d.retry, reconcile: d.reconcile}
-	d.retryAll, d.reconcileAll = false, false
+	t := noticeTriggers{retryAll: d.retryAll, reconcileAll: d.reconcileAll, retryWaiting: d.retryWaiting, retry: d.retry, reconcile: d.reconcile}
+	d.retryAll, d.reconcileAll, d.retryWaiting = false, false, false
 	d.retry, d.reconcile = map[string]bool{}, map[string]bool{}
 	return t
 }
@@ -163,18 +166,21 @@ func (d *noticeDispatcher) run(ctx context.Context) {
 	d.trigMu.Lock()
 	d.retryAll, d.reconcileAll = true, true
 	d.trigMu.Unlock()
-	t := time.NewTicker(noticeReconcileInterval)
-	defer t.Stop()
+	t := d.m.clock.NewTimer(noticeReconcileInterval)
+	defer func() { t.Stop() }()
 	for {
 		d.pass(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-d.wake:
-		case <-t.C:
+		case <-t.C():
+			// A wait for idle may end without an idle event (background
+			// work finishing quietly): the tick retries those too.
 			d.trigMu.Lock()
-			d.reconcileAll = true
+			d.reconcileAll, d.retryWaiting = true, true
 			d.trigMu.Unlock()
+			t = d.m.clock.NewTimer(noticeReconcileInterval)
 		}
 	}
 }
@@ -197,7 +203,8 @@ func (d *noticeDispatcher) pass(ctx context.Context) {
 		to := n.RecipientSessionID
 		switch n.State {
 		case tasks.NoticePending:
-			if n.Reason != "" && !trig.retryAll && !trig.retry[to] {
+			waiting := n.Reason == noticeReasonBusyWait || n.Reason == tasks.ReasonQuestionPending
+			if n.Reason != "" && !trig.retryAll && !trig.retry[to] && !(waiting && trig.retryWaiting) {
 				continue
 			}
 			d.attempt(ctx, n, n.Deliver == tasks.DeliverWake && n.Method == tasks.MethodRun)
@@ -246,6 +253,24 @@ func (d *noticeDispatcher) pendingFor(ctx context.Context, n *tasks.Notice, reas
 // Must run under d.mu.
 func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake bool) tasks.Notice {
 	m := d.m
+	if m.planner != nil && m.planner.hooks.attempted != nil {
+		defer m.planner.hooks.attempted(n.ID)
+	}
+	// A scheduled run's assignment follows the run's frozen delivery policy,
+	// and a failure to deliver it is final (Not sent) instead of retried.
+	var occ *tasks.Occurrence
+	if n.Kind == tasks.NoticeAssigned {
+		o, ok, err := m.tasks.OccurrenceForNotice(ctx, n.ID)
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Warn("task notices: reading the notice's run failed", "notice", n.ID, "error", err)
+			}
+			return n
+		}
+		if ok {
+			occ = &o
+		}
+	}
 	to := n.RecipientSessionID
 	if _, live := m.Get(to); !live {
 		if _, known := m.sessionCWD(to); !known {
@@ -261,14 +286,14 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 		case err == nil, errors.Is(err, ErrBusy):
 			// ErrBusy: someone else is loading it; their resume retries us.
 		case errors.Is(err, ErrAutomationTooManySessions):
-			d.pendingFor(ctx, &n, tasks.ReasonSessionLimit)
+			d.undeliverable(ctx, &n, occ, tasks.ReasonSessionLimit)
 			return n
 		case errors.Is(err, session.ErrNotFound):
 			d.setState(ctx, &n, tasks.NoticeChange{State: tasks.NoticeFailed, Reason: tasks.ReasonSessionDeleted})
 			return n
 		default:
 			slog.Warn("task notices: resuming the recipient failed", "notice", n.ID, "session", to, "error", err)
-			d.pendingFor(ctx, &n, "resume_failed")
+			d.undeliverable(ctx, &n, occ, reasonResumeFailed)
 			return n
 		}
 		if _, live := m.Get(to); !live {
@@ -291,6 +316,17 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 		}
 	}
 	run := n.Method == tasks.MethodRun
+	// busy=wait: start a fresh turn when the session is free, never steer.
+	// A cheap look first avoids a reservation write per pass while it is
+	// clearly working; the IdleOnly gate below is the authority.
+	idleOnly := run && occ != nil && occ.Spec.Delivery.Busy == tasks.BusyWait
+	if idleOnly {
+		if sess, live := m.Get(to); live && sessionBusy(sess) {
+			d.markWaitingIdle(to)
+			d.pendingFor(ctx, &n, noticeReasonBusyWait)
+			return n
+		}
+	}
 	steerID := core.NewSteerID()
 	// Persist the recovery decision before admission. If this write fails, no
 	// message or turn may start; a crash afterwards is reconciled as sent.
@@ -299,26 +335,48 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 	}
 	d.steers.Store(steerID, n.ID)
 	d.markInflight(to)
+	if m.planner != nil && m.planner.hooks.beforeAdmit != nil {
+		m.planner.hooks.beforeAdmit(n.ID)
+	}
 	steered, err := m.injectEvent(to, eventInjection{
-		Text:           func() string { return n.Text },
-		Custom:         func(steer bool) map[string]any { return noticeCustom(n, run, steer) },
+		Text: func() string { return n.Text },
+		Custom: func(steer bool) map[string]any {
+			c := noticeCustom(n, run, steer)
+			if occ != nil {
+				scheduledCustom(c, *occ, m.clock.Now())
+			}
+			return c
+		},
 		Autorun:        run,
 		SteerID:        steerID,
 		RefuseQuestion: true,
+		IdleOnly:       idleOnly,
 	})
 	if !steered || err != nil {
 		d.steers.Delete(steerID)
 	}
 	switch {
 	case err == nil:
-		if !steered {
-			d.setState(ctx, &n, tasks.NoticeChange{State: tasks.NoticeSent})
+		if !steered || occ != nil {
+			// Accepted: a scheduled run records its admission with it.
+			change := tasks.NoticeChange{From: []string{tasks.NoticeSent}, State: tasks.NoticeSent, SteerID: n.SteerID, Admitted: occ != nil}
+			if !steered {
+				change.SteerID = ""
+			}
+			if ok, err := m.tasks.SetNoticeState(ctx, n.ID, change); err != nil {
+				slog.Warn("task notices: recording an admission failed", "notice", n.ID, "error", err)
+			} else if ok {
+				n.SteerID = change.SteerID
+			}
 		}
 		// The transcript may already have been saved during admission.
 		d.trigger(func() { d.reconcile[to] = true })
 	case errors.Is(err, errEventSessionQuestion):
 		d.markWaitingIdle(to)
 		d.pendingFor(ctx, &n, tasks.ReasonQuestionPending)
+	case errors.Is(err, errEventSessionNotIdle):
+		d.markWaitingIdle(to)
+		d.pendingFor(ctx, &n, noticeReasonBusyWait)
 	case errors.Is(err, errEventSessionBusy):
 		// Only an append waits like this: it never starts or joins a turn.
 		d.markWaitingIdle(to)
@@ -326,12 +384,77 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 	case errors.Is(err, ErrNotFound):
 		// Closed while we looked: the next pass sees it saved.
 		d.pendingFor(ctx, &n, "")
+	case occ != nil:
+		// The session refused the input (a full steer queue, say): proven
+		// not admitted, so back to pending first, then Not sent.
+		slog.Warn("task notices: the session refused a scheduled assignment", "notice", n.ID, "session", to, "error", err)
+		reason := reasonAdmissionFailed
+		if errors.Is(err, bus.ErrSteerQueueFull) {
+			reason = reasonSteerQueueFull
+		}
+		d.pendingFor(ctx, &n, reason)
+		d.undeliverable(ctx, &n, occ, reason)
 	default:
 		slog.Warn("task notices: the session did not accept the notice", "notice", n.ID, "session", to, "error", err)
 		d.markWaitingIdle(to)
 		d.pendingFor(ctx, &n, "session_busy")
 	}
 	return n
+}
+
+// undeliverable handles a delivery that cannot succeed now. An ordinary
+// notice waits for a later trigger; a scheduled run's assignment fails, and
+// its run with it (Not sent), in the same transaction.
+func (d *noticeDispatcher) undeliverable(ctx context.Context, n *tasks.Notice, occ *tasks.Occurrence, reason string) {
+	if occ == nil {
+		d.pendingFor(ctx, n, reason)
+		return
+	}
+	d.setState(ctx, n, tasks.NoticeChange{From: []string{tasks.NoticePending, tasks.NoticeHeld}, State: tasks.NoticeFailed, Reason: reason})
+}
+
+// sessionBusy is a cheap look at whether a live session is working or has
+// a queue; the IdleOnly gate decides for real.
+func sessionBusy(sess *ManagedSession) bool {
+	state := sess.runtime.State.Current()
+	if state == bus.StateRunning || state == bus.StatePermission || sess.runtime.Context().Agent.IsRunning() {
+		return true
+	}
+	ql, _ := bus.QueryTyped[bus.GetQueueLen, int](sess.runtime.Bus, bus.GetQueueLen{})
+	return ql > 0
+}
+
+// scheduledCustom adds a scheduled run's identity and times to its
+// assignment's message metadata, and the title the transcript shows:
+// "Scheduled task · <title> · due 03:00, sent 09:14 after your OK", in the
+// run's zone. sent is the admission time.
+func scheduledCustom(c map[string]any, o tasks.Occurrence, sent time.Time) {
+	c["parent_task_id"] = o.ScheduleTaskID
+	c["occurrence_id"] = o.ID
+	c["due_at"] = o.DueAt
+	c["tz"] = o.Spec.TZ
+	c["sent_at"] = sent.UnixMilli()
+	if o.ConfirmedAt != 0 {
+		c["confirmed_at"] = o.ConfirmedAt
+	}
+	loc, err := tasks.LoadZone(o.Spec.TZ)
+	if err != nil {
+		loc = time.UTC
+	}
+	due, at := time.UnixMilli(o.DueAt).In(loc), sent.In(loc)
+	dueLabel := due.Format("15:04")
+	if due.Format("2006-01-02") != at.Format("2006-01-02") {
+		dueLabel = due.Format("Jan 2 15:04")
+	}
+	title := fmt.Sprintf("Scheduled task · %s · due %s, sent %s", oneLineTitle(o.Spec.Title), dueLabel, at.Format("15:04"))
+	if o.ConfirmedAt != 0 {
+		title += " after your OK"
+	}
+	c["title"] = title
+}
+
+func oneLineTitle(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func noticeCustom(n tasks.Notice, autorun, steer bool) map[string]any {
@@ -392,7 +515,7 @@ func (d *noticeDispatcher) reconcileSent(ctx context.Context, n tasks.Notice) {
 		if hasNotice(sess.History(), n.ID) || noticeQueued(sess, n) {
 			return
 		}
-		if time.Since(time.UnixMilli(n.UpdatedAt)) < noticeLostAfter {
+		if d.m.clock.Now().Sub(time.UnixMilli(n.UpdatedAt)) < noticeLostAfter {
 			return
 		}
 		slog.Warn("task notices: a sent notice is missing from its session; delivering it again", "notice", n.ID, "session", to)

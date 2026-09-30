@@ -670,7 +670,14 @@ type eventInjection struct {
 	// RefuseQuestion refuses a session blocked on a permission prompt or an
 	// ask_user question instead of queueing behind the owner's answer.
 	RefuseQuestion bool
+	// IdleOnly starts a fresh turn or fails with errEventSessionNotIdle; it
+	// never steers into a working run or queues. Requires Autorun.
+	IdleOnly bool
 }
+
+// errEventSessionNotIdle means an IdleOnly injection found the session
+// working, queued or with background work.
+var errEventSessionNotIdle = errors.New("session is not idle")
 
 // errEventSessionQuestion means the session is waiting on the owner's answer
 // and the caller asked not to queue behind it.
@@ -697,6 +704,22 @@ func (m *Manager) injectEvent(sessionID string, in eventInjection) (steered bool
 	state := sess.runtime.State.Current()
 	if in.RefuseQuestion && state == bus.StatePermission {
 		return false, errEventSessionQuestion
+	}
+	if in.IdleOnly {
+		// The bus decides idleness atomically with starting the run.
+		err := sess.runtime.Bus.Execute(bus.SendPrompt{Text: text, Custom: in.Custom(false), IdleOnly: true, RefuseQuestion: in.RefuseQuestion})
+		switch {
+		case errors.Is(err, bus.ErrSessionQuestion):
+			return false, errEventSessionQuestion
+		case errors.Is(err, bus.ErrNotIdle):
+			return false, errEventSessionNotIdle
+		case err == nil:
+			sess.mu.Lock()
+			sess.Updated = time.Now()
+			sess.mu.Unlock()
+			sess.sendGeneration.Add(1)
+		}
+		return false, err
 	}
 	busy := state == bus.StateRunning || state == bus.StatePermission || sess.runtime.Context().Agent.IsRunning()
 	queued := false

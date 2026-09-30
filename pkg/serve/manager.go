@@ -827,6 +827,10 @@ type Manager struct {
 	tasksCancel context.CancelFunc
 	// notices delivers task notices; one dispatcher per serve process.
 	notices *noticeDispatcher
+	// planner materializes scheduled tasks and assigns their runs; clock is
+	// its time source and the task repository's.
+	planner *taskScheduler
+	clock   taskClock
 	// reports batches the run outcomes of a project's sessions and delivers
 	// them to its owner. nil when owners are unavailable (no config dir).
 	reports *reportCoordinator
@@ -946,6 +950,11 @@ type ManagerConfig struct {
 	ReleaseInfo        release.Info
 	UpdateChecker      *release.Checker
 	UpdateCheckEnabled bool
+
+	// clock replaces the scheduler's (and the task repository's) time
+	// source; schedulerHooks are its test seams. Tests only.
+	clock          taskClock
+	schedulerHooks taskSchedulerHooks
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
@@ -1113,10 +1122,21 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		}()
 	}
 	m.attention.Start()
-	m.startTasksWatcher(tasksCtx)
+	m.clock = cfg.clock
+	if m.clock == nil {
+		m.clock = systemClock{}
+	} else if m.tasks != nil {
+		m.tasks.SetClock(m.clock.Now)
+	}
 	if m.tasks != nil {
 		m.notices = newNoticeDispatcher(m)
+		m.planner = newTaskScheduler(m, m.clock, cfg.schedulerHooks)
+		m.recoverScheduledTasks(tasksCtx)
+	}
+	m.startTasksWatcher(tasksCtx)
+	if m.tasks != nil {
 		go m.notices.run(tasksCtx)
+		go m.planner.run(tasksCtx)
 	}
 	// The coordinator reads its outbox at startup, so it must exist before any
 	// session is resumed and starts reporting.

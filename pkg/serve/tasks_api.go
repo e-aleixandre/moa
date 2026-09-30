@@ -77,6 +77,9 @@ func (m *Manager) startTasksWatcher(ctx context.Context) {
 	go m.tasks.Watch(ctx, tasksWatchInterval, func(rev int64) {
 		m.taskHub.broadcast(rev)
 		m.publishChecklists()
+		// A schedule created or moved by any writer may change the planner's
+		// next wake-up.
+		m.planner.nudge()
 	})
 }
 

@@ -1327,8 +1327,13 @@ func (m *Manager) Shutdown() {
 	if m.tasksCancel != nil {
 		m.tasksCancel()
 	}
+	// Join the task workers before any runtime is torn down, so no
+	// scheduled run is provisioned or delivered into a closing session.
 	if m.notices != nil {
 		<-m.notices.done
+	}
+	if m.planner != nil {
+		<-m.planner.done
 	}
 	if m.secretReaperCancel != nil {
 		m.secretReaperCancel()
@@ -1910,3 +1915,4 @@ func creatorTZOf(meta map[string]any) string {
 	}
 	return tz
 }
+
