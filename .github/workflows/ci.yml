@@ -108,3 +108,14 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11.3
+          args: --verbose
+
+      - name: Capture lint cache for diagnosis
+        if: always()
+        run: tar -czf "$RUNNER_TEMP/lint-cache.tgz" -C "$HOME/.cache" golangci-lint
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-cache
+          path: ${{ runner.temp }}/lint-cache.tgz
