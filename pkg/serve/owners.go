@@ -232,13 +232,8 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 		return OwnerInfo{}, owner.ErrNotFound
 	}
 	oldName := own.Name
-	if opts.Closed != nil && *opts.Closed && own.SessionID != "" {
-		// Close the conversation before recording the flag, so a busy owner
-		// leaves both untouched. Already-saved is a no-op.
-		if err := m.CloseSession(own.SessionID); err != nil && !errors.Is(err, ErrNotFound) {
-			return OwnerInfo{}, err
-		}
-	}
+	// Validate everything before touching the conversation: a request that is
+	// going to be refused must not unload it on the way.
 	if opts.Name != nil {
 		name := strings.TrimSpace(*opts.Name)
 		if name == "" {
@@ -253,10 +248,16 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 		own.Avatar = *opts.Avatar
 	}
 	if opts.Closed != nil {
-		// A wake-up can have reloaded the conversation while the close was
-		// being admitted; an active owner is not closed.
-		_, loaded := m.Get(own.SessionID)
-		own.Closed = *opts.Closed && !loaded
+		if *opts.Closed && own.SessionID != "" {
+			// Close the conversation before recording the flag, so a busy
+			// owner leaves both untouched. Already saved is a no-op.
+			if err := m.CloseSession(own.SessionID); err != nil && !errors.Is(err, ErrNotFound) {
+				return OwnerInfo{}, err
+			}
+		}
+		// The flag is the user's act and is kept whatever the runtime does
+		// next: a report may wake the conversation again a moment later.
+		own.Closed = *opts.Closed
 	}
 	if err := store.Save(own); err != nil {
 		return OwnerInfo{}, err

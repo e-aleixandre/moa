@@ -1121,12 +1121,6 @@ func handleResumeSession(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		// Opening is the user's act: it brings a closed owner back to the
-		// column. Internal wake-ups (reports, schedules) resume through the
-		// Manager and leave the flag alone.
-		if sess.Kind == session.KindOwner {
-			mgr.reopenOwnerSession(sess.ID)
-		}
 		writeJSON(w, http.StatusOK, mgr.sessionInfo(sess))
 	}
 }

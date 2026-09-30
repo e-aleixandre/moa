@@ -97,10 +97,18 @@ export async function closeOwner(own) {
     });
     return false;
   }
-  const { closeSession } = await import('./session-actions.js');
-  // The server already unloaded the conversation; this mirrors it in the store
-  // and frees the pane that was showing it.
-  await closeSession(own.session_id).catch(() => {});
+  // The server's one call already unloaded the conversation; mirror it in the
+  // store and free the pane that was showing it, without a second request.
+  // The flag first, so the landing the local close triggers already knows this
+  // owner is closed and does not select it again.
+  setState((s) => ({
+    owners: {
+      ...ownersSlice(s),
+      list: (ownersSlice(s).list || []).map((o) => (o.id === own.id ? { ...o, closed: true } : o)),
+    },
+  }));
+  const { markSessionClosedLocally } = await import('./session-actions.js');
+  markSessionClosedLocally(own.session_id);
   await loadOwners();
   return true;
 }
@@ -111,10 +119,6 @@ export async function closeOwner(own) {
 // creation failed, and it says so rather than pretending to open something.
 export function openOwnerConversation(own) {
   const id = own?.session_id;
-  // Opening is what brings a closed owner back. Locally at once; the server
-  // clears the flag when it resumes the conversation, or on this call when the
-  // conversation was already loaded.
-  if (own?.closed) reopenOwnerFlag(own);
   if (!id) {
     addToast({
       title: 'This owner has no conversation',
@@ -129,16 +133,6 @@ export function openOwnerConversation(own) {
     loadOwnerSessions().then(() => openSession(id));
   }
   return true;
-}
-
-function reopenOwnerFlag(own) {
-  setState((s) => ({
-    owners: {
-      ...ownersSlice(s),
-      list: (ownersSlice(s).list || []).map((o) => (o.id === own.id ? { ...o, closed: false } : o)),
-    },
-  }));
-  api('PATCH', `/api/owners/${own.id}`, { closed: false }).catch(() => loadOwners());
 }
 
 // loadOwnerSessions pulls the roster WITH the owner conversations, which the

@@ -780,16 +780,48 @@ func TestCloseOwnerClosesItsSessionAndOpeningClearsTheFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The user opening it (HTTP resume, which the palette uses too) clears it.
+	// Resuming over HTTP is also what auto-selection does, so it is not an
+	// opening by the user and leaves the flag alone.
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(mgr))
+	if err := mgr.CloseSession(info.SessionID); err != nil {
+		t.Fatal(err)
+	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/sessions/"+info.SessionID+"/resume", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("resume = %d %s", rec.Code, rec.Body)
 	}
+	if !ownerClosedOnDisk(t, mgr, info.ID) {
+		t.Fatal("an automatic resume cleared the closed flag")
+	}
+
+	// Only the explicit PATCH does.
+	if resp := patchOwner(t, mgr, info.ID, `{"closed":false}`); resp.Code != http.StatusOK {
+		t.Fatalf("reopen = %d %s", resp.Code, resp.Body)
+	}
 	if ownerClosedOnDisk(t, mgr, info.ID) {
-		t.Fatal("closed flag survived the owner being opened")
+		t.Fatal("closed flag survived the explicit reopen")
+	}
+}
+
+func TestInvalidPatchDoesNotCloseTheConversation(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, _ := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	for name, body := range map[string]string{
+		"empty name":     `{"closed":true,"name":"  "}`,
+		"invalid avatar": `{"closed":true,"avatar":{"shape":"nope","color":"nope"}}`,
+	} {
+		if resp := patchOwner(t, mgr, info.ID, body); resp.Code != http.StatusBadRequest {
+			t.Fatalf("%s: = %d, want 400", name, resp.Code)
+		}
+		if _, loaded := mgr.Get(info.SessionID); !loaded {
+			t.Fatalf("%s: a refused PATCH unloaded the conversation", name)
+		}
+		if ownerClosedOnDisk(t, mgr, info.ID) {
+			t.Fatalf("%s: a refused PATCH set the flag", name)
+		}
 	}
 }
 

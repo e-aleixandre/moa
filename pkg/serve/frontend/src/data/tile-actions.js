@@ -4,6 +4,7 @@ import { closeTasksView } from './tasks-view.js';
 import { acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { armReadAnchor, __resetReadAnchorsForTests } from './stream-read-anchor.js';
+import { reopenClosedOwnerOf } from './owner-closed.js';
 import { landingOrder } from './util/project-sessions.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
@@ -141,6 +142,7 @@ export function setActiveSession(id) {
 export function openSession(id) {
   const state = store.get();
   if (!state.sessions[id]) return false;
+  reopenClosedOwnerOf(id);
   // A session opened from anywhere (the sidebar, the palette, a toast, a
   // task's "Asked by") is shown: the Tasks view gives the screen back.
   if (state.view === 'tasks') closeTasksView();

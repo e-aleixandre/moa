@@ -11,6 +11,7 @@ import {
 import { allSessionIds, clearSession } from './tileTree.js';
 import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } from './attention-arrivals.js';
 import { loadEvents } from './events.js'; // wake-on-event
+import { reopenClosedOwnerOf } from './owner-closed.js';
 import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 import { closeSessionPanelForSession } from './session-panel.js';
 import { combineQueueText, droppedImageCount } from './composer-queue.js';
@@ -344,6 +345,9 @@ export function startPolling() {
     if (!pollTimer) return; // stopped (hidden) while it waited
     loadSessions();
     loadEvents();
+    // An event can clear an owner's closed flag on the server; the owners
+    // roster is the only place the client learns it.
+    import('./owners.js').then((m) => m.loadOwners()).catch(() => {});
   }), interval);
 }
 
@@ -463,8 +467,13 @@ export async function closeSession(id) {
     });
     throw e;
   }
-  // Reflect immediately so the UI updates without waiting for the next poll
-  // (which can lag up to ~15s on mobile). The server already committed above.
+  markSessionClosedLocally(id);
+}
+
+// markSessionClosedLocally reflects a close the server already committed, so
+// the UI updates without waiting for the next poll (which can lag up to ~15s
+// on mobile). Also used by Close owner, whose one server call does the close.
+export function markSessionClosedLocally(id) {
   updateSession(id, {
     state: 'saved',
     readCandidateSeq: 0,
@@ -1034,6 +1043,7 @@ export async function resumeSession(id) {
     throw e;
   }
   await loadSessions();
+  reopenClosedOwnerOf(sess.id);
   const state = store.get();
   if (state.isMobile) {
     setActiveSession(sess.id);
