@@ -500,10 +500,18 @@ export function confirmBody(run, action) {
   return { revision: run.revision, action };
 }
 
+// uncertainRun — a run that was on its way to its session when moa lost
+// track of it: it may already have been delivered, so running it again could
+// duplicate the work.
+export function uncertainRun(run) {
+  return run?.reason === 'delivery_uncertain';
+}
+
 export function lateBanner(run, now, tz) {
   if (!run) return '';
   const due = whenShort(run.at, now, tz);
   const head = `Was due ${due.charAt(0).toLowerCase()}${due.slice(1)}.`;
+  if (uncertainRun(run)) return `${head} It may already have been delivered — running it again could duplicate the work.`;
   return run.observed_at ? `${head} moa was down until ${clock(run.observed_at, tz)}.` : head;
 }
 

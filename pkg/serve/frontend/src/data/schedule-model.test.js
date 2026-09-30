@@ -425,3 +425,10 @@ test('skipped runs say why: replaced by a newer run, or sent before migration', 
     ['Skipped', 'Already sent before migration'],
   ]);
 });
+
+test('an uncertain delivery warns that running it again could duplicate the work', () => {
+  const run = { id: 5, revision: 3, at: at(30, 9), state: 'late', reason: 'delivery_uncertain', observed_at: at(30, 9) };
+  expect(model.uncertainRun(run)).toBe(true);
+  expect(model.uncertainRun({ ...run, reason: 'regated' })).toBe(false);
+  expect(lateBanner(run, NOW, TZ)).toBe('Was due today 09:00. It may already have been delivered — running it again could duplicate the work.');
+});

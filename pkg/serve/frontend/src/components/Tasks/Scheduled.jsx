@@ -17,7 +17,7 @@ import {
   WHEN_PRESETS, awaitsYou, canReroute, clock, createWhenInput, dateLabel, deliveryRows, deliverySummary, deviceZone, failedRun, failureWords,
   inWords, isDefaultDelivery, isRepeat, lateBanner, lateRun, modelLabel, pickOf, pickText, rebaseSchedDraft, repeatOptions, ruleShort,
   ruleText, runOpenSession, runRows, schedActions, schedDirty, schedDraft, schedEyebrow, schedReady, schedRight, scheduleBody, schedulePatch,
-  scheduledRows, stateOf, targetFromDest, targetName, targetSessionId, waitingCount, whenButton, whenLong, whenShort,
+  scheduledRows, stateOf, targetFromDest, targetName, targetSessionId, uncertainRun, waitingCount, whenButton, whenLong, whenShort,
 } from "../../data/schedule-model.js";
 import { CloseIcon, Keycap, MOD_ENTER, MoveList, OpenSessionButton, useEscape } from "./parts.jsx";
 
@@ -530,7 +530,7 @@ export function SchedDetail({
         {del}
         <span class="tk-grow" />
         {acts.includes("lateSkip") && <button type="button" class="zl-ask-btn" disabled={busy || !late} onClick={() => act("Could not skip the run", () => confirmRun(late, "skip", task.id))}>Skip</button>}
-        {acts.includes("lateRun") && <button type="button" class="zl-ask-btn is-primary" disabled={busy || !late} onClick={() => act("Could not run it", () => confirmRun(late, "run", task.id))}><Play size={14} aria-hidden="true" />Run now</button>}
+        {acts.includes("lateRun") && <button type="button" class="zl-ask-btn is-primary" disabled={busy || !late} onClick={() => act("Could not run it", () => confirmRun(late, "run", task.id))}><Play size={14} aria-hidden="true" />{uncertainRun(late) ? "Run again" : "Run now"}</button>}
         {acts.includes("reroute") && canReroute(failRun) && (
           <button type="button" class="zl-ask-btn is-primary" disabled={busy} onClick={() => (onPushReroute ? onPushReroute(failRun) : setPop(pop === "reroute" ? null : "reroute"))}>Send to another session</button>
         )}
@@ -555,7 +555,7 @@ export function SchedDetail({
         {!isNew && awaitsYou(detail) && (
           <div class="sch-late" role="status">
             <span class="sch-late-t">{late ? lateBanner(late, now, tz) : "A run is waiting for your OK."}</span>
-            <span class="sch-late-q">Run it now?</span>
+            <span class="sch-late-q">{uncertainRun(late) ? "Run it again?" : "Run it now?"}</span>
           </div>
         )}
         {!isNew && s === "failed" && (
