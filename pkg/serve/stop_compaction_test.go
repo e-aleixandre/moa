@@ -107,7 +107,7 @@ func TestStopDoesNotAbortANewerManualCompaction(t *testing.T) {
 	stopDone := make(chan error, 1)
 	go func() {
 		resp := apiReq(t, srv, "POST", "/api/sessions/"+sess.ID+"/cancel-and-recall", "")
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 		if resp.StatusCode != http.StatusOK {
 			stopDone <- fmt.Errorf("Stop HTTP status=%d", resp.StatusCode)
 			return
