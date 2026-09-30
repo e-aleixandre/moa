@@ -112,25 +112,20 @@
 .of-serena.is-working .of-eyes { transition-duration: var(--motion-base); }
 .of-serena.is-idle .of-eyes { transform: none; }
 
-/* The arc ᵕ: a circle (its centre line is the curve, its inset ring the
-   stroke) cut at the chord, and a round cap at each end. The wrapper fades;
-   its parts are static. */
+/* The arc ᵕ: a static SVG curve filling the eye's box. The wrapper fades;
+   the drawing never moves. */
 .of-serena .of-arc {
+  inset: 0;
   transition: opacity var(--of-arc-in) ease var(--of-arc-delay);
 }
-.of-serena .of-ring,
-.of-serena .of-cap { position: absolute; display: block; }
-.of-serena .of-ring {
-  inset: 0;
-  box-sizing: border-box;
-  /* An inset shadow, not a border: Chromium snaps border widths to whole
-     pixels, a shadow's spread keeps its fraction. */
-  box-shadow: inset 0 0 0 var(--of-sw, 0px) var(--of-eye);
-  border-radius: 50%;
-}
-.of-serena .of-cap {
-  border-radius: 50%;
-  background: var(--of-eye);
+.of-serena .of-arc svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: var(--of-eye);
+  stroke-linecap: round;
 }
 .of-serena .of-dot {
   border-radius: 50%;

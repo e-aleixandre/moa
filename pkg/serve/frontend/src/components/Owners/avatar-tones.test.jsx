@@ -70,10 +70,10 @@ test("the tone sets the body, and pale draws the same eyes in ink", () => {
     }
   }
   const css = readFileSync(new URL("./OwnerFace.css", import.meta.url), "utf8");
-  // One variable carries the eye colour for arcs (ring and caps), dots and lines alike, and
+  // One variable carries the eye colour for arcs, dots and lines alike, and
   // pale turns it to ink.
   expect(css).toContain(".of-serena.is-tone-pale { --of-eye: var(--of-ink); }");
-  for (const part of ["of-ring", "of-cap", "of-dot", "of-line"]) {
+  for (const part of ["of-arc svg", "of-dot", "of-line"]) {
     expect(css).toMatch(new RegExp(`\\.of-serena \\.${part} \\{[^}]*var\\(--of-eye\\)`));
   }
   expect(css).toMatch(/\.is-tone-dark\.is-saved \{ opacity: 0\.8; \}/);

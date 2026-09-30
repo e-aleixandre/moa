@@ -237,7 +237,7 @@ export function ShutEyes({ cx, cy, dx, cls }) {
    Structure: .of-eyes (the pair, translated by --ex/--ey when open) > per
    eye a square box centred on the eye and turned by the owner's own tilt >
    its drawings, which exist only for the states that use them:
-     arc   (idle, working, asks) — the lower part of a ring with round caps: ᵕ
+     arc   (idle, working, asks) — a round-capped curve, static SVG in an HTML box: ᵕ
      dot   (idle, working, asks) — a circle, scaled 0 ↔ 1
      line  (saved)               — a level pill, static
    Geometry is in viewBox units turned into % of the box, so one drawing
@@ -253,23 +253,11 @@ export function SerenaEyes({ p, shape, eyes, small }) {
   const pct = (n) => `${r3((n / 32) * 100)}%`;
   const q = (n) => `${r3(((n + EYE_BOX / 2) / EYE_BOX) * 100)}%`; // local → % of the eye box
   const qs = (n) => `${r3((n / EYE_BOX) * 100)}%`;
-  const px = (n) => `calc(${n} * var(--of-u))`;
-  // The arc ᵕ is a circular segment: the lower part of a ring (stroke arcSw)
-  // whose chord is 2w wide and whose depth is h, cut at the chord, with round
-  // caps at its two ends (what an SVG round-capped stroke has).
-  const R = (g.w * g.w + g.h * g.h) / (2 * g.h);
-  const S = 2 * R + g.arcSw;
-  const qa = (n) => `${r3((n / S) * 100)}%`; // % of the arc's own box
-  const below = R - g.h; // the chord's distance under the ring's centre
-  const arc = {
-    S,
-    cy: 0.55 * g.h - R,
-    clip: `${r3(((S / 2 + below) / S) * 100)}%`,
-    capD: qa(g.arcSw),
-    capL: qa(S / 2 - g.w - g.arcSw / 2),
-    capR: qa(S / 2 + g.w - g.arcSw / 2),
-    capT: qa(S / 2 + below - g.arcSw / 2),
-  };
+  // The arc ᵕ is the lab's own curve, a round-capped quadratic, drawn in a
+  // static SVG that fills the eye's box. Only its HTML wrapper animates
+  // (opacity), so the tween stays on the compositor.
+  const E = EYE_BOX / 2;
+  const arcD = `M${r3(-g.w)} ${r3(-g.h * 0.45)}Q0 ${r3(g.h * 1.55)} ${g.w} ${r3(-g.h * 0.45)}`;
   const eye = (side) => (
     <span
       class="of-eye"
@@ -288,13 +276,10 @@ export function SerenaEyes({ p, shape, eyes, small }) {
         />
       ) : (
         <>
-          <span
-            class="of-arc"
-            style={{ left: q(-arc.S / 2), top: q(arc.cy - arc.S / 2), width: qs(arc.S), height: qs(arc.S) }}
-          >
-            <span class="of-ring" style={{ "--of-sw": px(g.arcSw), clipPath: `inset(${arc.clip} 0 0 0)` }} />
-            <span class="of-cap" style={{ left: arc.capL, top: arc.capT, width: arc.capD, height: arc.capD }} />
-            <span class="of-cap" style={{ left: arc.capR, top: arc.capT, width: arc.capD, height: arc.capD }} />
+          <span class="of-arc">
+            <svg viewBox={`${-E} ${-E} ${EYE_BOX} ${EYE_BOX}`} aria-hidden="true">
+              <path d={arcD} stroke-width={g.arcSw} />
+            </svg>
           </span>
           <span class="of-dot" style={{ left: q(-g.dr), top: q(0.2 - g.dr), width: qs(2 * g.dr), height: qs(2 * g.dr) }} />
         </>
