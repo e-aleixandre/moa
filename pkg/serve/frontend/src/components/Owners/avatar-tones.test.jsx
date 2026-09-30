@@ -45,6 +45,8 @@ test("every added shape draws its own outline with its eyes inside it", () => {
     // Not sent back to the circle.
     expect(fill.props.d).not.toBe(SHAPE_PATHS.circle);
     expect(tree.props.class).toContain("is-idle");
+    expect(tree.props.class).toContain("of-serena");
+    expect(tree.props.class).not.toContain("of-mirada");
   }
 });
 
@@ -52,6 +54,7 @@ test("the tone sets the body, and pale draws the same eyes in ink", () => {
   for (const tone of AVATAR_TONES) {
     for (const state of ["idle", "working", "asks", "saved"]) {
       const tree = OwnerFace({ shape: "ghost", color: "peach", tone, state, size: 20, gaze: [0, 0] });
+      expect(tree.props.class.split(" ")).toContain("of-serena");
       expect(tree.props.class).toContain(`is-tone-${tone}`);
       expect(tree.props.class).toContain(`is-${state}`);
       expect(tree.props.style["--of-body"]).toBe(faceBodyColor("peach", tone));
@@ -74,6 +77,14 @@ test("the tone sets the body, and pale draws the same eyes in ink", () => {
     expect(css).toMatch(new RegExp(`\\.of-serena \\.${part} \\{[^}]*var\\(--of-eye\\)`));
   }
   expect(css).toMatch(/\.is-tone-dark\.is-saved \{ opacity: 0\.8; \}/);
+  // The rules the component relies on are Serena's, not a leftover face's.
+  for (const rule of [
+    ".of-serena .of-dot {",
+    ".of-serena.is-idle .of-eyes { transform: none; }",
+    ".of-serena.is-saved { opacity: 0.66; }",
+    "@media (prefers-reduced-motion: reduce) {\n  .of-serena .of-head,",
+  ]) expect(css).toContain(rule);
+  expect(css).not.toContain("of-mirada");
 });
 
 test("deep is today's body exactly, and an absent or unknown tone is deep", () => {

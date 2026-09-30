@@ -44,42 +44,6 @@ export function combineGaze(eyes, gx, gy) {
   return [clamp(s.x + gx * s.scale, -1, 1), clamp(s.y + gy * s.scale, -1, 1)];
 }
 
-// How far the "head" reaches for each outline: the radius of the sphere the
-// eyes are projected on. Smaller than the outline so a turned eye never lands
-// on the rim — a drop narrows at eye height, a pill is wide.
-const HEAD_R = {
-  circle: 11, squircle: 11.5, blob: 10.5, hexagon: 10.5, drop: 10, pill: 12.5, triangle: 8, cloud: 10,
-  flower: 10.5, ghost: 11, bean: 10.5, diamond: 9, shield: 11, bell: 8,
-};
-
-// poseVars turns a gaze (gx, gy in −1..1, already combined with the state)
-// into the custom properties the CSS reads. Pure, so the tests can check a
-// pose without a DOM.
-//
-// A head turn: each eye sits on a sphere at ±φ from the facing direction, so
-// it moves by R·sin and is foreshortened by cos. The far eye thins and the
-// pair bunches towards the edge, which reads as "turned" rather than as two
-// marks sliding.
-export function poseVars(p, shape, gx, gy) {
-  const R = HEAD_R[shape] || 11;
-  const phi = Math.asin(Math.min(0.9, p.eyeGap / R));
-  const yaw = gx * 0.72;
-  const eye = (side) => {
-    const th = yaw + side * phi;
-    return {
-      x: R * Math.sin(th) - side * p.eyeGap,
-      s: Math.max(0.3, Math.cos(th) / Math.cos(phi)),
-    };
-  };
-  const l = eye(-1);
-  const r = eye(1);
-  return {
-    "--lx": r3(l.x), "--ls": r3(l.s), "--rx": r3(r.x), "--rs": r3(r.s),
-    "--gy": r3(gy * 2.6), "--sy": r3(1 - 0.14 * Math.abs(gy)),
-    "--bx": r3(gx * 0.45), "--by": r3(gy * 0.3),
-  };
-}
-
 // Serena's pose: the head (--bx/--by/--rot) always follows the gaze; the eyes
 // (--ex/--ey) slide on the body only while open — the CSS ignores them at
 // rest. Asking is pinned on you, so the head does not turn.
@@ -117,14 +81,23 @@ export function faceBodyColor(colorId, tone) {
   return `oklch(${l} ${c} ${h})`;
 }
 
+// syncPose writes a pose's custom properties straight to the element. The
+// scheduler does the same behind the renderer's back, so the last gaze it sent
+// would survive a state change whose rendered style is unchanged (idle →
+// saved, idle → asks): the rest pose is written again whenever the state is.
+export function syncPose(el, vars) {
+  for (const k in vars) el.style.setProperty(k, String(vars[k]));
+}
+
 let faceSeq = 0;
 
 // useFaceMotion registers a mounted face with the shared scheduler and
 // applies what it sends: blink / live / nudge classes and the gaze, turned
 // into custom properties by `pose`. Exported for the catalog's alternative
 // drawings, which move on the same clock.
-export function useFaceMotion(ref, { p, eyes, mode, follow, pinned, pose }) {
+export function useFaceMotion(ref, { p, eyes, mode, follow, pinned, pose, rest }) {
   useEffect(() => {
+    if (rest && ref.current) syncPose(ref.current, rest);
     // A shut face is resting on purpose: it does not blink or look anywhere.
     if (eyes === "saved" || pinned) return undefined;
     const el = ref.current;
@@ -134,8 +107,7 @@ export function useFaceMotion(ref, { p, eyes, mode, follow, pinned, pose }) {
       if ("blink" in ev) return void el.classList.toggle("is-blink", ev.blink);
       if ("live" in ev) return void el.classList.toggle("is-live", ev.live);
       if ("nudge" in ev) return void el.classList.toggle("is-nudge", ev.nudge);
-      const vars = pose(ev.gx, ev.gy);
-      for (const k in vars) el.style.setProperty(k, String(vars[k]));
+      syncPose(el, pose(ev.gx, ev.gy));
     };
     const off = motion.register({
       el,
@@ -182,7 +154,7 @@ export function OwnerFace({
   const pose = (gx, gy) => serenaPose(eyes, ...combineGaze(eyes, gx, gy));
   pose.key = eyes;
   const small = size <= 24;
-  useFaceMotion(ref, { p, eyes, mode: eyes, follow, pinned: !!gaze, pose });
+  useFaceMotion(ref, { p, eyes, mode: eyes, follow, pinned: !!gaze, pose, rest });
 
   const style = {
     "--of-body": muted ? "#4a4b5c" : faceBodyColor(av.color, av.tone),
@@ -241,11 +213,6 @@ export function OwnerFace({
       </span>
     </span>
   );
-}
-
-// OwnerFaceFor mirrors OwnerAvatarFor: the one-argument form.
-export function OwnerFaceFor({ owner, ...rest }) {
-  return <OwnerFace owner={owner} {...rest} />;
 }
 
 // ShutEyes are two closed arcs, the same drawing as the previous mark's.
@@ -325,7 +292,7 @@ export function SerenaEyes({ p, shape, eyes, small }) {
             class="of-arc"
             style={{ left: q(-arc.S / 2), top: q(arc.cy - arc.S / 2), width: qs(arc.S), height: qs(arc.S) }}
           >
-            <span class="of-ring" style={{ borderWidth: px(g.arcSw), clipPath: `inset(${arc.clip} 0 0 0)` }} />
+            <span class="of-ring" style={{ "--of-sw": px(g.arcSw), clipPath: `inset(${arc.clip} 0 0 0)` }} />
             <span class="of-cap" style={{ left: arc.capL, top: arc.capT, width: arc.capD, height: arc.capD }} />
             <span class="of-cap" style={{ left: arc.capR, top: arc.capT, width: arc.capD, height: arc.capD }} />
           </span>

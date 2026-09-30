@@ -9,7 +9,7 @@ import { expect, test } from "bun:test";
 import {
   BLINK_MS, NUDGE_MS, createFaceScheduler, facePersonality, motionScript,
 } from "./faceMotion.js";
-import { combineGaze, poseVars } from "./OwnerFace.jsx";
+import { combineGaze, serenaPose, syncPose } from "./OwnerFace.jsx";
 import { AVATAR_SHAPES, DEFAULT_AVATAR_SHAPES, defaultAvatar, ownerAvatar } from "./avatar-identity.js";
 
 // A fake clock: timers fire only when the test advances time.
@@ -228,10 +228,29 @@ test("state poses: working rests low and aside, asks is pinned on you", () => {
   }
   // Waiting for you is pinned on you whatever the script says.
   expect(combineGaze("asks", 0.6, -0.6)).toEqual([0, 0]);
-  // The head turn: the far eye is the foreshortened one.
-  const v = poseVars(p, "circle", 1, 0);
-  expect(v["--rs"]).toBeLessThan(v["--ls"]);
-  expect(v["--rs"]).toBeLessThan(0.7);
+  // Asking does not turn the head; working rests with the eyes low and aside.
+  expect(serenaPose("asks", ...combineGaze("asks", 0.6, -0.6))["--rot"]).toBe(0);
+  const work = serenaPose("working", ...combineGaze("working", 0, 0));
+  expect(work["--ex"]).toBeGreaterThan(0);
+  expect(work["--ey"]).toBeGreaterThan(0);
+  expect(work["--rot"]).toBeGreaterThan(0);
+});
+
+test("a state change writes the rest pose over the scheduler's last gaze", () => {
+  // The scheduler sets custom properties on the element behind the renderer's
+  // back; the rendered style does not change for idle → saved / asks, so the
+  // stale gaze has to be overwritten explicitly.
+  const style = new Map();
+  const el = { style: { setProperty: (k, v) => style.set(k, v) } };
+  syncPose(el, serenaPose("idle", 0.6, -0.4));
+  expect(style.get("--ex")).toBe("1.44");
+  for (const eyes of ["saved", "asks"]) {
+    syncPose(el, serenaPose(eyes, ...combineGaze(eyes, 0, 0)));
+    expect(style.get("--ex")).toBe("0");
+    expect(style.get("--ey")).toBe("0");
+    expect(style.get("--bx")).toBe("0");
+    expect(style.get("--rot")).toBe("0");
+  }
 });
 test("each state has its own deterministic script", () => {
   for (const mode of ["idle", "working", "asks"]) {

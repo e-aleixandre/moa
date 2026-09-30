@@ -4,6 +4,10 @@
    the openness they inherited from the previous product face (Mirada) live
    here, so none of it reaches the production bundle. */
 
+.of {
+  --of-lid-close: 60ms;
+  --of-lid-open: 95ms;
+}
 .of-pupilas,
 .of-sobria { transition: transform var(--motion-base) var(--of-spring); }
 .of-pupilas.is-nudge,
