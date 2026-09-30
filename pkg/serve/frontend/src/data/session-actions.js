@@ -340,7 +340,11 @@ export function startPolling() {
   // and toasted (loadEvents diffs the ids it already knew).
   // A tick that lands while a visible conversation is still receiving its
   // init waits for it, like the foreground refresh does.
-  pollTimer = setInterval(() => afterPendingInits('poll', () => { loadSessions(); loadEvents(); }), interval);
+  pollTimer = setInterval(() => afterPendingInits('poll', () => {
+    if (!pollTimer) return; // stopped (hidden) while it waited
+    loadSessions();
+    loadEvents();
+  }), interval);
 }
 
 export function stopPolling() {

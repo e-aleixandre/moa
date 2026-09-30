@@ -3,12 +3,15 @@ import { store, setState } from './store.js';
 import {
   INIT_IDLE_TIMEOUT_MS, afterPendingInits, reconnectAll, retryHistoryHydration, syncConnections,
 } from './api.js';
+import { startPolling, stopPolling } from './session-actions.js';
 
 // A fake clock: timers fire only when advance() moves past their due time, in
 // due order, so a test can walk a slow transfer second by second.
 let now = 0;
 let timers = [];
 let originals;
+let intervals = [];
+let fetched = [];
 
 function advance(ms) {
   const target = now + ms;
@@ -32,7 +35,9 @@ class TestWebSocket {
   close() {
     if (this.closed) return;
     this.closed = true;
-    this.onclose?.();
+    // A browser may only report the close after a handshake stuck behind the
+    // same slow link; a test can withhold it.
+    if (!TestWebSocket.withholdClose) this.onclose?.();
   }
 }
 
@@ -40,9 +45,26 @@ beforeEach(() => {
   now = 0;
   timers = [];
   TestWebSocket.instances = [];
+  TestWebSocket.withholdClose = false;
   originals = {
     WebSocket: globalThis.WebSocket, location: globalThis.location,
     setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout,
+    setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval,
+    fetch: globalThis.fetch,
+  };
+  intervals = [];
+  fetched = [];
+  globalThis.setInterval = (callback, delay) => {
+    const interval = { callback, delay };
+    intervals.push(interval);
+    return interval;
+  };
+  globalThis.clearInterval = (interval) => {
+    intervals = intervals.filter((i) => i !== interval);
+  };
+  globalThis.fetch = (path) => {
+    fetched.push(path);
+    return new Promise(() => {});
   };
   globalThis.WebSocket = TestWebSocket;
   globalThis.location = { protocol: 'http:', host: 'localhost' };
@@ -58,6 +80,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  stopPolling();
   syncConnections([]);
   Object.assign(globalThis, originals);
 });
@@ -219,4 +242,57 @@ test('a failed init releases the refreshes it was holding back', () => {
   afterPendingInits('foreground', () => { ran += 1; });
   advance(INIT_IDLE_TIMEOUT_MS);
   expect(ran).toBe(1);
+});
+
+test('a failure releases held refreshes even while another socket is still pending', () => {
+  setState({ sessions: {
+    s1: { id: 's1', messages: [], subagents: {} },
+    s2: { id: 's2', messages: [], subagents: {} },
+  } });
+  syncConnections(['s1']);
+  advance(INIT_IDLE_TIMEOUT_MS - 2000);
+  syncConnections(['s1', 's2']);
+  let ran = 0;
+  afterPendingInits('poll', () => { ran += 1; });
+  advance(2000); // s1 times out; s2 is still waiting
+  expect(ran).toBe(1);
+});
+
+test('replacing a pending socket does not release held refreshes', () => {
+  syncConnections(['s1']);
+  let ran = 0;
+  afterPendingInits('poll', () => { ran += 1; });
+  reconnectAll();
+  retryHistoryHydration('s1');
+  expect(ran).toBe(0);
+  lastSocket().onmessage({ data: initJSON() });
+  expect(ran).toBe(1);
+});
+
+test('an abandoned socket whose close never completes is still retried, and cannot write into the session', () => {
+  TestWebSocket.withholdClose = true;
+  syncConnections(['s1']);
+  const abandoned = lastSocket();
+  advance(INIT_IDLE_TIMEOUT_MS);
+  expect(abandoned.closed).toBe(true);
+  advance(1000);
+  expect(TestWebSocket.instances).toHaveLength(2);
+
+  abandoned.onmessage({ data: initJSON() }); // late arrival on the old socket
+  expect(store.get().sessions.s1.historyHydrated).toBe(false);
+  lastSocket().onmessage({ data: initJSON() });
+  expect(store.get().sessions.s1.historyHydrated).toBe(true);
+});
+
+test('a poll tick that waited for an init does not run once polling stopped', () => {
+  syncConnections(['s1']);
+  startPolling();
+  intervals[0].callback(); // tick while the init is pending: held back
+  stopPolling();           // app hidden meanwhile
+  lastSocket().onmessage({ data: initJSON() });
+  expect(fetched.filter((path) => /^\/api\/(sessions|events)(\?|$)/.test(path))).toEqual([]);
+
+  startPolling();
+  intervals[0].callback(); // nothing pending now: runs at once
+  expect(fetched.filter((path) => /^\/api\/(sessions|events)(\?|$)/.test(path)).length).toBe(2);
 });

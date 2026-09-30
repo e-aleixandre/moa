@@ -117,7 +117,9 @@ const INITIAL_BACKOFF = 1000;
 const MAX_BACKOFF = 16000;
 // Work that should not compete with a pending init for a weak link's
 // bandwidth (roster, inbox, catalog…): run once no visible socket is waiting
-// for its init. A failed or timed-out attempt releases it too.
+// for its init. Any failed or timed-out attempt releases it at once, even with
+// other sockets still pending, so staggered failing retries cannot hold it
+// back indefinitely.
 const afterInits = new Map(); // key → callback
 
 function cursorAcknowledgementKey(sessionId, seq, namespace) {
@@ -159,8 +161,9 @@ function initsPending() {
 }
 
 // afterPendingInits runs fn now, or once every visible socket has its init
-// (or has given up on it). Registering the same key again replaces the
-// previous callback, so a repeated poll tick runs once.
+// (or one of them has given up on it). Registering the same key again replaces
+// the previous callback, so a repeated poll tick runs once. Callers re-check
+// their own preconditions (visibility, polling) when fn finally runs.
 export function afterPendingInits(key, fn) {
   if (!initsPending()) {
     afterInits.delete(key);
@@ -170,8 +173,8 @@ export function afterPendingInits(key, fn) {
   afterInits.set(key, fn);
 }
 
-function flushAfterInits() {
-  if (afterInits.size === 0 || initsPending()) return;
+function flushAfterInits({ failed = false } = {}) {
+  if (afterInits.size === 0 || (!failed && initsPending())) return;
   const callbacks = [...afterInits.values()];
   afterInits.clear();
   for (const fn of callbacks) fn();
@@ -284,7 +287,6 @@ function settleAndClose(sessionId, entry) {
   clearHistoryHydrationTimer(sessionId);
   finishHistoryHydration(sessionId);
   try { entry.ws.close(); } catch (_) { /* a replacement or absence is fine */ }
-  flushAfterInits();
 }
 
 // (Re)start the init deadline: called when the socket is created and on every
@@ -299,7 +301,7 @@ function noteInitProgress(sessionId, entry) {
     failHistoryHydration(sessionId);
     try { entry.ws.close(); } catch (_) { /* already closing */ }
     scheduleReconnect(sessionId);
-    flushAfterInits();
+    flushAfterInits({ failed: true });
   }, INIT_IDLE_TIMEOUT_MS));
 }
 
@@ -366,6 +368,7 @@ function openWs(sessionId) {
     if (skipDelta) forceFullInit.add(sessionId);
     failHistoryHydration(sessionId);
     scheduleReconnect(sessionId);
+    flushAfterInits({ failed: true });
     return;
   }
   ws.binaryType = 'arraybuffer';
@@ -466,7 +469,7 @@ function openWs(sessionId) {
     if (!wantedIds.has(sessionId)) return; // intentionally removed
     failHistoryHydration(sessionId);
     scheduleReconnect(sessionId);
-    flushAfterInits();
+    flushAfterInits({ failed: true });
   };
 
   ws.onerror = () => {

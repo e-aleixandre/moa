@@ -188,6 +188,7 @@ function useBootstrap() {
         // open conversation's init — the one thing the user is waiting for —
         // so they wait until it lands (or fails).
         afterPendingInits("foreground", () => {
+          if (document.visibilityState !== "visible") return;
           loadSessions();
           loadEvents(); // wake-on-event: an event may have arrived while away
           resumeTasksSync();
@@ -213,6 +214,7 @@ function useBootstrap() {
       if (document.visibilityState !== "visible") return;
       reconnectAll();
       afterPendingInits("online", () => {
+        if (document.visibilityState !== "visible") return;
         loadSessions();
         resumeTasksSync();
         ensureModelCatalog();
