@@ -107,6 +107,4 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.11.3
-          # Cached analysis facts in v2.11.3 can lose t.Fatal's no-return behavior.
-          skip-cache: true
+          version: v2.14.0

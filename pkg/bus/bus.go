@@ -234,7 +234,7 @@ func (b *LocalBus) Subscribe(handler any) func() {
 		panic(fmt.Sprintf("bus: Subscribe handler must have no return values, got %d", ht.NumOut()))
 	}
 	eventType := ht.In(0)
-	if eventType.Kind() == reflect.Ptr {
+	if eventType.Kind() == reflect.Pointer {
 		panic("bus: handler parameter must be a struct, not a pointer")
 	}
 	if eventType.Kind() != reflect.Struct {
@@ -491,7 +491,7 @@ func (b *LocalBus) OnCommand(handler any) {
 		panic(fmt.Sprintf("bus: OnCommand handler must return error, got %s", ht.Out(0)))
 	}
 	cmdType := ht.In(0)
-	if cmdType.Kind() == reflect.Ptr {
+	if cmdType.Kind() == reflect.Pointer {
 		panic("bus: command parameter must be a struct, not a pointer")
 	}
 	if cmdType.Kind() != reflect.Struct {
@@ -554,7 +554,7 @@ func (b *LocalBus) OnQuery(handler any) {
 		panic(fmt.Sprintf("bus: OnQuery handler second return must be error, got %s", ht.Out(1)))
 	}
 	queryType := ht.In(0)
-	if queryType.Kind() == reflect.Ptr {
+	if queryType.Kind() == reflect.Pointer {
 		panic("bus: query parameter must be a struct, not a pointer")
 	}
 	if queryType.Kind() != reflect.Struct {
