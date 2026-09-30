@@ -96,8 +96,9 @@ func TestTaskSchedulerRestartOverdue(t *testing.T) {
 	}
 }
 
-// Runs the owner already authorized (confirmed, Run now), reserved runs and
-// late=run runs are never gated again by a restart, however long it took.
+// Runs the owner already authorized (confirmed, Run now) and late=run runs
+// are never gated again by a restart, however long it took. A reservation
+// alone is not an admission: see TestScheduleReviewReservedNotAdmittedIsRegated.
 func TestTaskSchedulerRestartDoesNotRelateAuthorizedRun(t *testing.T) {
 	cases := map[string]func(t *testing.T, h *schedHarness, r *tasks.Repo, sid string) int64{
 		"confirmed": func(t *testing.T, h *schedHarness, r *tasks.Repo, sid string) int64 {
@@ -124,19 +125,6 @@ func TestTaskSchedulerRestartDoesNotRelateAuthorizedRun(t *testing.T) {
 			h.clock.Advance(time.Minute)
 			if os, _ := r.MaterializeDue(bgc, 10); len(os) != 1 || os[0].State != tasks.OccReady {
 				t.Fatalf("T0 = %+v", os)
-			}
-			return tmpl.ID
-		},
-		"reserved": func(t *testing.T, h *schedHarness, r *tasks.Repo, sid string) int64 {
-			tmpl := mkTemplate(t, r, "reserved", onceAt(h.clock.Now().Add(time.Minute), toSession(sid), tasks.Delivery{}))
-			h.clock.Advance(time.Minute)
-			os, _ := r.MaterializeDue(bgc, 10)
-			o, err := r.AssignOccurrence(bgc, os[0].ID, tasks.Destination{SessionID: sid})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if ok, err := r.SetNoticeState(bgc, o.NoticeID, tasks.NoticeChange{From: []string{tasks.NoticePending}, State: tasks.NoticeSent}); !ok || err != nil {
-				t.Fatalf("reserve: %v %v", ok, err)
 			}
 			return tmpl.ID
 		},

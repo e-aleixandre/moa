@@ -359,12 +359,18 @@ func (s *taskScheduler) provisionNew(ctx context.Context, o tasks.Occurrence) bo
 // recoverScheduledTasks runs once at startup, before the dispatcher and the
 // planner start: the legacy /schedule import, then the restart re-gate of
 // runs that never reached their session.
+//
+// A reserved (sent) assignment is not proof of delivery: the process may
+// have died before admitting it. Sent notices are first settled against the
+// saved transcripts, so the re-gate sees as undelivered (back to pending)
+// every assignment that is not there.
 func (m *Manager) recoverScheduledTasks(ctx context.Context) {
 	m.importLegacySchedules(ctx)
 	if _, err := os.Stat(m.tasks.Path()); err != nil {
 		// No database yet: nothing to recover, and a read must not create it.
 		return
 	}
+	m.notices.reconcileSentAtStartup(ctx)
 	if n, err := m.tasks.RegateOnRestart(ctx); err != nil {
 		slog.Warn("task scheduler: re-gating runs at startup failed", "error", err)
 	} else if n > 0 {

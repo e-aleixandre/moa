@@ -543,6 +543,25 @@ func (d *noticeDispatcher) reconcileSent(ctx context.Context, n tasks.Notice) {
 	d.nudge()
 }
 
+// reconcileSentAtStartup runs reconcileSent on every sent notice before the
+// dispatcher starts. Nothing is resident yet, so each is settled against its
+// saved transcript: delivered if it is there, pending if not (and left sent
+// when the transcript cannot be read).
+func (d *noticeDispatcher) reconcileSentAtStartup(ctx context.Context) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	notices, err := d.m.tasks.OpenNotices(ctx)
+	if err != nil {
+		slog.Warn("task notices: reading the outbox at startup failed", "error", err)
+		return
+	}
+	for _, n := range notices {
+		if n.State == tasks.NoticeSent && ctx.Err() == nil {
+			d.reconcileSent(ctx, n)
+		}
+	}
+}
+
 func (d *noticeDispatcher) delivered(ctx context.Context, n tasks.Notice) tasks.Notice {
 	if n.SteerID != "" {
 		d.steers.Delete(n.SteerID)
