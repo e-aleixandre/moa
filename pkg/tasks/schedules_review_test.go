@@ -52,20 +52,20 @@ func TestScheduleReviewCatchUpSupersedesUndeliveredRun(t *testing.T) {
 	}
 }
 
-// Q2: a run whose assignment is already on its way (sent) or admitted is
-// never superseded: only never-admitted, unconfirmed runs are.
-func TestScheduleReviewCatchUpKeepsInflightAndConfirmedRuns(t *testing.T) {
+// Q2: an admitted run is never superseded. (A reserved one without an
+// acknowledgment is uncertain history: TestRound3SupersededUncertainIsHistory.)
+func TestScheduleReviewCatchUpKeepsAdmittedRuns(t *testing.T) {
 	r, clock := schedRepo(t, "2026-09-28T08:00:00Z")
 	mkSchedule(t, r, "inflight", dailyDef(9, 0, "UTC", LateRun))
 	clock.Set(utc("2026-09-28T09:00:00Z"))
 	sent := mustAssign(t, r, materializeOne(t, r).ID, "s1")
-	if _, err := r.SetNoticeState(bg, sent.NoticeID, NoticeChange{From: []string{NoticePending}, State: NoticeSent}); err != nil {
+	if _, err := r.SetNoticeState(bg, sent.NoticeID, NoticeChange{From: []string{NoticePending}, State: NoticeSent, Admitted: true}); err != nil {
 		t.Fatal(err)
 	}
 	clock.Set(utc("2026-09-30T09:20:00Z"))
 	latest := materializeOne(t, r)
 	if got := mustOcc(t, r, sent.ID); got.State != OccAssigned {
-		t.Errorf("a sent assignment was superseded: %s/%s", got.State, got.Reason)
+		t.Errorf("an admitted assignment was superseded: %s/%s", got.State, got.Reason)
 	}
 	if latest.MissedCount != 1 {
 		t.Errorf("missed_count = %d, want 1 (only the empty slot of 09-29)", latest.MissedCount)

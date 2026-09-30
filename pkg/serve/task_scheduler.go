@@ -165,18 +165,7 @@ func (s *taskScheduler) pass(ctx context.Context) {
 		s.hooks.beforePass(ctx)
 	}
 	repo := s.m.tasks
-	for ctx.Err() == nil {
-		os, err := repo.MaterializeDue(ctx, materializeBatch)
-		if err != nil {
-			if ctx.Err() == nil {
-				slog.Warn("task scheduler: materializing due runs failed", "error", err)
-			}
-			break
-		}
-		if len(os) < materializeBatch {
-			break
-		}
-	}
+	s.materialize(ctx)
 	ready, err := repo.ReadyOccurrences(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -195,6 +184,25 @@ func (s *taskScheduler) pass(ctx context.Context) {
 	}
 	if assigned {
 		s.m.notices.nudge()
+	}
+}
+
+// materialize consumes every due slot (T0), serialized with scheduled
+// delivery attempts (noticeDispatcher.admitMu).
+func (s *taskScheduler) materialize(ctx context.Context) {
+	for ctx.Err() == nil {
+		s.m.notices.admitMu.Lock()
+		os, err := s.m.tasks.MaterializeDue(ctx, materializeBatch)
+		s.m.notices.admitMu.Unlock()
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Warn("task scheduler: materializing due runs failed", "error", err)
+			}
+			return
+		}
+		if len(os) < materializeBatch {
+			return
+		}
 	}
 }
 

@@ -49,6 +49,14 @@ type noticeDispatcher struct {
 	wake chan struct{}
 	done chan struct{}
 
+	// admitMu serializes a scheduled assignment's short delivery span
+	// (reservation → admission → acknowledgment or refusal) with the
+	// consumption of new slots, which coalesces a recurrence's older runs:
+	// coalescing never sees an attempt in flight, and an attempt never
+	// delivers a run a due slot supersedes. Resumes and scans stay outside,
+	// and nothing under it waits for a model.
+	admitMu sync.Mutex
+
 	trigMu       sync.Mutex
 	retryAll     bool
 	reconcileAll bool
@@ -303,6 +311,19 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 		}
 	}
 
+	if occ != nil {
+		d.admitMu.Lock()
+		defer d.admitMu.Unlock()
+		// One pending run per recurrence: a newer slot already due
+		// supersedes this one when the planner takes it.
+		if due, err := m.tasks.SlotDue(ctx, occ.ScheduleTaskID); err != nil || due {
+			if err != nil && ctx.Err() == nil {
+				slog.Warn("task notices: reading the run's schedule failed", "notice", n.ID, "error", err)
+			}
+			m.planner.nudge()
+			return n
+		}
+	}
 	// Reconcile even a pending row: an earlier admission may have reached the
 	// transcript before recording its state failed (including older binaries).
 	if sess, live := m.Get(to); live {
@@ -353,6 +374,8 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 		SteerID:        steerID,
 		RefuseQuestion: true,
 		IdleOnly:       idleOnly,
+		// Under admitMu: a lifecycle writer is a refusal, retried later.
+		NoWait: occ != nil,
 	})
 	if !steered || err != nil {
 		d.steers.Delete(steerID)

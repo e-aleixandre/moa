@@ -519,26 +519,21 @@ func TestScheduleEditFromNext(t *testing.T) {
 	def := dailyDef(9, 0, "UTC", "")
 	def.Delivery.Saved = DeliverHold
 	tmpl := mkSchedule(t, r, "daily", def)
-	// Sep 26 run by hand → assigned with a held notice. Runs the owner
-	// authorized are not coalesced into later slots.
+	// Sep 26 run by hand → assigned and admitted: an admitted run is never
+	// coalesced into later slots.
 	byHand, err := r.RunNow(bg, tmpl.ID, tmpl.Revision, tmpl.Next)
 	if err != nil {
 		t.Fatal(err)
 	}
 	held := mustAssign(t, r, byHand.ID, "s1")
-	// Sep 27 observed late, then confirmed → ready (left unassigned).
-	clock.Set(utc("2026-09-27T09:30:00Z"))
-	first := materializeOne(t, r)
-	ready, err := r.ConfirmOccurrence(bg, first.ID, first.Revision, LateRun)
-	if err != nil {
-		t.Fatal(err)
+	if ok, err := r.SetNoticeState(bg, held.NoticeID, NoticeChange{From: []string{NoticePending}, State: NoticeSent, Admitted: true}); err != nil || !ok {
+		t.Fatalf("admit: %v %v", ok, err)
 	}
-	// Sep 28 observed late → late.
+	// Sep 28 observed late → late, the recurrence's one pending candidate.
 	clock.Set(utc("2026-09-28T09:30:00Z"))
 	late := materializeOne(t, r)
-	if held.State != OccAssigned || ready.State != OccReady || late.State != OccLate ||
-		mustNotice(t, r, held.NoticeID).Deliver != DeliverHold {
-		t.Fatalf("setup: %+v %+v %+v", held, ready, late)
+	if held.State != OccAssigned || late.State != OccLate || mustNotice(t, r, held.NoticeID).Deliver != DeliverHold {
+		t.Fatalf("setup: %+v %+v", held, late)
 	}
 	cur := mustGet(t, r, tmpl.ID)
 	rule := daily(18, 30)
@@ -547,7 +542,7 @@ func TestScheduleEditFromNext(t *testing.T) {
 	if _, err := r.Update(bg, tmpl.ID, cur.Revision, Patch{Description: ptr("edited"), Title: ptr("renamed"), Schedule: newDef}); err != nil {
 		t.Fatal(err)
 	}
-	for _, o := range []Occurrence{held, ready, late} {
+	for _, o := range []Occurrence{held, late} {
 		got := mustOcc(t, r, o.ID)
 		if got.Spec.Description != "do daily" || got.Spec.Title != "daily" || got.Spec.Target.ID != "s1" ||
 			got.Spec.When.Rule.H != 9 || got.Spec.TZ != "UTC" || got.Spec.Delivery.Late != LateAsk || got.State != o.State {
@@ -1197,10 +1192,15 @@ func TestScheduleRegateOnRestart(t *testing.T) {
 func TestScheduleParentDeleteSettlesLate(t *testing.T) {
 	r, clock := schedRepo(t, "2026-09-29T08:00:00Z")
 	tmpl := mkSchedule(t, r, "daily", dailyDef(9, 0, "UTC", ""))
-	// Run by hand: an authorized run is not coalesced into the next slot.
-	ready, err := r.RunNow(bg, tmpl.ID, tmpl.Revision, tmpl.Next)
+	// Run by hand and admitted: an admitted run is not coalesced into the
+	// next slot, and outlives its template.
+	byHand, err := r.RunNow(bg, tmpl.ID, tmpl.Revision, tmpl.Next)
 	if err != nil {
 		t.Fatal(err)
+	}
+	admitted := mustAssign(t, r, byHand.ID, "s1")
+	if ok, err := r.SetNoticeState(bg, admitted.NoticeID, NoticeChange{From: []string{NoticePending}, State: NoticeSent, Admitted: true}); err != nil || !ok {
+		t.Fatalf("admit: %v %v", ok, err)
 	}
 	clock.Set(utc("2026-09-30T09:30:00Z"))
 	late := materializeOne(t, r)
@@ -1216,8 +1216,8 @@ func TestScheduleParentDeleteSettlesLate(t *testing.T) {
 	if l, _ := r.List(bg, Filter{}); l.Counts.LateOccurrences != 0 {
 		t.Fatalf("orphan decision counted: %+v", l.Counts)
 	}
-	if got := mustAssign(t, r, ready.ID, "s1"); got.State != OccAssigned {
-		t.Fatal("authorized run lost")
+	if got := mustOcc(t, r, admitted.ID); got.State != OccAssigned {
+		t.Fatalf("admitted run lost: %+v", got)
 	}
 }
 

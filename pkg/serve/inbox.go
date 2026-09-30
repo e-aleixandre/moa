@@ -673,6 +673,10 @@ type eventInjection struct {
 	// IdleOnly starts a fresh turn or fails with errEventSessionNotIdle; it
 	// never steers into a working run or queues. Requires Autorun.
 	IdleOnly bool
+	// NoWait fails with errEventSessionBusy instead of waiting for the
+	// session's lifecycle (a close, delete or reload draining it), so a
+	// caller holding a lock across the injection never waits behind it.
+	NoWait bool
 }
 
 // errEventSessionNotIdle means an IdleOnly injection found the session
@@ -692,7 +696,13 @@ func (m *Manager) injectEvent(sessionID string, in eventInjection) (steered bool
 	if !ok {
 		return false, ErrNotFound
 	}
-	sess.lifecycle.RLock()
+	if in.NoWait {
+		if !sess.lifecycle.TryRLock() {
+			return false, errEventSessionBusy
+		}
+	} else {
+		sess.lifecycle.RLock()
+	}
 	defer sess.lifecycle.RUnlock()
 	if sess.closing.Load() {
 		return false, ErrNotFound

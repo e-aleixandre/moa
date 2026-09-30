@@ -261,7 +261,11 @@ func handleRunNow(m *Manager) http.HandlerFunc {
 		if !decodeStrict(w, r, &b) {
 			return
 		}
+		// Run now is a new slot: it coalesces the older runs, so it waits
+		// for a delivery attempt in flight like the planner's T0.
+		m.notices.admitMu.Lock()
 		occ, err := m.tasks.RunNow(r.Context(), id, b.Revision, b.DueAt)
+		m.notices.admitMu.Unlock()
 		if err != nil {
 			writeTaskError(w, err)
 			return

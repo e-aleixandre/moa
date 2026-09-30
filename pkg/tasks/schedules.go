@@ -360,7 +360,7 @@ func (r *Repo) consume(ctx context.Context, taskID, expectRev, expectDue int64, 
 			}
 			return false, &ConflictError{Current: cur}
 		}
-		if trigger == TriggerTimer && s.Def.When.Kind == WhenRepeat {
+		if trigger != TriggerSkipNext && s.Def.When.Kind == WhenRepeat {
 			superseded, err := r.supersedeUndelivered(ctx, tx, taskID)
 			if err != nil {
 				return false, err
@@ -404,15 +404,22 @@ func (r *Repo) consume(ctx context.Context, taskID, expectRev, expectDue int64, 
 }
 
 // supersedeUndelivered coalesces a recurring template's earlier runs into the
-// one its timer is about to create: every run that never reached its session
-// and that the owner did not authorize by hand (ready, late, or assigned with
-// its notice still waiting) is skipped as superseded, its undelivered
-// assignment withdrawn. It returns how many slots the new run stands for in
-// their place, their own coalesced slots included. An assignment already on
-// its way (sent) or admitted, or a child someone started, is left alone.
+// one a new slot (its timer or Run now) is about to create, so a recurrence
+// has one pending candidate: every run not admitted by its session (ready,
+// late, or assigned with its notice waiting or reserved), whoever authorized
+// it, is skipped as superseded and gives up its child and assignment. It
+// returns how many slots the new run stands for in their place, their own
+// coalesced slots included. A run whose delivery is uncertain (reserved
+// without an acknowledgment, or already such a decision) may have run: it
+// goes to history without being counted. An admitted run, or a child someone
+// completed, is left alone.
+//
+// The caller serializes it with the delivery attempts' short span from
+// reservation to acknowledgment or refusal, so a reserved assignment seen
+// here is not in flight.
 func (r *Repo) supersedeUndelivered(ctx context.Context, tx *sql.Tx, taskID int64) (int, error) {
 	os, err := queryOccurrences(ctx, tx, `schedule_task_id = ? AND state IN ('ready','assigned','late')
-		AND admitted_at IS NULL AND confirmed_at IS NULL AND trigger <> 'run_now' ORDER BY id`, taskID)
+		AND admitted_at IS NULL ORDER BY id`, taskID)
 	if err != nil {
 		return 0, err
 	}
@@ -429,14 +436,23 @@ func (r *Repo) supersedeUndelivered(ctx context.Context, tx *sql.Tx, taskID int6
 				continue
 			}
 		}
+		uncertain := o.State == OccLate && o.Reason == ReasonUncertain
 		if o.NoticeID != "" {
-			res, err := tx.ExecContext(ctx, `UPDATE task_notifications SET state = 'failed', reason = ?, updated_at = ?
-				WHERE id = ? AND state IN ('pending','held')`, ReasonSuperseded, now, o.NoticeID)
-			if err != nil {
+			var state string
+			if err := tx.QueryRowContext(ctx, "SELECT state FROM task_notifications WHERE id = ?", o.NoticeID).Scan(&state); err != nil {
 				return 0, err
 			}
-			if k, _ := res.RowsAffected(); k != 1 && o.State == OccAssigned {
+			reason := ReasonSuperseded
+			switch state {
+			case NoticePending, NoticeHeld:
+			case NoticeSent:
+				uncertain, reason = true, ReasonUncertain
+			default:
 				continue
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE task_notifications SET state = 'failed', reason = ?, updated_at = ?
+				WHERE id = ?`, reason, now, o.NoticeID); err != nil {
+				return 0, err
 			}
 		}
 		if o.ChildTaskID != 0 {
@@ -446,12 +462,31 @@ func (r *Repo) supersedeUndelivered(ctx context.Context, tx *sql.Tx, taskID int6
 		}
 		o.ChildTaskID, o.NoticeID, o.SessionID = 0, "", ""
 		o.State, o.Reason, o.Note = OccSkipped, ReasonSuperseded, "Superseded by a later run"
+		if uncertain {
+			o.Note = "Superseded by a later run; it may already have been delivered"
+		} else {
+			n += 1 + o.MissedCount
+		}
 		if err := r.saveOccurrence(ctx, tx, o); err != nil {
 			return 0, err
 		}
-		n += 1 + o.MissedCount
 	}
 	return n, nil
+}
+
+// SlotDue reports whether a recurring template has a slot due that the
+// planner has not taken yet: a delivery of one of its older runs would be
+// superseded by it, and waits for it instead.
+func (r *Repo) SlotDue(ctx context.Context, taskID int64) (bool, error) {
+	rd, err := r.reader()
+	if err != nil || rd == nil {
+		return false, err
+	}
+	var due bool
+	err = rd.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM task_schedules WHERE task_id = ? AND enabled = 1
+		AND json_extract(when_json, '$.kind') = ? AND next_due_at IS NOT NULL AND next_due_at <= ?)`,
+		taskID, WhenRepeat, r.now().UnixMilli()).Scan(&due)
+	return due, err
 }
 
 // controlTarget is the error for an owner control on a task that is not an
