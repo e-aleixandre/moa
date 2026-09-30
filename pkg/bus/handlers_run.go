@@ -526,6 +526,12 @@ func originFromCustom(custom map[string]any) RunOrigin {
 	}
 }
 
+// OriginOfInput is the provenance of one input message, read off the Custom
+// metadata it carries (nil for a plain typed message). Consumers that watch
+// inputs land in a run, as push does, classify them with the same rules that
+// admit a run.
+func OriginOfInput(custom map[string]any) RunOrigin { return originFromCustom(custom) }
+
 // continuationOrigin describes a run started by a background job's own
 // notification. A notification that lost its job ID is unknown provenance, not
 // a continuation: it must start a new turn rather than silently fold into one.

@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -62,73 +61,88 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 			Watched:   sess.presence.watched(),
 		}
 	}
-	// A question or permission someone was looking at waits out a grace period
-	// and is sent only if that very request is still open.
+	// A question or permission someone was looking at waits out a grace period;
+	// it is sent only if that very request is still open, which is also checked
+	// before an immediate send (the request may have been answered while this
+	// event waited its turn).
 	request := func(kind push.Kind, id string) {
 		if !allowed() {
 			return
 		}
+		approvals := sess.runtime.Context().Approvals
 		s := signal(kind)
 		s.RequestID = id
 		s.StillPending = func() bool {
 			if !allowed() {
 				return false
 			}
-			info, err := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](b, bus.GetPendingApproval{})
-			if err != nil {
-				return false
-			}
 			if kind == push.KindAsk {
-				return info.Ask != nil && info.Ask.ID == id
+				return approvals.AskPending(id)
 			}
-			return info.Permission != nil && info.Permission.ID == id
+			return approvals.PermissionPending(id)
 		}
 		pol.Handle(s)
 	}
 
-	// The current run, recorded at RunStarted for RunEnded: how long it took and
-	// whether it was an owner digesting a report. The two events are handled on
-	// separate subscriber goroutines; if the start is somehow unknown we fail
-	// open and treat the run as an ordinary one.
-	var runMu sync.Mutex
+	// One subscriber sees the run's events in the order they happened, so what
+	// a run was (a digest of a report, how long it took) is learnt before the
+	// run ends and cannot be mixed up with the next run's.
 	var run struct {
+		active bool
 		gen    uint64
 		start  time.Time
 		digest bool
 	}
+	// An input that lands in a digest run and did not come from a report (the
+	// user's own instruction) makes it a turn somebody asked for.
+	landed := func(custom map[string]any) {
+		if run.active && run.digest {
+			if o := bus.OriginOfInput(custom); o.Explicit && o.Source != reportSource {
+				run.digest = false
+			}
+		}
+	}
 
 	sess.pushUnsubs = append(sess.pushUnsubs,
 		func() { pol.CancelSession(sess.ID) },
-		b.Subscribe(func(e bus.AskUserRequested) { request(push.KindAsk, e.ID) }),
-		b.Subscribe(func(e bus.PermissionRequested) { request(push.KindPermission, e.ID) }),
-		b.Subscribe(func(e bus.AskUserResolved) { pol.Resolved(push.KindAsk, sess.ID, e.ID) }),
-		b.Subscribe(func(e bus.PermissionResolved) { pol.Resolved(push.KindPermission, sess.ID, e.ID) }),
-		b.Subscribe(func(e bus.RunStarted) {
-			runMu.Lock()
-			run.gen, run.start, run.digest = e.RunGen, time.Now(), e.Origin.Source == reportSource
-			runMu.Unlock()
-		}),
-		b.Subscribe(func(e bus.RunEnded) {
-			if e.Err != nil || e.Cancelled || !allowed() {
-				return
-			}
-			runMu.Lock()
-			known := run.gen == e.RunGen && !run.start.IsZero()
-			start, digest := run.start, run.digest && run.gen == e.RunGen
-			runMu.Unlock()
-			if known && time.Since(start) < minRunForPush {
-				return // quick answer — not worth a buzz
-			}
-			s := signal(push.KindDone)
-			if digest {
-				s.Kind = push.KindDigest
-				s.Project = sess.CWD
-			}
-			pol.Handle(s)
-		}),
-		b.Subscribe(func(e bus.StateChanged) {
-			if e.State == string(bus.StateError) && allowed() {
-				pol.Handle(signal(push.KindFailed))
+		b.SubscribeAll(func(event any) {
+			switch e := event.(type) {
+			case bus.AskUserRequested:
+				request(push.KindAsk, e.ID)
+			case bus.PermissionRequested:
+				request(push.KindPermission, e.ID)
+			case bus.AskUserResolved:
+				pol.Resolved(push.KindAsk, sess.ID, e.ID)
+			case bus.PermissionResolved:
+				pol.Resolved(push.KindPermission, sess.ID, e.ID)
+			case bus.RunStarted:
+				run.active, run.gen, run.start = true, e.RunGen, time.Now()
+				run.digest = e.Origin.Source == reportSource
+			case bus.Steered:
+				landed(e.Custom)
+			case bus.UserMessageAppended:
+				landed(e.Custom)
+			case bus.RunEnded:
+				known := run.active && run.gen == e.RunGen
+				start, digest := run.start, known && run.digest
+				run.active = false
+				if e.Err != nil || e.Cancelled || !allowed() {
+					return
+				}
+				switch {
+				case digest:
+					s := signal(push.KindDigest)
+					s.Project = sess.CWD
+					pol.Handle(s)
+				case known && time.Since(start) < minRunForPush:
+					// quick answer — not worth a buzz
+				default:
+					pol.Handle(signal(push.KindDone))
+				}
+			case bus.StateChanged:
+				if e.State == string(bus.StateError) && allowed() {
+					pol.Handle(signal(push.KindFailed))
+				}
 			}
 		}),
 	)

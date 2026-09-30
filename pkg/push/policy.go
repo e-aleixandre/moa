@@ -55,6 +55,17 @@ func ParseSummaries(s string) Summaries {
 	return SummariesPassive
 }
 
+const (
+	// DefaultWindow is how long a summary waits for company: the last digest
+	// of a project (or event of a source) goes after this much quiet, so a burst
+	// of reports is one notification.
+	DefaultWindow = 15 * time.Minute
+	// DefaultDailyLimit caps the non-blocking notifications of a day. Every
+	// notification reaches every subscribed device, so it is also the cap per
+	// device. Questions and permissions are exempt.
+	DefaultDailyLimit = 150
+)
+
 // DefaultGrace is how long a question or permission someone is looking at on
 // another device waits before it is sent anyway.
 const DefaultGrace = 60 * time.Second
@@ -91,21 +102,41 @@ type Signal struct {
 // PolicyConfig tunes a Policy.
 type PolicyConfig struct {
 	Summaries Summaries
-	// Grace overrides DefaultGrace.
-	Grace time.Duration
-	// After schedules f after d and returns a stop func. Tests replace it.
+	// Grace overrides DefaultGrace; Window, DefaultWindow; DailyLimit,
+	// DefaultDailyLimit.
+	Grace      time.Duration
+	Window     time.Duration
+	DailyLimit int
+	// After schedules f after d and returns a stop func; Now is the clock.
+	// Tests replace both.
 	After func(d time.Duration, f func()) (stop func() bool)
+	Now   func() time.Time
 }
 
-// Policy turns signals into notifications for a Sender.
+// Policy turns signals into notifications for a Sender. Its timers (grace
+// periods, summary windows) live in memory only: a restart forgets them, as it
+// already forgets the question they were about.
 type Policy struct {
-	sender    Sender
-	summaries Summaries
-	grace     time.Duration
-	after     func(d time.Duration, f func()) func() bool
+	sender     Sender
+	summaries  Summaries
+	grace      time.Duration
+	window     time.Duration
+	dailyLimit int
+	after      func(d time.Duration, f func()) func() bool
+	now        func() time.Time
 
 	mu      sync.Mutex
+	closed  bool
 	pending map[pendingKey]func() bool // grace timers, by request
+	summary map[string]*summaryWait    // aggregation windows, by group tag
+	day     string                     // calendar day sent counts
+	sent    int                        // non-blocking notifications sent on day
+}
+
+// summaryWait is a digest or event group waiting for its quiet window to end.
+type summaryWait struct {
+	stop func() bool
+	n    Notification
 }
 
 type pendingKey struct {
@@ -117,17 +148,30 @@ type pendingKey struct {
 // NewPolicy builds a policy delivering through sender.
 func NewPolicy(sender Sender, cfg PolicyConfig) *Policy {
 	p := &Policy{
-		sender:    sender,
-		summaries: cfg.Summaries,
-		grace:     cfg.Grace,
-		after:     cfg.After,
-		pending:   make(map[pendingKey]func() bool),
+		sender:     sender,
+		summaries:  cfg.Summaries,
+		grace:      cfg.Grace,
+		window:     cfg.Window,
+		dailyLimit: cfg.DailyLimit,
+		after:      cfg.After,
+		now:        cfg.Now,
+		pending:    make(map[pendingKey]func() bool),
+		summary:    make(map[string]*summaryWait),
 	}
 	if p.summaries == "" {
 		p.summaries = SummariesPassive
 	}
 	if p.grace <= 0 {
 		p.grace = DefaultGrace
+	}
+	if p.window <= 0 {
+		p.window = DefaultWindow
+	}
+	if p.dailyLimit <= 0 {
+		p.dailyLimit = DefaultDailyLimit
+	}
+	if p.now == nil {
+		p.now = time.Now
 	}
 	if p.after == nil {
 		p.after = func(d time.Duration, f func()) func() bool { return time.AfterFunc(d, f).Stop }
@@ -222,13 +266,29 @@ func (p *Policy) Handle(s Signal) {
 	if !d.send {
 		return
 	}
-	if d.delay <= 0 {
-		p.sender.Notify(d.n)
+	// A request that is already gone is not worth a notification, however the
+	// events were ordered on the way here.
+	if s.StillPending != nil && !s.StillPending() {
 		return
 	}
+	switch {
+	case d.n.Level == LevelUrgent && d.delay > 0:
+		p.afterGrace(s, d)
+	case d.n.Kind == KindDigest || d.n.Kind == KindEvent:
+		p.afterQuiet(d.n)
+	default:
+		p.emit(d.n)
+	}
+}
+
+// afterGrace holds an urgent notification for a request somebody is looking at.
+func (p *Policy) afterGrace(s Signal, d decision) {
 	key := pendingKey{s.Kind, s.SessionID, s.RequestID}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
 	if _, dup := p.pending[key]; dup {
 		return
 	}
@@ -237,9 +297,71 @@ func (p *Policy) Handle(s Signal) {
 		delete(p.pending, key)
 		p.mu.Unlock()
 		if s.StillPending == nil || s.StillPending() {
-			p.sender.Notify(d.n)
+			p.emit(d.n)
 		}
 	})
+}
+
+// afterQuiet sends the latest notification of a group once the group has been
+// quiet for the window; each newer one restarts the wait.
+func (p *Policy) afterQuiet(n Notification) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
+	if w, ok := p.summary[n.Tag]; ok {
+		w.stop()
+	}
+	w := &summaryWait{n: n}
+	p.summary[n.Tag] = w
+	w.stop = p.after(p.window, func() {
+		p.mu.Lock()
+		if p.summary[n.Tag] != w {
+			p.mu.Unlock()
+			return // superseded while this timer was already firing
+		}
+		delete(p.summary, n.Tag)
+		p.mu.Unlock()
+		p.emit(w.n)
+	})
+}
+
+// emit hands a notification to the transport. Everything but a question or a
+// permission counts against the daily limit.
+func (p *Policy) emit(n Notification) {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	if n.Level != LevelUrgent {
+		if day := p.now().Format("2006-01-02"); day != p.day {
+			p.day, p.sent = day, 0
+		}
+		if p.sent >= p.dailyLimit {
+			p.mu.Unlock()
+			return
+		}
+		p.sent++
+	}
+	p.mu.Unlock()
+	p.sender.Notify(n)
+}
+
+// Close stops every timer and makes the policy inert.
+func (p *Policy) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closed = true
+	for key, stop := range p.pending {
+		stop()
+		delete(p.pending, key)
+	}
+	for tag, w := range p.summary {
+		w.stop()
+		delete(p.summary, tag)
+	}
 }
 
 // Resolved drops the grace timer of a request that was answered.

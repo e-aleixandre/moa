@@ -76,8 +76,7 @@ func TestPushSkipsSessionsTheOwnerLaunched(t *testing.T) {
 	ask := func(sess *ManagedSession) int32 {
 		t.Helper()
 		before := hits.Load()
-		sess.runtime.Bus.Publish(bus.AskUserRequested{SessionID: sess.ID, RunGen: 1, ID: "ask-" + sess.ID})
-		sess.runtime.Bus.Publish(bus.PermissionRequested{SessionID: sess.ID, RunGen: 1, ID: "perm-" + sess.ID})
+		openPermission(t, sess)
 		sess.runtime.Bus.Publish(bus.StateChanged{SessionID: sess.ID, State: string(bus.StateError)})
 		sess.runtime.Bus.Drain(5 * time.Second)
 		return hits.Load() - before
@@ -86,10 +85,10 @@ func TestPushSkipsSessionsTheOwnerLaunched(t *testing.T) {
 	if got := ask(launched); got != 0 {
 		t.Fatalf("a session the owner launched pushed %d notifications to the user", got)
 	}
-	if got := ask(userSess); got != 3 {
-		t.Fatalf("a user session in an owner's codebase pushed %d notifications, want 3", got)
+	if got := ask(userSess); got != 2 {
+		t.Fatalf("a user session in an owner's codebase pushed %d notifications, want 2", got)
 	}
-	if got := ask(ownerSess); got != 3 {
-		t.Fatalf("the owner's own conversation pushed %d notifications, want 3", got)
+	if got := ask(ownerSess); got != 2 {
+		t.Fatalf("the owner's own conversation pushed %d notifications, want 2", got)
 	}
 }

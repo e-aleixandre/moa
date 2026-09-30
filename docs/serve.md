@@ -942,20 +942,25 @@ What is worth a notification is decided on the server, in one place
 |---|---|
 | A question (`ask_user`) or a permission request | Urgent, with sound, at once |
 | …that you have open and visible on another device | Waits **60 s** and goes only if it is still unanswered. If whoever was looking leaves sooner, it still goes at the 60 s mark |
-| A run you started finishes (≥ 60 s), or fails | Sound, unless you are looking at the session |
-| An owner finishes digesting a report | No sound; **one per project**, each replacing the previous |
-| A wake-on-event delivery | No sound; one per source, each replacing the previous |
+| A run you started finishes (≥ 60 s), or fails | Sound, unless you are looking at the session. If your own instruction landed in a run that began as a report digest, it counts as yours |
+| An owner finishes digesting a report | No sound; **one per project**, sent after 15 minutes without another one, each replacing the previous. A digest is never held back for being short |
+| A wake-on-event delivery | No sound; one per source, sent after 15 minutes without another one |
 | A run you cancelled; sessions an owner launched | Nothing (the owner reports on them) |
+
+Everything except questions and permissions stops after 150 notifications a
+day. Waiting summaries are kept in memory only: a restart forgets them.
 
 The two quiet rows are provisional and set by [`push_summaries`](./configuration.md)
 (`passive` by default, `active` or `off`). Quiet hours are iOS's own (Focus and
 Scheduled Summary); moa has none.
 
 "Looking at" is reported by each open tab over the session WebSocket as
-`{"type":"presence","visible":true|false}`, on connect, on every visibility
-change and every 15 s while visible; a report lapses after 45 s, so a phone that
-was put away stops counting without sending anything. A connected socket that
-has said nothing does not count.
+`{"type":"presence","visible":true|false}`: true only for a conversation the
+screen is rendering, once its history has been shown and while the page is
+visible; it is renewed every 15 s and lapses after 45 s, so a phone that was
+put away stops counting without sending anything. A connected socket does not
+count by itself: neither a session that is connected but not shown (the other
+tiles while one conversation is open, the Tasks screen) nor one still loading.
 
 On the device, quiet notifications are `silent` and a notification replaces the
 previous one with the same `tag`; urgent and ordinary ones alert again when they

@@ -153,21 +153,98 @@ func TestFinishedRunOfTheUsersSessionIsAudibleUnlessWatched(t *testing.T) {
 }
 
 func TestDigestsArePassiveAndOnePerProject(t *testing.T) {
-	p, rec, _ := newPolicy("")
-	p.Handle(Signal{Kind: KindDigest, SessionID: "o1", Project: "/a"})
-	p.Handle(Signal{Kind: KindDigest, SessionID: "o2", Project: "/a"}) // another session of the same project
-	p.Handle(Signal{Kind: KindDigest, SessionID: "o3", Project: "/b"})
+	p, rec, clock := newPolicy("")
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o1", Project: "/a", Title: "first"})
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o2", Project: "/a", Title: "last"}) // another session of the same project
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o3", Project: "/b", Title: "other"})
+	if len(rec.all()) != 0 {
+		t.Fatalf("digests went before their window ended: %+v", rec.all())
+	}
+	clock.fire()
 	got := rec.all()
-	if len(got) != 3 {
-		t.Fatalf("sent %d, want 3", len(got))
+	if len(got) != 2 {
+		t.Fatalf("sent %d, want 2: one per project", len(got))
 	}
 	for _, n := range got {
 		if n.Level != LevelPassive {
 			t.Fatalf("digest level = %q, want passive", n.Level)
 		}
 	}
-	if got[0].Tag != got[1].Tag || got[0].Tag == got[2].Tag {
-		t.Fatalf("tags %q %q %q: the same project must share one (it replaces), another project must not", got[0].Tag, got[1].Tag, got[2].Tag)
+	if got[0].Body != "last" || got[0].Tag == got[1].Tag {
+		t.Fatalf("sent %+v: the project must send its latest digest, under its own tag", got)
+	}
+}
+
+func TestSummariesWaitForTheWindowAndEachNewOneRestartsIt(t *testing.T) {
+	p, rec, clock := newPolicy("")
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o1", Project: "/a"})
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o1", Project: "/a"})
+	if len(clock.timers) != 2 || clock.timers[0].d != DefaultWindow || !clock.timers[0].stopped || clock.timers[1].stopped {
+		t.Fatalf("timers = %+v, want the first stopped by the second, both %s", clock.timers, DefaultWindow)
+	}
+	clock.fire()
+	if len(rec.all()) != 1 {
+		t.Fatalf("sent %d, want exactly the last digest", len(rec.all()))
+	}
+}
+
+func TestSummaryTimerThatLostTheRaceSendsNothing(t *testing.T) {
+	p, rec, clock := newPolicy("")
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o1", Project: "/a"})
+	stale := clock.timers[0].f
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o1", Project: "/a"})
+	stale() // already firing when it was superseded
+	if len(rec.all()) != 0 {
+		t.Fatalf("a superseded timer sent %+v", rec.all())
+	}
+}
+
+func TestDailyLimitCapsQuietAndAudibleButNeverQuestions(t *testing.T) {
+	rec, clock := &recorder{}, &fakeClock{}
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	p := NewPolicy(rec, PolicyConfig{After: clock.after, DailyLimit: 3, Now: func() time.Time { return now }})
+	for i := 0; i < 5; i++ {
+		p.Handle(Signal{Kind: KindDone, SessionID: "s"})
+	}
+	p.Handle(Signal{Kind: KindAsk, SessionID: "s", RequestID: "a1"})
+	p.Handle(Signal{Kind: KindPermission, SessionID: "s", RequestID: "p1"})
+	got := rec.all()
+	if len(got) != 5 || got[3].Kind != KindAsk || got[4].Kind != KindPermission {
+		t.Fatalf("sent %d: %+v, want 3 dones then the ask and the permission", len(got), got)
+	}
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o", Project: "/a"})
+	clock.fire()
+	if len(rec.all()) != 5 {
+		t.Fatalf("a summary went over the daily limit: %+v", rec.all())
+	}
+	now = now.Add(24 * time.Hour)
+	p.Handle(Signal{Kind: KindDone, SessionID: "s"})
+	if len(rec.all()) != 6 {
+		t.Fatal("the limit must reset the next day")
+	}
+}
+
+func TestImmediateRequestThatIsAlreadyGoneSendsNothing(t *testing.T) {
+	p, rec, _ := newPolicy("")
+	p.Handle(Signal{Kind: KindPermission, SessionID: "s1", RequestID: "p1", StillPending: func() bool { return false }})
+	if got := rec.all(); len(got) != 0 {
+		t.Fatalf("sent %+v for a request nobody can answer any more", got)
+	}
+}
+
+func TestClosedPolicyIsInert(t *testing.T) {
+	p, rec, clock := newPolicy("")
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o", Project: "/a"})
+	p.Handle(Signal{Kind: KindAsk, SessionID: "s", RequestID: "a", Watched: true})
+	p.Close()
+	clock.fire()
+	p.Handle(Signal{Kind: KindDone, SessionID: "s"})
+	p.Handle(Signal{Kind: KindDigest, SessionID: "o", Project: "/a"})
+	if got := rec.all(); len(got) != 0 {
+		t.Fatalf("a closed policy sent %+v", got)
+	}
+	if len(clock.timers) != 2 || !clock.timers[0].stopped || !clock.timers[1].stopped {
+		t.Fatalf("Close must stop its timers and arm no new ones: %+v", clock.timers)
 	}
 }
 
@@ -180,15 +257,16 @@ func TestDigestOfAWatchedOwnerIsDropped(t *testing.T) {
 }
 
 func TestEventsArePassiveAndOnePerSource(t *testing.T) {
-	p, rec, _ := newPolicy("")
+	p, rec, clock := newPolicy("")
 	p.Handle(Signal{Kind: KindEvent, Source: "grokbot", Headline: "Event from grokbot", SessionID: "s1"})
 	p.Handle(Signal{Kind: KindEvent, Source: "grokbot", Headline: "Event from grokbot", SessionID: "s1"})
 	p.Handle(Signal{Kind: KindEvent, Source: "ci", Headline: "Event from ci waiting", Inbox: true})
+	clock.fire()
 	got := rec.all()
-	if len(got) != 3 || got[0].Level != LevelPassive || got[0].Tag != got[1].Tag || got[0].Tag == got[2].Tag {
-		t.Fatalf("sent = %+v", got)
+	if len(got) != 2 || got[0].Level != LevelPassive || got[0].Tag == got[1].Tag {
+		t.Fatalf("sent = %+v, want one passive notification per source", got)
 	}
-	if got[0].Title != "Event from grokbot" || !got[2].Inbox {
+	if got[0].Title != "Event from grokbot" || !got[1].Inbox {
 		t.Fatalf("headline or inbox lost: %+v", got)
 	}
 }
@@ -199,9 +277,10 @@ func TestSummariesModeIsTheOneKnob(t *testing.T) {
 		want Level
 		n    int
 	}{{SummariesPassive, LevelPassive, 2}, {SummariesActive, LevelActive, 2}, {SummariesOff, "", 0}} {
-		p, rec, _ := newPolicy(tc.mode)
+		p, rec, clock := newPolicy(tc.mode)
 		p.Handle(Signal{Kind: KindDigest, SessionID: "o1", Project: "/a"})
 		p.Handle(Signal{Kind: KindEvent, Source: "x"})
+		clock.fire()
 		got := rec.all()
 		if len(got) != tc.n || (tc.n > 0 && (got[0].Level != tc.want || got[1].Level != tc.want)) {
 			t.Fatalf("mode %q: sent = %+v", tc.mode, got)

@@ -250,6 +250,7 @@ func TestRunEndedPolicy(t *testing.T) {
 		sess.runtime.Bus.Drain(5 * time.Second)
 		sess.runtime.Bus.Publish(bus.RunEnded{SessionID: sess.ID, RunGen: gen, Cancelled: cancelled})
 		sess.runtime.Bus.Drain(5 * time.Second)
+		probe.expire() // a digest goes once its window of quiet ends
 		return probe.delivered()[before:]
 	}
 
@@ -289,13 +290,13 @@ func TestSessionsTheOwnerLaunchedNeverPushUnderThePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	bus_ := launched.runtime.Bus
-	bus_.Publish(bus.AskUserRequested{SessionID: launched.ID, RunGen: 1, ID: "a"})
-	bus_.Publish(bus.PermissionRequested{SessionID: launched.ID, RunGen: 1, ID: "p"})
+	openPermission(t, launched)
 	publishRunStart(launched, 1, bus.RunOrigin{Explicit: true})
 	bus_.Drain(5 * time.Second)
 	bus_.Publish(bus.RunEnded{SessionID: launched.ID, RunGen: 1})
 	bus_.Publish(bus.StateChanged{SessionID: launched.ID, State: string(bus.StateError)})
 	bus_.Drain(5 * time.Second)
+	probe.expire()
 	// Its owner does get a report and digests it (a real, separate notification
 	// for the owner's session); nothing may be about the launched session.
 	for _, n := range probe.delivered() {
@@ -311,16 +312,17 @@ func TestEventsAreQuietAndOnePerSource(t *testing.T) {
 	mgr.notifyEvent(events.Event{ID: "e1", Source: "grokbot"})
 	mgr.notifyEvent(events.Event{ID: "e2", Source: "grokbot"})
 	mgr.notifyEvent(events.Event{ID: "e3", Source: "ci"})
+	probe.expire()
 	got := probe.delivered()
-	if len(got) != 3 {
-		t.Fatalf("delivered %d, want 3 (the device replaces by tag)", len(got))
+	if len(got) != 2 {
+		t.Fatalf("delivered %d, want 2: the last event of each source after its window", len(got))
 	}
 	for _, n := range got {
 		if n.Level != push.LevelPassive || !n.Inbox {
 			t.Fatalf("event = %+v, want passive and opening the inbox", n)
 		}
 	}
-	if got[0].Tag != got[1].Tag || got[0].Tag == got[2].Tag {
-		t.Fatalf("tags %q %q %q: one per source", got[0].Tag, got[1].Tag, got[2].Tag)
+	if got[0].Tag == got[1].Tag {
+		t.Fatalf("tags %q %q: one per source", got[0].Tag, got[1].Tag)
 	}
 }

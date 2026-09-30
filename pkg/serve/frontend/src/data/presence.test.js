@@ -1,18 +1,82 @@
 import { describe, expect, test } from 'bun:test';
-import { presenceFrame, sendPresence } from './presence.js';
+import { isPresent, presenceFrame, shownSessionIds, watchPresence } from './presence.js';
 
-const doc = (state) => ({ visibilityState: state });
+const tile = (id, sessionId) => ({ type: 'tile', id, sessionId });
+const tree = { type: 'split', children: [tile('t1', 'a'), tile('t2', 'b')] };
+const session = (hydrated = true) => ({ historyHydrated: hydrated });
+const visibleDoc = () => ({ visibilityState: 'visible', addEventListener() {}, removeEventListener() {} });
 
-describe('presence', () => {
-  test('reports visible only while the page is visible', () => {
-    expect(JSON.parse(presenceFrame(doc('visible')))).toEqual({ type: 'presence', visible: true });
-    expect(JSON.parse(presenceFrame(doc('hidden')))).toEqual({ type: 'presence', visible: false });
+function state(over = {}) {
+  return {
+    isMobile: false, view: null, activeSession: null, tileTree: tree, focusedTile: 't1',
+    sessions: { a: session(), b: session() }, ...over,
+  };
+}
+
+describe('shownSessionIds', () => {
+  test('a single conversation shows only the focused tile, although the tree has more', () => {
+    expect(shownSessionIds(state())).toEqual(['a']);
+    expect(shownSessionIds(state({ focusedTile: 't2' }))).toEqual(['b']);
+  });
+  test('the grid shows every tile', () => {
+    expect(shownSessionIds(state({ view: 'grid' }))).toEqual(['a', 'b']);
+  });
+  test('the tasks screen shows no conversation', () => {
+    expect(shownSessionIds(state({ view: 'tasks' }))).toEqual([]);
+  });
+  test('mobile shows the active session, whatever the tree says', () => {
+    expect(shownSessionIds(state({ isMobile: true, activeSession: 'b' }))).toEqual(['b']);
+    expect(shownSessionIds(state({ isMobile: true }))).toEqual([]);
+  });
+});
+
+describe('isPresent', () => {
+  test('needs the page visible, the session shown and its init landed', () => {
+    const doc = visibleDoc();
+    expect(isPresent(state(), 'a', doc)).toBe(true);
+    expect(isPresent(state(), 'b', doc)).toBe(false); // connected, not shown
+    expect(isPresent(state({ view: 'tasks' }), 'a', doc)).toBe(false);
+    expect(isPresent(state({ sessions: { a: session(false) } }), 'a', doc)).toBe(false); // before init
+    expect(isPresent(state(), 'a', { visibilityState: 'hidden' })).toBe(false);
+  });
+});
+
+describe('watchPresence', () => {
+  function harness(initial) {
+    let current = initial;
+    const listeners = new Set();
+    const sent = [];
+    const ws = (id) => ({ readyState: 1, send: (m) => sent.push([id, JSON.parse(m).visible]) });
+    const sockets = { a: ws('a'), b: ws('b') };
+    const stop = watchPresence({
+      connections: () => Object.entries(sockets),
+      getState: () => current,
+      subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+      doc: visibleDoc(),
+    });
+    const set = (next) => { current = next; for (const fn of listeners) fn(); };
+    return { sent, set, stop };
+  }
+
+  test('says nothing until the init lands, then only about the shown conversation', () => {
+    const h = harness(state({ sessions: { a: session(false), b: session(false) } }));
+    expect(h.sent).toEqual([]);
+    h.set(state());
+    expect(h.sent).toEqual([['a', true], ['b', false]]);
+    h.stop();
   });
 
-  test('sends only on an open socket', () => {
-    const sent = [];
-    sendPresence({ readyState: 0, send: (m) => sent.push(m) }, doc('visible'));
-    sendPresence({ readyState: 1, send: (m) => sent.push(m) }, doc('visible'));
-    expect(sent).toHaveLength(1);
+  test('reports a change once, not on every store update', () => {
+    const h = harness(state());
+    h.set(state());
+    h.set(state());
+    expect(h.sent.filter(([id]) => id === 'a')).toHaveLength(1);
+    h.set(state({ view: 'tasks' }));
+    expect(h.sent.filter(([id]) => id === 'a').map(([, v]) => v)).toEqual([true, false]);
+    h.stop();
+  });
+
+  test('presenceFrame is the wire format the server reads', () => {
+    expect(JSON.parse(presenceFrame(true))).toEqual({ type: 'presence', visible: true });
   });
 });
