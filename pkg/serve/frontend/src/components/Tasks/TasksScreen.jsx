@@ -11,6 +11,8 @@ import {
 } from "../../data/tasks-model.js";
 import { CloseIcon, EmptyState, Filters, Keycap, TaskGroups, completesInline, openTaskSession, useRowChecks } from "./parts.jsx";
 import { TaskDetail, taskEyebrow, useTaskLookup } from "./TaskDetail.jsx";
+import { ScheduledGroup } from "./Scheduled.jsx";
+import { scheduledRows } from "../../data/schedule-model.js";
 
 // TasksScreen — the global view, in the desktop's middle zone. You (requests
 // above notes), a Backlog per project, the agents' checklists behind their
@@ -39,9 +41,15 @@ export function TasksScreen() {
     () => (only ? sessionGroups(onlyData, only).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions })),
     [only, onlyData, slice.list, slice.agents, project, sessions],
   );
-  const rows = flatRows(groups, doneOpen);
+  // Scheduled sits on top of the other groups: the templates the view shows
+  // (a session's own, or those filed under the chosen project).
+  const scheduled = useMemo(
+    () => scheduledRows(only ? onlyData?.scheduled : slice.list.filter((t) => !project || t.project_key === project)),
+    [only, onlyData, slice.list, project],
+  );
+  const rows = [...scheduled.slice(0, 5), ...flatRows(groups, doneOpen)];
   const projects = projectOptions(slice.projects, slice.list);
-  const task = sel ? slice.list.find((t) => t.id === sel) || slice.details[sel] || lookup(sel) : null;
+  const task = sel ? slice.list.find((t) => t.id === sel) || slice.details[sel] || scheduled.find((t) => t.id === sel) || lookup(sel) : null;
 
   const open = (id) => { setSel(id); setCreating(false); setDropInit(null); };
   const nav = useRef({});
@@ -73,7 +81,7 @@ export function TasksScreen() {
   };
 
   const count = openOwnCount(slice.list);
-  const hasOpen = groups.some((g) => g.id !== "done" && g.rows.length);
+  const hasOpen = scheduled.length > 0 || groups.some((g) => g.id !== "done" && g.rows.length);
   const hasDone = groups.some((g) => g.id === "done");
 
   return (
@@ -101,6 +109,7 @@ export function TasksScreen() {
         <div class="tk-scroll" ref={listRef}>
           {slice.error && !slice.loaded && <p class="tk-banner" role="status">Couldn't load tasks: {slice.error}</p>}
           {(only ? !!onlyData?.loaded : slice.loaded) && !hasOpen && <EmptyState compact={hasDone} onNew={() => setCreating(true)} />}
+          <ScheduledGroup list={scheduled} selected={sel} onSelect={open} />
           {(hasOpen || hasDone) && (
             <TaskGroups
               groups={groups}
@@ -128,7 +137,7 @@ export function TasksScreen() {
               <button type="button" class="zl-x" onClick={() => { setSel(null); setCreating(false); }} aria-label="Close"><CloseIcon /></button>
             </div>
             {creating ? (
-              <TaskDetail isNew key="new" newDest={only ? { place: "agent", sessionId: only } : null} onCreated={(id) => { setCreating(false); if (id) setSel(id); }} />
+              <TaskDetail isNew key="new" newDest={only ? { place: "agent", sessionId: only } : null} onOpenSession={openTaskSession} onCreated={(id) => { setCreating(false); if (id) setSel(id); }} />
             ) : (
               <TaskDetail
                 key={task.id}

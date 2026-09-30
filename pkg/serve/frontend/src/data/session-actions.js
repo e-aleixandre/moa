@@ -15,6 +15,7 @@ import { reopenClosedOwnerOf } from './owner-closed.js';
 import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 import { closeSessionPanelForSession } from './session-panel.js';
 import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.js';
+import { deviceZone } from './schedule-model.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -391,7 +392,8 @@ export function stopUsagePolling() {
 }
 
 export async function createSession(opts) {
-  const sess = await api('POST', '/api/sessions', opts, { timeoutMs: 0 });
+  // The device's zone is the one the session's agent schedules in (creator_tz).
+  const sess = await api('POST', '/api/sessions', { tz: deviceZone(), ...opts }, { timeoutMs: 0 });
   // Advance the roster generation before publishing the session. A GET that
   // started before this successful create is a snapshot from before the new
   // session existed, so it must not be allowed to replace the local roster.

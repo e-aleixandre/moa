@@ -29,6 +29,11 @@ export const PANEL_PAGES = {
   taskNew: 'New task',
   taskNewDeps: 'Waits for',
   taskNewMove: 'Move to',
+  taskNewWhen: 'When',
+  taskNewTarget: 'Send to',
+  schedNew: 'Schedule a task',
+  schedNewWhen: 'When',
+  schedNewTarget: 'Send to',
 };
 
 // Pages that carry an id: one task of the session, and Move for that task.
@@ -40,10 +45,13 @@ const PANEL_PAGE_KINDS = {
   task: { title: 'Task', parent: () => 'tasks' },
   taskMove: { title: 'Move to', parent: (id) => `task:${id}` },
   taskDeps: { title: 'Waits for', parent: (id) => `task:${id}` },
+  taskWhen: { title: 'When', parent: (id) => `task:${id}` },
+  taskTarget: { title: 'Send to', parent: (id) => `task:${id}` },
+  taskReroute: { title: 'Send to', parent: (id) => `task:${id}` },
 };
 
 export function parsePanelPage(page) {
-  const m = /^(task|taskMove|taskDeps):(\d+)$/.exec(String(page || ''));
+  const m = /^(task|taskMove|taskDeps|taskWhen|taskTarget|taskReroute):(\d+)$/.exec(String(page || ''));
   if (m) return { kind: m[1], id: Number(m[2]) };
   return { kind: page || 'root', id: null };
 }
@@ -81,6 +89,11 @@ export const PANEL_PAGE_PARENT = {
   taskNew: 'tasks',
   taskNewDeps: 'taskNew',
   taskNewMove: 'taskNew',
+  taskNewWhen: 'taskNew',
+  taskNewTarget: 'taskNew',
+  schedNew: 'tasks',
+  schedNewWhen: 'schedNew',
+  schedNewTarget: 'schedNew',
 };
 
 // panelPageParent — where "back" goes from a page. The root's parent is the

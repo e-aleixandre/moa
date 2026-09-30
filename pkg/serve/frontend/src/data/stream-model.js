@@ -528,10 +528,15 @@ export function projectStream(session) {
       // becomes a waypoint. The custom envelope is set by the server on
       // delivery and survives resumes and reloads (like subagent_parent).
       if (msg.custom?.source === 'event') {
+        // A scheduled task's run arrives as its assignment notice. The server
+        // wrote its title in the schedule's own zone ("Scheduled task · … ·
+        // due 03:00, sent 09:14 after your OK"), so it is shown as written.
+        const scheduled = !!msg.custom.occurrence_id;
         blocks.push({
           kind: 'event',
           id: blockID('event', msg, i),
-          source: msg.custom.source_name || 'event',
+          source: scheduled ? 'scheduled' : (msg.custom.source_name || 'event'),
+          ...(scheduled ? { taskId: msg.custom.task_id, parentTaskId: msg.custom.parent_task_id } : null),
           title: msg.custom.title || '',
           body: joinText(msg.content),
           time: msg.timestamp,

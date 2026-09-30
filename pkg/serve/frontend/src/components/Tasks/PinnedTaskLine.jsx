@@ -4,6 +4,8 @@ import { useStore } from "../../hooks/useStore.js";
 import { selectSessionDirectory, selectSessionTasks, watchSessionTasks } from "../../data/tasks.js";
 import { pinnedLine, sessionRecords } from "../../data/tasks-model.js";
 import { CompletionFlow, TasksGlyph } from "./parts.jsx";
+import { SchedPinBar, useNow } from "./Scheduled.jsx";
+import { deviceZone, schedPin } from "../../data/schedule-model.js";
 
 // PinnedTaskLine — what this session asked of you, pinned over the composer
 // so it does not sink in the transcript: the first open request, "+N" for the
@@ -17,8 +19,15 @@ export function PinnedTaskLine({ sessionId, phone = false, onOpenTask }) {
   useEffect(() => watchSessionTasks(sessionId), [sessionId]);
   useEffect(() => setCompleting(null), [sessionId]);
 
+  const now = useNow();
   const pin = pinnedLine(sessionRecords(data, sessionId));
-  if (!pin) return null;
+  if (!pin) {
+    // Nothing asked of you: what is scheduled into this session takes the
+    // same slot ("Scheduled", or "Waiting for you" when a run needs your OK).
+    const sched = schedPin(data?.scheduled, now, deviceZone());
+    if (!sched) return null;
+    return <div class="tk-pin-host"><SchedPinBar pin={sched} phone={phone} onOpenTask={onOpenTask} /></div>;
+  }
   const task = pin.task;
   const open = completing === task.id;
   return (

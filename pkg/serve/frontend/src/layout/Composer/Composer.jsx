@@ -34,6 +34,9 @@ import {
   compositionSubmitted, newCompositionState, shouldDiscardLateCompositionInput,
   valueBeforeLateCompositionInput,
 } from "../../data/composer-composition.js";
+import { createPortal } from "preact/compat";
+import { SendLater, SendLaterButton } from "../../components/Tasks/SendLater.jsx";
+import { MobileSheet } from "../mobile/MobileSheet/MobileSheet.jsx";
 import "./Composer.css";
 
 // Composer — the conversation input. Markup and CSS are the catalogue's
@@ -182,6 +185,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     keepCommandSuggestionVisible(cmdSuggestionsRef.current, cmdCursor);
   }, [cmdSuggestions, cmdCursor]);
 
+  // --- Send later: the draft as a scheduled task (components/Tasks/SendLater) ---
+  const [later, setLater] = useState(null); // null | { text }
+  const canLater = !!sessionId && !steer;
+  const openLater = useCallback(() => {
+    const text = textareaRef.current?.value || "";
+    if (!canLater || !text.trim()) return;
+    setLater((cur) => (cur ? null : { text }));
+  }, [canLater]);
+
   // --- Attachments ---
   const [attachments, setAttachments] = useState([]);
   // Slots reserved by in-flight addFiles calls, so two concurrent loads (e.g.
@@ -213,6 +225,18 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     el.style.height = "0";
     el.style.height = Math.min(el.scrollHeight, 132) + "px";
   }, []);
+
+  // A scheduled draft leaves the box once the server has it, and only if the
+  // box still holds exactly what was scheduled: anything typed since stays.
+  const clearScheduled = useCallback((text) => {
+    const el = textareaRef.current;
+    if (!el || el.value.trim() !== String(text || "").trim()) return;
+    writeComposer(el, "");
+    inputValueRef.current = "";
+    saveDraft(sessionId, "");
+    setHasText(false);
+    autoResize();
+  }, [sessionId, autoResize, writeComposer]);
 
   // Restore the persisted draft on mount. The composer is keyed by session in
   // the container, so a session switch remounts this component (tearing down
@@ -961,6 +985,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       return;
     }
 
+    // ⌘⇧↵ — Send later, before any Enter that sends.
+    if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+      if (e.isComposing || compositionRef.current.composing) return;
+      e.preventDefault();
+      openLater();
+      return;
+    }
+
     // Alt/⌥+Enter enqueues explicitly (parity with the placeholder hint);
     // sendMessage still routes to a steer whenever the session is busy, so this
     // is only meaningful for an idle session the user wants to queue against.
@@ -1126,6 +1158,15 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       {/* First child on purpose: the slab's content is positioned after it
           while the voice is live (Composer.css), so it paints above the wash. */}
       {voiceLit && <ComposerAurora getStream={recording ? getRecordingStream : voiceLive.getStream} />}
+      {later && !compact && (
+        <SendLater sessionId={sessionId} text={later.text} onClose={() => setLater(null)} onScheduled={clearScheduled} />
+      )}
+      {compact && canLater && textareaRef.current?.closest(".mconv") && createPortal(
+        <MobileSheet open={!!later} onClose={() => setLater(null)} title="Send later">
+          {later && <SendLater phone sessionId={sessionId} text={later.text} onClose={() => setLater(null)} onScheduled={clearScheduled} />}
+        </MobileSheet>,
+        textareaRef.current.closest(".mconv"),
+      )}
       {cacheExpired && (
         <div class="cache-warn" title="Cache expired: your next message costs more">
           <TriangleAlert class="cache-warn-icon" size={14} strokeWidth={1.75} aria-hidden="true" />
@@ -1296,6 +1337,9 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
               ? <Loader2 size={15} class="spin" />
               : <PhoneCall size={15} />}
           </button>
+        )}
+        {canLater && (hasText || later) && (
+          <SendLaterButton on={!!later} disabled={contentSendPending} onClick={openLater} />
         )}
         {/* Send is always Send now. It no longer has to ask whose turn it is:
             the mic is a button beside it, so one tap has exactly one meaning

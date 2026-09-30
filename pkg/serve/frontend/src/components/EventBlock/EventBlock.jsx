@@ -13,7 +13,7 @@
 // uses for a tool's output (a recessed crust panel with a flush CodeBlock), so
 // "raw text this conversation received" looks the same everywhere.
 import { useState } from "preact/hooks";
-import { ChevronRight, Import } from "lucide-preact";
+import { ChevronRight, Clock3, Import } from "lucide-preact";
 import { CodeBlock } from "../CodeBlock/CodeBlock.jsx";
 import "./EventBlock.css";
 import { SessionChip } from "../SessionChip/SessionChip.jsx";
@@ -152,7 +152,7 @@ export function EventBlock({ source = "event", title = "", body = "", time, stee
       >
         <span class="evb-id">
           <span class="evb-meta">
-            <span class="evb-glyph" aria-hidden="true"><Import size={13} /></span>
+            <span class="evb-glyph" aria-hidden="true">{source === "scheduled" ? <Clock3 size={13} /> : <Import size={13} />}</span>
             <span class="evb-source">{source}</span>
             {age && <span>· {age}</span>}
             {scheduledFor && <span>· for {scheduleClock(scheduledFor)}</span>}

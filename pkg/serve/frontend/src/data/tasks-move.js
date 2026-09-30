@@ -60,7 +60,7 @@ export function moveIndex({ sessions = {}, owners = [], projects = [], now = Dat
   for (const p of projects) {
     for (const cwd of p.cwds?.length ? p.cwds : [p.cwd]) if (cwd && !keyOf.has(cwd)) keyOf.set(cwd, p.key);
   }
-  const groups = new Map(projects.map((p) => [p.key, { key: p.key, cwd: p.cwd || '', label: labels.get(p.key), sessions: [] }]));
+  const groups = new Map(projects.map((p) => [p.key, { key: p.key, cwd: p.cwd || '', cwds: p.cwds || [], label: labels.get(p.key), sessions: [] }]));
   const all = Object.values(sessions).filter((s) => s?.id && !ownerIds.has(s.id) && s.kind !== 'owner');
   for (const s of all) {
     const key = keyOf.get(s.cwd);

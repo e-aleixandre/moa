@@ -12,7 +12,7 @@ import { closeSession, deleteSession, resumeSession } from "../../data/session-a
 import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSession, routeEventToOwner, toggleInbox } from "../../data/events.js"; // wake-on-event
 import { selectDesktopChrome } from "../Sidebar/sessions.js";
 import { tasksSlice } from "../../data/tasks.js";
-import { openRequestCount } from "../../data/tasks-model.js";
+import { attentionCount } from "../../data/schedule-model.js";
 import { toggleTasksView } from "../../data/tasks-view.js";
 import "./DesktopShell.css";
 
@@ -31,7 +31,7 @@ import "./DesktopShell.css";
 export function DesktopShell({ version, children }) {
   const chrome = useStore(selectDesktopChrome);
   const tasksOpen = useStore((s) => s.view === "tasks");
-  const tasksCount = useStore((s) => openRequestCount(tasksSlice(s).list));
+  const tasksCount = useStore((s) => attentionCount(tasksSlice(s)));
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   // New owner is a centred modal here, not a page of the sidebar: the column
   // is where you look for your work, and a form that takes it over hides the

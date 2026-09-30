@@ -24,7 +24,7 @@ import { SessionPanel } from "../../../components/index.js";
 import { NewOwnerDialog } from "../../../components/Owners/NewOwnerDialog.jsx";
 import { panelAccessibleName, sessionPanelBack, sessionPanelView, closeSessionPanel, toggleSessionPanel, openSessionPanel, taskPanelPage } from "../../../data/session-panel.js";
 import { tasksSlice } from "../../../data/tasks.js";
-import { openRequestCount } from "../../../data/tasks-model.js";
+import { attentionCount } from "../../../data/schedule-model.js";
 import { closeTasksView, openTasksView } from "../../../data/tasks-view.js";
 import { PinnedTaskLine } from "../../../components/Tasks/PinnedTaskLine.jsx";
 import { MobileTasksView } from "../../../components/Tasks/MobileTasksView.jsx";
@@ -521,7 +521,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   };
 
   const inboxCount = inboxPendingCount(chrome.inbox);
-  const tasksCount = useStore((s) => openRequestCount(tasksSlice(s).list));
+  const tasksCount = useStore((s) => attentionCount(tasksSlice(s)));
   const tasksOpen = useStore((s) => s.view === "tasks");
   // The session the header is about, for the Owner chip. Read here rather than
   // taken from `chrome`: the chrome snapshot is deliberately the ROSTER, and

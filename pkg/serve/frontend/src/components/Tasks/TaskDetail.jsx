@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { Check, ChevronDown, Plus, Search, Trash2 } from "lucide-preact";
+import { Check, ChevronDown, Clock3, Plus, Search, Trash2 } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { hasBlockingOverlay } from "../../data/overlays.js";
 import { addToast } from "../../data/notifications.js";
@@ -16,6 +16,8 @@ import {
   CheckRing, CloseIcon, CompletionFlow, DeliverChoice, Keycap, MOD_ENTER, MoveList, OpenSessionButton, useEscape, useNotifyGesture,
 } from "./parts.jsx";
 import { ownersSlice } from "../../data/owners.js";
+import { isScheduled, schedEyebrow, targetFromDest } from "../../data/schedule-model.js";
+import { SchedDetail, WhenEditor } from "./Scheduled.jsx";
 
 function failed(title, error, lookup) {
   addToast({ title, detail: nameTaskRefs(errorText(error), lookup), type: "error" });
@@ -96,6 +98,7 @@ export function DepList({ taskId, current, phone, onPick, onClose }) {
 export function TaskDetail({
   taskId, isNew = false, newDest = null, phone = false, keys = false,
   onOpenTask, onOpenSession, onPushMove, onPushDeps, onClose, onCreated, init = {}, hereSessionId = null,
+  onPushWhen, onPushTarget, onPushReroute,
 }) {
   const slice = useStore(tasksSlice);
   const sessions = useStore(selectSessionDirectory);
@@ -107,7 +110,8 @@ export function TaskDetail({
   // Back from the "Waits for" page (phone): the draft the editor left there
   // comes back with the chosen task added.
   const draftKey = isNew ? "new" : taskId;
-  const [stashed] = useState(() => takeDraft(draftKey));
+  // A scheduled task's own draft is its detail's to take back (SchedDetail).
+  const [stashed] = useState(() => (!isNew && peekDraft(draftKey)?.draft && "when" in peekDraft(draftKey).draft ? null : takeDraft(draftKey)));
   const [base, setBase] = useState(stashed?.base || rec);
   const [draft, setDraft] = useState(() => stashed?.draft || editorDraft(rec));
   const [dest, setDest] = useState(stashed?.dest || newDest || { place: "you" });
@@ -164,6 +168,24 @@ export function TaskDetail({
 
   useEscape(menu, () => setMenu(false));
   useEffect(() => { if (menu) loadTaskProjects(); }, [menu]);
+  const [whenPop, setWhenPop] = useState(null); // null | { text }
+  useEscape(!!whenPop, () => setWhenPop(null));
+
+  // A scheduled task is edited by its own detail (When, Send to, runs); so
+  // is a new task once it is given a time.
+  const sched = { phone, keys, hereSessionId, onClose, onOpenSession, onPushWhen, onPushTarget, onPushReroute };
+  if (!isNew && rec && isScheduled(rec)) return <SchedDetail key={taskId} taskId={taskId} {...sched} />;
+  if (isNew && draft.when) {
+    const target = draft.target !== undefined ? draft.target : (dest.place === "agent" ? targetFromDest(dest) : null);
+    return (
+      <SchedDetail
+        isNew
+        {...sched}
+        onCreated={onCreated}
+        init={{ draft: { ...draft, target }, pop: whenPop ? "when" : null, whenText: whenPop?.text || "" }}
+      />
+    );
+  }
 
   if (!isNew && rec?.gone) {
     return <div class={`tk-detail${phone ? " is-phone" : ""}`}><div class="tk-detail-body"><p class="tk-empty-t">This task is no longer available.</p></div></div>;
@@ -341,6 +363,31 @@ export function TaskDetail({
         />
 
         <dl class="tk-props">
+          {isNew && (
+            <div class="tk-prop">
+              <dt>When</dt>
+              <dd class="tk-anchor">
+                <button
+                  type="button"
+                  class="tk-prop-btn sch-empty"
+                  aria-expanded={!!whenPop}
+                  onClick={() => {
+                    if (onPushWhen) { stashDraft(draftKey, { base, draft, dest }); onPushWhen(); return; }
+                    setWhenPop(whenPop ? null : { text: "" });
+                  }}
+                >
+                  <Clock3 size={13} aria-hidden="true" />
+                  <span class="tk-prop-v">Not scheduled</span>
+                  <ChevronDown size={13} aria-hidden="true" />
+                </button>
+              </dd>
+            </div>
+          )}
+          {isNew && whenPop && (
+            <div class="sch-inline-pop">
+              <WhenEditor value={null} onChange={(w, text) => { setWhenPop({ text: text || "" }); set({ when: w }); }} />
+            </div>
+          )}
           <div class="tk-prop">
             <dt>Where</dt>
             <dd class="tk-anchor tk-where">
@@ -473,6 +520,7 @@ export function TaskDetail({
 // taskEyebrow — the dossier head over a task says which kind it is.
 export function taskEyebrow(task) {
   if (!task) return "Task";
+  if (isScheduled(task) && task.status !== "done") return schedEyebrow(task);
   if (task.status === "done") return "Done";
   if (isRequest(task)) return "For you";
   if (task.place === "agent") return "Agent task";

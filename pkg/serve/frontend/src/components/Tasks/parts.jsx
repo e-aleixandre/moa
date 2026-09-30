@@ -9,6 +9,8 @@ import {
   projectLabelOf, recipientFor, relAge, sessionName, startNotifyGesture, taskProjectName,
 } from "../../data/tasks-model.js";
 import { moveIndex, moveSearch } from "../../data/tasks-move.js";
+import { isTargetHere } from "../../data/schedule-model.js";
+import { projectName } from "../../data/util/format.js";
 import { openSession } from "../../data/tile-actions.js";
 import { openOwnerConversation, ownersSlice } from "../../data/owners.js";
 import { store } from "../../data/store.js";
@@ -547,10 +549,17 @@ function joinMeta(parts) {
 //
 // The project level is the picker's own unless `onLevel` is given: the
 // phone's Tasks screen makes it a page of the sheet, so ‹ walks it back.
+//
+// A scheduled task's Send to walks the same levels (`mode="target"`): no You
+// and no backlog, and a project offers a new session in each of its
+// directories. Rerouting a run that was not sent (`mode="reroute"`) offers
+// existing sessions only. Both pick directly: the schedule's own foot is the
+// confirmation.
 export function MoveList({
   task, projects, sessions, owners = [], phone, onPick, direct = false, pending: pending0 = null,
-  level: levelProp = null, onLevel,
+  level: levelProp = null, onLevel, mode = "move", target: schedTarget = null,
 }) {
+  const moving = mode === "move";
   const [q, setQ] = useState("");
   const [pending, setPending] = useState(pending0);
   const [ownLevel, setOwnLevel] = useState(null);
@@ -605,7 +614,7 @@ export function MoveList({
         <span class="tk-pop-t">{label}</span>
         {sub && <span class="tk-pop-sub">{sub}</span>}
       </span>
-      {isHere(task, dest) && <Check size={14} class="tk-pop-on" aria-hidden="true" />}
+      {(moving ? isHere(task, dest) : isTargetHere(schedTarget, dest, owners)) && <Check size={14} class="tk-pop-on" aria-hidden="true" />}
     </button>
   );
   const SessionItem = ({ s, withProject = true }) => (
@@ -619,7 +628,7 @@ export function MoveList({
   const OwnerItem = ({ o }) => (
     <Item
       key={o.id}
-      dest={{ place: "agent", sessionId: o.id }}
+      dest={{ place: "agent", sessionId: o.id, owner: o.owner }}
       label={o.name}
       lead={<span class="tk-pop-lead"><OwnerAvatarFor owner={o.owner} state={ownerState(o.owner)} size={phone ? 24 : 20} /></span>}
       sub={stateWord(o.state)}
@@ -628,6 +637,19 @@ export function MoveList({
   const backlog = (p) => (
     <Item key={`b-${p.key}`} dest={{ place: "backlog", key: p.key, cwd: p.cwd }} label={level ? "Backlog" : `Backlog · ${p.label}`} />
   );
+  // A new session in a project: one per directory when it has several, so
+  // the choice of checkout is made here and stored.
+  const newRows = (p) => {
+    const dirs = p.cwds?.length ? p.cwds : [p.cwd];
+    return dirs.map((cwd) => (
+      <Item
+        key={`n-${p.key}-${cwd}`}
+        dest={{ place: "new", key: p.key, cwd }}
+        label={`New session in ${p.label}`}
+        sub={dirs.length > 1 ? cwd.split("/").filter(Boolean).slice(-1)[0] || projectName(cwd) : null}
+      />
+    ));
+  };
   const projectSub = (p) => joinMeta([
     p.sessions.length ? `${p.sessions.length} session${p.sessions.length === 1 ? "" : "s"}` : "No sessions",
     p.working ? <span class="tk-word-working">{p.working} working</span> : null,
@@ -662,7 +684,7 @@ export function MoveList({
     const hits = moveSearch(index, q, project.key);
     body = (
       <>
-        {!needle && backlog(project)}
+        {!needle && (moving ? backlog(project) : mode === "target" ? newRows(project) : null)}
         {project.sessions.length > 0 && <div class="tk-pop-label">Sessions</div>}
         {needle ? hits.sessions.map((s) => <SessionItem key={s.id} s={s} withProject={false} />) : sessionsOf(project)}
         {needle && hits.more > 0 && <div class="tk-pop-none">{hits.more} more. Keep typing to narrow it.</div>}
@@ -676,8 +698,10 @@ export function MoveList({
       <>
         {hits.owners.length > 0 && <div class="tk-pop-label">Owners</div>}
         {hits.owners.map((o) => <OwnerItem key={o.id} o={o} />)}
-        {hits.projects.length > 0 && <div class="tk-pop-label">Backlogs</div>}
-        {hits.projects.map((p) => backlog(p))}
+        {moving && hits.projects.length > 0 && <div class="tk-pop-label">Backlogs</div>}
+        {moving && hits.projects.map((p) => backlog(p))}
+        {mode === "target" && hits.projects.length > 0 && <div class="tk-pop-label">New session in</div>}
+        {mode === "target" && hits.projects.map((p) => newRows(p))}
         {hits.sessions.length > 0 && <div class="tk-pop-label">Sessions</div>}
         {hits.sessions.map((s) => <SessionItem key={s.id} s={s} />)}
         {hits.more > 0 && <div class="tk-pop-none">{hits.more} more. Keep typing to narrow it.</div>}
@@ -687,7 +711,7 @@ export function MoveList({
   } else {
     body = (
       <>
-        <Item dest={{ place: "you" }} label="You" />
+        {moving && <Item dest={{ place: "you" }} label="You" />}
         {index.owners.length > 0 && <div class="tk-pop-label">Owners</div>}
         {index.owners.map((o) => <OwnerItem key={o.id} o={o} />)}
         {index.recent.length > 0 && <div class="tk-pop-label">Recent</div>}
@@ -703,8 +727,8 @@ export function MoveList({
       <Search size={phone ? 15 : 14} aria-hidden="true" />
       <input
         class="tk-field"
-        placeholder={project ? `Search ${project.label}` : "Search owners, projects, sessions"}
-        aria-label="Search where to move it"
+        placeholder={project ? `Search ${project.label}` : moving ? "Search owners, projects, sessions" : "Send to…"}
+        aria-label={moving ? "Search where to move it" : "Find where to send it"}
         value={q}
         onInput={(e) => setQ(e.currentTarget.value)}
       />

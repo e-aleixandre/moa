@@ -59,7 +59,7 @@ export function loadSessionTasks(sessionId) {
   if (!sessionId) return Promise.resolve();
   return api('GET', `/api/sessions/${encodeURIComponent(sessionId)}/tasks`)
     .then((res) => patch((t) => ({
-      bySession: { ...t.bySession, [sessionId]: { requests: res?.requests || [], checklist: res?.checklist || [], loaded: true } },
+      bySession: { ...t.bySession, [sessionId]: { requests: res?.requests || [], checklist: res?.checklist || [], scheduled: res?.scheduled || [], loaded: true } },
     })))
     .catch(() => {});
 }
@@ -210,6 +210,46 @@ export function deleteTaskAt(path, id) {
   });
 }
 
+// ── Scheduled tasks ──────────────────────────────────────────────────────
+// A template's controls answer the committed record or run; a 409 carries
+// the current one (conflictCurrent), like every other write here.
+
+export function parseWhen(text, tz) {
+  return api('POST', '/api/tasks/when/parse', { text, tz });
+}
+
+function control(path, body, id) {
+  return api('POST', path, body).then((res) => {
+    if (id) loadTask(id);
+    refreshTasks();
+    return res;
+  });
+}
+
+export function runScheduleNow(task) {
+  return control(`/api/tasks/${task.id}/run-now`, { revision: task.revision, due_at: task.next }, task.id);
+}
+
+export function skipScheduleNext(task) {
+  return control(`/api/tasks/${task.id}/skip`, { revision: task.revision, due_at: task.next }, task.id);
+}
+
+export function pauseSchedule(task) {
+  return control(`/api/tasks/${task.id}/pause`, { revision: task.revision }, task.id).then(after);
+}
+
+export function resumeSchedule(task) {
+  return control(`/api/tasks/${task.id}/resume`, { revision: task.revision }, task.id).then(after);
+}
+
+export function confirmRun(run, action, taskId) {
+  return control(`/api/tasks/occurrences/${run.id}/confirm`, { revision: run.revision, action }, taskId);
+}
+
+export function rerouteRun(run, sessionId, taskId) {
+  return control(`/api/tasks/occurrences/${run.id}/reroute`, { revision: run.revision, session_id: sessionId }, taskId);
+}
+
 export function deliverNotice(noticeId) {
   return api('POST', `/api/tasks/notices/${encodeURIComponent(noticeId)}/deliver`).then((n) => {
     refreshTasks();
@@ -328,6 +368,14 @@ export function addDraftWait(key, id) {
 
 // setDraftDest — Where, chosen on its own page (phone) for a task still being
 // written: the stashed draft keeps it until the editor takes the draft back.
+// patchDraft — a scheduled task's When or Send to, chosen on its own page
+// (phone): the stashed draft keeps it until the editor takes it back.
+export function patchDraft(key, fields) {
+  const entry = drafts.get(String(key));
+  if (!entry) return;
+  drafts.set(String(key), { ...entry, draft: { ...entry.draft, ...fields } });
+}
+
 export function setDraftDest(key, dest) {
   const entry = drafts.get(String(key));
   if (!entry) return;

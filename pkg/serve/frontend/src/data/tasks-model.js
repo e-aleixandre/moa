@@ -13,6 +13,7 @@
 // the notice, is kept in this module so it can be tested without a renderer.
 
 import { projectName, sessionTitle } from './util/format.js';
+import { deviceZone, isScheduled, scheduleVerdict } from './schedule-model.js';
 
 export const isOpen = (t) => !!t && t.status !== 'done';
 export const isRequest = (t) => !!t && t.place === 'you' && !!t.requester_session_id;
@@ -138,7 +139,9 @@ const byId = (a, b) => (a.id || 0) - (b.id || 0);
 // what is done folded at the end. Empty groups are left out.
 export function groupTasks(list, { agents = false, project = null, sessions = {} } = {}) {
   const all = Array.isArray(list) ? list : [];
-  const scoped = project ? all.filter((t) => t.project_key === project) : all;
+  // A scheduled task is not the owner's to do: it has its own group
+  // (Scheduled) until it is done.
+  const scoped = (project ? all.filter((t) => t.project_key === project) : all).filter((t) => !isScheduled(t) || !isOpen(t));
   const groups = [];
 
   const you = scoped.filter((t) => t.place === 'you' && isOpen(t));
@@ -246,22 +249,23 @@ export function pinnedLine(data) {
 }
 
 // The session panel's Tasks row. It replaces the old "Tasks done/total" fact,
-// so it carries both numbers once: requests waiting on you, and the
-// checklist's progress.
-export function sessionTasksVerdict(data) {
+// so it carries every number once: requests waiting on you, runs waiting for
+// your OK, the next scheduled run, and the checklist's progress.
+export function sessionTasksVerdict(data, now = Date.now(), tz = deviceZone()) {
   const reqs = openSessionRequests(data).length;
   const list = Array.isArray(data?.checklist) ? data.checklist : [];
   const parts = [];
   if (reqs) parts.push(`${reqs} for you`);
+  parts.push(...scheduleVerdict(Array.isArray(data?.scheduled) ? data.scheduled : [], now, tz));
   if (list.length) parts.push(`${list.filter((t) => t.status === 'done').length}/${list.length}`);
   return parts.join(' · ') || 'none';
 }
 
 // sessionTasksStatus — the status line's Tasks item: the panel row's words,
 // or null when the session has nothing to show.
-export function sessionTasksStatus(data) {
+export function sessionTasksStatus(data, now = Date.now(), tz = deviceZone()) {
   if (!data) return null;
-  const verdict = sessionTasksVerdict(data);
+  const verdict = sessionTasksVerdict(data, now, tz);
   if (verdict === 'none') return null;
   return { text: verdict, forYou: openSessionRequests(data).length };
 }
@@ -471,7 +475,7 @@ export function projectOptions(projects, list) {
 
 // The count beside the view's title: what is open in You and the backlogs.
 export function openOwnCount(list) {
-  return (list || []).filter((t) => isOpen(t) && t.place !== 'agent').length;
+  return (list || []).filter((t) => isOpen(t) && t.place !== 'agent' && !isScheduled(t)).length;
 }
 
 // ── Dependencies ──────────────────────────────────────────────────────────

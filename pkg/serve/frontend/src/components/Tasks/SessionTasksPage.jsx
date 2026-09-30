@@ -7,6 +7,7 @@ import { loadTask, loadTaskProjects, patchTask, peekDraft, selectSessionDirector
 import { errorText, movePatch, projectOptions, sessionGroups } from "../../data/tasks-model.js";
 import { EmptyState, MoveList, TaskGroups, openTaskSession, useRowChecks, completesInline } from "./parts.jsx";
 import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
+import { ReroutePage, SchedDetail, ScheduledGroup, TargetPage, WhenPage } from "./Scheduled.jsx";
 
 // SessionTasksPage — the session panel's Tasks pages. Tasks lists what this
 // session asked of you and its own checklist; a task opens as the next page,
@@ -27,9 +28,20 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
   const groups = useMemo(() => sessionGroups(data, session.id), [data, session.id]);
 
 
+  // On the phone a scheduled task's When, Send to and reroute are pages of
+  // this panel; its draft waits in the stash while they show.
+  const schedPages = (whenPage, targetPage, reroutePage) => (sheet ? {
+    onPushWhen: () => goPage(whenPage),
+    onPushTarget: () => goPage(targetPage),
+    onPushReroute: reroutePage ? () => goPage(reroutePage) : undefined,
+  } : {});
+
   if (kind === "tasks") {
     return (
       <div class="zl-panel-body is-sub tk-panel-body tk-root">
+        {data?.loaded && (
+          <ScheduledGroup list={data.scheduled || []} phone context="session" onSelect={(tid) => goPage(taskPanelPage(tid))} onAdd={() => goPage("schedNew")} />
+        )}
         {data?.loaded ? (
           <TaskGroups
             groups={groups}
@@ -57,8 +69,44 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
           newDest={{ place: "agent", sessionId: session.id }}
           onPushDeps={sheet ? () => goPage("taskNewDeps") : undefined}
           onPushMove={sheet ? () => goPage("taskNewMove") : undefined}
+          {...schedPages("taskNewWhen", "taskNewTarget")}
+          hereSessionId={session.id}
           onCreated={() => goPage("tasks")}
         />
+      </div>
+    );
+  }
+
+  if (kind === "schedNew") {
+    return (
+      <div class="zl-panel-body is-sub tk-panel-detail">
+        <SchedDetail isNew phone={sheet} hereSessionId={session.id} {...schedPages("schedNewWhen", "schedNewTarget")} onCreated={() => goPage("tasks")} />
+      </div>
+    );
+  }
+
+  if (kind === "taskWhen" || kind === "taskNewWhen" || kind === "schedNewWhen") {
+    const back = kind === "taskWhen" ? () => goPage(taskPanelPage(id)) : () => goPage(kind === "taskNewWhen" ? "taskNew" : "schedNew");
+    return (
+      <div class="zl-panel-body is-sub tk-panel-body">
+        <WhenPage draftKey={kind === "taskWhen" ? id : "new"} onBack={back} />
+      </div>
+    );
+  }
+
+  if (kind === "taskTarget" || kind === "taskNewTarget" || kind === "schedNewTarget") {
+    const back = kind === "taskTarget" ? () => goPage(taskPanelPage(id)) : () => goPage(kind === "taskNewTarget" ? "taskNew" : "schedNew");
+    return (
+      <div class="zl-panel-body is-sub tk-panel-body">
+        <TargetPage draftKey={kind === "taskTarget" ? id : "new"} onDone={back} />
+      </div>
+    );
+  }
+
+  if (kind === "taskReroute") {
+    return (
+      <div class="zl-panel-body is-sub tk-panel-body">
+        <ReroutePage taskId={id} onDone={() => goPage(taskPanelPage(id))} />
       </div>
     );
   }
@@ -126,6 +174,7 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
         hereSessionId={session.id}
         onPushMove={sheet ? () => goPage(taskMovePanelPage(id)) : undefined}
         onPushDeps={sheet ? () => goPage(taskDepsPanelPage(id)) : undefined}
+        {...schedPages(`taskWhen:${id}`, `taskTarget:${id}`, `taskReroute:${id}`)}
         onClose={() => goPage("tasks")}
       />
     </div>

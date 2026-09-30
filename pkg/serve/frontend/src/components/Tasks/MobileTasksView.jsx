@@ -11,6 +11,8 @@ import { errorText, groupTasks, movePatch, projectOptions, sessionGroups, sessio
 import { projectLabels } from "../../data/tasks-move.js";
 import { BackIcon, EmptyState, Filters, MoveList, TaskGroups, openTaskSession, useEscape, useRowChecks, completesInline } from "./parts.jsx";
 import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
+import { ReroutePage, ScheduledGroup, TargetPage, WhenPage } from "./Scheduled.jsx";
+import { scheduledRows } from "../../data/schedule-model.js";
 import "../../layout/mobile/MobileConversationScreen/MobileInboxView.css";
 
 // MobileTasksView — the Tasks screen on the phone: a full-screen push, like
@@ -47,7 +49,18 @@ export function MobileTasksView({ onBack }) {
     [only, onlyData, slice.list, slice.agents, project, sessions],
   );
   const projects = projectOptions(slice.projects, slice.list);
-  const hasOpen = groups.some((g) => g.id !== "done" && g.rows.length);
+  const scheduled = useMemo(
+    () => scheduledRows(only ? onlyData?.scheduled : slice.list.filter((t) => !project || t.project_key === project)),
+    [only, onlyData, slice.list, project],
+  );
+  const hasOpen = scheduled.length > 0 || groups.some((g) => g.id !== "done" && g.rows.length);
+  // A scheduled task's When, Send to and reroute are pages of this screen
+  // too; its draft waits in the stash while they show.
+  const schedPages = (key) => ({
+    onPushWhen: () => push({ kind: "when", key }),
+    onPushTarget: () => push({ kind: "target", key }),
+    onPushReroute: () => push({ kind: "reroute", id: key }),
+  });
   const hasDone = groups.some((g) => g.id === "done");
 
   let title = "Tasks";
@@ -66,6 +79,7 @@ export function MobileTasksView({ onBack }) {
           onClearSession={() => setTasksSession(null)}
         />
         {(only ? !!onlyData?.loaded : slice.loaded) && !hasOpen && <EmptyState phone compact={hasDone} onNew={() => push({ kind: "new" })} />}
+        <ScheduledGroup list={scheduled} phone limit={4} onSelect={(id) => push({ kind: "task", id })} />
         {(hasOpen || hasDone) && (
           <TaskGroups
             groups={groups}
@@ -92,9 +106,29 @@ export function MobileTasksView({ onBack }) {
         newDest={only ? { place: "agent", sessionId: only } : null}
         onPushDeps={() => push({ kind: "deps", id: null })}
         onPushMove={() => push({ kind: "move", id: null })}
+        {...schedPages("new")}
+        onOpenSession={openTaskSession}
         onCreated={(id) => setStack(id ? [{ kind: "task", id }] : [])}
       />
     );
+  } else if (top.kind === "when") {
+    title = "When";
+    body = <WhenPage draftKey={top.key} onBack={pop} />;
+  } else if (top.kind === "target") {
+    title = top.level ? projectLabels(projects).get(top.level) || "Project" : "Send to";
+    const done = () => setStack(stack.filter((p) => p.kind !== "target"));
+    body = (
+      <TargetPage
+        key={top.level || "top"}
+        draftKey={top.key}
+        level={top.level || null}
+        onLevel={(level) => (level ? push({ kind: "target", key: top.key, level }) : pop())}
+        onDone={done}
+      />
+    );
+  } else if (top.kind === "reroute") {
+    title = "Send to";
+    body = <ReroutePage taskId={top.id} onDone={pop} />;
   } else if (top.kind === "deps") {
     title = "Waits for";
     body = <DepsPage taskId={top.id} onBack={pop} />;
@@ -146,6 +180,7 @@ export function MobileTasksView({ onBack }) {
         onOpenSession={openTaskSession}
         onPushMove={() => push({ kind: "move", id: top.id })}
         onPushDeps={() => push({ kind: "deps", id: top.id })}
+        {...schedPages(top.id)}
         onClose={pop}
       />
     );

@@ -33,6 +33,7 @@ const ALLOWED_RAW = new Map([
   ["layout/Sidebar/Sidebar.jsx", "the catalogue's search well (16px, iOS floor); Field's chrome is a different surface"],
   ["components/Tasks/TaskDetail.jsx", "the task editor edits in place (title, details, subtasks, find-a-task): borderless tk-field at 16px, not Field's boxed chrome"],
   ["components/Tasks/parts.jsx", "the completion note and Move's search well (tk-field, 16px), the same in-place surface as the task editor"],
+  ["components/Tasks/Scheduled.jsx", "the scheduled task editor: the same in-place tk-field surface as TaskDetail (16px), and When's native date/time pickers (sch-pick-in, 16px)"],
   ["primitives/Field/Field.jsx", "the primitive itself"],
 ]);
 
