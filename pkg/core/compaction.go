@@ -86,6 +86,11 @@ type CompactionPayload struct {
 	// Pricing is the rate card of the model that wrote the summary, for
 	// charging Usage. Not persisted: cost is settled when the event is seen.
 	Pricing *Pricing `json:"-"`
+	// Ephemeral marks a compaction of the discarded preparation conversation.
+	// The producer fixes its origin before asynchronous delivery: a generation
+	// stamped by a later consumer may belong to a different run. This only
+	// routes persistence; it is not part of the saved or client-facing payload.
+	Ephemeral bool `json:"-"`
 }
 
 // FreshPayload is the result of starting fresh: the conversation was cut at

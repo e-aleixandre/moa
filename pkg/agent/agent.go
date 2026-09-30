@@ -1893,6 +1893,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		convertToLLM:        a.config.ConvertToLLM,
 		materializeContent:  a.materializeContent(),
 		permissionCheck:     permissionCheck,
+		ephemeralCompaction: allowCheckpoint,
 		// A function, not a snapshot: model, thinking and the compaction
 		// settings can all change while the run is in flight (the settings are
 		// replaced copy-on-write), and each request must see them as of its own

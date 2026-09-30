@@ -214,11 +214,6 @@ type SessionContext struct {
 	// Stamped on agent-lifecycle events by the bridge. Written by startRun
 	// (under runMu), read atomically by the bridge.
 	RunGenAtomic atomic.Uint64
-	// ephemeralRunGen is the generation of the last /prepare-compact
-	// preparation run. That run works on a copy of the conversation that is
-	// restored when it ends, so the TreeSyncer must not record the
-	// compactions it makes. Generations are never reused, so it needs no reset.
-	ephemeralRunGen atomic.Uint64
 	// runStartedAnchor is written synchronously with reserving a run, before
 	// RunStarted is published. The immutable pair lets a finishing generation
 	// clear only its own anchor without racing a newly reserved run.

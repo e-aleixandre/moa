@@ -139,6 +139,10 @@ type loopConfig struct {
 	// automatic compaction summary, and a callback to clear it once consumed.
 	// Nil when no checkpoint slot is wired.
 	readCheckpoint func() (string, func())
+	// ephemeralCompaction is set for a /prepare-compact preparation run, whose
+	// conversation is discarded: its automatic compactions are flagged so the
+	// session does not record them.
+	ephemeralCompaction bool
 	// compactStrategy is what the agent gets before an automatic compaction:
 	// core.CompactPlain, CompactNotify or CompactPrepare. Read per iteration so
 	// a settings change reaches a run already in flight.
@@ -486,6 +490,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 							Usage:            result.Usage,
 							SummarizerNotice: fallbackNotice,
 							Pricing:          sumModel.Pricing,
+							Ephemeral:        cfg.ephemeralCompaction,
 						},
 					})
 				} else {
