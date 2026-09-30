@@ -52,7 +52,7 @@ type noticeDispatcher struct {
 	trigMu       sync.Mutex
 	retryAll     bool
 	reconcileAll bool
-	retryWaiting bool // the periodic tick: retry notices waiting on purpose
+	retryWaiting bool            // the periodic tick: retry notices waiting on purpose
 	retry        map[string]bool // sessions whose held or undeliverable notices get another attempt
 	reconcile    map[string]bool // sessions whose sent notices are looked for in the saved transcript
 	waitingIdle  map[string]bool // sessions with a notice waiting for them to become idle
@@ -204,7 +204,8 @@ func (d *noticeDispatcher) pass(ctx context.Context) {
 		switch n.State {
 		case tasks.NoticePending:
 			waiting := n.Reason == noticeReasonBusyWait || n.Reason == tasks.ReasonQuestionPending
-			if n.Reason != "" && !trig.retryAll && !trig.retry[to] && !(waiting && trig.retryWaiting) {
+			retry := trig.retryAll || trig.retry[to] || (waiting && trig.retryWaiting)
+			if n.Reason != "" && !retry {
 				continue
 			}
 			d.attempt(ctx, n, n.Deliver == tasks.DeliverWake && n.Method == tasks.MethodRun)

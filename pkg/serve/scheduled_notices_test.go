@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ func fireOnce(t *testing.T, h *schedHarness, r *tasks.Repo, title string, target
 	h.clock.Advance(time.Minute)
 	h.pass()
 	o := oneRun(t, r, tmpl.ID)
-	if o.State != tasks.OccAssigned {
+	if o.NoticeID == "" || o.ChildTaskID == 0 {
 		t.Fatalf("run after firing = %+v", o)
 	}
 	return o
@@ -84,12 +85,11 @@ func TestScheduledNoticeBusyWaitAdmission(t *testing.T) {
 		prov := newMockProvider(blockingHandler(started, release, "competing"), simpleResponseHandler("did it"))
 		h := newSchedHarness(t, prov, "2026-09-30T08:00:00Z")
 		var sess *ManagedSession
-		raced := false
+		var raced atomic.Bool
 		h.hooks.beforeAdmit = func(string) {
-			if raced {
+			if raced.Swap(true) {
 				return
 			}
-			raced = true
 			if _, _, _, err := h.mgr.Send(sess.ID, "competing", nil, "", ""); err != nil {
 				t.Error(err)
 			}
@@ -101,7 +101,7 @@ func TestScheduledNoticeBusyWaitAdmission(t *testing.T) {
 		o := fireOnce(t, h, r, "wait for me", toSession(sess.ID), tasks.Delivery{Busy: tasks.BusyWait})
 		pollUntil(t, 10*time.Second, "refused by the gate", func() bool {
 			n := noticeByID(t, r, o.NoticeID)
-			return raced && n.State == tasks.NoticePending && n.Reason == noticeReasonBusyWait
+			return raced.Load() && n.State == tasks.NoticePending && n.Reason == noticeReasonBusyWait
 		})
 		if steerQueued(sess, o.NoticeID) {
 			t.Fatal("IdleOnly assignment queued as a steer")
@@ -113,25 +113,30 @@ func TestScheduledNoticeBusyWaitAdmission(t *testing.T) {
 		}
 	})
 	t.Run("tick", func(t *testing.T) {
-		prov := newMockProvider(simpleResponseHandler("did it"))
+		started, release := make(chan struct{}, 1), make(chan struct{})
+		prov := newMockProvider(blockingHandler(started, release, "busy"), simpleResponseHandler("did it"))
 		h := newSchedHarness(t, prov, "2026-09-30T08:00:00Z")
 		h.start()
 		sess := h.session()
+		startRunning(t, h, sess, started)
 		r := h.repo()
-		// The run's assignment is waiting for idle, but the session became
-		// free without an idle event (background work finished quietly).
-		tmpl := mkTemplate(t, r, "quiet", onceAt(h.clock.Now().Add(time.Minute), toSession(sess.ID), tasks.Delivery{Busy: tasks.BusyWait}))
-		h.clock.Advance(time.Minute)
-		os, _ := r.MaterializeDue(bgc, 10)
-		o, err := r.AssignOccurrence(bgc, os[0].ID, tasks.Destination{SessionID: sess.ID})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if ok, err := r.SetNoticeState(bgc, o.NoticeID, tasks.NoticeChange{From: []string{tasks.NoticePending}, State: tasks.NoticePending, Reason: noticeReasonBusyWait}); !ok || err != nil {
-			t.Fatal(ok, err)
-		}
-		h.mgr.notices.nudge()
+		// Due in 1ms, so crossing it does not also fire the 30s tick.
+		tmpl := mkTemplate(t, r, "quiet", onceAt(h.clock.Now().Add(time.Millisecond), toSession(sess.ID), tasks.Delivery{Busy: tasks.BusyWait}))
+		h.clock.Advance(time.Millisecond)
 		h.pass()
+		o := oneRun(t, r, tmpl.ID)
+		pollUntil(t, 10*time.Second, "waiting for idle", func() bool {
+			return noticeByID(t, r, o.NoticeID).Reason == noticeReasonBusyWait
+		})
+		// The session becomes free without the idle event reaching the
+		// notice (background work ending quietly).
+		d := h.mgr.notices
+		d.trigMu.Lock()
+		delete(d.waitingIdle, sess.ID)
+		d.trigMu.Unlock()
+		close(release)
+		pollUntil(t, 5*time.Second, "idle", func() bool { return sessState(sess) == StateIdle })
+		d.pass(bgc)
 		if n := noticeByID(t, r, o.NoticeID); n.State != tasks.NoticePending {
 			t.Fatalf("waiting notice retried without a trigger: %+v", n)
 		}

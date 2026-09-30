@@ -11,7 +11,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/handoff"
-	"github.com/e-aleixandre/moa/pkg/schedule"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/verify"
@@ -40,109 +39,12 @@ var commandRegistry = map[string]commandHandler{
 	"reload":          cmdReload,
 }
 
-func cmdSchedule(m *Manager, sess *ManagedSession, args []string) (*CommandResult, error) {
-	if m.scheduler == nil {
-		return &CommandResult{OK: false, Message: "schedule storage is unavailable"}, nil
-	}
-	if len(args) == 0 || args[0] == "list" {
-		var mine []schedule.Schedule
-		for _, record := range m.scheduler.list() {
-			if record.SessionID == sess.ID {
-				mine = append(mine, record)
-			}
-		}
-		if len(mine) == 0 {
-			return &CommandResult{OK: true, Message: "no schedules"}, nil
-		}
-		return &CommandResult{OK: true, Message: formatScheduleList(mine)}, nil
-	}
-	if args[0] == "cancel" {
-		if len(args) != 2 {
-			return &CommandResult{OK: false, Message: "usage: /schedule cancel <id>"}, nil
-		}
-		var owned bool
-		for _, record := range m.scheduler.list() {
-			if record.ID == args[1] && record.SessionID == sess.ID {
-				owned = true
-				break
-			}
-		}
-		if !owned {
-			return &CommandResult{OK: false, Message: "schedule not found"}, nil
-		}
-		record, err := m.scheduler.cancel(sess, args[1])
-		if err != nil {
-			return &CommandResult{OK: false, Message: err.Error()}, nil
-		}
-		return &CommandResult{OK: true, Message: "canceled schedule " + record.ID}, nil
-	}
-
-	parsed, err := schedule.ParseCreateArgs(strings.Join(args, " "), time.Local)
-	if err != nil {
-		return &CommandResult{OK: false, Message: err.Error() + " — usage: /schedule at YYYY-MM-DD HH:MM [IANA-zone] -- text | in <duration> -- text"}, nil
-	}
-	record, err := m.scheduler.create(schedule.Schedule{
-		SessionID: sess.ID,
-		Text:      parsed.Text,
-		DueAt:     parsed.DueAt,
-		TimeZone:  parsed.TimeZone,
-	})
-	if err != nil {
-		return &CommandResult{OK: false, Message: err.Error()}, nil
-	}
-	return &CommandResult{OK: true, Message: fmt.Sprintf("scheduled %s for %s (%s)", record.ID, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"), untilLabel(time.Until(record.DueAt)))}, nil
+func cmdSchedule(_ *Manager, _ *ManagedSession, _ []string) (*CommandResult, error) {
+	return &CommandResult{OK: false, Message: scheduleRetiredMessage}, nil
 }
 
-// scheduleListMax bounds the /schedule list answer: it is shown in a toast, and
-// a long history would run off the screen.
-const scheduleListMax = 8
-
-// formatScheduleList shows pending records first (soonest due), then the most
-// recent settled ones, and says how many did not fit.
-func formatScheduleList(records []schedule.Schedule) string {
-	var pending, settled []schedule.Schedule
-	for _, record := range records { // records arrive ordered by due time
-		if record.Status == schedule.StatusPending {
-			pending = append(pending, record)
-		} else {
-			settled = append([]schedule.Schedule{record}, settled...)
-		}
-	}
-	ordered := append(pending, settled...)
-	shown := ordered
-	if len(shown) > scheduleListMax {
-		shown = shown[:scheduleListMax]
-	}
-	lines := make([]string, 0, len(shown)+1)
-	for _, record := range shown {
-		lines = append(lines, fmt.Sprintf("%s %s %s — %s", record.ID, record.Status, record.DueAt.In(time.Local).Format("2006-01-02 15:04 MST"), record.Text))
-	}
-	if hidden := len(ordered) - len(shown); hidden > 0 {
-		lines = append(lines, fmt.Sprintf("+%d more", hidden))
-	}
-	return strings.Join(lines, "\n")
-}
-
-// untilLabel renders a remaining duration as "in 2h 5m", to whole minutes
-// (seconds only under a minute).
-func untilLabel(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("in %ds", int(d.Seconds()))
-	}
-	total := int(d.Round(time.Minute).Minutes())
-	days, hours, mins := total/1440, total%1440/60, total%60
-	var parts []string
-	if days > 0 {
-		parts = append(parts, fmt.Sprintf("%dd", days))
-	}
-	if hours > 0 {
-		parts = append(parts, fmt.Sprintf("%dh", hours))
-	}
-	if mins > 0 || len(parts) == 0 {
-		parts = append(parts, fmt.Sprintf("%dm", mins))
-	}
-	return "in " + strings.Join(parts, " ")
-}
+// scheduleRetiredMessage answers the retired /schedule command.
+const scheduleRetiredMessage = "/schedule is gone: schedule a task from Tasks, or with the clock next to Send in the composer."
 
 // ExecCommand executes a slash command in a session. id is the client-minted
 // stable ID for the optimistic chip when the command is enqueued as a barrier

@@ -22,7 +22,7 @@
 | `pkg/permission/` | Gate for `yolo`/`ask`/`auto` tool approvals |
 | `pkg/checkpoint/` | File-level undo — snapshots before writes, pop to revert |
 | `pkg/memory/` | Cross-session persistent project memory |
-| `pkg/tasks/` | Shared SQLite task database (owner and agent-scoped access) and the `tasks` tool |
+| `pkg/tasks/` | Shared SQLite task database (owner and agent-scoped access, scheduled and recurring tasks with their runs) and the `tasks` tool; serve's task scheduler turns each due run into a child task delivered through the task-notice outbox |
 | `pkg/subagent/` | Child agent execution and async job management |
 | `pkg/verify/` | Run project verification checks |
 | `pkg/skill/` | Skill file loading |
@@ -71,7 +71,7 @@
 | `pkg/push/` | Web Push notifications (VAPID keys, subscription store, dispatch) |
 | `pkg/usage/` | Provider-qualified plan-usage pollers; Claude and xAI consumer data come from private, best-effort endpoints |
 | `pkg/attention/` | Attention Service: consumes every session's event bus and produces a priority-ordered attention queue |
-| `pkg/schedule/` | Durable one-shot schedule records (backs the web `/schedule` command) |
+| `pkg/schedule/` | Decoder of the retired `/schedule` store, used once to import it into scheduled tasks |
 | `pkg/events/` | Wake-on-event inbox: model and durable store for external events; routing lives in `pkg/serve` |
 | `pkg/release/` | Build metadata and best-effort release update checks |
 | `pkg/ansi/` | Strips terminal control sequences from untrusted text before rendering |

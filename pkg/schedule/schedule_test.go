@@ -48,51 +48,6 @@ func TestStorePersistsRecords(t *testing.T) {
 	}
 }
 
-func TestParseCreateArgs(t *testing.T) {
-	madrid, err := time.LoadLocation("Europe/Madrid")
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-
-	at, err := ParseCreateArgsAt("at 2026-12-01 09:15 America/New_York -- call Alex", now, madrid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantAt := time.Date(2026, 12, 1, 14, 15, 0, 0, time.UTC)
-	if !at.DueAt.Equal(wantAt) || at.TimeZone != "America/New_York" || at.Text != "call Alex" {
-		t.Fatalf("at parse = %#v, want due %s", at, wantAt)
-	}
-
-	in, err := ParseCreateArgsAt("in 90m -- stretch", now, madrid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !in.DueAt.Equal(now.Add(90*time.Minute)) || in.TimeZone != "Europe/Madrid" || in.Text != "stretch" {
-		t.Fatalf("in parse = %#v", in)
-	}
-
-	defaultZone, err := ParseCreateArgsAt("at 2026-07-10 15:30 -- local reminder", now, madrid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if defaultZone.TimeZone != "Europe/Madrid" || !defaultZone.DueAt.Equal(time.Date(2026, 7, 10, 13, 30, 0, 0, time.UTC)) {
-		t.Fatalf("default-zone parse = %#v", defaultZone)
-	}
-
-	for _, input := range []string{
-		"at 2026-12-01 09:15 UTC -- no",
-		"at 2026-12-01 09:15 America/New_York -- one -- two",
-		"in 1h America/New_York -- no",
-		"in -1h -- no",
-		"at 2026-12-01 09:15 --",
-	} {
-		if _, err := ParseCreateArgsAt(input, now, madrid); err == nil {
-			t.Errorf("ParseCreateArgsAt(%q) succeeded, want error", input)
-		}
-	}
-}
-
 func TestCancelIsIdempotentAndPersistent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schedules.json")
 	store := NewStore(path)
@@ -126,17 +81,6 @@ func TestCancelIsIdempotentAndPersistent(t *testing.T) {
 	got, ok := loaded.Get(created.ID)
 	if !ok || got.Status != StatusCanceled {
 		t.Fatalf("persisted cancellation = %#v, exists %v", got, ok)
-	}
-}
-
-func TestParseAtRejectsPastTime(t *testing.T) {
-	madrid, _ := time.LoadLocation("Europe/Madrid")
-	now := time.Date(2026, 7, 10, 12, 0, 0, 0, madrid)
-	if _, err := ParseCreateArgsAt("at 2026-07-10 11:59 Europe/Madrid -- late", now, time.UTC); err == nil {
-		t.Fatal("past time accepted")
-	}
-	if _, err := ParseCreateArgsAt("at 2026-07-10 12:01 Europe/Madrid -- soon", now, time.UTC); err != nil {
-		t.Fatal(err)
 	}
 }
 

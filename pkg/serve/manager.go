@@ -814,7 +814,9 @@ type Manager struct {
 	// fileScanner is shared across /api/sessions/{id}/files requests.
 	// Invalidated on successful edit tool completions.
 	fileScanner *files.Scanner
-	scheduler   *schedulerService
+	// schedulePath is the retired /schedule store, read once at startup by
+	// the legacy import; "" when unresolvable.
+	schedulePath string
 	// attention normalizes cross-session blocking state for future voice and
 	// digest clients. It owns no session state and is stopped on Shutdown.
 	attention *attention.Service
@@ -941,8 +943,9 @@ type ManagerConfig struct {
 	// Tasks overrides the shared task database. Empty follows SessionBaseDir
 	// (tasks.sqlite beside it) or, with no override at all, the config directory.
 	Tasks *tasks.Repo
-	// SchedulePath overrides the durable schedules file. Empty stores it beside
-	// the session base directory.
+	// SchedulePath overrides the retired /schedule file, imported once into
+	// the task database at startup. Empty looks for it beside the session
+	// base directory.
 	SchedulePath string
 	// EventsPath overrides the wake-on-event inbox file. Empty stores it beside
 	// the session base directory.
@@ -983,14 +986,6 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		}
 		if baseDir != "" {
 			schedulePath = filepath.Join(filepath.Dir(baseDir), "schedules.json")
-		}
-	}
-	var scheduler *schedulerService
-	if schedulePath != "" {
-		var err error
-		scheduler, err = newSchedulerService(schedulePath)
-		if err != nil {
-			slog.Warn("schedule storage disabled", "path", schedulePath, "error", err)
 		}
 	}
 	// wake-on-event: the inbox file sits beside schedules.json, and a failure
@@ -1075,7 +1070,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		secretBatches:               make(map[string][]string),
 		savedCacheTTL:               30 * time.Second,
 		fileScanner:                 files.NewScanner(),
-		scheduler:                   scheduler,
+		schedulePath:                schedulePath,
 		attention:                   attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
 		conversationKey:             conversationKey,
 		version:                     release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
@@ -1145,9 +1140,6 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	// has recovered it.
 	m.heartbeat = newHeartbeatService(m)
 	m.heartbeat.Start()
-	if m.scheduler != nil {
-		m.scheduler.Start(m)
-	}
 	reapStaleAttachments()
 	secrets.Reap()
 	// The manager, rather than its caller's context, owns this process-wide

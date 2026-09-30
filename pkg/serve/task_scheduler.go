@@ -360,6 +360,7 @@ func (s *taskScheduler) provisionNew(ctx context.Context, o tasks.Occurrence) bo
 // planner start: the legacy /schedule import, then the restart re-gate of
 // runs that never reached their session.
 func (m *Manager) recoverScheduledTasks(ctx context.Context) {
+	m.importLegacySchedules(ctx)
 	if _, err := os.Stat(m.tasks.Path()); err != nil {
 		// No database yet: nothing to recover, and a read must not create it.
 		return

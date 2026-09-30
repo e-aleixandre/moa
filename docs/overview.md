@@ -43,7 +43,7 @@ All state lives under `~/.config/moa/` (or `MOA_CONFIG_DIR`):
 | `config.json` | Global config |
 | `auth.json` | Provider credentials (mode `0600`) |
 | `sessions/` | Saved sessions |
-| `schedules.json` | Durable one-shot schedules (`/schedule`) |
+| `schedules.json.migrated` | The retired `/schedule` store, kept after its pending records were imported as scheduled tasks |
 | `projects/<hash>/state.json` | [Your project state](./configuration.md#your-project-state): saved approvals, MCP vetoes, your own per-project settings |
 | `attachments/v1/` | Image and document bytes referenced by sessions, deduplicated by content |
 | `skills/` | Global skill packs (`<name>/SKILL.md`) |

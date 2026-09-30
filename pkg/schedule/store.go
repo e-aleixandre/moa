@@ -1,4 +1,6 @@
-// Package schedule provides durable one-shot schedule records.
+// Package schedule decodes the retired /schedule store (schedules.json),
+// which serve imports once into the task database. It is kept only for that
+// import.
 package schedule
 
 import (

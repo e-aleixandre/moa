@@ -806,13 +806,6 @@ func (m *Manager) isOwnerSession(id string) bool {
 
 // deleteSession is Delete's body. Callers must hold automationMu.
 func (m *Manager) deleteSession(id string) (err error) {
-	defer func() {
-		if err == nil && m.scheduler != nil {
-			if serr := m.scheduler.deleteSession(id); serr != nil {
-				slog.Warn("delete session schedules", "session", id, "error", serr)
-			}
-		}
-	}()
 	m.mu.RLock()
 	_, resuming := m.resuming[id]
 	m.mu.RUnlock()
@@ -1353,9 +1346,6 @@ func (m *Manager) Shutdown() {
 		if m.secretReaperDone != nil {
 			<-m.secretReaperDone
 		}
-	}
-	if m.scheduler != nil {
-		m.scheduler.Close()
 	}
 	// Stop deliveries before anything else, and wait for the actor to confirm
 	// it. From here on no timer and no immediate report can start a run in an
