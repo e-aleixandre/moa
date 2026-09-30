@@ -823,9 +823,26 @@ func (m *Manager) deleteSession(id string) (err error) {
 	// file goes: once unlinked, nothing may recreate or re-deliver to it.
 	// It is settled here, after the last busy check and under m.mu, so no
 	// Resume can reserve the session between the settlement and the
-	// deletion: a refused delete settles nothing.
-	if err := m.settleScheduledWork(id, sess); err != nil {
+	// deletion: a refused delete settles nothing. A saved session's file is
+	// unlinked inside the settlement's transaction, so a refused unlink
+	// settles nothing either.
+	var unlink func() error
+	var savedDir string
+	if !ok {
+		unlink = func() error {
+			if savedDir != "" {
+				return nil // already unlinked by an earlier try of the transaction
+			}
+			dir, err := session.UnlinkByID(m.sessionBaseDir, id)
+			savedDir = dir
+			return err
+		}
+	}
+	if err := m.settleScheduledWork(id, sess, unlink); err != nil {
 		m.mu.Unlock()
+		if errors.Is(err, session.ErrNotFound) {
+			return ErrNotFound
+		}
 		return err
 	}
 	if m.automation != nil {
@@ -835,17 +852,14 @@ func (m *Manager) deleteSession(id string) (err error) {
 		m.automation.forget(id)
 	}
 	if !ok {
-		// Not active — delete its on-disk state, still under m.mu so a
-		// Resume cannot load the file the settlement already gave up on.
-		err := session.DeleteByID(m.sessionBaseDir, id)
+		// Not active — its file went with the settlement, still under m.mu
+		// so a Resume cannot load a file the settlement already gave up on.
 		m.mu.Unlock()
+		err := session.RemoveSideFiles(savedDir, id)
+		m.invalidateSavedCache()
 		if err != nil {
-			if errors.Is(err, session.ErrNotFound) {
-				return ErrNotFound
-			}
 			return err
 		}
-		m.invalidateSavedCache()
 		m.forgetUnseen(id)
 		m.forgetSecretBatches(id)
 		_ = removeSessionAttachDir(id)
@@ -1932,15 +1946,22 @@ func creatorTZOf(meta map[string]any) string {
 // delivered work ends with an unknown outcome. A failure refuses the delete:
 // removing the file first could let a restart recreate the session.
 //
+// unlink, when not nil, removes a saved session's file inside the
+// settlement's transaction: its error refuses the delete and is returned as
+// is. It runs whenever the delete goes ahead, even with nothing to settle.
+//
 // Called with m.mu held: sess is the live session (nil when saved), read
 // from m.sessions by the caller, and nothing here takes a Manager lock.
-func (m *Manager) settleScheduledWork(id string, sess *ManagedSession) error {
+func (m *Manager) settleScheduledWork(id string, sess *ManagedSession, unlink func() error) error {
+	if unlink == nil {
+		unlink = func() error { return nil }
+	}
 	if m.tasks == nil {
-		return nil
+		return unlink()
 	}
 	if _, err := os.Stat(m.tasks.Path()); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil // no task database: nothing can be bound to the session
+			return unlink() // no task database: nothing can be bound to the session
 		}
 		// An unreadable database is not an empty one.
 		return fmt.Errorf("settle scheduled work of session %s: %w", id, err)
@@ -1967,12 +1988,20 @@ func (m *Manager) settleScheduledWork(id string, sess *ManagedSession) error {
 	if v, _ := meta[session.MetaScheduledOccurrenceID].(string); v != "" {
 		marker, _ = strconv.ParseInt(v, 10, 64)
 	}
-	if _, err := m.tasks.SettleSessionDeleted(m.baseCtx, id, marker); err != nil {
+	var unlinkErr error
+	remove := func() error {
+		unlinkErr = unlink()
+		return unlinkErr
+	}
+	if _, err := m.tasks.SettleSessionDeleted(m.baseCtx, id, marker, remove); err != nil {
+		if unlinkErr != nil {
+			return unlinkErr
+		}
 		if errors.Is(err, tasks.ErrSchemaTooNew) {
 			// A newer moa owns this database; this binary cannot write it
 			// and must not make sessions undeletable because of it.
 			slog.Warn("scheduled work not settled: task database is newer than this binary", "session", id)
-			return nil
+			return unlink()
 		}
 		return fmt.Errorf("settle scheduled work of session %s: %w", id, err)
 	}

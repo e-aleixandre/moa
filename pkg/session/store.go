@@ -823,19 +823,30 @@ func FindSummaryReadOnly(baseDir, id string) (Summary, error) {
 
 // DeleteByID searches all project stores under baseDir and deletes the session.
 func DeleteByID(baseDir, id string) error {
+	dir, err := UnlinkByID(baseDir, id)
+	if err != nil {
+		return err
+	}
+	return RemoveSideFiles(dir, id)
+}
+
+// UnlinkByID removes only a saved session's transcript file and returns the
+// store directory it was in. The session is gone once it returns nil; its
+// side files are then removed with RemoveSideFiles.
+func UnlinkByID(baseDir, id string) (string, error) {
 	if err := ValidateID(id); err != nil {
-		return fmt.Errorf("session %s: %w", id, ErrNotFound)
+		return "", fmt.Errorf("session %s: %w", id, ErrNotFound)
 	}
 	if baseDir == "" {
 		var err error
 		baseDir, err = defaultBaseDir()
 		if err != nil {
-			return fmt.Errorf("session %s: %w", id, ErrNotFound)
+			return "", fmt.Errorf("session %s: %w", id, ErrNotFound)
 		}
 	}
 	entries, err := os.ReadDir(baseDir)
 	if err != nil {
-		return fmt.Errorf("session %s: %w", id, ErrNotFound)
+		return "", fmt.Errorf("session %s: %w", id, ErrNotFound)
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -848,14 +859,20 @@ func DeleteByID(baseDir, id string) error {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return fmt.Errorf("session %s: stat: %w", id, err)
+			return "", fmt.Errorf("session %s: stat: %w", id, err)
 		}
 		if err := store.Delete(id); err != nil {
-			return err
+			return "", err
 		}
-		_ = os.RemoveAll(filepath.Join(dir, id+".subagents"))
-		_ = RemoveTranscriptSnapshots(dir, id)
-		return RemoveArtifacts(dir, id)
+		return dir, nil
 	}
-	return fmt.Errorf("session %s: %w", id, ErrNotFound)
+	return "", fmt.Errorf("session %s: %w", id, ErrNotFound)
+}
+
+// RemoveSideFiles removes what a deleted session left next to its transcript
+// in dir: subagent transcripts, snapshots and artifacts.
+func RemoveSideFiles(dir, id string) error {
+	_ = os.RemoveAll(filepath.Join(dir, id+".subagents"))
+	_ = RemoveTranscriptSnapshots(dir, id)
+	return RemoveArtifacts(dir, id)
 }

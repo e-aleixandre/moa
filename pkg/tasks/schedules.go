@@ -1226,7 +1226,11 @@ func (r *Repo) RegateOnRestart(ctx context.Context) (int, error) {
 // session was created but not yet bound; 0 for none). Undelivered work fails
 // (session_deleted) and can be sent elsewhere; work reserved or admitted is
 // skipped with an unknown outcome. Finished history is unchanged.
-func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, markerOccurrenceID int64) (int, error) {
+//
+// remove, when not nil, removes the session's file inside the settlement's
+// transaction, last: if it fails, nothing is settled. It may be called again
+// when the transaction is retried.
+func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, markerOccurrenceID int64, remove func() error) (int, error) {
 	var n int
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		n = 0
@@ -1262,6 +1266,11 @@ func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, marke
 				return false, err
 			}
 			n++
+		}
+		if remove != nil {
+			if err := remove(); err != nil {
+				return false, err
+			}
 		}
 		return n > 0, nil
 	})

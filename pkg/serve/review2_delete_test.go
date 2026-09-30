@@ -146,3 +146,34 @@ func TestReview2MoaMarkedSavedDeleteReadsHeader(t *testing.T) {
 		t.Errorf("planner recreated the explicitly deleted marked session as %s", after.SessionID)
 	}
 }
+
+// A saved session whose directory is readable but not writable cannot be
+// unlinked. Returning that error must not fail its still-live assignment.
+func TestReview2MoaSavedDeleteUnlinkRefusalSettlesNothing(t *testing.T) {
+	h := newSchedHarness(t, newMockProvider(), "2026-09-30T08:00:00Z")
+	m := h.start()
+	schedReviewStopWorkers(t, m)
+	sid := h.savedSession()
+	r := h.repo()
+	o := review2MoaAssignedRun(t, h, r, sid)
+	_, store, err := session.FindSessionReadOnly(h.base, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(store.Dir(), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(store.Dir(), 0o700) }()
+	deleteErr := m.Delete(sid)
+	if !errors.Is(deleteErr, os.ErrPermission) {
+		t.Fatalf("test setup: expected unlink permission failure, got %v", deleteErr)
+	}
+	if _, _, err := session.FindSessionReadOnly(h.base, sid); err != nil {
+		t.Fatalf("test setup: refused Delete's saved session is not readable: %v", err)
+	}
+	after, n := occNow(t, r, o.ID), noticeByID(t, r, o.NoticeID)
+	t.Logf("Delete=%v; surviving session's run=%s/%s notice=%s/%s", deleteErr, after.State, after.Reason, n.State, n.Reason)
+	if after.State != tasks.OccAssigned || n.State != tasks.NoticePending {
+		t.Errorf("refused unlink settled surviving work: run=%s/%s notice=%s/%s", after.State, after.Reason, n.State, n.Reason)
+	}
+}
