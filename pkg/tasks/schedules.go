@@ -724,6 +724,21 @@ func (r *Repo) Occurrence(ctx context.Context, id int64) (Occurrence, error) {
 	return getOccurrence(ctx, rd, id)
 }
 
+// OccurrenceForNotice returns the run whose current assignment is noticeID.
+// The dispatcher uses it to apply the run's frozen delivery policy (busy
+// wait). A superseded notice of a rerouted run maps to nothing.
+func (r *Repo) OccurrenceForNotice(ctx context.Context, noticeID string) (Occurrence, bool, error) {
+	rd, err := r.reader()
+	if err != nil || rd == nil {
+		return Occurrence{}, false, err
+	}
+	os, err := queryOccurrences(ctx, rd, "notice_id = ?", noticeID)
+	if err != nil || len(os) == 0 {
+		return Occurrence{}, false, err
+	}
+	return os[0], true, nil
+}
+
 // Runs returns a template's runs newest first, before beforeID when it is not 0.
 func (r *Repo) Runs(ctx context.Context, taskID, beforeID int64, limit int) ([]Occurrence, error) {
 	rd, err := r.reader()

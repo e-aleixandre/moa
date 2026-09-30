@@ -908,6 +908,13 @@ func TestScheduleRerouteReusesChild(t *testing.T) {
 	if got := mustOcc(t, r, o.ID); got.State != OccAssigned || got.AdmittedAt != 0 || got.NoticeID != re.NoticeID {
 		t.Fatalf("old notice mutated the run: %+v", got)
 	}
+	// The dispatcher finds a run by its current notice only.
+	if cur, ok, err := r.OccurrenceForNotice(bg, re.NoticeID); err != nil || !ok || cur.ID != o.ID {
+		t.Fatalf("run for new notice = %+v %v %v", cur, ok, err)
+	}
+	if _, ok, err := r.OccurrenceForNotice(bg, o.NoticeID); err != nil || ok {
+		t.Fatalf("old notice still maps to the run: %v %v", ok, err)
+	}
 	// Reroute is only for a failed run.
 	if _, err := r.RerouteOccurrence(bg, o.ID, mustOcc(t, r, o.ID).Revision, dest("s3")); !isConflict(err) {
 		t.Fatalf("reroute of an assigned run = %v", err)
