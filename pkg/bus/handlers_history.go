@@ -66,6 +66,11 @@ func registerHistoryHandlers(sctx *SessionContext) {
 	b.OnCommand(func(cmd CompactSession) error {
 		compactionLifecycleMu.Lock()
 		defer compactionLifecycleMu.Unlock()
+		// Admission under abortMu: a Stop still pending for a run that already
+		// settled idle must finish its Agent.Abort before this compaction can
+		// occupy the agent, or that Abort would cancel it.
+		sctx.abortMu.Lock()
+		defer sctx.abortMu.Unlock()
 		// A manual compact occupies the agent's run slot for seconds, so it
 		// must occupy the session too: transition to running so frontends
 		// switch the input to queue mode (steer) and Manager.Send/requireIdle
@@ -189,6 +194,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 	})
 
 	b.OnCommand(func(cmd PrepareCompactSession) error {
+		// Claim and launch under abortMu, like SendPrompt (see CompactSession).
+		sctx.abortMu.Lock()
+		defer sctx.abortMu.Unlock()
 		if err := reserveRunSlot(sctx); err != nil {
 			return fmt.Errorf("cannot prepare compact: %w", err)
 		}
@@ -268,6 +276,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		if sctx.ProviderFactory == nil {
 			return fmt.Errorf("handoff unavailable: provider factory not configured")
 		}
+		// Claim and launch under abortMu, like SendPrompt (see CompactSession).
+		sctx.abortMu.Lock()
+		defer sctx.abortMu.Unlock()
 		if err := reserveRunSlot(sctx); err != nil {
 			return fmt.Errorf("cannot hand off: %w", err)
 		}

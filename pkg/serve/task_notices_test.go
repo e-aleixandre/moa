@@ -540,9 +540,12 @@ func startAndSteerNotice(t *testing.T, srv *httptest.Server, mgr *Manager, sess 
 	pollUntil(t, 2*time.Second, "running", func() bool { return sessState(sess) == StateRunning })
 	completeRequest(t, srv, rec, "", "")
 	n := waitNoticeState(t, mgr, rec.ID, tasks.NoticeSent)
-	if n.SteerID == "" || !noticeQueued(sess, n) {
-		t.Fatalf("notice not queued as a steer: %+v", n)
+	if n.SteerID == "" {
+		t.Fatalf("notice sent without a steer: %+v", n)
 	}
+	// The notice is recorded as sent before the steer command lands in the
+	// queue, so wait for the queue itself.
+	pollUntil(t, 5*time.Second, "notice queued as a steer", func() bool { return noticeQueued(sess, n) })
 	return rec, n
 }
 
