@@ -812,11 +812,6 @@ func (m *Manager) deleteSession(id string) (err error) {
 	if resuming {
 		return ErrBusy
 	}
-	if m.automation != nil {
-		// A deleted session must not keep answering an idempotency key: the next
-		// retry should create a fresh run rather than resolve to a gone session.
-		m.automation.forget(id)
-	}
 	m.mu.Lock()
 	if _, resuming := m.resuming[id]; resuming {
 		m.mu.Unlock()
@@ -831,6 +826,12 @@ func (m *Manager) deleteSession(id string) (err error) {
 	if err := m.settleScheduledWork(id, sess); err != nil {
 		m.mu.Unlock()
 		return err
+	}
+	if m.automation != nil {
+		// A deleted session must not keep answering an idempotency key: the next
+		// retry should create a fresh run rather than resolve to a gone session.
+		// Only now: a refused delete keeps the session, and its key with it.
+		m.automation.forget(id)
 	}
 	if !ok {
 		// Not active — delete its on-disk state, still under m.mu so a
