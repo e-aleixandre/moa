@@ -411,8 +411,8 @@ func (r *Repo) consume(ctx context.Context, taskID, expectRev, expectDue int64, 
 // returns how many slots the new run stands for in their place, their own
 // coalesced slots included. A run whose delivery is uncertain (reserved
 // without an acknowledgment, or already such a decision) may have run: it
-// goes to history without being counted. An admitted run, or a child someone
-// completed, is left alone.
+// goes to history without being counted. Only an admitted run is left
+// alone: its child's status does not keep it.
 //
 // The caller serializes it with the delivery attempts' short span from
 // reservation to acknowledgment or refusal, so a reserved assignment seen
@@ -426,16 +426,6 @@ func (r *Repo) supersedeUndelivered(ctx context.Context, tx *sql.Tx, taskID int6
 	now := r.now().UnixMilli()
 	n := 0
 	for _, o := range os {
-		if o.ChildTaskID != 0 {
-			var status string
-			err := tx.QueryRowContext(ctx, "SELECT status FROM tasks WHERE id = ?", o.ChildTaskID).Scan(&status)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return 0, err
-			}
-			if err == nil && status != StatusPending {
-				continue
-			}
-		}
 		uncertain := o.State == OccLate && o.Reason == ReasonUncertain
 		if o.NoticeID != "" {
 			var state string
