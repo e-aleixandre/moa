@@ -7,7 +7,7 @@ import { projectStream, liveTrayAgents } from "../../../data/stream-model.js";
 import { focusedSessionId } from "../../../data/selectors.js";
 import { openSession, setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setSectionCollapsed, setSidebarMode } from "../../../data/drawer.js";
-import { createOwner, openOwnerConversation } from "../../../data/owners.js";
+import { closeOwner, createOwner, openOwnerConversation } from "../../../data/owners.js";
 import { openPalette } from "../../../data/palette.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, rewindToMessage, stopRun } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
@@ -590,6 +590,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         /* Choosing an owner closes the drawer onto its conversation, exactly
            as choosing a session does. */
         onOpenOwner={(own) => { if (openOwnerConversation(own)) closeDrawer(); }}
+        onCloseOwner={(own) => { closeOwner(own); }}
         onNewOwner={onNewOwnerFromDrawer}
         drawerCollapsed={chrome.drawerCollapsed}
         onToggleProject={setDrawerProjectCollapsed}

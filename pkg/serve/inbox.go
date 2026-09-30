@@ -639,6 +639,13 @@ func (m *Manager) deliverEvent(sessionID string, ev events.Event, autorun bool) 
 		Custom:  func(steer bool) map[string]any { return eventCustom(ev, autorun, steer) },
 		Autorun: autorun,
 	})
+	if err == nil {
+		// An event landing on a closed owner is one of the things that
+		// brings it back to the column.
+		if sess, ok := m.Get(sessionID); ok && sess.Kind == session.KindOwner {
+			m.reopenOwnerSession(sessionID)
+		}
+	}
 	return err
 }
 

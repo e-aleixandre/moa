@@ -119,6 +119,9 @@ type CreateOwnerOpts struct {
 type UpdateOwnerOpts struct {
 	Name   *string       `json:"name"`
 	Avatar *owner.Avatar `json:"avatar"`
+	// Closed sets or clears the user's "put away" flag. Setting it also closes
+	// the owner's conversation, and is refused with ErrBusy while it works.
+	Closed *bool `json:"closed"`
 }
 
 func validateOwnerAvatar(avatar owner.Avatar) error {
@@ -229,6 +232,13 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 		return OwnerInfo{}, owner.ErrNotFound
 	}
 	oldName := own.Name
+	if opts.Closed != nil && *opts.Closed && own.SessionID != "" {
+		// Close the conversation before recording the flag, so a busy owner
+		// leaves both untouched. Already-saved is a no-op.
+		if err := m.CloseSession(own.SessionID); err != nil && !errors.Is(err, ErrNotFound) {
+			return OwnerInfo{}, err
+		}
+	}
 	if opts.Name != nil {
 		name := strings.TrimSpace(*opts.Name)
 		if name == "" {
@@ -241,6 +251,12 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 			return OwnerInfo{}, err
 		}
 		own.Avatar = *opts.Avatar
+	}
+	if opts.Closed != nil {
+		// A wake-up can have reloaded the conversation while the close was
+		// being admitted; an active owner is not closed.
+		_, loaded := m.Get(own.SessionID)
+		own.Closed = *opts.Closed && !loaded
 	}
 	if err := store.Save(own); err != nil {
 		return OwnerInfo{}, err
@@ -264,6 +280,31 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 		}
 	}
 	return m.ownerInfo(own), nil
+}
+
+// reopenOwnerSession clears the closed flag once the owner's conversation is
+// active again, by whatever route it was loaded. Best effort: the flag is a
+// sidebar hint, and a failure to clear it must not fail a resume.
+func (m *Manager) reopenOwnerSession(sessionID string) {
+	m.ownerEdit.Lock()
+	defer m.ownerEdit.Unlock()
+	store, err := m.ownerStore()
+	if err != nil {
+		return
+	}
+	owners, err := store.List()
+	if err != nil {
+		return
+	}
+	for _, own := range owners {
+		if own.SessionID != sessionID || !own.Closed {
+			continue
+		}
+		own.Closed = false
+		if err := store.Save(own); err != nil {
+			slog.Warn("owner: could not clear the closed flag", "owner", own.ID, "error", err)
+		}
+	}
 }
 
 // titleForName is what SetTitle stores for a given owner name.
@@ -517,6 +558,9 @@ func handleUpdateOwner(mgr *Manager) http.HandlerFunc {
 			return
 		case errors.Is(err, ErrInvalidAvatar), errors.Is(err, ErrInvalidOwnerName):
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		case errors.Is(err, ErrBusy):
+			http.Error(w, "owner is busy; let it finish before closing it", http.StatusConflict)
 			return
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -73,11 +73,36 @@ export async function createOwner({ root, name, model, thinking, avatar }) {
 
 // updateOwner reloads both projections because an owner rename can also
 // retitle its standing conversation, which is carried by the session list.
-export async function updateOwner(id, { name, avatar }) {
-  const info = await api('PATCH', `/api/owners/${id}`, { name, avatar });
+export async function updateOwner(id, { name, avatar, closed }) {
+  const info = await api('PATCH', `/api/owners/${id}`, { name, avatar, closed });
   await loadOwners();
   await loadSessions();
   return info;
+}
+
+// closeOwner is Close session on the owner's conversation plus the flag that
+// sends it to the closed group, in one server call. The server refuses while
+// the owner works (409); the toast says so, as it does for a session.
+export async function closeOwner(own) {
+  try {
+    await api('PATCH', `/api/owners/${own.id}`, { closed: true });
+  } catch (e) {
+    const busy = String(e.message || e).startsWith('409');
+    addToast({
+      title: busy ? 'Owner is still working' : 'Could not close owner',
+      detail: busy
+        ? 'Wait for it to finish before closing it.'
+        : String(e.message || e),
+      type: busy ? 'info' : 'error',
+    });
+    return false;
+  }
+  const { closeSession } = await import('./session-actions.js');
+  // The server already unloaded the conversation; this mirrors it in the store
+  // and frees the pane that was showing it.
+  await closeSession(own.session_id).catch(() => {});
+  await loadOwners();
+  return true;
 }
 
 // openOwnerConversation opens the owner's own session in the pane. The backend
@@ -86,6 +111,10 @@ export async function updateOwner(id, { name, avatar }) {
 // creation failed, and it says so rather than pretending to open something.
 export function openOwnerConversation(own) {
   const id = own?.session_id;
+  // Opening is what brings a closed owner back. Locally at once; the server
+  // clears the flag when it resumes the conversation, or on this call when the
+  // conversation was already loaded.
+  if (own?.closed) reopenOwnerFlag(own);
   if (!id) {
     addToast({
       title: 'This owner has no conversation',
@@ -100,6 +129,16 @@ export function openOwnerConversation(own) {
     loadOwnerSessions().then(() => openSession(id));
   }
   return true;
+}
+
+function reopenOwnerFlag(own) {
+  setState((s) => ({
+    owners: {
+      ...ownersSlice(s),
+      list: (ownersSlice(s).list || []).map((o) => (o.id === own.id ? { ...o, closed: false } : o)),
+    },
+  }));
+  api('PATCH', `/api/owners/${own.id}`, { closed: false }).catch(() => loadOwners());
 }
 
 // loadOwnerSessions pulls the roster WITH the owner conversations, which the

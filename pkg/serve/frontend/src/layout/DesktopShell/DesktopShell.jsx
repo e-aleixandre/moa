@@ -7,7 +7,7 @@ import { useStore } from "../../hooks/useStore.js";
 import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { setDrawerProjectCollapsed, setSectionCollapsed, setSidebarMode } from "../../data/drawer.js";
-import { createOwner, openOwnerConversation } from "../../data/owners.js";
+import { closeOwner, createOwner, openOwnerConversation } from "../../data/owners.js";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
 import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSession, routeEventToOwner, toggleInbox } from "../../data/events.js"; // wake-on-event
 import { selectDesktopChrome } from "../Sidebar/sessions.js";
@@ -68,6 +68,7 @@ export function DesktopShell({ version, children }) {
         owners={chrome.owners}
         activeOwnerId={chrome.activeOwnerId}
         onOpenOwner={(own) => openOwnerConversation(own)}
+        onCloseOwner={(own) => { closeOwner(own); }}
         onNewOwner={() => setNewOwnerOpen(true)}
         collapsedProjects={chrome.drawerCollapsed}
         onToggleProject={setDrawerProjectCollapsed}

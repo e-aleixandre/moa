@@ -735,3 +735,114 @@ func TestOwnerAPIAcceptsTheNewShapesAndTones(t *testing.T) {
 		t.Fatalf("toneless PATCH left %+v", got.Avatar)
 	}
 }
+
+func ownerClosedOnDisk(t *testing.T, mgr *Manager, id string) bool {
+	t.Helper()
+	info, err := mgr.GetOwner(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Closed
+}
+
+func TestCloseOwnerClosesItsSessionAndOpeningClearsTheFlag(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Winerim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := patchOwner(t, mgr, info.ID, `{"closed":true}`)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("close = %d %s", resp.Code, resp.Body)
+	}
+	if _, loaded := mgr.Get(info.SessionID); loaded {
+		t.Fatal("closing an owner left its conversation loaded")
+	}
+	if !ownerClosedOnDisk(t, mgr, info.ID) {
+		t.Fatal("closed flag not persisted")
+	}
+	// Closing again, with the conversation already saved, is idempotent.
+	if resp := patchOwner(t, mgr, info.ID, `{"closed":true}`); resp.Code != http.StatusOK {
+		t.Fatalf("second close = %d %s", resp.Code, resp.Body)
+	}
+
+	// Any way of loading the conversation (a wake-up, the palette) clears it.
+	// An internal wake-up (a report, a schedule) leaves the flag alone.
+	if _, err := mgr.ResumeSession(info.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if !ownerClosedOnDisk(t, mgr, info.ID) {
+		t.Fatal("a wake-up cleared the closed flag")
+	}
+	if err := mgr.CloseSession(info.SessionID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The user opening it (HTTP resume, which the palette uses too) clears it.
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(mgr))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/sessions/"+info.SessionID+"/resume", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resume = %d %s", rec.Code, rec.Body)
+	}
+	if ownerClosedOnDisk(t, mgr, info.ID) {
+		t.Fatal("closed flag survived the owner being opened")
+	}
+}
+
+func TestCloseOwnerWhileWorkingIs409AndLeavesItOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	release := make(chan struct{})
+	mgr := newTestManager(t, ctx, newMockProvider(func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return simpleResponse("reply"), nil
+	}))
+	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Winerim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := mgr.Send(info.SessionID, "go", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	sess, _ := mgr.Get(info.SessionID)
+	pollUntil(t, 5*time.Second, "running", func() bool { return sessState(sess) == StateRunning })
+
+	if resp := patchOwner(t, mgr, info.ID, `{"closed":true}`); resp.Code != http.StatusConflict {
+		t.Fatalf("close while working = %d, want 409", resp.Code)
+	}
+	if ownerClosedOnDisk(t, mgr, info.ID) {
+		t.Fatal("a refused close set the flag")
+	}
+	if _, loaded := mgr.Get(info.SessionID); !loaded {
+		t.Fatal("a refused close unloaded the conversation")
+	}
+	close(release)
+}
+
+func TestEventOnAClosedOwnerBringsItBack(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, _ := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	if resp := patchOwner(t, mgr, info.ID, `{"closed":true}`); resp.Code != http.StatusOK {
+		t.Fatalf("close = %d %s", resp.Code, resp.Body)
+	}
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "build ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.routeEventToOwner(ev, info.SessionID, false); err != nil {
+		t.Fatal(err)
+	}
+	if ownerClosedOnDisk(t, mgr, info.ID) {
+		t.Fatal("an event left the owner closed")
+	}
+}

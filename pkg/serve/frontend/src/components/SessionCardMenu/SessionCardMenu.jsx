@@ -13,6 +13,10 @@ export function SessionCardMenu({
   onReopen,
   onDelete,
   scrollContainerSelector,
+  // An owner row uses this same menu and gesture. Its "session" is the owner
+  // (`saved` = closed), the wording says so, and Delete is not offered: it
+  // would leave the owner's sessions without an owner.
+  owner = false,
 }) {
   const [open, setOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -23,14 +27,15 @@ export function SessionCardMenu({
 
   const stop = (event) => event.stopPropagation();
 
+  const noun = owner ? "owner" : "session";
   const actions = [
     session.saved
-      ? { id: "reopen", icon: ArchiveRestore, label: "Reopen session", onClick: () => onReopen?.(session.id) }
-      : { id: "close", icon: Archive, label: "Close session", onClick: () => onClose?.(session.id) },
-    { id: "copy", icon: Copy, label: "Copy session ID", onClick: () => copyToClipboard(session.id) },
-    confirmingDelete
+      ? { id: "reopen", icon: ArchiveRestore, label: `Reopen ${noun}`, onClick: () => onReopen?.(session.id) }
+      : { id: "close", icon: Archive, label: `Close ${noun}`, onClick: () => onClose?.(session.id) },
+    { id: "copy", icon: Copy, label: `Copy ${noun} ID`, onClick: () => copyToClipboard(session.id) },
+    ...(owner ? [] : [confirmingDelete
       ? { id: "delete", icon: Trash2, label: "Delete — this cannot be undone", danger: true, onClick: () => onDelete?.(session.id) }
-      : { id: "delete", icon: Trash2, label: "Delete…", danger: true, closeOnClick: false, onClick: () => setConfirmingDelete(true) },
+      : { id: "delete", icon: Trash2, label: "Delete…", danger: true, closeOnClick: false, onClick: () => setConfirmingDelete(true) }]),
   ];
 
   return (
@@ -40,7 +45,7 @@ export function SessionCardMenu({
         open={open}
         onOpenChange={setOpen}
         icon={MoreHorizontal}
-        label="Session actions"
+        label={owner ? "Owner actions" : "Session actions"}
         triggerClass="session-card-menu-button"
         triggerSize={16}
         placement="auto"
