@@ -297,21 +297,25 @@ func (m *Manager) ownerDestination(ownerID string) (tasks.Destination, string, e
 
 // provisionNew creates the run's session, or finds the one a previous
 // attempt created: the run's ID is written in that session's first save, and
-// a full scan of the saved sessions finds it after a crash. Held under
-// automationMu, like session Delete and Close, so a delete cannot slip between
-// the scan, the creation and T1.
+// a full scan of the saved sessions finds it after a crash.
+//
+// The scan reads every session header, so it runs before automationMu, which
+// session Delete and Close also take. The creation and T1 run under it, after
+// the run is read again: a Delete of the session the scan found settles the
+// run through its marker (no longer ready), and only this planner creates
+// marked sessions, so an empty scan cannot go stale.
 func (s *taskScheduler) provisionNew(ctx context.Context, o tasks.Occurrence) bool {
 	m := s.m
-	m.automationMu.Lock()
-	defer m.automationMu.Unlock()
-	cur, err := m.tasks.Occurrence(ctx, o.ID)
-	if err != nil || cur.State != tasks.OccReady {
-		return false
-	}
 	occKey, parentKey := strconv.FormatInt(o.ID, 10), strconv.FormatInt(o.ScheduleTaskID, 10)
 	found, err := session.FindByMetadata(m.sessionBaseDir, session.MetaScheduledOccurrenceID, occKey)
 	if err != nil {
 		s.fail(ctx, o.ID, reasonDestinationUncertain, err.Error())
+		return false
+	}
+	m.automationMu.Lock()
+	defer m.automationMu.Unlock()
+	cur, err := m.tasks.Occurrence(ctx, o.ID)
+	if err != nil || cur.State != tasks.OccReady {
 		return false
 	}
 	var dest tasks.Destination
