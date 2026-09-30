@@ -54,6 +54,7 @@ func withPushEndpoint(t *testing.T, mgr *Manager) *atomic.Int32 {
 		t.Fatal(err)
 	}
 	mgr.pushDispatcher = push.NewDispatcher(store, vapid, "mailto:test@example.com")
+	mgr.pushPolicy = push.NewPolicy(mgr.pushDispatcher, push.PolicyConfig{})
 	return &hits
 }
 

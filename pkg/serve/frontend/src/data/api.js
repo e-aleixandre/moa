@@ -24,6 +24,7 @@ import {
   attentionNamespaceFromInit, attentionNamespaceTransition, adoptAttentionNamespace,
 } from './ws-handlers.js';
 import { store, updateSession } from './store.js';
+import { sendPresence, watchPresence } from './presence.js';
 import {
   beginHistoryHydration, canAppendHistoryDelta, confirmHistoryHydrationInit,
   finishHistoryHydration, lastDurableHistoryAnchor,
@@ -108,6 +109,7 @@ const pendingTimers = new Map();  // sessionId → timeoutId (for reconnects awa
 const hydrationTimers = new Map(); // sessionId → timeoutId (waiting for WS init)
 const wantedIds = new Set();      // sessions that should have a connection
 const forceFullInit = new Set();  // session IDs whose cached delta base was absent
+watchPresence(() => Array.from(connections.values(), (entry) => entry.ws));
 const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
 // Delay before the next automatic retry. It survives replacements that open a
 // socket at once (foreground, network return, Retry now), so a link that keeps
@@ -383,6 +385,7 @@ function openWs(sessionId) {
   noteInitProgress(sessionId, entry);
 
   ws.onopen = () => {
+    sendPresence(ws);
     if (connections.get(sessionId) === entry && !entry.initDone) noteInitProgress(sessionId, entry);
   };
 

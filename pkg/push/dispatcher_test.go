@@ -89,3 +89,31 @@ func TestDispatcher_PrunesGoneSubscription(t *testing.T) {
 		t.Fatalf("gone subscription should be pruned, got len %d", store.Len())
 	}
 }
+
+// A passive notification must not ask the push service for high urgency (it
+// would wake a phone in battery saver for something that makes no sound); a
+// blocking one must.
+func TestDispatcher_UrgencyFollowsLevel(t *testing.T) {
+	urgencies := make(chan string, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		urgencies <- r.Header.Get("Urgency")
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	store, err := NewStore(filepath.Join(t.TempDir(), "subs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Add(validSub(t, srv.URL)); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDispatcher(t, store)
+	d.Notify(Notification{Title: "q", Level: LevelUrgent})
+	d.Notify(Notification{Title: "digest", Level: LevelPassive})
+	if got := <-urgencies; got != "high" {
+		t.Fatalf("urgent notification Urgency = %q, want high", got)
+	}
+	if got := <-urgencies; got != "normal" {
+		t.Fatalf("passive notification Urgency = %q, want normal", got)
+	}
+}

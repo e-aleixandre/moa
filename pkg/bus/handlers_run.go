@@ -522,7 +522,7 @@ func originFromCustom(custom map[string]any) RunOrigin {
 	default:
 		// owner, report, heartbeat, event, secret_batch, schedule: somebody
 		// (or something acting for them) asked for this turn.
-		return RunOrigin{Explicit: true}
+		return RunOrigin{Explicit: true, Source: source}
 	}
 }
 

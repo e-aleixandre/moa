@@ -229,9 +229,11 @@ func TestAskUserRootBashCompletionKeepsRunState(t *testing.T) {
 			if got := sess.runtime.State.Current(); got != bus.StatePermission {
 				t.Fatalf("state with ask_user pending = %q, want %q", got, bus.StatePermission)
 			}
+			// RunStarted reaches this subscriber on its own goroutine, so it may
+			// land just after the ask does: wait for it rather than poll.
 			select {
 			case <-runs: // Initial foreground run.
-			default:
+			case <-time.After(5 * time.Second):
 				t.Fatal("missing initial RunStarted")
 			}
 

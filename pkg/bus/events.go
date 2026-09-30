@@ -313,6 +313,11 @@ type RunOrigin struct {
 	// steps inside the current work, not new things that happened, so they
 	// must not become a second entry on the owner's status board.
 	ContinueCurrent bool
+	// Source is the prompt source ("report", "event", …) stamped on an explicit
+	// run whose every input came from that one source; empty when it was typed,
+	// mixed or unknown. It lets push tell an owner digesting a report from a
+	// turn somebody asked for.
+	Source string
 }
 
 // RunEnded is published when a full agent run completes (may span multiple turns).

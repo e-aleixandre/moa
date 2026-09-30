@@ -823,14 +823,14 @@ func (m *Manager) writeEventBody(ev events.Event) (string, error) {
 	return path, nil
 }
 
-// notifyEvent buzzes the phone once per event. Per the push contract it names
-// the action and at most the session title — never the event's own title or
-// body, which are external text that would land on a lock screen.
+// notifyEvent announces an event. Per the push contract it names the action
+// and at most the session title — never the event's own title or body, which
+// are external text that would land on a lock screen. How loud it is, and that
+// one source's events replace each other, is the push policy's call.
 func (m *Manager) notifyEvent(ev events.Event) {
-	if m.pushDispatcher == nil {
+	if m.pushPolicy == nil {
 		return
 	}
-	n := push.Notification{Tag: ev.ID}
 	source := sanitizeEventHeader(ev.Source)
 	if len(source) > events.MaxSourceBytes {
 		source = source[:events.MaxSourceBytes]
@@ -838,32 +838,34 @@ func (m *Manager) notifyEvent(ev events.Event) {
 	if source == "" {
 		source = "event"
 	}
+	s := push.Signal{Kind: push.KindEvent, Source: source}
 	if ev.RoutedTo != "" {
-		n.Title = "Event from " + source
-		n.SessionID = ev.RoutedTo
+		s.Headline = "Event from " + source
+		s.SessionID = ev.RoutedTo
 		if sess, ok := m.Get(ev.RoutedTo); ok {
-			n.Body = sess.title()
+			s.Title = sess.title()
 		}
 	} else {
-		n.Title = "Event from " + source + " waiting"
-		n.Inbox = true
+		s.Headline = "Event from " + source + " waiting"
+		s.Inbox = true
 	}
-	m.pushDispatcher.Notify(n)
+	m.pushPolicy.Handle(s)
 }
 
 func (m *Manager) notifyEventRateLimited(source string) {
-	if m.pushDispatcher == nil {
+	if m.pushPolicy == nil {
 		return
 	}
 	source = sanitizeEventHeader(source)
 	if source == "" {
 		source = "event"
 	}
-	m.pushDispatcher.Notify(push.Notification{
-		Tag:   "event-rate:" + source,
-		Title: "Event source rate-limited",
-		Body:  source + " is sending too many events; new ones wait in the inbox",
-		Inbox: true,
+	m.pushPolicy.Handle(push.Signal{
+		Kind:     push.KindEvent,
+		Source:   source,
+		Headline: "Event source rate-limited",
+		Title:    source + " is sending too many events; new ones wait in the inbox",
+		Inbox:    true,
 	})
 }
 

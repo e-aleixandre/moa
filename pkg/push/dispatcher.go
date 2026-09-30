@@ -24,6 +24,10 @@ type Notification struct {
 	// Inbox asks the client to open the event inbox (pending events have no
 	// session to deep-link). The service worker turns this into /?inbox=1.
 	Inbox bool `json:"inbox,omitempty"`
+	// Kind and Level come from the policy. Level is how the device should
+	// present it: passive means no sound, replacing the previous one of its tag.
+	Kind  Kind  `json:"kind,omitempty"`
+	Level Level `json:"level,omitempty"`
 }
 
 const (
@@ -59,12 +63,17 @@ func (d *Dispatcher) Notify(n Notification) {
 		slog.Warn("push: marshal notification", "error", err)
 		return
 	}
+	// A passive notification is not worth waking a phone in battery saver for.
+	urgency := webpush.UrgencyHigh
+	if n.Level == LevelPassive {
+		urgency = webpush.UrgencyNormal
+	}
 	for _, sub := range d.store.All() {
-		d.send(payload, sub)
+		d.send(payload, sub, urgency)
 	}
 }
 
-func (d *Dispatcher) send(payload []byte, sub webpush.Subscription) {
+func (d *Dispatcher) send(payload []byte, sub webpush.Subscription, urgency webpush.Urgency) {
 	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
 	defer cancel()
 
@@ -74,7 +83,7 @@ func (d *Dispatcher) send(payload []byte, sub webpush.Subscription) {
 		VAPIDPublicKey:  d.vapid.Public,
 		VAPIDPrivateKey: d.vapid.Private,
 		TTL:             ttlSeconds,
-		Urgency:         webpush.UrgencyHigh,
+		Urgency:         urgency,
 	})
 	if err != nil {
 		slog.Warn("push: send failed", "error", err)
