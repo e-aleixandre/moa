@@ -9,7 +9,7 @@ import { expect, test } from "bun:test";
 import {
   BLINK_MS, NUDGE_MS, createFaceScheduler, facePersonality, motionScript,
 } from "./faceMotion.js";
-import { combineGaze, serenaPose, syncPose } from "./OwnerFace.jsx";
+import { combineGaze, peekGate, serenaPose, syncPose } from "./OwnerFace.jsx";
 import { AVATAR_SHAPES, DEFAULT_AVATAR_SHAPES, defaultAvatar, ownerAvatar } from "./avatar-identity.js";
 
 // A fake clock: timers fire only when the test advances time.
@@ -339,4 +339,18 @@ test("events due close together are played in one task", () => {
   expect(events).toBeGreaterThan(0);
   // Without coalescing every event wakes the timer on its own.
   expect(wakes).toBeLessThan(events * 0.75);
+});
+
+test("at rest only every second blink peeks; awake blinks all go through", () => {
+  const idle = peekGate("idle");
+  const opened = [];
+  for (let i = 0; i < 6; i++) {
+    opened.push(idle(true));
+    expect(idle(false)).toBe(true);
+  }
+  expect(opened).toEqual([false, true, false, true, false, true]);
+  for (const eyes of ["working", "asks"]) {
+    const gate = peekGate(eyes);
+    for (let i = 0; i < 4; i++) expect(gate(true)).toBe(true);
+  }
 });

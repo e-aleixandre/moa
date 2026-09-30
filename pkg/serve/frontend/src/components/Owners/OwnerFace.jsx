@@ -89,6 +89,14 @@ export function syncPose(el, vars) {
   for (const k in vars) el.style.setProperty(k, String(vars[k]));
 }
 
+// At rest a blink is a peek, and a column of owners peeking on every blink
+// was too busy: only every second one opens the eyes. Closing always goes
+// through (removing an absent class is a no-op). Awake blinks are untouched.
+export function peekGate(eyes) {
+  let n = 0;
+  return (blink) => eyes !== "idle" || !blink || n++ % 2 === 1;
+}
+
 let faceSeq = 0;
 
 // useFaceMotion registers a mounted face with the shared scheduler and
@@ -103,8 +111,9 @@ export function useFaceMotion(ref, { p, eyes, mode, follow, pinned, pose, rest }
     const el = ref.current;
     const motion = faceMotion();
     if (!el || !motion) return undefined;
+    const peek = peekGate(eyes);
     const apply = (ev) => {
-      if ("blink" in ev) return void el.classList.toggle("is-blink", ev.blink);
+      if ("blink" in ev) return void (peek(ev.blink) && el.classList.toggle("is-blink", ev.blink));
       if ("live" in ev) return void el.classList.toggle("is-live", ev.live);
       if ("nudge" in ev) return void el.classList.toggle("is-nudge", ev.nudge);
       syncPose(el, pose(ev.gx, ev.gy));
