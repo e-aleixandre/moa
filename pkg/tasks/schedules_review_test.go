@@ -72,6 +72,62 @@ func TestScheduleReviewCatchUpKeepsInflightAndConfirmedRuns(t *testing.T) {
 	}
 }
 
+// Q3: completing an old child of a once template does not finish the
+// template while a newer accepted date is still pending.
+func TestScheduleReviewOldCompletionKeepsNewOnceDate(t *testing.T) {
+	r, clock := schedRepo(t, "2026-09-30T08:00:00Z")
+	tmpl := mkSchedule(t, r, "explicitly rescheduled", onceDef(utc("2026-10-01T09:00:00Z"), ""))
+	first, err := r.RunNow(bg, tmpl.ID, tmpl.Revision, tmpl.Next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first = mustAssign(t, r, first.ID, "s1")
+	cur := mustGet(t, r, tmpl.ID)
+	if _, err = r.Update(bg, cur.ID, cur.Revision, Patch{Schedule: onceDef(utc("2026-10-02T09:00:00Z"), "")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.AgentDone(bg, actor("s1", "p"), first.ChildTaskID); err != nil {
+		t.Fatal(err)
+	}
+	after := mustGet(t, r, tmpl.ID)
+	clock.Set(utc("2026-10-02T09:00:00Z"))
+	os := materialize(t, r)
+	if after.Status == StatusDone || len(os) != 1 {
+		t.Fatalf("old completion canceled the accepted new date: status=%s next=%d; new runs=%d", after.Status, after.Next, len(os))
+	}
+	second := mustAssign(t, r, os[0].ID, "s1")
+	if _, err = r.AgentDone(bg, actor("s1", "p"), second.ChildTaskID); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGet(t, r, tmpl.ID); got.Status != StatusDone {
+		t.Errorf("completing the latest run left the once template %s", got.Status)
+	}
+}
+
+// Q3: completing the first run does not mark the template Done while its
+// second execution is still assigned.
+func TestScheduleReviewOnceSecondRunNotPrematurelyDone(t *testing.T) {
+	r, clock := schedRepo(t, "2026-09-30T08:00:00Z")
+	tmpl := mkSchedule(t, r, "one shot", onceDef(utc("2026-10-01T09:00:00Z"), ""))
+	first, err := r.RunNow(bg, tmpl.ID, tmpl.Revision, tmpl.Next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first = mustAssign(t, r, first.ID, "s1")
+	cur := mustGet(t, r, tmpl.ID)
+	if _, err := r.Update(bg, cur.ID, cur.Revision, Patch{Schedule: onceDef(utc("2026-10-02T09:00:00Z"), "")}); err != nil {
+		t.Fatal(err)
+	}
+	clock.Set(utc("2026-10-02T09:00:00Z"))
+	second := mustAssign(t, r, materializeOne(t, r).ID, "s1")
+	if _, err := r.AgentDone(bg, actor("s1", "p"), first.ChildTaskID); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGet(t, r, tmpl.ID); got.Status == StatusDone && mustOcc(t, r, second.ID).State == OccAssigned {
+		t.Error("first completion marked the once template Done while its second run is still assigned")
+	}
+}
+
 // Q2 without a restart: an assignment still waiting in the outbox (held for a
 // closed session, say) is coalesced into the next slot's run.
 func TestScheduleReviewNextSlotSupersedesWaitingAssignment(t *testing.T) {

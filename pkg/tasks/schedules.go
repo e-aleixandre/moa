@@ -481,6 +481,17 @@ func (r *Repo) insertOccurrence(ctx context.Context, tx *sql.Tx, o Occurrence) (
 // run was skipped or finished follows it to Done.
 func (r *Repo) touchTemplate(ctx context.Context, tx *sql.Tx, tmpl Record, o Occurrence) error {
 	once := o.Spec.When.Kind == WhenOnce
+	if once {
+		// An older run (Run now, then a new date) does not speak for the
+		// template while a newer run or an accepted date is still pending.
+		var drives bool
+		if err := tx.QueryRowContext(ctx, `SELECT NOT EXISTS (SELECT 1 FROM task_schedules WHERE task_id = ? AND next_due_at IS NOT NULL)
+			AND NOT EXISTS (SELECT 1 FROM task_occurrences WHERE schedule_task_id = ? AND id > ?)`,
+			tmpl.ID, tmpl.ID, o.ID).Scan(&drives); err != nil {
+			return err
+		}
+		once = drives
+	}
 	switch {
 	case once && o.State == OccSkipped && tmpl.Status != StatusDone:
 		r.applyStatus(&tmpl, StatusDone)
