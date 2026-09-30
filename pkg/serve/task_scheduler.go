@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
@@ -326,6 +327,11 @@ func (s *taskScheduler) provisionNew(ctx context.Context, o tasks.Occurrence) bo
 	if err != nil || cur.State != tasks.OccReady {
 		return false
 	}
+	// A delete of the run's session that lost its settlement (a crash, SQL)
+	// leaves the run ready until a start finishes it: never a new session.
+	if discarding, err := m.tasks.MarkerDiscarding(ctx, o.ID); err != nil || discarding {
+		return false
+	}
 	var dest tasks.Destination
 	switch len(found) {
 	case 0:
@@ -368,6 +374,42 @@ func (s *taskScheduler) provisionNew(ctx context.Context, o tasks.Occurrence) bo
 	return s.assign(ctx, o.ID, dest)
 }
 
+// finishSessionDiscards completes the saved-session deletes a crash or a
+// SQL failure left between their discard mark and their settlement: a file
+// that is gone is settled as deleted; one still there was never unlinked,
+// and keeps its session and its work.
+func (m *Manager) finishSessionDiscards(ctx context.Context) {
+	ds, err := m.tasks.SessionDiscards(ctx)
+	if err != nil {
+		slog.Warn("task scheduler: reading interrupted session deletes failed", "error", err)
+		return
+	}
+	if len(ds) == 0 {
+		return
+	}
+	base := m.sessionBaseDir
+	if base == "" {
+		base = core.ConfigSubdir("sessions")
+	}
+	// An unreadable sessions directory would look like gone files.
+	if _, err := os.ReadDir(base); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("task scheduler: interrupted session deletes left for the next start", "error", err)
+		return
+	}
+	for _, d := range ds {
+		_, err := session.FindSessionStoreReadOnly(m.sessionBaseDir, d.SessionID)
+		switch {
+		case errors.Is(err, session.ErrNotFound):
+			_, err = m.tasks.SettleSessionDeleted(ctx, d.SessionID, d.MarkerOccurrenceID)
+		case err == nil:
+			err = m.tasks.ClearSessionDiscard(ctx, d.SessionID)
+		}
+		if err != nil {
+			slog.Warn("task scheduler: finishing an interrupted session delete failed", "session", d.SessionID, "error", err)
+		}
+	}
+}
+
 // recoverScheduledTasks runs once at startup, before the dispatcher and the
 // planner start: the legacy /schedule import, then the restart re-gate of
 // runs that were never attempted. A reserved (sent) assignment was
@@ -379,6 +421,7 @@ func (m *Manager) recoverScheduledTasks(ctx context.Context) {
 		// No database yet: nothing to recover, and a read must not create it.
 		return
 	}
+	m.finishSessionDiscards(ctx)
 	if n, err := m.tasks.RegateOnRestart(ctx); err != nil {
 		slog.Warn("task scheduler: re-gating runs at startup failed", "error", err)
 	} else if n > 0 {

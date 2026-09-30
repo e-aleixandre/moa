@@ -1243,7 +1243,7 @@ func TestScheduleSessionDeletedSettlement(t *testing.T) {
 	if _, err := r.SetNoticeState(bg, admitted.NoticeID, NoticeChange{From: []string{NoticeSent}, State: NoticeSent, Admitted: true}); err != nil {
 		t.Fatal(err)
 	}
-	n, err := r.SettleSessionDeleted(bg, "gone", marker.ID, nil)
+	n, err := r.SettleSessionDeleted(bg, "gone", marker.ID)
 	if err != nil || n != 4 {
 		t.Fatalf("settled %d, %v", n, err)
 	}

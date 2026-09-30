@@ -58,7 +58,9 @@ func TestScheduledNewSessionDeleteBeforeBinding(t *testing.T) {
 	t.Run("sql_failure", func(t *testing.T) {
 		h, r, o, sid, release := setup(t)
 		defer close(release)
-		drop := abortTrigger(t, h.dbPath(), "no_settle", "BEFORE UPDATE ON task_occurrences")
+		// The discard mark is the step that can still refuse a saved delete
+		// intact; a settlement lost after the unlink is TestRound4Delete*.
+		drop := abortTrigger(t, h.dbPath(), "no_settle", "BEFORE INSERT ON session_discards")
 		if err := h.mgr.Delete(sid); err == nil {
 			t.Fatal("delete succeeded without settling the run")
 		}

@@ -1303,16 +1303,13 @@ func (r *Repo) MarkDeliveryUncertain(ctx context.Context, noticeID string) (bool
 	return marked, err
 }
 
-// SettleSessionDeleted settles, before a session's file is removed, every
-// unfinished run bound to it, plus markerOccurrenceID (a run whose new
-// session was created but not yet bound; 0 for none). Undelivered work fails
-// (session_deleted) and can be sent elsewhere; work reserved or admitted is
-// skipped with an unknown outcome. Finished history is unchanged.
-//
-// remove, when not nil, removes the session's file inside the settlement's
-// transaction, last: if it fails, nothing is settled. It may be called again
-// when the transaction is retried.
-func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, markerOccurrenceID int64, remove func() error) (int, error) {
+// SettleSessionDeleted settles every unfinished run bound to a deleted
+// session, plus markerOccurrenceID (a run whose new session was created but
+// not yet bound; 0 for none), and clears the session's discard mark.
+// Undelivered work fails (session_deleted) and can be sent elsewhere; work
+// reserved or admitted is skipped with an unknown outcome. Finished history
+// is unchanged.
+func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, markerOccurrenceID int64) (int, error) {
 	var n int
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		n = 0
@@ -1349,14 +1346,74 @@ func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, marke
 			}
 			n++
 		}
-		if remove != nil {
-			if err := remove(); err != nil {
-				return false, err
-			}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM session_discards WHERE session_id = ?", sessionID); err != nil {
+			return false, err
 		}
 		return n > 0, nil
 	})
 	return n, err
+}
+
+// SessionDiscard is a saved session's delete that committed its mark but
+// not yet its settlement.
+type SessionDiscard struct {
+	SessionID          string
+	MarkerOccurrenceID int64
+}
+
+// MarkSessionDiscarding records, before a saved session's file is unlinked,
+// that its delete is under way: markerOccurrenceID (0 for none) is never
+// given a new session while the mark stands. Invisible to readers: it does
+// not change the revision.
+func (r *Repo) MarkSessionDiscarding(ctx context.Context, sessionID string, markerOccurrenceID int64) error {
+	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
+		_, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO session_discards (session_id, marker_occurrence_id, created_at)
+			VALUES (?, ?, ?)`, sessionID, markerOccurrenceID, r.now().UnixMilli())
+		return false, err
+	})
+}
+
+// ClearSessionDiscard withdraws the mark of a delete whose file was not
+// unlinked: the session and its work stay as they were.
+func (r *Repo) ClearSessionDiscard(ctx context.Context, sessionID string) error {
+	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
+		_, err := tx.ExecContext(ctx, "DELETE FROM session_discards WHERE session_id = ?", sessionID)
+		return false, err
+	})
+}
+
+// SessionDiscards lists the marks a start must finish or undo.
+func (r *Repo) SessionDiscards(ctx context.Context) ([]SessionDiscard, error) {
+	rd, err := r.reader()
+	if err != nil || rd == nil {
+		return nil, err
+	}
+	rows, err := rd.QueryContext(ctx, "SELECT session_id, marker_occurrence_id FROM session_discards ORDER BY session_id")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []SessionDiscard
+	for rows.Next() {
+		var d SessionDiscard
+		if err := rows.Scan(&d.SessionID, &d.MarkerOccurrenceID); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// MarkerDiscarding reports whether the session created for a run is being
+// deleted: the run must not get another one meanwhile.
+func (r *Repo) MarkerDiscarding(ctx context.Context, occurrenceID int64) (bool, error) {
+	rd, err := r.reader()
+	if err != nil || rd == nil {
+		return false, err
+	}
+	var found bool
+	err = rd.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM session_discards WHERE marker_occurrence_id = ?)", occurrenceID).Scan(&found)
+	return found, err
 }
 
 // LegacySchedule is one pending record of the old schedules.json.

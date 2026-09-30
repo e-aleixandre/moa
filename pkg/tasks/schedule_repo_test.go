@@ -124,7 +124,7 @@ func TestScheduleMigrationFromV2(t *testing.T) {
 	}
 	raw := rawDB(t, path)
 	var v int
-	if err := raw.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 3 {
+	if err := raw.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) {
 		t.Fatalf("user_version = %d, %v", v, err)
 	}
 	var imported int

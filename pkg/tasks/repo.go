@@ -138,6 +138,15 @@ CREATE TABLE task_occurrences (
 );
 CREATE INDEX task_occurrences_work ON task_occurrences(state, due_at, id);
 CREATE INDEX task_occurrences_session ON task_occurrences(resolved_session_id, state);`,
+	// 4: a saved session whose delete is between its file's unlink and the
+	// settlement of its runs. The file cannot come back with a rollback, so
+	// the mark is committed first: nothing recreates or delivers to it, and
+	// a start after a crash finishes or undoes the delete.
+	`CREATE TABLE session_discards (
+  session_id TEXT PRIMARY KEY,
+  marker_occurrence_id INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);`,
 }
 
 // Repo is the shared task database. It opens lazily: a process that never

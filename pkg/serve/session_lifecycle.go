@@ -824,15 +824,12 @@ func (m *Manager) deleteSession(id string) (err error) {
 	// It is settled here, after the last busy check and under m.mu, so no
 	// Resume can reserve the session between the settlement and the
 	// deletion: a refused delete settles nothing. A saved session's file is
-	// unlinked inside the settlement's transaction, so a refused unlink
-	// settles nothing either.
+	// unlinked between its discard mark and its settlement, so a refused
+	// unlink settles nothing either.
 	var unlink func() error
 	var savedDir string
 	if !ok {
 		unlink = func() error {
-			if savedDir != "" {
-				return nil // already unlinked by an earlier try of the transaction
-			}
 			dir, err := session.UnlinkByID(m.sessionBaseDir, id)
 			savedDir = dir
 			return err
@@ -1940,20 +1937,30 @@ func creatorTZOf(meta map[string]any) string {
 	return tz
 }
 
+// afterSessionUnlink is a test seam at Delete's crash boundary: a saved
+// session's file is gone and its settlement is not yet committed. Nil in
+// production.
+var afterSessionUnlink func(sessionID string)
+
 // settleScheduledWork settles, before a session is deleted, the scheduled
 // runs bound to it, and the run it was created for if it carries a marker
 // (created, crash, not yet bound). Undelivered work becomes Not sent;
 // delivered work ends with an unknown outcome. A failure refuses the delete:
 // removing the file first could let a restart recreate the session.
 //
-// unlink, when not nil, removes a saved session's file inside the
-// settlement's transaction: its error refuses the delete and is returned as
-// is. It runs whenever the delete goes ahead, even with nothing to settle.
+// unlink, when not nil, removes a saved session's file. SQLite cannot roll
+// an unlink back, so a saved delete goes in three steps: a committed discard
+// mark (nothing recreates or delivers to the session meanwhile), the unlink,
+// and the settlement, which clears the mark. A refused unlink withdraws the
+// mark and settles nothing; its error is returned as is. Once the file is
+// gone the delete has happened: a settlement that fails then is logged and
+// finished at the next start (finishSessionDiscards).
 //
 // Called with m.mu held: sess is the live session (nil when saved), read
 // from m.sessions by the caller, and nothing here takes a Manager lock.
 func (m *Manager) settleScheduledWork(id string, sess *ManagedSession, unlink func() error) error {
-	if unlink == nil {
+	saved := unlink != nil
+	if !saved {
 		unlink = func() error { return nil }
 	}
 	if m.tasks == nil {
@@ -1988,15 +1995,13 @@ func (m *Manager) settleScheduledWork(id string, sess *ManagedSession, unlink fu
 	if v, _ := meta[session.MetaScheduledOccurrenceID].(string); v != "" {
 		marker, _ = strconv.ParseInt(v, 10, 64)
 	}
-	var unlinkErr error
-	remove := func() error {
-		unlinkErr = unlink()
-		return unlinkErr
+	var err error
+	if saved {
+		err = m.tasks.MarkSessionDiscarding(m.baseCtx, id, marker)
+	} else {
+		_, err = m.tasks.SettleSessionDeleted(m.baseCtx, id, marker)
 	}
-	if _, err := m.tasks.SettleSessionDeleted(m.baseCtx, id, marker, remove); err != nil {
-		if unlinkErr != nil {
-			return unlinkErr
-		}
+	if err != nil {
 		if errors.Is(err, tasks.ErrSchemaTooNew) {
 			// A newer moa owns this database; this binary cannot write it
 			// and must not make sessions undeletable because of it.
@@ -2004,6 +2009,21 @@ func (m *Manager) settleScheduledWork(id string, sess *ManagedSession, unlink fu
 			return unlink()
 		}
 		return fmt.Errorf("settle scheduled work of session %s: %w", id, err)
+	}
+	if !saved {
+		return nil
+	}
+	if err := unlink(); err != nil {
+		if cerr := m.tasks.ClearSessionDiscard(m.baseCtx, id); cerr != nil {
+			slog.Warn("session delete refused; its discard mark stays until the next start", "session", id, "error", cerr)
+		}
+		return err
+	}
+	if afterSessionUnlink != nil {
+		afterSessionUnlink(id)
+	}
+	if _, err := m.tasks.SettleSessionDeleted(m.baseCtx, id, marker); err != nil {
+		slog.Warn("deleted session's scheduled work not settled; the next start settles it", "session", id, "error", err)
 	}
 	return nil
 }
