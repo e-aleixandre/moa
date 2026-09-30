@@ -131,6 +131,7 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 				case r != nil && r.digest:
 					s := signal(push.KindDigest)
 					s.Project = sess.CWD
+					s.StillPending = allowed // a deleted session announces nothing
 					pol.Handle(s)
 				case r != nil && !r.start.IsZero() && !e.At.IsZero() && e.At.Sub(r.start) < minRunForPush:
 					// quick answer — not worth a buzz

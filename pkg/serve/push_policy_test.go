@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -395,5 +396,54 @@ func TestDeleteDropsTheWaitingDigest(t *testing.T) {
 	probe.expire()
 	if got := probe.delivered(); len(got) != 0 {
 		t.Fatalf("a digest for a deleted session was sent: %+v", got)
+	}
+}
+
+// gateProbe holds every "blocker" notification until released and records the
+// rest; it makes a real delivery queue build up behind busy workers.
+type gateProbe struct {
+	pushProbe
+	release chan struct{}
+}
+
+func (g *gateProbe) Notify(ctx context.Context, n push.Notification) {
+	if n.Body == "blocker" {
+		select {
+		case <-g.release:
+		case <-ctx.Done():
+		}
+		return
+	}
+	g.pushProbe.Notify(ctx, n)
+}
+
+// A digest whose window ended sits in the delivery queue behind busy workers;
+// deleting its session meanwhile must stop it from going out.
+func TestDeletedSessionsQueuedDigestIsNotSent(t *testing.T) {
+	mgr := newOwnerTestManager(t, context.Background())
+	g := &gateProbe{release: make(chan struct{})}
+	pol := push.NewPolicy(g, push.PolicyConfig{After: g.after})
+	t.Cleanup(pol.Close)
+	mgr.pushPolicy = pol
+	sess, err := mgr.CreateSession(CreateOpts{Title: "deleted while queued"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishStartAt(sess, 1, bus.RunOrigin{Explicit: true, Source: reportSource}, time.Now())
+	publishEnd(sess, 1, time.Now())
+	sess.runtime.Bus.Drain(5 * time.Second)
+	for i := 0; i < 8; i++ { // more than the workers can take at once
+		pol.Handle(push.Signal{Kind: push.KindAsk, SessionID: fmt.Sprint("blocker", i), Headline: "x", Title: "blocker", RequestID: "r"})
+	}
+	g.expire() // the digest's window ends: it is queued now
+	if err := mgr.Delete(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(g.release)
+	time.Sleep(100 * time.Millisecond)
+	for _, n := range g.delivered() {
+		if n.Kind == push.KindDigest {
+			t.Fatalf("a digest for a deleted session was sent: %+v", n)
+		}
 	}
 }

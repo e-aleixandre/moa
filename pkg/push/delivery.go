@@ -23,6 +23,13 @@ const (
 	maxQuietQueued  = 64
 )
 
+// job is a queued notification with the check that says whether it is still
+// worth sending when its turn comes.
+type job struct {
+	n     Notification
+	valid func() bool
+}
+
 type deliverer struct {
 	sender Sender
 	ctx    context.Context
@@ -32,7 +39,7 @@ type deliverer struct {
 	cond    *sync.Cond
 	closed  bool
 	seq     int
-	pending map[string]Notification
+	pending map[string]job
 	urgent  []string // keys of pending urgent notifications, oldest first
 	quiet   []string
 	busy    map[string]bool // keys being sent right now
@@ -44,7 +51,7 @@ func newDeliverer(sender Sender) *deliverer {
 		sender:  sender,
 		ctx:     ctx,
 		cancel:  cancel,
-		pending: make(map[string]Notification),
+		pending: make(map[string]job),
 		busy:    make(map[string]bool),
 	}
 	d.cond = sync.NewCond(&d.mu)
@@ -55,7 +62,7 @@ func newDeliverer(sender Sender) *deliverer {
 }
 
 // submit queues n. It never blocks.
-func (d *deliverer) submit(n Notification) {
+func (d *deliverer) submit(n Notification, valid func() bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -67,10 +74,10 @@ func (d *deliverer) submit(n Notification) {
 		key = fmt.Sprintf("\x00untagged-%d", d.seq) // nothing to replace, nothing to serialize
 	}
 	if _, waiting := d.pending[key]; waiting {
-		d.pending[key] = n // the latest of a tag wins, keeping its place in line
+		d.pending[key] = job{n, valid} // the latest of a tag wins, keeping its place in line
 		return
 	}
-	d.pending[key] = n
+	d.pending[key] = job{n, valid}
 	if n.Level == LevelUrgent {
 		d.urgent = append(d.urgent, key)
 	} else {
@@ -107,11 +114,13 @@ func (d *deliverer) work(urgentOnly bool) {
 			d.cond.Wait()
 			continue
 		}
-		n := d.pending[key]
+		j := d.pending[key]
 		delete(d.pending, key)
 		d.busy[key] = true
 		d.mu.Unlock()
-		d.sender.Notify(d.ctx, n)
+		if j.valid == nil || j.valid() {
+			d.sender.Notify(d.ctx, j.n)
+		}
 		d.mu.Lock()
 		delete(d.busy, key)
 		d.cond.Broadcast() // a newer notification of this tag may now go

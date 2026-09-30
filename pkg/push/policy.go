@@ -141,8 +141,9 @@ type Policy struct {
 
 // summaryWait is a digest or event group waiting for its quiet window to end.
 type summaryWait struct {
-	stop func() bool
-	n    Notification
+	stop  func() bool
+	n     Notification
+	valid func() bool
 }
 
 type pendingKey struct {
@@ -284,9 +285,9 @@ func (p *Policy) Handle(s Signal) {
 	case d.n.Level == LevelUrgent && d.delay > 0:
 		p.afterGrace(s, d)
 	case d.n.Kind == KindDigest || d.n.Kind == KindEvent:
-		p.afterQuiet(d.n)
+		p.afterQuiet(d.n, s.StillPending)
 	default:
-		p.emit(d.n)
+		p.emit(d.n, s.StillPending)
 	}
 }
 
@@ -306,14 +307,14 @@ func (p *Policy) afterGrace(s Signal, d decision) {
 		delete(p.pending, key)
 		p.mu.Unlock()
 		if s.StillPending == nil || s.StillPending() {
-			p.emit(d.n)
+			p.emit(d.n, s.StillPending)
 		}
 	})
 }
 
 // afterQuiet sends the latest notification of a group once the group has been
 // quiet for the window; each newer one restarts the wait.
-func (p *Policy) afterQuiet(n Notification) {
+func (p *Policy) afterQuiet(n Notification, valid func() bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
@@ -322,7 +323,7 @@ func (p *Policy) afterQuiet(n Notification) {
 	if w, ok := p.summary[n.Tag]; ok {
 		w.stop()
 	}
-	w := &summaryWait{n: n}
+	w := &summaryWait{n: n, valid: valid}
 	p.summary[n.Tag] = w
 	w.stop = p.after(p.window, func() {
 		p.mu.Lock()
@@ -332,13 +333,17 @@ func (p *Policy) afterQuiet(n Notification) {
 		}
 		delete(p.summary, n.Tag)
 		p.mu.Unlock()
-		p.emit(w.n)
+		p.emit(w.n, w.valid)
 	})
 }
 
 // emit hands a notification to the transport. Everything but a question or a
 // permission counts against the daily limit.
-func (p *Policy) emit(n Notification) {
+//
+// valid (nil = always) is asked again right before the transport is called: a
+// notification can wait in the delivery queue while its question is answered
+// or its session deleted.
+func (p *Policy) emit(n Notification, valid func() bool) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -356,7 +361,7 @@ func (p *Policy) emit(n Notification) {
 	}
 	p.mu.Unlock()
 	if p.out != nil {
-		p.out.submit(n)
+		p.out.submit(n, valid)
 		return
 	}
 	p.sender.Notify(context.Background(), n)
