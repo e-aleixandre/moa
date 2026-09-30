@@ -1,5 +1,5 @@
 /* OwnerAvatar — the root rules every owner mark shares. The product draws
-   the Mirada face (OwnerFace.css); `.ow-av` is kept on it because the
+   the Serena face (OwnerFace.css); `.ow-av` is kept on it because the
    surfaces around the mark already select it (StatusStrip's
    `.zl-st-owner .ow-av`). The previous static tile's sheet, and the two
    proposals that wore it, moved to the catalog (catalog/owner-faces-alt.css). */

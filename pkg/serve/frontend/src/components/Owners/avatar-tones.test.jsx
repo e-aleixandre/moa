@@ -20,7 +20,7 @@ const {
   AVATAR_COLORS, AVATAR_SHAPES, AVATAR_TONES, DEFAULT_AVATAR_SHAPES, SHAPE_PATHS, EYE_CENTER,
   defaultAvatar, ownerAvatar, proposeAvatar, storedAvatar,
 } = await import("./avatar-identity.js");
-const { OwnerFace, faceBodyColor } = await import("./OwnerFace.jsx");
+const { OwnerFace, SerenaEyes, faceBodyColor } = await import("./OwnerFace.jsx");
 
 function nodes(node, out = []) {
   if (node == null || typeof node !== "object") return out;
@@ -55,16 +55,24 @@ test("the tone sets the body, and pale draws the same eyes in ink", () => {
       expect(tree.props.class).toContain(`is-tone-${tone}`);
       expect(tree.props.class).toContain(`is-${state}`);
       expect(tree.props.style["--of-body"]).toBe(faceBodyColor("peach", tone));
-      const all = nodes(tree);
-      // The eyes are the same drawing in every tone: open strokes, or the shut
-      // arcs when saved.
-      expect(all.some((n) => n.type?.name === "MiradaEyes")).toBe(state !== "saved");
-      expect(all.some((n) => n.type?.name === "MiradaShut")).toBe(state === "saved");
+      // SerenaEyes is a pure function component: expand it to see its parts.
+      const el = nodes(tree).find((n) => n.type === SerenaEyes);
+      const all = nodes(SerenaEyes(el.props));
+      // The same drawings in every tone: per state, arcs + dots at rest and
+      // awake, two level lines when saved.
+      const count = (cls) => all.filter((n) => n.props?.class === cls).length;
+      expect(count("of-arc")).toBe(state === "saved" ? 0 : 2);
+      expect(count("of-dot")).toBe(state === "saved" ? 0 : 2);
+      expect(count("of-line")).toBe(state === "saved" ? 2 : 0);
     }
   }
   const css = readFileSync(new URL("./OwnerFace.css", import.meta.url), "utf8");
-  expect(css).toContain(".of-mirada.is-tone-pale .of-lid { background: var(--of-ink); }");
-  expect(css).toContain(".of-mirada.is-tone-pale .of-m-shut { stroke: var(--of-ink); }");
+  // One variable carries the eye colour for arcs (ring and caps), dots and lines alike, and
+  // pale turns it to ink.
+  expect(css).toContain(".of-serena.is-tone-pale { --of-eye: var(--of-ink); }");
+  for (const part of ["of-ring", "of-cap", "of-dot", "of-line"]) {
+    expect(css).toMatch(new RegExp(`\\.of-serena \\.${part} \\{[^}]*var\\(--of-eye\\)`));
+  }
   expect(css).toMatch(/\.is-tone-dark\.is-saved \{ opacity: 0\.8; \}/);
 });
 

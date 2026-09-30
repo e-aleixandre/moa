@@ -9,8 +9,8 @@ import "./owner-faces-lab.css";
 
 /* Owner faces — ways of giving the owner's mark eyes that are alive.
    Every face here is the component itself (components/Owners/OwnerFace.jsx)
-   on the shared scheduler (faceMotion.js). A · Mirada is what the product now
-   draws through OwnerAvatar; B and C stay as the alternatives, and "Antes" is
+   on the shared scheduler (faceMotion.js). A (key "mirada") is what the product
+   draws through OwnerAvatar — now Serena; B and C stay as the alternatives, and "Antes" is
    the static mark it replaced (OwnerAvatarClassic). */
 
 const own = (name, codebase_key, extra = {}) => ({ id: `own_${codebase_key}`, name, codebase_key, ...extra });
@@ -73,9 +73,9 @@ const GAZES = [
   { id: "waiting", g: [0, 0], state: "asks" },
 ];
 
-const LABEL = { mirada: "A · Mirada", pupilas: "B · Pupilas", sobria: "C · Sobria" };
+const LABEL = { mirada: "A · Serena (product)", pupilas: "B · Pupilas", sobria: "C · Sobria" };
 const BLURB = {
-  mirada: "Main. A flat ball, two white strokes. Turns like a head.",
+  mirada: "Main. A flat ball; content shut eyes, open dots when awake. The head looks.",
   pupilas: "Today's lit tile. Pupils move inside the whites.",
   sobria: "Today's mark exactly. Blinks and a rare glance.",
 };
@@ -87,7 +87,7 @@ const FACE_VARIANTS = ["mirada", "pupilas", "sobria"];
 // Selectable only: never a default (see DEFAULT_AVATAR_SHAPES).
 const OPT_IN_SHAPES = AVATAR_SHAPES.filter((s) => !DEFAULT_AVATAR_SHAPES.includes(s));
 
-// Mirada is the product's OwnerFace; B and C are the catalog-only drawings.
+// "mirada" is the product's OwnerFace (Serena); B and C are the catalog-only drawings.
 function Face({ variant, ...props }) {
   const { sheen } = useContext(Lab);
   if (variant === "mirada") return <OwnerFace sheen={sheen} {...props} />;

@@ -1,18 +1,20 @@
-/* OwnerFace — the owner's animated "Mirada" face (drawn through OwnerAvatar).
-   Every class is prefixed `of`. The proposals it was chosen over live in the
-   catalog (catalog/owner-faces-alt.css) and are not in the product bundle.
+/* OwnerFace — the owner's animated "Serena" face (drawn through OwnerAvatar).
+   Every class is prefixed `of`. The alternatives it was chosen over live in
+   the catalog (catalog/owner-faces-alt.css) and are not in the product bundle.
 
-   HOW IT MOVES. Eyes: faceMotion sets a few custom properties (the gaze) and
+   HOW IT MOVES. faceMotion sets a few custom properties (the gaze) and
    toggles `.is-blink` / `.is-nudge`; the transitions below are the whole
-   tween, and between two events no frame is produced. Everything Mirada
-   moves is an HTML box (see MiradaEyes), so those transitions run on the
+   tween, and between two events no frame is produced. Everything Serena
+   moves is an HTML box (see SerenaEyes): the head, the pair of eyes, the
+   dots (transform) and the arcs (opacity) — so those transitions run on the
    compositor rather than restyling and re-laying-out the page every frame.
    The ONE continuous animation is the idle breath, and it is written to be
    cheap: a transform on the face's HTML root <span> (Chrome composites
    animations on HTML boxes but never on SVG elements, the outer <svg>
    included), so it runs without touching style, layout or paint; long period,
    and paused unless faceMotion has marked the face `.is-live` — on screen,
-   tab visible, not frozen, no reduced motion. */
+   tab visible, not frozen, no reduced motion. Under prefers-reduced-motion
+   there is no breath and no transition. */
 
 .of {
   position: relative;
@@ -21,13 +23,27 @@
   overflow: visible;
   line-height: 0;
   --of-ink: #12121a;
+  --of-eye: #fff;
   --of-spring: var(--motion-ease-spring, cubic-bezier(0.34, 1.42, 0.64, 1));
-  /* A blink is faster than anything in the motion language, so its two
-     halves are named here, once, rather than typed into each rule. */
-  --of-blink-close: 60ms;
-  --of-blink-open: 95ms;
+  --of-soft: cubic-bezier(0.34, 1.18, 0.64, 1);
+  --of-out: cubic-bezier(0.3, 0.9, 0.3, 1);
+  /* The eyes' timings are faster than anything in the motion language (a
+     blink, a peek), so they are named here, once, rather than typed into each
+     rule. Open fast, close slow: the asymmetry is what reads as a lid. */
+  --of-peek-open: 90ms;
+  --of-peek-close: 380ms;
+  --of-peek-curve: cubic-bezier(0.4, 0, 0.6, 1);
+  --of-awake-open: 110ms;
+  --of-blink-in: 70ms;
+  --of-blink-out: 50ms;
+  --of-arc-in: 120ms;
+  --of-arc-delay: 250ms;
+  --of-arc-fade: 60ms;
+  --of-arc-out: 70ms;
+  --of-arc-out-delay: 50ms;
+  --of-lid-close: 60ms;
+  --of-lid-open: 95ms;
   transform-origin: 50% 88%;
-  transition: transform var(--motion-base) var(--of-spring);
 }
 
 .of .of-svg { display: block; overflow: visible; }
@@ -44,95 +60,127 @@
   to { transform: scale(1.018, 1.026); }
 }
 
-/* Waiting for you: a small hop towards you, springing back. */
-.of.is-nudge { transform: translateY(-7%) scale(1.04); transition-duration: var(--motion-fast); }
+/* ── Serena ─────────────────────────────────────────────────────────────── */
 
-/* Every moving group scales and turns about its own centre. */
-.of .of-gaze,
-.of .of-open,
-.of .of-lid,
-.of .of-body {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-/* The blink: squash fast, reopen a touch slower — the asymmetry is what makes
-   it read as a lid and not as a flicker. */
-.of .of-lid { transition: transform var(--of-blink-open) cubic-bezier(0.2, 0.7, 0.3, 1); }
-.of.is-blink .of-lid {
-  transform: scaleY(0.08);
-  transition: transform var(--of-blink-close) cubic-bezier(0.5, 0, 0.9, 0.5);
-}
-
-/* How open the eyes are, by state: narrowed on the work, wide at you. */
-.of .of-open { transition: transform var(--motion-base) var(--of-spring); }
-.of.is-working .of-open { transform: scaleY(0.62); }
-.of.is-asks .of-open { transform: scale(1.14); }
-
-/* ── A · Mirada ─────────────────────────────────────────────────────────── */
-
-.of-mirada {
+.of-serena {
   filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.45));
 }
+/* Pale: every drawing in ink, because white vanishes on a pale body. */
+.of-serena.is-tone-pale { --of-eye: var(--of-ink); }
+
+/* The head — body and eyes — turns about its base and follows the gaze. */
+.of-serena .of-head {
+  position: relative;
+  display: block;
+  transform-origin: 50% 92%;
+  transform:
+    rotate(calc(var(--rot, 0) * 1deg))
+    translate(calc(var(--bx, 0) * var(--of-u)), calc(var(--by, 0) * var(--of-u)));
+  transition: transform var(--motion-slow) var(--of-soft);
+}
+.of-serena.is-nudge .of-head { transition-duration: var(--motion-fast); }
+
 /* Flat and solid, in --of-body (the identity hue one step deeper, see
    faceBodyColor). The stroke in the same colour only rounds the corners a
    little (hexagon, drop's tip): a ball, not a cut-out. */
-.of-mirada .of-fill {
+.of-serena .of-fill {
   fill: var(--of-body);
   stroke: var(--of-body);
   stroke-width: 1.4;
   stroke-linejoin: round;
 }
-.of-mirada .of-sheen-0 { stop-color: rgba(255, 255, 255, 0.34); }
-.of-mirada .of-sheen-1 { stop-color: rgba(255, 255, 255, 0.07); }
-.of-mirada .of-sheen-2 { stop-color: rgba(255, 255, 255, 0); }
-.of-mirada .of-shade-0 { stop-color: rgba(0, 0, 0, 0); }
-.of-mirada .of-shade-1 { stop-color: rgba(0, 0, 0, 0.16); }
-/* The body's sub-pixel follow of the head turn, on an HTML box. */
-.of-mirada .of-bodybox {
-  display: block;
-  transform: translate(calc(var(--bx, 0) * var(--of-u)), calc(var(--by, 0) * var(--of-u)));
-  transition: transform var(--motion-slow) var(--of-spring);
-}
-.of-mirada .of-m-eyes,
-.of-mirada .of-gaze,
-.of-mirada .of-lean,
-.of-mirada .of-open,
-.of-mirada .of-lid {
+.of-serena .of-sheen-0 { stop-color: rgba(255, 255, 255, 0.34); }
+.of-serena .of-sheen-1 { stop-color: rgba(255, 255, 255, 0.07); }
+.of-serena .of-sheen-2 { stop-color: rgba(255, 255, 255, 0); }
+.of-serena .of-shade-0 { stop-color: rgba(0, 0, 0, 0); }
+.of-serena .of-shade-1 { stop-color: rgba(0, 0, 0, 0.16); }
+
+/* The eyes: a pair layer, one box per eye (sized and turned inline), and the
+   drawings inside it. Open eyes look; shut ones ride the head. */
+.of-serena .of-eyes,
+.of-serena .of-eye,
+.of-serena .of-arc,
+.of-serena .of-dot,
+.of-serena .of-line {
   position: absolute;
   display: block;
 }
-.of-mirada .of-m-eyes { inset: 0; pointer-events: none; }
-.of-mirada .of-lean,
-.of-mirada .of-open,
-.of-mirada .of-lid { inset: 0; }
-.of-mirada .of-lid { border-radius: 999px; background: #fff; }
-.of-mirada .of-gaze { transition: transform var(--motion-slow) var(--of-spring); }
-.of-mirada.is-working .of-gaze { transition-duration: var(--motion-fast); }
-.of-mirada .of-gaze-l {
-  transform: translate(calc(var(--lx, 0) * var(--of-u)), calc(var(--gy, 0) * var(--of-u))) scale(var(--ls, 1), var(--sy, 1));
+.of-serena .of-eyes {
+  inset: 0;
+  pointer-events: none;
+  transform: translate(calc(var(--ex, 0) * var(--of-u)), calc(var(--ey, 0) * var(--of-u)));
+  transition: transform var(--motion-slow) var(--of-out);
 }
-.of-mirada .of-gaze-r {
-  transform: translate(calc(var(--rx, 0) * var(--of-u)), calc(var(--gy, 0) * var(--of-u))) scale(var(--rs, 1), var(--sy, 1));
+.of-serena.is-working .of-eyes { transition-duration: var(--motion-base); }
+.of-serena.is-idle .of-eyes { transform: none; }
+
+/* The arc ᵕ: a bordered circle (its centre line is the curve, its border the
+   stroke) cut at the chord, and a round cap at each end. The wrapper fades;
+   its parts are static. */
+.of-serena .of-arc {
+  transition: opacity var(--of-arc-in) ease var(--of-arc-delay);
 }
-.of-mirada .of-m-shut { stroke: #fff; stroke-width: 2; }
-.of-mirada.is-saved { opacity: 0.66; }
-/* Pale: the same eyes in ink, because white ones vanish on a pale body. Every
-   state is the same drawing, so the eyes say it exactly as clearly. */
-.of-mirada.is-tone-pale .of-lid { background: var(--of-ink); }
-.of-mirada.is-tone-pale .of-m-shut { stroke: var(--of-ink); }
+.of-serena .of-ring,
+.of-serena .of-cap { position: absolute; display: block; }
+.of-serena .of-ring {
+  inset: 0;
+  box-sizing: border-box;
+  border: 0 solid var(--of-eye);
+  border-radius: 50%;
+}
+.of-serena .of-cap {
+  border-radius: 50%;
+  background: var(--of-eye);
+}
+.of-serena .of-dot {
+  border-radius: 50%;
+  background: var(--of-eye);
+  transform: scale(0);
+  transition: transform var(--of-peek-close) var(--of-peek-curve);
+}
+.of-serena .of-line {
+  border-radius: 999px;
+  background: var(--of-eye);
+}
+
+/* The peek: at rest the dot opens fast and closes slowly. */
+.of-serena.is-blink .of-dot {
+  transform: scale(1);
+  transition: transform var(--of-peek-open) cubic-bezier(0.2, 0.8, 0.3, 1.25);
+}
+.of-serena.is-blink .of-arc { opacity: 0; transition: opacity var(--of-arc-fade) ease; }
+
+/* Awake (working, or waiting on you): eyes open; the blink is the arcs for a
+   moment. */
+.of-serena.is-working .of-dot,
+.of-serena.is-asks .of-dot {
+  transform: scale(1);
+  transition: transform var(--of-awake-open) cubic-bezier(0.2, 0.8, 0.3, 1.2);
+}
+.of-serena.is-working .of-arc,
+.of-serena.is-asks .of-arc { opacity: 0; transition: opacity var(--of-arc-out) ease var(--of-arc-out-delay); }
+.of-serena.is-working.is-blink .of-dot,
+.of-serena.is-asks.is-blink .of-dot { transform: scale(0); transition: transform var(--of-blink-in) ease-in; }
+.of-serena.is-working.is-blink .of-arc,
+.of-serena.is-asks.is-blink .of-arc { opacity: 1; transition: opacity var(--of-blink-out) ease; }
+/* Waiting on you: the dots pulse; nothing else moves. */
+.of-serena.is-asks.is-nudge .of-dot {
+  transform: scale(1.22);
+  transition: transform var(--motion-fast) var(--of-spring);
+}
+
+.of-serena.is-saved { opacity: 0.66; }
 /* Dark: at 0.66 a saved dark body sank into the sidebar (≈2.5:1 on
    --zl-sheet). 0.8 gives it the silhouette a saved deep face has (≈3.2:1),
    so it still steps back, as far as the others and no further. */
-.of-mirada.ow-av.is-tone-dark.is-saved { opacity: 0.8; }
+.of-serena.ow-av.is-tone-dark.is-saved { opacity: 0.8; }
 
 /* The system asked for stillness: no breath, and whatever pose is set is
    reached without travelling. The scheduler also stops sending events. */
 @media (prefers-reduced-motion: reduce) {
-  .of,
-  .of .of-lid,
-  .of .of-open,
-  .of .of-gaze,
-  .of .of-bodybox { transition: none; }
+  .of-serena .of-head,
+  .of-serena .of-eyes,
+  .of-serena .of-arc,
+  .of-serena .of-dot { transition: none !important; }
   .of.is-breathe { animation: none; }
 }

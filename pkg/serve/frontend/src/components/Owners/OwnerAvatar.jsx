@@ -12,11 +12,12 @@ import { OwnerFace } from "./OwnerFace.jsx";
 // reason this exists. The mark is SHAPE × COLOUR × TONE (avatar-identity.js),
 // independent axes with 14 × 8 × 3 = 336 combinations, and none carries state.
 //
-// WHAT IT LOOKS LIKE NOW. The "Mirada" face (OwnerFace.jsx, chosen in the
-// ?view=faces lab): a flat body in the identity colour and two short white
-// strokes for eyes. It is ALIVE on purpose — the owner asked for faces that
-// blink and look around — and the eyes behave by state (idle breathes and
-// looks around, working narrows on its work, asks looks at you, saved rests).
+// WHAT IT LOOKS LIKE NOW. The "Serena" face (OwnerFace.jsx, chosen in the
+// ?view=faces-fable lab): a flat body in the identity colour and eyes that are
+// content and shut (ᵕ ᵕ) at rest. It is ALIVE on purpose — the owner asked for
+// faces that blink and look around — and it behaves by state (idle breathes,
+// wanders its head and peeks; working opens its eyes on its work; asks looks
+// at you; saved is two level lines).
 // That is a complement to the words on the row, never a replacement: the
 // row's dot and its lead clause still say the state.
 //
@@ -39,7 +40,6 @@ export function OwnerAvatar({
 }) {
   return (
     <OwnerFace
-      variant="mirada"
       shape={shape}
       color={color}
       tone={tone}

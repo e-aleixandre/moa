@@ -1,8 +1,28 @@
 /* owner-faces-alt — CATALOG ONLY. The previous static tile (OwnerAvatarClassic)
    and the two proposals that wore it (B · Pupilas, C · Sobria). They share
-   the product face's root and blink rules (OwnerFace.css: `.of`, `.of-lid`,
-   `.of-open`, the breath); only what is theirs lives here, so none of it
-   reaches the production bundle. */
+   the product face's root and breath (OwnerFace.css: `.of`); the blink and
+   the openness they inherited from the previous product face (Mirada) live
+   here, so none of it reaches the production bundle. */
+
+.of-pupilas,
+.of-sobria { transition: transform var(--motion-base) var(--of-spring); }
+.of-pupilas.is-nudge,
+.of-sobria.is-nudge { transform: translateY(-7%) scale(1.04); transition-duration: var(--motion-fast); }
+.of .of-gaze,
+.of .of-open,
+.of .of-lid {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.of .of-lid { transition: transform var(--of-lid-open) cubic-bezier(0.2, 0.7, 0.3, 1); }
+.of.is-blink .of-lid {
+  transform: scaleY(0.08);
+  transition: transform var(--of-lid-close) cubic-bezier(0.5, 0, 0.9, 0.5);
+}
+.of .of-open { transition: transform var(--motion-base) var(--of-spring); }
+@media (prefers-reduced-motion: reduce) {
+  .of-pupilas, .of-sobria, .of .of-lid, .of .of-open { transition: none; }
+}
 
 /* ── The lit tile ──────────────────────────────────────────────────────────
    Lit from above like every sheet in the product: two gradients and the same
