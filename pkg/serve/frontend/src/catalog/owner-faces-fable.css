@@ -1,0 +1,350 @@
+/* Owner faces · a gaze of our own (?view=faces-fable). Lab only. Every face
+   class is prefixed `ff`, the page's `ffl`.
+
+   The frame is Mirada's: an HTML root that breathes, an HTML head that
+   turns, and an SVG inside. The scheduler toggles `.is-blink` / `.is-nudge`
+   / `.is-live` on the root and sets the pose as custom properties; the
+   transitions below are the whole tween. */
+
+.ff {
+  position: relative;
+  flex: none;
+  display: block;
+  overflow: visible;
+  line-height: 0;
+  --ff-eye: #fff;
+  --of-spring: var(--motion-ease-spring, cubic-bezier(0.34, 1.42, 0.64, 1));
+  --ff-soft: cubic-bezier(0.34, 1.18, 0.64, 1);
+  --ff-out: cubic-bezier(0.3, 0.9, 0.3, 1);
+  transform-origin: 50% 88%;
+}
+.ff.is-tone-pale { --ff-eye: #12121a; }
+.ff .ff-svg { display: block; overflow: visible; }
+
+/* The breath, Mirada's: paused unless the scheduler marks the face live. */
+.ff.is-breathe {
+  animation: ff-breathe var(--of-breath) ease-in-out var(--of-breath-at) infinite alternate;
+  animation-play-state: paused;
+}
+.ff.is-breathe.is-live { animation-play-state: running; will-change: transform; }
+@keyframes ff-breathe {
+  from { transform: scale(1); }
+  to { transform: scale(1.018, 1.026); }
+}
+
+/* The head: a turn about its base, the body's follow of the gaze, and the
+   nudge (lift / lean) any proposal may add through --nrot / --nby / --nsc. */
+.ff .ff-head {
+  display: block;
+  transform-origin: 50% 92%;
+  transform:
+    rotate(calc((var(--rot, 0) + var(--nrot, 0)) * 1deg))
+    translate(calc(var(--bx, 0) * var(--ff-u)), calc(var(--by, 0) * var(--ff-u) + var(--nby, 0) * 1%))
+    scale(var(--nsc, 1));
+  transition: transform var(--motion-slow) var(--ff-soft);
+}
+.ff.is-nudge .ff-head { transition-duration: var(--motion-fast); }
+
+.ff .ff-fill {
+  fill: var(--ff-body);
+  stroke: var(--ff-body);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+}
+.ff .ff-white { fill: var(--ff-eye); }
+.ff .ff-shut {
+  display: none;
+  fill: none;
+  stroke: var(--ff-eye);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+.ff.is-small .ff-shut { stroke-width: 2.1; }
+.ff.is-saved .ff-shut { display: block; }
+.ff.is-saved .ff-white,
+.ff.is-saved .ff-lid,
+.ff.is-saved .ff-lid-low { display: none; }
+
+/* Every moving SVG piece turns and scales about its own centre. */
+.ff .ff-gaze,
+.ff .ff-eyes,
+.ff .ff-mouth,
+.ff .ff-arc,
+.ff .ff-dot,
+.ff .ff-smile,
+.ff .ff-o {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* The lid: a rectangle in the body colour, clipped to the eye, sliding down
+   from above. --ff-b is the eye's half-height in user units. Shut fast,
+   reopen a touch slower, exactly Mirada's asymmetry, on a different motion. */
+.ff .ff-lid {
+  fill: var(--ff-body);
+  transform: translateY(0);
+  transition: transform 110ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.ff.is-blink .ff-lid {
+  transform: translateY(calc(var(--ff-b, 1.6) * 2.3px));
+  transition: transform 70ms cubic-bezier(0.5, 0, 0.9, 0.5);
+}
+
+/* ── 1 · Almendra ───────────────────────────────────────────────────────── */
+
+.ff-almendra .ff-gaze { transition: transform var(--motion-slow) var(--ff-out); }
+.ff-almendra.is-working .ff-gaze { transition-duration: var(--motion-base); }
+.ff-almendra .ff-gaze-l {
+  transform: translate(calc(var(--lx, 0) * 1px), calc(var(--gy, 0) * 1px)) scaleX(var(--ls, 1));
+}
+.ff-almendra .ff-gaze-r {
+  transform: translate(calc(var(--rx, 0) * 1px), calc(var(--gy, 0) * 1px)) scaleX(var(--rs, 1));
+}
+/* Concentrating: the lower lid rises into a squint. */
+.ff-almendra .ff-lid-low {
+  fill: var(--ff-body);
+  transform: translateY(0);
+  transition: transform var(--motion-base) var(--ff-soft);
+}
+.ff-almendra.is-working .ff-lid-low { transform: translateY(calc(var(--ff-b, 1.6) * -0.8px)); }
+/* Your turn: the cocked head nods a little further, and springs back. */
+.ff-almendra.is-nudge { --nrot: 4; }
+
+/* ── 2 · Serena ─────────────────────────────────────────────────────────── */
+
+.ff-serena .ff-eyes {
+  transform: translate(calc(var(--ex, 0) * 1px), calc(var(--ey, 0) * 1px));
+  transition: transform var(--motion-slow) var(--ff-out);
+}
+.ff-serena.is-working .ff-eyes { transition-duration: var(--motion-base); }
+.ff-serena.is-idle .ff-eyes { transform: none; }
+.ff-serena .ff-arc {
+  fill: none;
+  stroke: var(--ff-eye);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  transition: opacity 120ms ease 250ms;
+}
+.ff-serena.is-small .ff-arc { stroke-width: 2.8; }
+.ff-serena .ff-dot {
+  fill: var(--ff-eye);
+  transform: scale(0);
+  transition: transform 380ms cubic-bezier(0.4, 0, 0.6, 1);
+}
+/* The peek: opens fast, closes slowly. */
+.ff-serena.is-blink .ff-dot {
+  transform: scale(1);
+  transition: transform 90ms cubic-bezier(0.2, 0.8, 0.3, 1.25);
+}
+.ff-serena.is-blink .ff-arc { opacity: 0; transition: opacity 60ms ease; }
+/* Awake (working, or waiting on you): eyes open; the blink is a smile for
+   a moment. */
+.ff-serena.is-working .ff-dot,
+.ff-serena.is-asks .ff-dot {
+  transform: scale(1);
+  transition: transform 110ms cubic-bezier(0.2, 0.8, 0.3, 1.2);
+}
+.ff-serena.is-working .ff-arc,
+.ff-serena.is-asks .ff-arc { opacity: 0; transition: opacity 70ms ease 50ms; }
+.ff-serena.is-working.is-blink .ff-dot,
+.ff-serena.is-asks.is-blink .ff-dot { transform: scale(0); transition: transform 70ms ease-in; }
+.ff-serena.is-working.is-blink .ff-arc,
+.ff-serena.is-asks.is-blink .ff-arc { opacity: 1; transition: opacity 50ms ease; }
+.ff-serena.is-asks.is-nudge .ff-dot { transform: scale(1.22); transition: transform var(--motion-fast) var(--of-spring); }
+.ff-serena .ff-shut { stroke-width: 2.2; }
+.ff-serena.is-saved .ff-arc,
+.ff-serena.is-saved .ff-dot { display: none; }
+
+/* ── 3 · Cara ───────────────────────────────────────────────────────────── */
+
+.ff-cara .ff-eyes {
+  transform: translate(calc(var(--ex, 0) * 1px), calc(var(--ey, 0) * 1px));
+  transition: transform var(--motion-slow) var(--ff-out);
+}
+.ff-cara .ff-mouth {
+  transform: translate(calc(var(--mx, 0) * 1px), calc(var(--my, 0) * 1px));
+  transition: transform var(--motion-slow) var(--ff-out);
+}
+.ff-cara.is-working .ff-eyes,
+.ff-cara.is-working .ff-mouth { transition-duration: var(--motion-base); }
+.ff-cara .ff-smile {
+  fill: none;
+  stroke: var(--ff-eye);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  transform-origin: 50% 0;
+  transition: transform var(--motion-base) var(--of-spring), opacity 100ms ease;
+}
+.ff-cara.is-small .ff-smile { stroke-width: 1.9; }
+.ff-cara .ff-o {
+  fill: var(--ff-eye);
+  transform: scale(0);
+  transition: transform var(--motion-base) var(--of-spring);
+}
+/* Concentrating: eyes on the work, mouth flat. */
+.ff-cara.is-working .ff-smile { transform: scaleY(0.12); }
+/* Your turn: an "o", and a small lean towards you. */
+.ff-cara.is-asks .ff-o { transform: scale(1); }
+.ff-cara.is-asks .ff-smile { opacity: 0; }
+.ff-cara.is-nudge { --nby: -6; --nsc: 1.04; }
+.ff-cara.is-saved .ff-o { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ff .ff-head,
+  .ff .ff-lid,
+  .ff .ff-gaze,
+  .ff .ff-eyes,
+  .ff .ff-mouth,
+  .ff .ff-arc,
+  .ff .ff-dot,
+  .ff .ff-smile,
+  .ff .ff-o { transition: none; }
+  .ff.is-breathe { animation: none; }
+}
+
+/* ── The page ──────────────────────────────────────────────────────────── */
+
+.ffl {
+  min-height: 100vh;
+  padding: 28px 24px 80px;
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+}
+.ffl.is-solo { padding-top: 20px; }
+.ffl-head { max-width: 760px; margin: 0 auto 28px; text-align: center; }
+.ffl-head h1 { margin: 0 0 8px; font-size: var(--zl-fs-display); font-weight: 600; }
+.ffl-head p { margin: 0 0 14px; line-height: 1.6; color: var(--zl-t3); }
+.ffl-nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; }
+.ffl-nav a { color: var(--zl-t2); font-size: var(--zl-fs-meta); }
+
+.ffl-sec {
+  max-width: 1080px;
+  margin: 0 auto 28px;
+  padding: 20px 24px 22px;
+  border: 1px solid var(--zl-rim);
+  border-radius: var(--zl-r-xl);
+  background: var(--zl-sheet);
+}
+.ffl-sec-head h2 { margin: 0 0 4px; font-size: var(--zl-fs-title); font-weight: 600; }
+.ffl-sec-head p { margin: 0 0 16px; color: var(--zl-t3); line-height: 1.5; }
+
+.ffl-cols,
+.ffl-state {
+  display: grid;
+  grid-template-columns: 180px 132px 1.3fr 1fr 1fr 0.8fr;
+  gap: 12px;
+  align-items: center;
+}
+.ffl-cols {
+  margin-bottom: 6px;
+  font-size: var(--zl-fs-micro);
+  font-weight: 500;
+  color: var(--zl-t4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ffl-state {
+  padding: 10px 0;
+  border-top: 1px solid var(--zl-rim);
+}
+.ffl-state-cap { display: flex; flex-direction: column; gap: 2px; padding-right: 8px; }
+.ffl-state-cap b { font-weight: 600; font-size: var(--zl-fs-meta); }
+.ffl-state-cap span { color: var(--zl-t3); font-size: var(--zl-fs-micro); line-height: 1.4; }
+b.is-working, .ffl-lead.is-working { color: var(--blue, #89b4fa); }
+b.is-asks { color: var(--yellow, #f9e2af); }
+b.is-saved { color: var(--zl-t3); }
+
+.ffl-cell { display: flex; align-items: center; gap: 10px; min-height: 56px; }
+.ffl-hero {
+  justify-content: center;
+  height: 132px;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+}
+
+.ffl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 44px;
+  padding: 0 8px;
+  border-radius: var(--zl-r-md);
+}
+.ffl-row:hover { background: var(--zl-raised); }
+.ffl-row-name { font-weight: 500; }
+.ffl-lead { margin-left: auto; font-size: var(--zl-fs-meta); }
+.ffl-lead.is-asks {
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--yellow, #f9e2af);
+  background: color-mix(in srgb, var(--yellow, #f9e2af) 14%, transparent);
+}
+
+.ffl-status-tx { font-size: var(--zl-fs-meta); color: var(--zl-t3); }
+.ffl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 4px;
+  border: 1px solid var(--zl-rim);
+  border-radius: 999px;
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-micro);
+}
+.ffl-chip.is-20 { padding: 3px 10px 3px 4px; font-size: var(--zl-fs-meta); }
+
+.ffl-roster { margin-top: 16px; }
+.ffl-roster h3 {
+  margin: 0 0 8px;
+  font-size: var(--zl-fs-micro);
+  font-weight: 500;
+  color: var(--zl-t4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ffl-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-width: 640px; }
+.ffl-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px 10px;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  font-size: var(--zl-fs-micro);
+  color: var(--zl-t2);
+}
+.ffl-cell .ffl-tile { width: 92px; }
+
+/* ── Serena's full sheet ─────────────────────────────────────────────── */
+
+.ffl-sheet { margin-top: 24px; }
+.ffl-sheet h3 {
+  margin: 18px 0 8px;
+  font-size: var(--zl-fs-micro);
+  font-weight: 500;
+  color: var(--zl-t4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ffl-matrix {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 8), minmax(0, 1fr));
+  gap: 6px;
+  max-width: 980px;
+}
+.ffl-mcell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-canvas);
+}
+.ffl-mcell.is-tall { flex-direction: column; padding: 10px 4px; }
+.ffl-tone { display: grid; grid-template-columns: 48px 1fr; gap: 10px; align-items: center; margin-bottom: 6px; }
+.ffl-tone-name { font-size: var(--zl-fs-micro); color: var(--zl-t3); text-transform: uppercase; letter-spacing: 0.04em; }
