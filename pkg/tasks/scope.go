@@ -16,6 +16,7 @@ type Scope struct {
 	repo      *Repo
 	sessionID string
 	cwd       string
+	tz        string
 
 	keyOnce sync.Once
 	key     string
@@ -27,6 +28,13 @@ type Scope struct {
 // NewScope binds repo to a session and its working directory.
 func NewScope(repo *Repo, sessionID, cwd string) *Scope {
 	return &Scope{repo: repo, sessionID: sessionID, cwd: cwd}
+}
+
+// WithTZ records the IANA zone of the device that created the session ("" when
+// unknown). Set once at construction, before the scope is shared.
+func (s *Scope) WithTZ(tz string) *Scope {
+	s.tz = tz
+	return s
 }
 
 // Repo is the shared repository.
@@ -43,7 +51,7 @@ func (s *Scope) Actor() Actor {
 			s.key = core.CodebaseKey(s.cwd)
 		}
 	})
-	return Actor{SessionID: s.sessionID, ProjectKey: s.key, ProjectCWD: s.cwd}
+	return Actor{SessionID: s.sessionID, ProjectKey: s.key, ProjectCWD: s.cwd, TZ: s.tz}
 }
 
 func opCtx() (context.Context, context.CancelFunc) {

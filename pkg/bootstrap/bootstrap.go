@@ -58,6 +58,10 @@ type SessionConfig struct {
 	// right behavior for one-off agents that have no conversation to pin.
 	SessionID string
 
+	// CreatorTZ is the IANA zone of the device that created the session, ""
+	// when unknown. The task tool schedules in it.
+	CreatorTZ string
+
 	// Tasks is the shared task repository. nil = the process-wide one for the
 	// current config directory (tasks.Shared). Serve passes its own so tests
 	// and alternative session base directories stay isolated.
@@ -374,7 +378,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	if taskSessionID == "" {
 		taskSessionID = core.NewSteerID()
 	}
-	taskStore := tasks.NewScope(taskRepo, taskSessionID, cfg.CWD)
+	taskStore := tasks.NewScope(taskRepo, taskSessionID, cfg.CWD).WithTZ(cfg.CreatorTZ)
 	core.RegisterOrLog(toolReg, tasks.NewTool(taskStore))
 
 	// 3b. moa's own documentation, embedded in the binary. Always available:

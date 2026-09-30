@@ -137,4 +137,7 @@ type Actor struct {
 	SessionID  string
 	ProjectKey string // core.CodebaseKey(cwd); "" when unknown
 	ProjectCWD string
+	// TZ is the IANA zone of the device that created the session, "" when
+	// unknown. Scheduling by the agent uses it (UTC when unknown).
+	TZ string
 }

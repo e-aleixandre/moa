@@ -20,6 +20,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
@@ -33,6 +34,9 @@ type CreateOpts struct {
 	// Origin records who created the session ("user" when empty). Free-form so
 	// automation callers can label their integration, e.g. "linear-webhook".
 	Origin string `json:"origin"`
+	// TZ is the IANA timezone of the creating device (optional). It is kept
+	// with the session and is the zone the agent schedules tasks in.
+	TZ string `json:"tz,omitempty"`
 	// extraMeta carries additional creation-time metadata (automation
 	// bookkeeping such as the idempotency key and callback target). Not part of
 	// the public JSON body — automation handlers set it.
@@ -69,6 +73,11 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	if opts.Thinking != "" && !core.IsValidThinkingLevel(opts.Thinking) {
 		return nil, fmt.Errorf("%w: %q (choose: %s)", ErrInvalidThinking, opts.Thinking, core.ThinkingLevelOptions())
 	}
+	if opts.TZ != "" {
+		if _, err := tasks.LoadZone(opts.TZ); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidTimezone, err)
+		}
+	}
 	if opts.PermissionMode != "" {
 		switch permission.Mode(opts.PermissionMode) {
 		case permission.ModeYolo, permission.ModeAsk, permission.ModeAuto:
@@ -94,6 +103,12 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	persisted.Title = opts.Title
 	persisted.TitleSource = titleSource
 	persisted.SetOrigin(opts.Origin)
+	if opts.TZ != "" {
+		if persisted.Metadata == nil {
+			persisted.Metadata = make(map[string]any)
+		}
+		persisted.Metadata[session.MetaCreatorTZ] = opts.TZ
+	}
 	for k, v := range opts.extraMeta {
 		if persisted.Metadata == nil {
 			persisted.Metadata = make(map[string]any)
@@ -110,6 +125,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	}
 	bopts.artifactStore = session.NewArtifactStore(store.Dir(), id)
 	bopts.ownerSession = persisted.Kind() == session.KindOwner
+	bopts.creatorTZ = opts.TZ
 	sess, err := m.buildManagedSession(id, opts.Title, opts.Model, cwd, bopts)
 	if err != nil {
 		return nil, err
@@ -179,6 +195,10 @@ type buildOpts struct {
 	// (its role prompt, and later its write access to the book). Derived from
 	// the persisted kind, so a resume rebuilds the same agent the create did.
 	ownerSession bool
+
+	// creatorTZ is the creating device's IANA zone, "" when unknown. A resume
+	// takes it from the persisted metadata.
+	creatorTZ string
 }
 
 // buildManagedSession creates an in-memory managed session with full runtime.
@@ -238,8 +258,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	var sess *ManagedSession
 
 	var extraMCPServers map[string]core.MCPServer
+	var creatorTZ string
 	if opts != nil {
 		extraMCPServers = opts.extraMCPServers
+		creatorTZ = opts.creatorTZ
 	}
 
 	bs, err := bootstrap.BuildSession(bootstrap.SessionConfig{
@@ -256,6 +278,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Ctx:               sessionCtx,
 		EnableAskUser:     true,
 		OwnerSession:      opts != nil && opts.ownerSession,
+		CreatorTZ:         creatorTZ,
 		Fast:              initialFast,
 		BeforeWrite:       cpStore.Capture,
 		AttachmentScope:   attachScope,
@@ -736,6 +759,7 @@ var (
 	ErrInvalidCWD              = errors.New("invalid working directory")
 	ErrInvalidModel            = errors.New("invalid model")
 	ErrInvalidThinking         = errors.New("invalid thinking level")
+	ErrInvalidTimezone         = errors.New("invalid timezone")
 	ErrInvalidPermissionMode   = errors.New("invalid permission mode")
 	ErrNoMCP                   = errors.New("session has no MCP servers")
 	ErrInvalidAttentionCursor  = errors.New("invalid attention cursor")
@@ -1222,6 +1246,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 		titleSource:            saved.TitleSource,
 		artifactStore:          session.NewArtifactStore(store.Dir(), saved.ID),
 		ownerSession:           saved.Kind() == session.KindOwner,
+		creatorTZ:              creatorTZOf(saved.Metadata),
 		// Per-run MCP servers are session-scoped: they only exist in this
 		// session's metadata, so a resume has to bring them back or the agent
 		// silently loses the tools the automation caller attached. A name the
@@ -1871,4 +1896,17 @@ func modelDisplayName(m core.Model) string {
 		return m.Name
 	}
 	return m.ID
+}
+
+// creatorTZOf is the creating device's zone recorded in a session's metadata,
+// "" when absent or no longer valid.
+func creatorTZOf(meta map[string]any) string {
+	tz, _ := meta[session.MetaCreatorTZ].(string)
+	if tz == "" {
+		return ""
+	}
+	if _, err := tasks.LoadZone(tz); err != nil {
+		return ""
+	}
+	return tz
 }

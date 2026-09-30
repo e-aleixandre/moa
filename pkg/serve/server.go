@@ -456,7 +456,7 @@ func handleCreateSession(mgr *Manager) http.HandlerFunc {
 		}
 		sess, err := mgr.CreateSession(opts)
 		if err != nil {
-			if errors.Is(err, ErrInvalidCWD) || errors.Is(err, ErrInvalidModel) || errors.Is(err, ErrInvalidThinking) || errors.Is(err, ErrInvalidPermissionMode) {
+			if errors.Is(err, ErrInvalidCWD) || errors.Is(err, ErrInvalidModel) || errors.Is(err, ErrInvalidThinking) || errors.Is(err, ErrInvalidPermissionMode) || errors.Is(err, ErrInvalidTimezone) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}

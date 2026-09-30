@@ -120,6 +120,15 @@ const (
 	// forward untouched so saving a session never deletes what an old JSON
 	// held, and so rolling back to an older binary still finds it.
 	MetaLegacyTasks = "tasks"
+	// MetaScheduledOccurrenceID and MetaScheduledTaskID mark a session the
+	// task scheduler created for one run of a scheduled task. They are written
+	// in the session's first save, so after a crash the scheduler finds the
+	// session it already created instead of creating another.
+	MetaScheduledOccurrenceID = "scheduled_occurrence_id"
+	MetaScheduledTaskID       = "scheduled_task_id"
+	// MetaCreatorTZ is the IANA timezone of the device that created the
+	// session. Absent when unknown (older sessions, the CLI).
+	MetaCreatorTZ = "creator_tz"
 )
 
 // KindOwner marks the conversation of a project owner. Such a session is a
@@ -146,7 +155,7 @@ const OriginUser = "user"
 // does not know about. The persistence reactor rebuilds Metadata from scratch
 // on every snapshot, so persisters must carry these forward or they would be
 // dropped on the first save after creation.
-var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind, MetaOwnerDetached, MetaLegacyTasks}
+var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind, MetaOwnerDetached, MetaLegacyTasks, MetaScheduledOccurrenceID, MetaScheduledTaskID, MetaCreatorTZ}
 
 // SetOrigin records who created the session (e.g. "user", "automation", or a
 // caller-chosen label such as "linear-webhook"). An empty origin is not stored:
