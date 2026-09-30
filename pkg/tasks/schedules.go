@@ -1014,7 +1014,9 @@ func (r *Repo) FailOccurrence(ctx context.Context, id int64, reason, note string
 
 // RerouteOccurrence sends a failed, never admitted run to another existing
 // session: the same child moves there and gets one new assignment notice.
-// The old notice stays failed and is no longer the run's.
+// The old notice stays failed and is no longer the run's. Only the latest run
+// of its template can be sent: a newer one already stands for the recurrence,
+// which has one pending candidate.
 func (r *Repo) RerouteOccurrence(ctx context.Context, id, revision int64, dest Destination) (Occurrence, error) {
 	if dest.SessionID == "" {
 		return Occurrence{}, invalid("choose a session")
@@ -1027,6 +1029,14 @@ func (r *Repo) RerouteOccurrence(ctx context.Context, id, revision int64, dest D
 		}
 		if o.Revision != revision || o.State != OccFailed || o.AdmittedAt != 0 {
 			return false, &OccurrenceConflictError{Current: o}
+		}
+		var newer bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_occurrences
+			WHERE schedule_task_id = ? AND id > ?)`, o.ScheduleTaskID, o.ID).Scan(&newer); err != nil {
+			return false, err
+		}
+		if newer {
+			return false, &OccurrenceConflictError{Current: o, Msg: "A newer run replaced this one"}
 		}
 		if o.NoticeID != "" {
 			var state string

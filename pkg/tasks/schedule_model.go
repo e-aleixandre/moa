@@ -181,10 +181,17 @@ type Destination struct {
 	ProjectCWD string
 }
 
-// OccurrenceConflictError is a stale occurrence revision or state.
-type OccurrenceConflictError struct{ Current Occurrence }
+// OccurrenceConflictError is a stale occurrence revision or state. Msg, when
+// set, says why in the owner's words.
+type OccurrenceConflictError struct {
+	Current Occurrence
+	Msg     string
+}
 
 func (e *OccurrenceConflictError) Error() string {
+	if e.Msg != "" {
+		return e.Msg
+	}
 	return fmt.Sprintf("run #%d changed (state %s, revision %d)", e.Current.ID, e.Current.State, e.Current.Revision)
 }
 
