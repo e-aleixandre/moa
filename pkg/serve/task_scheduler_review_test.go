@@ -4,10 +4,13 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
@@ -15,6 +18,18 @@ import (
 // SQLite, a controlled clock and provider, and SIGKILLed child processes.
 
 const schedReviewChildEnv = "MOA_SCHED_REVIEW_CHILD"
+
+func schedReviewStopWorkers(t *testing.T, m *Manager) {
+	t.Helper()
+	m.tasksCancel()
+	for _, done := range []<-chan struct{}{m.notices.done, m.planner.done} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("test setup: task worker did not stop")
+		}
+	}
+}
 
 func schedReviewKill() {
 	if err := syscall.Kill(os.Getpid(), syscall.SIGKILL); err != nil {
@@ -175,5 +190,100 @@ func TestScheduleReviewRecurringCrashCoalesces(t *testing.T) {
 					old.State, old.Reason, latest.MissedCount, delivered)
 			}
 		})
+	}
+}
+
+// A Delete refused because a Resume reserved the session in the meantime
+// settles nothing: the session lives on with its scheduled work intact.
+// Either Delete wins (the file is gone) or it is refused untouched.
+func TestScheduleReviewDeleteRacingResumeSettlesOnlyWhenDeleted(t *testing.T) {
+	prov := newMockProvider()
+	h := newSchedHarness(t, prov, "2026-09-30T08:00:00Z")
+	m := h.start()
+	schedReviewStopWorkers(t, m)
+	sid := h.savedSession()
+	r := h.repo()
+	tmpl := mkTemplate(t, r, "held assignment", onceAt(h.clock.Now().Add(time.Minute), toSession(sid), tasks.Delivery{Saved: tasks.DeliverHold}))
+	h.clock.Advance(time.Minute)
+	due, err := r.MaterializeDue(bgc, 10)
+	if err != nil || len(due) != 1 {
+		t.Fatalf("test setup: T0 = %+v / %v", due, err)
+	}
+	o, err := r.AssignOccurrence(bgc, due[0].ID, tasks.Destination{SessionID: sid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settling, resumeStarted := make(chan struct{}), make(chan struct{})
+	releaseSettle, releaseResume := make(chan struct{}), make(chan struct{})
+	var settleOnce, startedOnce, releaseSettleOnce, releaseResumeOnce sync.Once
+	unblockSettle := func() { releaseSettleOnce.Do(func() { close(releaseSettle) }) }
+	unblockResume := func() { releaseResumeOnce.Do(func() { close(releaseResume) }) }
+	defer unblockSettle()
+	defer unblockResume()
+	m.tasks.SetClock(func() time.Time {
+		settleOnce.Do(func() {
+			close(settling)
+			<-releaseSettle
+		})
+		return h.clock.Now()
+	})
+	m.providerFactory = func(core.Model) (core.Provider, error) {
+		startedOnce.Do(func() { close(resumeStarted) })
+		<-releaseResume
+		return prov, nil
+	}
+	deleted := make(chan error, 1)
+	go func() { deleted <- m.Delete(sid) }()
+	select {
+	case <-settling:
+	case <-time.After(5 * time.Second):
+		t.Fatal("test setup: Delete did not reach its settlement transaction")
+	}
+	resumed := make(chan error, 1)
+	go func() {
+		_, err := m.ResumeSession(sid)
+		resumed <- err
+	}()
+	// Give Resume the chance to reserve the session while Delete settles.
+	select {
+	case <-resumeStarted:
+	case <-time.After(time.Second):
+	}
+	unblockSettle()
+	var deleteErr error
+	select {
+	case deleteErr = <-deleted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("test setup: Delete did not return after settlement")
+	}
+	unblockResume()
+	var resumeErr error
+	select {
+	case resumeErr = <-resumed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("test setup: Resume did not finish")
+	}
+	m.tasks.SetClock(h.clock.Now)
+	after := oneRun(t, r, tmpl.ID)
+	n := noticeByID(t, r, o.NoticeID)
+	_, _, findErr := session.FindSessionReadOnly(h.base, sid)
+	t.Logf("delete=%v resume=%v file=%v; run %s/%s notice %s/%s", deleteErr, resumeErr, findErr, after.State, after.Reason, n.State, n.Reason)
+	switch {
+	case errors.Is(deleteErr, ErrBusy):
+		if resumeErr != nil || findErr != nil {
+			t.Fatalf("refused Delete: resume=%v find=%v", resumeErr, findErr)
+		}
+		if after.State != tasks.OccAssigned || n.State != tasks.NoticeHeld {
+			t.Errorf("refused Delete settled live work: run=%s/%s notice=%s/%s", after.State, after.Reason, n.State, n.Reason)
+		}
+	case deleteErr == nil:
+		if !errors.Is(findErr, session.ErrNotFound) || resumeErr == nil {
+			t.Fatalf("Delete succeeded but the session survived: resume=%v find=%v", resumeErr, findErr)
+		}
+		if after.State != tasks.OccFailed || after.Reason != tasks.ReasonSessionDeleted {
+			t.Errorf("deleted session's run = %s/%s, want failed/%s", after.State, after.Reason, tasks.ReasonSessionDeleted)
+		}
+	default:
+		t.Fatalf("Delete = %v", deleteErr)
 	}
 }

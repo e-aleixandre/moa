@@ -812,12 +812,6 @@ func (m *Manager) deleteSession(id string) (err error) {
 	if resuming {
 		return ErrBusy
 	}
-	// Scheduled work bound to this session is settled in SQLite before its
-	// file goes: once unlinked, nothing may recreate or re-deliver to it.
-	// No Manager lock is held across this write.
-	if err := m.settleScheduledWork(id); err != nil {
-		return err
-	}
 	if m.automation != nil {
 		// A deleted session must not keep answering an idempotency key: the next
 		// retry should create a fresh run rather than resolve to a gone session.
@@ -829,10 +823,21 @@ func (m *Manager) deleteSession(id string) (err error) {
 		return ErrBusy
 	}
 	sess, ok := m.sessions[id]
-	if !ok {
+	// Scheduled work bound to this session is settled in SQLite before its
+	// file goes: once unlinked, nothing may recreate or re-deliver to it.
+	// It is settled here, after the last busy check and under m.mu, so no
+	// Resume can reserve the session between the settlement and the
+	// deletion: a refused delete settles nothing.
+	if err := m.settleScheduledWork(id, sess); err != nil {
 		m.mu.Unlock()
-		// Not active — delete its on-disk state.
-		if err := session.DeleteByID(m.sessionBaseDir, id); err != nil {
+		return err
+	}
+	if !ok {
+		// Not active — delete its on-disk state, still under m.mu so a
+		// Resume cannot load the file the settlement already gave up on.
+		err := session.DeleteByID(m.sessionBaseDir, id)
+		m.mu.Unlock()
+		if err != nil {
 			if errors.Is(err, session.ErrNotFound) {
 				return ErrNotFound
 			}
@@ -1924,7 +1929,10 @@ func creatorTZOf(meta map[string]any) string {
 // (created, crash, not yet bound). Undelivered work becomes Not sent;
 // delivered work ends with an unknown outcome. A failure refuses the delete:
 // removing the file first could let a restart recreate the session.
-func (m *Manager) settleScheduledWork(id string) error {
+//
+// Called with m.mu held: sess is the live session (nil when saved), read
+// from m.sessions by the caller, and nothing here takes a Manager lock.
+func (m *Manager) settleScheduledWork(id string, sess *ManagedSession) error {
 	if m.tasks == nil {
 		return nil
 	}
@@ -1932,7 +1940,7 @@ func (m *Manager) settleScheduledWork(id string) error {
 		return nil // no task database: nothing can be bound to the session
 	}
 	var meta map[string]any
-	if sess, ok := m.Get(id); ok && sess.persister != nil {
+	if sess != nil && sess.persister != nil {
 		sess.persister.has(func(s *session.Session) bool {
 			meta = s.Metadata
 			return true
