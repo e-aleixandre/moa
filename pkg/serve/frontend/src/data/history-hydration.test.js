@@ -6,7 +6,7 @@ import {
 } from './history-hydration.js';
 import { handleWsInit } from './ws-handlers.js';
 import {
-  HISTORY_HYDRATION_TIMEOUT_MS, reconnectAll, syncConnections,
+  INIT_IDLE_TIMEOUT_MS, reconnectAll, syncConnections,
 } from './api.js';
 import { deleteSession, loadSessions } from './session-actions.js';
 import { __resetBootForTests, afterVisibilityChange } from './tile-actions.js';
@@ -207,7 +207,7 @@ test('socket close and init timeout settle hydration', () => {
 
     syncConnections(['s1']);
     expect(store.get().sessions.s1.historyPending).toBe(true);
-    const timeout = timers.find((timer) => timer.delay === HISTORY_HYDRATION_TIMEOUT_MS);
+    const timeout = timers.find((timer) => timer.delay === INIT_IDLE_TIMEOUT_MS);
     timeout.callback();
     expect(store.get().sessions.s1.historyPending).toBe(false);
     expect(store.get().sessions.s1.historyStale).toBe(true);
@@ -248,7 +248,7 @@ test('reconnectAll starts a clean hydration grace window', () => {
       historyCacheSeq: 7,
     } } });
     syncConnections(['s1']);
-    const abandonedTimeout = timers.find(timer => timer.delay === HISTORY_HYDRATION_TIMEOUT_MS);
+    const abandonedTimeout = timers.find(timer => timer.delay === INIT_IDLE_TIMEOUT_MS);
 
     // The previous socket saw an up-to-date cache; the replacement must
     // recompute risk after the roster learns of a newer occurrence.

@@ -41,10 +41,16 @@ export const MCP_RESTART_TIMEOUT_MS = 30000;
 // MCP OAuth start/finish talk to the remote authorization server (up to 45s on
 // the backend) and finish then waits up to 20s more for the reconnect.
 export const MCP_OAUTH_TIMEOUT_MS = 75000;
-// A live socket normally sends init immediately. If a proxy or half-open
-// transport swallows it, keep the cached transcript legible but explicitly
-// marked stale. Only an authoritative init may acknowledge its attention.
-export const HISTORY_HYDRATION_TIMEOUT_MS = 12000;
+// A live socket normally sends init immediately, but on a weak mobile link a
+// large one takes far longer than any fixed deadline that still catches a dead
+// socket quickly: a 12 s deadline from socket creation cut every attempt short
+// and restarted the download from zero, forever. The server therefore sends a
+// large init as parts (init_chunks=1), and this deadline restarts on every sign
+// of progress (open, announcement, part). It only expires when nothing at all
+// arrives for this long — a proxy or half-open transport that swallowed the
+// init — and then keeps the cached transcript legible but marked stale. Only an
+// authoritative init may acknowledge its attention.
+export const INIT_IDLE_TIMEOUT_MS = 20000;
 
 export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_MS, cache, headers } = {}) {
 	const controller = timeoutMs > 0 ? new AbortController() : null;
@@ -97,13 +103,22 @@ export function getVersion() {
 
 // --- Centralized WS Manager ---
 
-const connections = new Map();    // sessionId → { ws, backoff, timer }
+const connections = new Map();    // sessionId → socket entry (see openWs)
 const pendingTimers = new Map();  // sessionId → timeoutId (for reconnects awaiting retry)
 const hydrationTimers = new Map(); // sessionId → timeoutId (waiting for WS init)
 const wantedIds = new Set();      // sessions that should have a connection
 const forceFullInit = new Set();  // session IDs whose cached delta base was absent
 const attentionAcknowledgements = new Map(); // occurrence → confirmed POST
+// Delay before the next automatic retry. It survives replacements that open a
+// socket at once (foreground, network return, Retry now), so a link that keeps
+// failing still backs off; only an accepted init resets it.
+const retryBackoff = new Map(); // sessionId → ms
+const INITIAL_BACKOFF = 1000;
 const MAX_BACKOFF = 16000;
+// Work that should not compete with a pending init for a weak link's
+// bandwidth (roster, inbox, catalog…): run once no visible socket is waiting
+// for its init. A failed or timed-out attempt releases it too.
+const afterInits = new Map(); // key → callback
 
 function cursorAcknowledgementKey(sessionId, seq, namespace) {
   return `cursor:${sessionId}:${seq}:${namespace}`;
@@ -123,19 +138,51 @@ export function syncConnections(visibleIds) {
       pendingTimers.delete(id);
     }
   }
+  // A conversation opened again later starts with a quick first retry.
+  for (const id of retryBackoff.keys()) {
+    if (!wantedIds.has(id)) retryBackoff.delete(id);
+  }
   // Open connections for newly visible sessions (that aren't already connecting/pending)
   for (const id of visibleIds) {
     if (!connections.has(id) && !pendingTimers.has(id)) {
-      openWs(id, 1000);
+      openWs(id);
     }
   }
+  flushAfterInits();
+}
+
+function initsPending() {
+  for (const entry of connections.values()) {
+    if (!entry.initDone) return true;
+  }
+  return false;
+}
+
+// afterPendingInits runs fn now, or once every visible socket has its init
+// (or has given up on it). Registering the same key again replaces the
+// previous callback, so a repeated poll tick runs once.
+export function afterPendingInits(key, fn) {
+  if (!initsPending()) {
+    afterInits.delete(key);
+    fn();
+    return;
+  }
+  afterInits.set(key, fn);
+}
+
+function flushAfterInits() {
+  if (afterInits.size === 0 || initsPending()) return;
+  const callbacks = [...afterInits.values()];
+  afterInits.clear();
+  for (const fn of callbacks) fn();
 }
 
 // reconnectAll tears down every live socket and reopens the wanted ones
-// immediately with a fresh backoff. Call it when the app returns to the
-// foreground or regains network: a socket may be silently half-open (no close
-// event ever fired), so the normal onclose→backoff path would never trigger and
-// the session would sit frozen until a manual reload.
+// immediately, keeping the retry backoff earned by earlier failures. Call it
+// when the app returns to the foreground or regains network: a socket may be
+// silently half-open (no close event ever fired), so the normal
+// onclose→backoff path would never trigger and the session would sit frozen
+// until a manual reload.
 export function reconnectAll() {
   const ids = [...wantedIds];
   // Remove ownership before close so an asynchronous onclose cannot schedule
@@ -145,7 +192,7 @@ export function reconnectAll() {
   for (const [id, entry] of connections) settleAndClose(id, entry);
   for (const [, timer] of pendingTimers) clearTimeout(timer);
   pendingTimers.clear();
-  for (const id of ids) openWs(id, 1000);
+  for (const id of ids) openWs(id);
 }
 
 export function acknowledgeVisibleAttentionThrough(sessionId, throughSeq, namespace = '') {
@@ -196,14 +243,14 @@ function failHistoryHydration(sessionId) {
   finishHistoryHydration(sessionId, { stale: true });
 }
 
-function scheduleReconnect(sessionId, entry) {
+function scheduleReconnect(sessionId) {
   if (!wantedIds.has(sessionId) || pendingTimers.has(sessionId)) return;
-  const delay = entry.backoff;
-  const nextBackoff = Math.min(delay * 2, MAX_BACKOFF);
+  const delay = retryBackoff.get(sessionId) ?? INITIAL_BACKOFF;
+  retryBackoff.set(sessionId, Math.min(delay * 2, MAX_BACKOFF));
   const timer = setTimeout(() => {
     pendingTimers.delete(sessionId);
     if (wantedIds.has(sessionId) && !connections.has(sessionId)) {
-      openWs(sessionId, nextBackoff);
+      openWs(sessionId);
     }
   }, delay);
   pendingTimers.set(sessionId, timer);
@@ -224,7 +271,7 @@ export function retryHistoryHydration(sessionId, { fullInit = false } = {}) {
   // This close is intentionally superseded, so it cannot settle hydration
   // through onclose. Clear its boundary before opening the replacement.
   if (entry) settleAndClose(sessionId, entry);
-  openWs(sessionId, 1000);
+  openWs(sessionId);
   return true;
 }
 
@@ -237,9 +284,67 @@ function settleAndClose(sessionId, entry) {
   clearHistoryHydrationTimer(sessionId);
   finishHistoryHydration(sessionId);
   try { entry.ws.close(); } catch (_) { /* a replacement or absence is fine */ }
+  flushAfterInits();
 }
 
-function openWs(sessionId, initialBackoff) {
+// (Re)start the init deadline: called when the socket is created and on every
+// sign that its init is still arriving. On expiry the socket is abandoned
+// right away rather than on its onclose, which a browser may only fire after a
+// close handshake stuck behind the same slow link.
+function noteInitProgress(sessionId, entry) {
+  clearHistoryHydrationTimer(sessionId);
+  hydrationTimers.set(sessionId, setTimeout(() => {
+    if (connections.get(sessionId) !== entry) return;
+    connections.delete(sessionId);
+    failHistoryHydration(sessionId);
+    try { entry.ws.close(); } catch (_) { /* already closing */ }
+    scheduleReconnect(sessionId);
+    flushAfterInits();
+  }, INIT_IDLE_TIMEOUT_MS));
+}
+
+// readInitTransport turns what arrives before init into the init event. A
+// large init comes as an init_begin announcement plus binary parts that
+// concatenate to its JSON; each part is progress. Returns the event to route,
+// or null while the init is still incomplete or the socket was closed for a
+// malformed transfer.
+function readInitTransport(sessionId, entry, data) {
+  const reject = () => { entry.ws.close(); return null; };
+  const parts = entry.initParts;
+  if (typeof data !== 'string') {
+    const bytes = new Uint8Array(data);
+    if (!parts || bytes.byteLength === 0 || parts.received + bytes.byteLength > parts.bytes) return reject();
+    parts.chunks.push(bytes);
+    parts.received += bytes.byteLength;
+    if (parts.chunks.length < parts.expected) {
+      noteInitProgress(sessionId, entry);
+      return null;
+    }
+    entry.initParts = null;
+    if (parts.received !== parts.bytes) return reject();
+    const joined = new Uint8Array(parts.bytes);
+    let offset = 0;
+    for (const chunk of parts.chunks) {
+      joined.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const evt = JSON.parse(new TextDecoder().decode(joined));
+    return evt?.type === 'init' ? evt : reject();
+  }
+  const evt = JSON.parse(data);
+  if (evt.type === 'init_begin') {
+    const expected = evt.data?.parts;
+    const total = evt.data?.bytes;
+    if (parts || !Number.isInteger(expected) || expected < 1 || !Number.isInteger(total) || total < expected) return reject();
+    entry.initParts = { expected, bytes: total, received: 0, chunks: [] };
+    noteInitProgress(sessionId, entry);
+    return null;
+  }
+  // Nothing may interleave with the parts of an init.
+  return parts ? reject() : evt;
+}
+
+function openWs(sessionId) {
   pendingTimers.delete(sessionId);
   const cached = store.get().sessions[sessionId]?.messages || [];
   const cachedBase = lastDurableHistoryAnchor(cached)?.id;
@@ -252,6 +357,7 @@ function openWs(sessionId, initialBackoff) {
   try {
     const params = new URLSearchParams();
     if (useDeltaResume) params.set('since_msg', cachedBase);
+    params.set('init_chunks', '1');
     const query = params.size > 0 ? `?${params}` : '';
     ws = new WebSocket(`${proto}//${location.host}/api/sessions/${sessionId}/ws${query}`);
   } catch (_) {
@@ -259,27 +365,37 @@ function openWs(sessionId, initialBackoff) {
     // above but this attempt never reached the server.
     if (skipDelta) forceFullInit.add(sessionId);
     failHistoryHydration(sessionId);
-    scheduleReconnect(sessionId, { backoff: initialBackoff });
+    scheduleReconnect(sessionId);
     return;
   }
+  ws.binaryType = 'arraybuffer';
   const entry = {
     ws,
-    backoff: initialBackoff,
     lastSeq: 0,
     attentionNamespace: '',
+    initDone: false,
+    initParts: null,
   };
   connections.set(sessionId, entry);
-  clearHistoryHydrationTimer(sessionId);
-  hydrationTimers.set(sessionId, setTimeout(() => {
-    if (connections.get(sessionId)?.ws === ws) {
-      failHistoryHydration(sessionId);
-      ws.close(); // onclose schedules the normal backoff retry
-    }
-  }, HISTORY_HYDRATION_TIMEOUT_MS));
+  noteInitProgress(sessionId, entry);
+
+  ws.onopen = () => {
+    if (connections.get(sessionId) === entry && !entry.initDone) noteInitProgress(sessionId, entry);
+  };
 
   ws.onmessage = (e) => {
     if (connections.get(sessionId)?.ws !== ws) return;
-    const evt = JSON.parse(e.data);
+    let evt;
+    if (entry.initDone) {
+      if (typeof e.data !== 'string') {
+        ws.close();
+        return;
+      }
+      evt = JSON.parse(e.data);
+    } else {
+      evt = readInitTransport(sessionId, entry, e.data);
+      if (!evt) return;
+    }
     if (evt.type === 'init') {
       const namespace = attentionNamespaceFromInit(evt.data);
       if (!namespace) {
@@ -309,7 +425,9 @@ function openWs(sessionId, initialBackoff) {
       clearHistoryHydrationTimer(sessionId);
       confirmHistoryHydrationInit(sessionId, { deltaBase: !!evt.data?.delta_base });
       handleWsInit(sessionId, evt.data);
-      entry.backoff = 1000;
+      entry.initDone = true;
+      retryBackoff.delete(sessionId);
+      flushAfterInits();
       return;
     }
     // A socket's init stamps every later frame with the runtime incarnation
@@ -347,8 +465,8 @@ function openWs(sessionId, initialBackoff) {
     connections.delete(sessionId);
     if (!wantedIds.has(sessionId)) return; // intentionally removed
     failHistoryHydration(sessionId);
-    // Reconnect with exponential backoff (read from entry — may have been reset by init).
-    scheduleReconnect(sessionId, entry);
+    scheduleReconnect(sessionId);
+    flushAfterInits();
   };
 
   ws.onerror = () => {

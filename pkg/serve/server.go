@@ -217,7 +217,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	// wake-on-event: the owner's inbox. Deciding where an event goes is the
 	// owner's call, so these sit on the normal browser auth, not the automation
 	// token — that token may write events and nothing else.
-	mux.HandleFunc("GET /api/events", handleListEvents(manager))
+	mux.HandleFunc("GET /api/events", withGzip(handleListEvents(manager)))
 	mux.HandleFunc("POST /api/events/dismiss", handleDismissEventSource(manager))
 	mux.HandleFunc("POST /api/events/{id}/route", handleRouteEvent(manager))
 	mux.HandleFunc("POST /api/events/{id}/dismiss", handleDismissEvent(manager))
@@ -828,7 +828,19 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		sinceMsg := query.Get("since_msg")
 		initData := buildInitData(sess, streaming, liveTools, sinceMsg)
 		initData.LastSeq = cut
-		if deviceLeaseClosed(lease) || wsWriteJSON(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}) != nil {
+		abortInit := func() bool {
+			if deviceLeaseClosed(lease) {
+				return true
+			}
+			select {
+			case <-reactor.Done():
+				return true
+			default:
+				return false
+			}
+		}
+		chunked := query.Get("init_chunks") == "1"
+		if deviceLeaseClosed(lease) || writeInit(ctx, conn, Event{Type: "init", Data: initData, Seq: cut}, chunked, abortInit) != nil {
 			return
 		}
 
@@ -845,11 +857,12 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 
 		// Keepalive: ping periodically so a silently half-open connection (common
 		// on mobile network switches, where no close frame ever arrives) is
-		// detected. A failed ping returns from the handler, which decrements
+		// detected. A dead ping (see wsMaxMissedPongs) returns from the handler, which decrements
 		// wsConns via defer — otherwise a zombie viewer would freeze the session
 		// AND suppress its "finished/errored" push (gated on wsConns == 0).
-		pingTicker := time.NewTicker(30 * time.Second)
+		pingTicker := time.NewTicker(wsPingInterval)
 		defer pingTicker.Stop()
+		missedPongs := 0
 
 		for {
 			select {
@@ -872,10 +885,17 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 					return
 				}
 			case <-pingTicker.C:
-				pingCtx, cancelPing := context.WithTimeout(ctx, 10*time.Second)
+				pingCtx, cancelPing := context.WithTimeout(ctx, wsPongTimeout)
 				err := conn.Ping(pingCtx)
 				cancelPing()
-				if err != nil {
+				switch {
+				case err == nil:
+					missedPongs = 0
+				case ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && missedPongs+1 < wsMaxMissedPongs:
+					// A pong can only come back once the peer has read everything
+					// sent before the ping, so on a slow link it is late, not lost.
+					missedPongs++
+				default:
 					return // dead connection — defer releases wsConns
 				}
 			case <-reactor.Done():
@@ -1678,6 +1698,17 @@ func scanETag(s string) (tag, remain string, ok bool) {
 func wsAcceptOptions() *websocket.AcceptOptions {
 	return &websocket.AcceptOptions{CompressionMode: websocket.CompressionNoContextTakeover}
 }
+
+// Session sockets are pinged so a silently half-open one is noticed. The ping
+// travels behind whatever is still queued for the peer — on a weak mobile link
+// that can be tens of seconds of init — so a single late pong is not proof of a
+// dead socket: only wsMaxMissedPongs consecutive misses are (about 100 s).
+// Variables so tests can shrink them.
+var (
+	wsPingInterval   = 30 * time.Second
+	wsPongTimeout    = 10 * time.Second
+	wsMaxMissedPongs = 3
+)
 
 // wsWriteTimeout bounds a single WebSocket message write. A stalled client (its
 // receive buffer full) must not block the writer goroutine forever; on timeout

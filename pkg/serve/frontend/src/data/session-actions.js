@@ -1,6 +1,6 @@
 // session-actions.js — API-backed session operations
 
-import { api, retryHistoryHydration } from './api.js';
+import { afterPendingInits, api, retryHistoryHydration } from './api.js';
 import { attentionNamespaceTransition, normalizeConversationProjection, normalizeHistory } from './ws-handlers.js';
 import { triggerAttention, triggerFailed, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
@@ -338,7 +338,9 @@ export function startPolling() {
   // event can be sent to, so refreshing it on a timer of its own would let the
   // two disagree about what is open; it is also where an arrival is noticed
   // and toasted (loadEvents diffs the ids it already knew).
-  pollTimer = setInterval(() => { loadSessions(); loadEvents(); }, interval);
+  // A tick that lands while a visible conversation is still receiving its
+  // init waits for it, like the foreground refresh does.
+  pollTimer = setInterval(() => afterPendingInits('poll', () => { loadSessions(); loadEvents(); }), interval);
 }
 
 export function stopPolling() {

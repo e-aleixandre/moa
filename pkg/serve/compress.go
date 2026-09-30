@@ -17,7 +17,8 @@ var gzipWriterPool = sync.Pool{
 
 // withGzip compresses a JSON read route when the client advertises gzip. Only
 // the large read responses use it — the session roster and the two history
-// projections shrink by 64-82% — because compressing a 200-byte POST ack costs
+// projections shrink by 64-82%, the event inbox (polled every 15 s) by ~76% —
+// because compressing a 200-byte POST ack costs
 // CPU for nothing. The WebSocket is deliberately NOT wrapped: it negotiates
 // permessage-deflate on its own (see wsAcceptOptions), and gzipping the upgrade
 // response would break it.

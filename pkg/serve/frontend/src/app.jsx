@@ -19,7 +19,7 @@ import { loadOwners } from "./data/owners.js";
 import { startTasksSync, resumeTasksSync } from "./data/tasks.js";
 import { TasksScreen } from "./components/Tasks/TasksScreen.jsx";
 import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
-import { getVersion, reconnectAll, syncConnections } from "./data/api.js";
+import { afterPendingInits, getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
@@ -183,20 +183,25 @@ function useBootstrap() {
       if (document.visibilityState === "visible") {
         afterVisibilityChange();
         reconnectAll();
-        loadSessions();
-        loadEvents(); // wake-on-event: an event may have arrived while away
-        resumeTasksSync();
-        loadOwners();
         startPolling();
-        // Also restarts the usage timer, and refreshes immediately so the
-        // status line is not showing a number from before the app was hidden.
-        startUsagePolling();
-        // Retry a catalog that never arrived; a ready one costs nothing.
-        ensureModelCatalog();
-        // Returning to a backgrounded PWA is when a user expects to see the
-        // interface that was deployed meanwhile, and on iOS it is the only
-        // moment an installed app re-reads anything at all.
-        getVersion().then(checkBuild).catch(() => {});
+        // On a weak link these refreshes would share its bandwidth with the
+        // open conversation's init — the one thing the user is waiting for —
+        // so they wait until it lands (or fails).
+        afterPendingInits("foreground", () => {
+          loadSessions();
+          loadEvents(); // wake-on-event: an event may have arrived while away
+          resumeTasksSync();
+          loadOwners();
+          // Also restarts the usage timer, and refreshes immediately so the
+          // status line is not showing a number from before the app was hidden.
+          startUsagePolling();
+          // Retry a catalog that never arrived; a ready one costs nothing.
+          ensureModelCatalog();
+          // Returning to a backgrounded PWA is when a user expects to see the
+          // interface that was deployed meanwhile, and on iOS it is the only
+          // moment an installed app re-reads anything at all.
+          getVersion().then(checkBuild).catch(() => {});
+        });
       } else {
         stopPolling();
         // Without this the usage timer kept polling every minute in the
@@ -207,9 +212,11 @@ function useBootstrap() {
     const onOnline = () => {
       if (document.visibilityState !== "visible") return;
       reconnectAll();
-      loadSessions();
-      resumeTasksSync();
-      ensureModelCatalog();
+      afterPendingInits("online", () => {
+        loadSessions();
+        resumeTasksSync();
+        ensureModelCatalog();
+      });
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);

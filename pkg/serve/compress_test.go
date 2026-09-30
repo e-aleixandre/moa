@@ -75,6 +75,7 @@ func TestReadRoutesCompressOnlyWhenTheClientAcceptsGzip(t *testing.T) {
 		"/api/sessions",
 		"/api/sessions/" + sess.ID + "/history",
 		"/api/sessions/" + sess.ID + "/messages",
+		"/api/events",
 	} {
 		t.Run(path, func(t *testing.T) {
 			plainResp := rawGet(t, srv.URL+path, "")
