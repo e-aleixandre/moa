@@ -30,6 +30,7 @@ import { LPLab } from "./catalog/lp-lab.jsx";
 import { LP2Lab } from "./catalog/lp2-lab.jsx";
 import { HomeLab } from "./catalog/home-lab.jsx";
 import { ToolsLab, ToolsPhone, LedgerIcons } from "./catalog/tools-lab.jsx";
+import { OwnersFoldLab } from "./catalog/owners-fold-lab.jsx";
 import { seedCatalogStore } from "./catalog/specimen.js";
 import { installCatalogBackend } from "./catalog/catalog-backend.js";
 import { announceArrivals } from "./data/events.js"; // wake-on-event
@@ -63,6 +64,7 @@ const LINKS = [
   { key: "home", label: "Home (3 ways)", href: "?view=home" },
   { key: "tools", label: "Tool calls", href: "?view=tools" },
   { key: "toolsphone", label: "Tool calls (phone)", href: "?view=toolsphone" },
+  { key: "ownersfold", label: "Too many owners", href: "?view=ownersfold" },
 ];
 
 // wake-on-event: the two inbox seed sets are a URL away from each other, so
@@ -215,6 +217,8 @@ function CatalogApp() {
   else if (view === "tools") body = <ToolsLab />;
   else if (view === "toolsphone") body = <ToolsPhone />;
   else if (view === "ledgericons") body = <LedgerIcons />;
+  // Too many owners in the sidebar: pinned, quiet fold, face shelf.
+  else if (view === "ownersfold") body = <OwnersFoldLab />;
   else if (view === "mobile") {
     body = (
       <PhoneLab>
