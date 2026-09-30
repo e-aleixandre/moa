@@ -55,6 +55,14 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 			if e.Err != nil || e.Payload == nil {
 				return
 			}
+			// An automatic compaction inside the /prepare-compact preparation
+			// cut a conversation that is discarded when the run ends: its first
+			// kept message never reaches the tree. Recording it would leave a
+			// boundary pointing nowhere, in force whenever the final compaction
+			// does nothing or fails.
+			if e.RunGen != 0 && e.RunGen == sctx.ephemeralRunGen.Load() {
+				return
+			}
 			ts.handleCompaction(e)
 			b.Publish(TreeSynced{SessionID: sctx.SessionID})
 		case ContextTrimmed:

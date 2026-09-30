@@ -177,7 +177,7 @@ func (t *Tree) validBranchTargetLocked(entryID string) error {
 		return fmt.Errorf("tree: cannot branch to tool_result entry (would leave dangling tool_call)")
 	}
 	path := t.pathToLocked(entryID)
-	if err := validateToolCallBalance(entriesToContext(path)); err != nil {
+	if err := validateToolCallBalance(entriesToContext(path, t.cutMissingLocked(path))); err != nil {
 		return fmt.Errorf("tree: cannot branch to %s: %w", entryID, err)
 	}
 	return nil
@@ -348,9 +348,43 @@ func (t *Tree) BuildContext() ([]core.AgentMessage, int) {
 	if t.leafID != "" {
 		path = t.pathToLocked(t.leafID)
 	}
+	cutMissing := t.cutMissingLocked(path)
 	t.mu.RUnlock()
 
-	return entriesToContext(path)
+	return entriesToContext(path, cutMissing)
+}
+
+// cutMissingLocked reports whether the boundary that decides path's context is
+// a compaction whose cut is empty or names no entry anywhere in the tree. A
+// target on another branch exists and does not count. The answer is taken with
+// the path, under the same lock, so both describe one state of the tree.
+// Caller must hold at least a read lock.
+func (t *Tree) cutMissingLocked(path []Entry) bool {
+	b := effectiveBoundary(path)
+	if b == nil || b.Type != EntryCompaction {
+		return false
+	}
+	if b.Compaction.FirstKeptEntryID == "" {
+		return true
+	}
+	_, ok := t.index[b.Compaction.FirstKeptEntryID]
+	return !ok
+}
+
+// effectiveBoundary returns the entry that decides where path's context
+// starts: the last compaction or non-empty fresh cut, or nil.
+func effectiveBoundary(path []Entry) *Entry {
+	for i := len(path) - 1; i >= 0; i-- {
+		switch path[i].Type {
+		case EntryCompaction:
+			return &path[i]
+		case EntryFresh:
+			if !path[i].Fresh.IsEmpty() {
+				return &path[i]
+			}
+		}
+	}
+	return nil
 }
 
 // TrimWatermark returns the MsgID up to which the current path has already
@@ -384,7 +418,13 @@ func (t *Tree) TrimWatermark() string {
 // compaction keeps its suffix as it stood in memory, placeholders included, so
 // a rebuild that restored those originals would hand the provider a context it
 // has never seen — different bytes, cold cache, different behaviour.
-func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
+//
+// cutMissing says the last boundary is a compaction whose cut exists nowhere
+// (see cutMissingLocked). Such a cut used to leave the summary alone, dropping
+// every later turn the transcript still shows. The context instead resumes
+// right after the boundary: the messages before it stay summarised, and the
+// unknown first kept one is not guessed at.
+func entriesToContext(path []Entry, cutMissing bool) ([]core.AgentMessage, int) {
 	if len(path) == 0 {
 		return nil, 0
 	}
@@ -397,20 +437,16 @@ func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 	//
 	// A fresh cut is a boundary like a compaction, only without a summary:
 	// whichever of the two came last decides where the context starts.
-	var lastBoundary *Entry
 	var trims []core.TrimSpan
 	epoch := 0
 	for i := range path {
 		switch path[i].Type {
 		case EntryCompaction:
-			lastBoundary = &path[i]
 			epoch++
 		case EntryFresh:
-			if path[i].Fresh.IsEmpty() {
-				continue
+			if !path[i].Fresh.IsEmpty() {
+				epoch++
 			}
-			lastBoundary = &path[i]
-			epoch++
 		case EntryTrim:
 			trims = append(trims, core.TrimSpan{
 				WatermarkMsgID: path[i].Trim.WatermarkEntryID,
@@ -420,10 +456,12 @@ func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 		}
 	}
 
+	lastBoundary := effectiveBoundary(path)
 	if lastBoundary == nil {
 		// No compaction: emit all message entries
 		return core.ApplyTrims(collectMessages(path), trims), epoch
 	}
+	recovering := cutMissing && lastBoundary.Type == EntryCompaction
 
 	var msgs []core.AgentMessage
 	firstKept := lastBoundary.Fresh.FirstKeptEntryID
@@ -445,11 +483,19 @@ func entriesToContext(path []Entry) ([]core.AgentMessage, int) {
 	// Find firstKeptEntryID in the path and emit from there
 	collecting := false
 	for _, e := range path {
-		if e.ID == firstKept {
+		if e.ID == firstKept || (recovering && e.ID == lastBoundary.ID) {
 			collecting = true
 		}
 		if collecting && e.Type == EntryMessage && isLLMRole(e.Message.Role) {
-			msgs = append(msgs, e.Message)
+			m := e.Message
+			// Its usage was measured on a prefix that cannot be rebuilt, so it
+			// must not anchor the estimate. Clearing it on this copy leaves
+			// the recorded usage and cost untouched. A live reply anchors
+			// again; after a reload it is cleared too while the cut stays.
+			if recovering && m.Role == "assistant" {
+				m.Usage = nil
+			}
+			msgs = append(msgs, m)
 		}
 	}
 

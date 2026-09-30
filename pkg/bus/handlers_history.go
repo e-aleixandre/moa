@@ -221,6 +221,7 @@ func registerHistoryHandlers(sctx *SessionContext) {
 					_ = restoreConversation(sctx, before, epoch)
 				}
 			}()
+			sctx.ephemeralRunGen.Store(sctx.RunGenAtomic.Load())
 			if _, err = sendPrepareCompact(ctx, sctx, prompt); err != nil {
 				return nil, err
 			}
