@@ -226,7 +226,7 @@ export function ShutEyes({ cx, cy, dx, cls }) {
 }
 
 /* ── The eyes ────────────────────────────────────────────────────────────
-   The eyes are HTML, not SVG. Measured with CDP over 10 s on 8 faces: when
+   The animated eye layers are HTML, not SVG. Measured with CDP over 10 s on 8 faces: when
    they were SVG groups every frame of every gaze/blink transition cost a
    style recalc AND a layout on the main thread (~380 layouts per 10 s on a
    desktop sidebar, 11% of a 4×-throttled phone), because Chrome runs no SVG
