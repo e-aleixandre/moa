@@ -183,24 +183,23 @@ func (t *Tree) validBranchTargetLocked(entryID string) error {
 	return nil
 }
 
-// HasMsgID reports whether any entry in the tree — on ANY branch, not just the
-// current path — carries a message with this ID. Uniqueness of a message
-// identity is a property of the whole tree: branching away from a message does
-// not delete it, and a client can navigate back to that branch, so an ID reused
-// on another branch would collide there.
+// HasMsgID reports whether an ID is reserved anywhere in the tree, by an entry
+// or a legacy message identity. Uniqueness spans every branch: navigating away
+// does not release an ID, and rebuilt summaries share their boundary's entry ID.
 func (t *Tree) HasMsgID(msgID string) bool {
 	if msgID == "" {
 		return false
 	}
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	// Entry IDs are the message IDs for message entries (see Append), so the
-	// index answers this in O(1); fall back to a scan for entries whose message
-	// ID differs from the entry ID (e.g. legacy or non-message entries).
-	if idx, ok := t.index[msgID]; ok {
-		if t.entries[idx].Type == EntryMessage {
-			return true
-		}
+	// Every entry ID is reserved, not only message entries: a compaction, trim
+	// or fresh boundary ID may be reused as a message ID (the rebuilt summary
+	// does), and sync treats any existing entry ID as already stored, so a new
+	// message minted with such an ID would be silently dropped. The index
+	// answers this in O(1); scan for legacy messages whose MsgID differs from
+	// their entry ID.
+	if _, ok := t.index[msgID]; ok {
+		return true
 	}
 	for _, e := range t.entries {
 		if e.Type == EntryMessage && e.Message.MsgID == msgID {
@@ -475,13 +474,22 @@ func withoutRepeatedSummaries(msgs []core.AgentMessage, path []Entry) []core.Age
 		}
 	}
 	seen := map[string]bool{}
+	dropped := false
 	out := msgs[:0]
 	for _, m := range msgs {
 		if m.Role == "compaction_summary" && len(m.Content) == 1 && m.Content[0].Type == "text" && compacted[m.Content[0].Text] {
 			if seen[m.Content[0].Text] {
+				dropped = true
 				continue
 			}
 			seen[m.Content[0].Text] = true
+		}
+		// A removed copy may have been part of a later usage anchor's prefix.
+		// Without recording which projection supplied that anchor, invalidate it
+		// conservatively here; the next live response supplies a fresh one.
+		// Assigning on the message copy leaves historical usage/cache/cost intact.
+		if dropped && m.Role == "assistant" {
+			m.Usage = nil
 		}
 		out = append(out, m)
 	}

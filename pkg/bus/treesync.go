@@ -219,8 +219,8 @@ func (ts *TreeSyncer) visitInFlightTail(fn func(*core.AgentMessage)) {
 	}
 }
 
-// HasMsgID reports whether this ID belongs to a message that exists anywhere in
-// the session tree (any branch, not just the current path) or in the in-flight
+// HasMsgID reports whether this ID is taken anywhere in the session tree
+// (including boundary IDs used by sync, on any branch) or in the in-flight
 // turn not synced to the tree yet. Unlike DisplayMessages, which projects the
 // current branch, this is the uniqueness domain for message identities: a
 // message the current branch does not show is still reachable by branching back
