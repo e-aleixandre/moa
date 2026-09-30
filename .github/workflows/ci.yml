@@ -106,9 +106,10 @@ jobs:
         run: npm run check:fields
 
       - uses: golangci/golangci-lint-action@v9
+        continue-on-error: true
         with:
           version: v2.11.3
-          args: --verbose
+          args: --verbose --max-same-issues=0
 
       - name: Capture lint cache for diagnosis
         if: always()
@@ -119,3 +120,10 @@ jobs:
         with:
           name: lint-cache
           path: ${{ runner.temp }}/lint-cache.tgz
+
+      - name: Compare cold and warm analysis on the same runner
+        run: |
+          lint="$HOME/golangci-lint-2.11.3-linux-amd64/golangci-lint"
+          "$lint" cache clean
+          "$lint" run --verbose --max-same-issues=0
+          "$lint" run --verbose --max-same-issues=0
