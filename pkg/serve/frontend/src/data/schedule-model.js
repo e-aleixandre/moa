@@ -251,7 +251,7 @@ export function schedRight(t, now, tz, late = null) {
     return due ? `was ${noToday(whenShort(due, now, tz))}` : 'Run now?';
   }
   if (s === 'failed') return isRepeat(t) ? '' : noToday(whenShort(t.when.at, now, tz));
-  if (!t.next) return '';
+  if (s === 'paused' || !t.next) return '';
   return t.next - now < 3 * 3600000 ? inWords(t.next, now) : whenShort(t.next, now, tz);
 }
 
@@ -307,12 +307,17 @@ export function deliveryRows(target) {
   return target?.kind === 'new' ? DELIVERY_ROWS.filter((r) => r.key === 'late') : DELIVERY_ROWS;
 }
 
-export const modelLabel = (spec) => String(spec || '').split('/').pop();
+// modelLabel — the catalog's display name when it knows the model, else the
+// bare id without its provider prefix.
+export function modelLabel(spec, models = []) {
+  const m = (models || []).find((e) => e.id === spec);
+  return m?.name || String(spec || '').split('/').pop();
+}
 
-export function deliverySummary(d, target) {
+export function deliverySummary(d, target, models = []) {
   const v = { ...DEFAULT_DELIVERY, ...(d || {}) };
   const s = deliveryRows(target).map((r) => r.short[v[r.key]]).join(' · ');
-  const lead = target?.kind === 'new' ? `${[modelLabel(target.model), target.thinking].filter(Boolean).join(' · ')} · ` : '';
+  const lead = target?.kind === 'new' ? `${[modelLabel(target.model, models), target.thinking].filter(Boolean).join(' · ')} · ` : '';
   return lead + s.charAt(0).toUpperCase() + s.slice(1);
 }
 
@@ -525,14 +530,15 @@ export function runOpenSession(run) {
 export function runRows(detail) {
   const rows = [];
   if (detail?.next && stateOf(detail) !== 'paused') rows.push({ id: 'next', at: detail.next, word: 'Next', cls: 'next', note: '' });
+  const past = [];
   for (const r of detail?.runs || []) {
     let note = '';
     if (r.missed_count) note = `${r.missed_count} earlier run${r.missed_count === 1 ? '' : 's'} skipped`;
     else if (r.state === 'failed') note = failureWords(r.reason, r.note);
     else if (r.note && r.state !== 'done') note = r.note;
-    rows.push({ id: r.id, at: r.at, word: runWord(r), cls: runClass(r), note, run: r });
+    past.push({ id: r.id, at: r.at, word: runWord(r), cls: runClass(r), note, run: r });
   }
-  return rows;
+  return rows.concat(past.sort((a, b) => b.at - a.at));
 }
 
 // schedActions — the foot of a scheduled task's detail with nothing edited.

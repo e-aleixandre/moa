@@ -3,7 +3,7 @@
 // the words do not depend on the machine running the tests.
 import { test, expect } from 'bun:test';
 import {
-  attentionCount, canReroute, confirmBody, createWhenPreview, deliverySummary, isScheduled, lateBanner, lateRun,
+  attentionCount, canReroute, confirmBody, createWhenPreview, deliverySummary, isScheduled, lateBanner, lateRun, modelLabel,
   previewResult, rebaseSchedDraft, runOpenSession, runRows, schedActions, schedDraft, schedEyebrow, schedPin, schedRight,
   scheduleBody, schedulePatch, scheduledRows, sendLaterBody, submitSendLater, targetFromDest, targetName, targetSessionId,
   waitingCount, whenLong, whenShort, ruleShort, ruleText, inWords, DEFAULT_DELIVERY,
@@ -78,6 +78,9 @@ test('scheduledGroupingAndAttentionCount', () => {
   // The row's right edge: late says when it was due; soon is in words.
   expect(schedRight(rows[0], NOW, TZ)).toBe('was 21:00');
   expect(schedRight(tmpl(9, { next: NOW + 20 * 60000 }), NOW, TZ)).toBe('in 20 min');
+  expect(schedRight(weekly(11, { schedule_state: 'paused', next: Date.UTC(2026, 9, 5, 7) }), NOW, TZ)).toBe('');
+  expect(modelLabel('anthropic/claude-sonnet-5-5', [{ id: 'anthropic/claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }])).toBe('Claude Sonnet 5.5');
+  expect(modelLabel('anthropic/x')).toBe('x');
   expect(schedRight(weekly(10, { next: Date.UTC(2026, 9, 5, 7) }), NOW, TZ)).toBe('Mon 09:00');
   expect(schedEyebrow(rows[0])).toBe('Waiting for you');
   expect(schedEyebrow(rows[1])).toBe('Not sent');
@@ -210,6 +213,13 @@ test('scheduledWhenUsesServerPreview', async () => {
   expect(previewResult(null, err('past')).error).toBe('That time has passed. Pick a later one.');
   expect(previewResult(null, err('unknown')).error).toBe('Try “in 20 min”, “friday at 18:00” or “every monday at 9”.');
   expect(previewResult(null, err('repeat')).error).toBe('Try “every day at 8”, “weekdays at 9” or “every monday at 9”.');
+});
+
+test('runRows lists runs newest first whatever order the server sends', () => {
+  const detail = weekly(2, { next: at(31, 9), runs: [
+    { id: 1, revision: 1, at: at(28, 9), state: 'done' }, { id: 3, revision: 1, at: at(30, 9), state: 'done' }, { id: 2, revision: 1, at: at(29, 9), state: 'done' },
+  ] });
+  expect(runRows(detail).map((r) => r.id)).toEqual(['next', 3, 2, 1]);
 });
 
 // ── scheduledLateFailureControls ─────────────────────────────────────────

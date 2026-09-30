@@ -410,6 +410,9 @@ button.tk-group:hover { color: var(--zl-t2); }
 .sch-run.is-next .sch-run-at { color: var(--zl-t2); }
 .sch-run.is-next .sch-run-s { color: var(--zl-t4); }
 .sch-go { margin-left: auto; }
+.tk-detail.is-phone .sch-go, .sch-when.is-phone .tk-chip { position: relative; }
+.tk-detail.is-phone .sch-go::after { content: ''; position: absolute; inset: -8px; }
+.sch-when.is-phone .tk-chip::after { content: ''; position: absolute; inset: -4px 0; }
 
 
 /* ── When ──────────────────────────────────────────────────────────────── */

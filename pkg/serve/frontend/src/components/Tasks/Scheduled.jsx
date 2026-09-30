@@ -272,7 +272,7 @@ export function Delivery({ value, onChange, target, onTarget, open: open0 = fals
         Delivery
         {!open && custom && <span class="sch-deliv-dot" aria-label="Changed" />}
       </button>
-      {!open && <button type="button" class="sch-deliv-sum" onClick={() => setOpen(true)}>{deliverySummary(value, target)}</button>}
+      {!open && <button type="button" class="sch-deliv-sum" onClick={() => setOpen(true)}>{deliverySummary(value, target, models)}</button>}
       {open && (
         <div class="sch-deliv-rows">
           {target?.kind === "new" && (
@@ -280,7 +280,7 @@ export function Delivery({ value, onChange, target, onTarget, open: open0 = fals
               <div class="sch-opt">
                 <span class="sch-opt-k">Model</span>
                 <select class="sch-pick-in" aria-label="Model" value={target.model} onChange={(e) => onTarget?.({ ...target, model: e.currentTarget.value })}>
-                  {!models.some((m) => m.id === target.model) && <option value={target.model}>{modelLabel(target.model)}</option>}
+                  {!models.some((m) => m.id === target.model) && <option value={target.model}>{modelLabel(target.model, models)}</option>}
                   {models.map((m) => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
                 </select>
               </div>
