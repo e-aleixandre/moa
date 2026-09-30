@@ -580,12 +580,20 @@ func TestNoticeSteerDiscardedByStopIsAppendedNotRecalled(t *testing.T) {
 	}
 
 	resp := mustAPI(t, srv, "POST", "/api/sessions/"+sess.ID+"/cancel-and-recall", "", http.StatusOK)
-	out := decode[map[string][]string](t, resp)
-	if ids := out["discarded_steer_ids"]; len(ids) != 1 || ids[0] != "q-owner" {
+	out := decode[cancelAndRecallResponse](t, resp)
+	if ids := out.IDs; len(ids) != 1 || ids[0] != "q-owner" {
 		t.Fatalf("recalled = %v, want only the owner's steer (notice steer %s)", ids, n.SteerID)
+	}
+	if len(out.Steers) != 1 || out.Steers[0].ID != "q-owner" || out.Steers[0].Text != "mine" {
+		t.Fatalf("recalled steers = %+v, want the owner's text", out.Steers)
 	}
 	pollUntil(t, 5*time.Second, "idle", func() bool { return sessState(sess) == StateIdle })
 	assertAppendedWithoutTurn(t, mgr, prov, sess, rec.ID, prov.calls.Load())
+}
+
+type cancelAndRecallResponse struct {
+	IDs    []string           `json:"discarded_steer_ids"`
+	Steers []PendingSteerData `json:"discarded_steers"`
 }
 
 // abortAfterUnwind keeps the real agent and only delays Abort's return until
@@ -630,8 +638,8 @@ func TestNoticeSteerDiscardedByStopSurvivesUnwindFirst(t *testing.T) {
 	calls := prov.calls.Load()
 
 	resp := mustAPI(t, srv, "POST", "/api/sessions/"+sess.ID+"/cancel-and-recall", "", http.StatusOK)
-	out := decode[map[string][]string](t, resp)
-	if ids := out["discarded_steer_ids"]; len(ids) != 1 || ids[0] != "q-owner" {
+	out := decode[cancelAndRecallResponse](t, resp)
+	if ids := out.IDs; len(ids) != 1 || ids[0] != "q-owner" {
 		t.Errorf("recalled = %v, want only the owner's steer (notice steer %s)", ids, n.SteerID)
 	}
 	sess.runtime.Bus.Drain(5 * time.Second)

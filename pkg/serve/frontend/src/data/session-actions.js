@@ -14,6 +14,7 @@ import { loadEvents } from './events.js'; // wake-on-event
 import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 import { closeSessionPanelForSession } from './session-panel.js';
 import { combineQueueText, droppedImageCount } from './composer-queue.js';
+import { wsState } from './ws/shared.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -801,11 +802,45 @@ export async function cancelRun(id) {
 // Queued images cannot be pulled back (only their count was ever tracked
 // client-side), so they are reported instead.
 export async function stopRun(id) {
-  const steers = store.get().sessions[id]?.pendingSteers;
-  const result = await cancelRun(id);
+  const snapshot = store.get().sessions[id]?.pendingSteers || [];
+  const announced = new Map();
+  const collectors = wsState.stopCollectors[id] || (wsState.stopCollectors[id] = new Set());
+  collectors.add(announced);
+  let result;
+  try {
+    result = await cancelRun(id);
+  } catch (err) {
+    // The server may have stopped and announced its discards over the
+    // WebSocket even though the reply was lost: those chips are gone, so
+    // their text must still come back.
+    restoreStoppedSteers(id, [...announced.values()].filter((s) => !s.non_recallable));
+    throw err;
+  } finally {
+    collectors.delete(announced);
+    if (collectors.size === 0) delete wsState.stopCollectors[id];
+  }
   const discarded = new Set(result?.discarded_steer_ids || []);
-  const restored = (steers || []).filter((s) => discarded.has(s.id));
+  // The server's own items come last so they win: a steer admitted after the
+  // snapshot, or from another tab, is known only to them.
+  const known = new Map([
+    ...snapshot,
+    ...(store.get().sessions[id]?.pendingSteers || []),
+    ...announced.values(),
+    ...(result?.discarded_steers || []),
+  ].map((s) => [s.id, s]));
+  const restored = [...discarded].map((sid) => known.get(sid)).filter(Boolean);
   if (restored.length === 0) return result;
+  restoreStoppedSteers(id, restored);
+  const current = store.get().sessions[id];
+  if (current?.pendingSteers) {
+    const kept = current.pendingSteers.filter((s) => !discarded.has(s.id));
+    updateSession(id, { pendingSteers: kept.length > 0 ? kept : null });
+  }
+  return result;
+}
+
+function restoreStoppedSteers(id, restored) {
+  if (restored.length === 0) return;
   const text = restored.map((s) => s.text).join('\n');
   setState((state) => ({
     composerDrops: { ...state.composerDrops, [id]: { id: `stop-${Date.now()}`, text, files: [], focus: true } },
@@ -814,12 +849,6 @@ export async function stopRun(id) {
   if (dropped > 0) {
     addToast({ sessionId: id, title: 'Queued images dropped', detail: `${dropped} attached image${dropped > 1 ? 's were' : ' was'} not restored — re-attach if still needed.`, type: 'info' });
   }
-  const current = store.get().sessions[id];
-  if (current?.pendingSteers) {
-    const kept = current.pendingSteers.filter((s) => !discarded.has(s.id));
-    updateSession(id, { pendingSteers: kept.length > 0 ? kept : null });
-  }
-  return result;
 }
 
 // cancelSteers drops every steer message still queued (not yet delivered) on

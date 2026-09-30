@@ -11,4 +11,5 @@ export const wsState = {
   subagentBuffers: {}, // "sessionId:jobId" → reducer buffers
   pendingSubagentEvents: {}, // sessionId → [{ jobId, evt }]
   subagentFlushScheduled: false,
+  stopCollectors: {}, // sessionId → Set<Map<steerId, steer>>, one per Stop in flight
 };

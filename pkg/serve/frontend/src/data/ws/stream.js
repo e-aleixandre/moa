@@ -394,6 +394,14 @@ export function handleWsSteersCanceled(id, discardedSteerIDs) {
   if (!sess || !sess.pendingSteers) return;
   if (Array.isArray(discardedSteerIDs)) {
     const discarded = new Set(discardedSteerIDs);
+    // A Stop in flight keeps what the server discarded: this chip is the last
+    // copy of its text if the Stop's HTTP reply never arrives.
+    const collectors = wsState.stopCollectors[id];
+    if (collectors) {
+      for (const steer of sess.pendingSteers) {
+        if (discarded.has(steer.id)) collectors.forEach((c) => c.set(steer.id, steer));
+      }
+    }
     const pendingSteers = sess.pendingSteers.filter((steer) => !discarded.has(steer.id));
     updateSession(id, { pendingSteers: pendingSteers.length > 0 ? pendingSteers : null });
     return;

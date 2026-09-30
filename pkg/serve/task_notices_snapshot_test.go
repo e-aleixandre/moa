@@ -54,8 +54,8 @@ func TestNoticeStopWithOnlyANoticeRecallsNothing(t *testing.T) {
 	startAndSteerNotice(t, srv, mgr, sess)
 
 	resp := mustAPI(t, srv, "POST", "/api/sessions/"+sess.ID+"/cancel-and-recall", "", http.StatusOK)
-	out := decode[map[string][]string](t, resp)
-	if ids := out["discarded_steer_ids"]; len(ids) != 0 {
+	out := decode[cancelAndRecallResponse](t, resp)
+	if ids := out.IDs; len(ids) != 0 {
 		t.Fatalf("stop recalled %v, want nothing", ids)
 	}
 }

@@ -1143,8 +1143,10 @@ func handleCancel(mgr *Manager) http.HandlerFunc {
 
 // handleCancelAndRecall is the interactive frontend variant of cancel. It
 // preserves the public cancel endpoint's no-content contract while returning
-// only the steer IDs the server atomically discarded, so a client can recall
-// them to its composer without resending a steer that already reached history.
+// only the steers the server atomically discarded, so a client can recall them
+// to its composer without resending a steer that already reached history. The
+// items travel with their text: a steer admitted after the client's queue
+// snapshot must come back too.
 func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		discarded, err := mgr.CancelWithDiscardedSteers(r.PathValue("id"))
@@ -1163,7 +1165,10 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 				}
 				ids = append(ids, steer.ID)
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"discarded_steer_ids": ids})
+			writeJSON(w, http.StatusOK, map[string]any{
+				"discarded_steer_ids": ids,
+				"discarded_steers":    recallableSteers(discarded),
+			})
 		}
 	}
 }
@@ -1185,20 +1190,7 @@ func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		if r.Header.Get("X-Moa-Steers-Cancel-Response") == "discarded" {
-			steers := make([]PendingSteerData, 0, len(discarded))
-			for _, steer := range discarded {
-				// Task notices stay in the transcript instead (see
-				// handleCancelAndRecall).
-				if steer.Internal || isTaskNotice(steer.Custom) {
-					continue
-				}
-				steers = append(steers, PendingSteerData{
-					ID:      steer.ID,
-					Text:    steer.Text,
-					Command: steer.IsBarrier(),
-					Images:  countImageContent(steer.Content),
-				})
-			}
+			steers := recallableSteers(discarded)
 			ids := make([]string, len(steers))
 			for i, steer := range steers {
 				ids[i] = steer.ID
@@ -1211,6 +1203,25 @@ func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// recallableSteers projects discarded steers to what a client may put back in
+// the composer. Task notices stay in the transcript instead, and internal
+// steers were never the owner's text.
+func recallableSteers(discarded []core.SteerItem) []PendingSteerData {
+	steers := make([]PendingSteerData, 0, len(discarded))
+	for _, steer := range discarded {
+		if steer.Internal || isTaskNotice(steer.Custom) {
+			continue
+		}
+		steers = append(steers, PendingSteerData{
+			ID:      steer.ID,
+			Text:    steer.Text,
+			Command: steer.IsBarrier(),
+			Images:  countImageContent(steer.Content),
+		})
+	}
+	return steers
 }
 
 func handleCancelSubagent(mgr *Manager) http.HandlerFunc {
