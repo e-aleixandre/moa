@@ -574,7 +574,7 @@ func (r *Repo) ResetChecklist(ctx context.Context, sessionID string) error {
 			return false, err
 		}
 		for _, id := range runs {
-			if err := r.settleRemovedChild(ctx, tx, id); err != nil {
+			if _, err := r.settleRemovedChild(ctx, tx, id); err != nil {
 				return false, err
 			}
 		}

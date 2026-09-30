@@ -381,8 +381,9 @@ func (r *Repo) Delete(ctx context.Context, id, revision int64, deliver string) e
 		if cur.Revision != revision {
 			return false, &ConflictError{Current: cur}
 		}
+		heard := true
 		if cur.OccurrenceID != 0 {
-			if err := r.settleRemovedChild(ctx, tx, cur.OccurrenceID); err != nil {
+			if heard, err = r.settleRemovedChild(ctx, tx, cur.OccurrenceID); err != nil {
 				return false, err
 			}
 		}
@@ -394,7 +395,7 @@ func (r *Repo) Delete(ctx context.Context, id, revision int64, deliver string) e
 		if _, err := tx.ExecContext(ctx, "DELETE FROM tasks WHERE id = ?", id); err != nil {
 			return false, err
 		}
-		if cur.Place == PlaceAgent && cur.Status != StatusDone {
+		if cur.Place == PlaceAgent && cur.Status != StatusDone && heard {
 			return true, r.addNotice(ctx, tx, NoticeAgentDeleted, cur.AssigneeSessionID, deliver, cur)
 		}
 		return true, nil
@@ -503,7 +504,9 @@ func (r *Repo) List(ctx context.Context, f Filter) (ListResult, error) {
 		}
 		switch t.Place {
 		case PlaceYou:
-			res.Counts.You++
+			if !t.template {
+				res.Counts.You++
+			}
 			if t.RequesterSessionID != "" {
 				res.Counts.OpenRequests++
 			}

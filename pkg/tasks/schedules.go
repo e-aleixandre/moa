@@ -177,8 +177,13 @@ func attachSchedules(ctx context.Context, q querier, recs []Record) error {
 			return err
 		}
 		_ = rows.Close()
-		rows, err = q.QueryContext(ctx, `SELECT schedule_task_id, state, id, reason, note FROM task_occurrences
-			WHERE state IN ('late','failed') AND schedule_task_id IN (`+ph+`) ORDER BY due_at, id`, args...)
+		// latest: no later run of the same template exists. A recurring
+		// template is failed only while its most recent run is; a later run
+		// supersedes an older failure.
+		rows, err = q.QueryContext(ctx, `SELECT o.schedule_task_id, o.state, o.id, o.reason, o.note,
+			NOT EXISTS (SELECT 1 FROM task_occurrences l WHERE l.schedule_task_id = o.schedule_task_id AND l.due_at > o.due_at)
+			FROM task_occurrences o
+			WHERE o.state IN ('late','failed') AND o.schedule_task_id IN (`+ph+`) ORDER BY o.due_at, o.id`, args...)
 		if err != nil {
 			return err
 		}
@@ -186,13 +191,15 @@ func attachSchedules(ctx context.Context, q querier, recs []Record) error {
 		for rows.Next() {
 			var parent, id int64
 			var state, reason, note string
-			if err := rows.Scan(&parent, &state, &id, &reason, &note); err != nil {
+			var latest bool
+			if err := rows.Scan(&parent, &state, &id, &reason, &note, &latest); err != nil {
 				return err
 			}
 			rec := &recs[idx[parent]]
-			if state == OccLate {
+			switch {
+			case state == OccLate:
 				rec.LateCount++
-			} else {
+			case latest || rec.When == nil || rec.When.Kind == WhenOnce:
 				rec.Failure = &RunFailure{OccurrenceID: id, Reason: reason, Note: note}
 			}
 		}
@@ -977,24 +984,26 @@ func assignmentWithdrawn(ctx context.Context, q querier, occurrenceID int64) (bo
 // settleRemovedChild records that a run's child task is being deleted: the
 // run is skipped (removed; after delivery its outcome is unknown) and its
 // assignment can no longer be delivered. A finished run keeps its history.
-func (r *Repo) settleRemovedChild(ctx context.Context, tx *sql.Tx, occurrenceID int64) error {
+// It reports whether the session may have received the assignment: a
+// deletion is only worth telling a session that could have seen the task.
+func (r *Repo) settleRemovedChild(ctx context.Context, tx *sql.Tx, occurrenceID int64) (bool, error) {
 	o, err := getOccurrence(ctx, tx, occurrenceID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if o.State == OccDone || o.State == OccSkipped {
-		return nil
+		return true, nil
 	}
 	delivered := o.AdmittedAt != 0
 	if o.NoticeID != "" {
 		var state string
 		if err := tx.QueryRowContext(ctx, "SELECT state FROM task_notifications WHERE id = ?", o.NoticeID).Scan(&state); err != nil {
-			return err
+			return false, err
 		}
 		delivered = delivered || state == NoticeSent || state == NoticeDelivered
 		if _, err := tx.ExecContext(ctx, `UPDATE task_notifications SET state = 'failed', reason = ?, updated_at = ?
 			WHERE id = ? AND state IN ('pending','held','sent')`, ReasonChildRemoved, r.now().UnixMilli(), o.NoticeID); err != nil {
-			return err
+			return false, err
 		}
 	}
 	o.State, o.Reason = OccSkipped, ReasonChildRemoved
@@ -1003,9 +1012,9 @@ func (r *Repo) settleRemovedChild(ctx context.Context, tx *sql.Tx, occurrenceID 
 		o.Note = "Removed after delivery; outcome unknown"
 	}
 	if err := r.saveOccurrence(ctx, tx, o); err != nil {
-		return err
+		return false, err
 	}
-	return r.touchTemplateByID(ctx, tx, o)
+	return delivered, r.touchTemplateByID(ctx, tx, o)
 }
 
 // settleDeletedTemplate settles the late decisions of a template being
