@@ -183,6 +183,30 @@ func TestScheduleReviewExistingOrphanLateIsSettledAtRestart(t *testing.T) {
 	}
 }
 
+// Every pending decision of a template is listed, however old.
+func TestScheduleReviewLateRunsListsEveryDecision(t *testing.T) {
+	r, clock := schedRepo(t, "2026-09-30T08:00:00Z")
+	tmpl := mkSchedule(t, r, "old late", dailyDef(9, 0, "UTC", LateAsk))
+	clock.Set(utc("2026-09-30T09:20:00Z"))
+	late := materializeOne(t, r)
+	if late.State != OccLate {
+		t.Fatalf("setup: %+v", late)
+	}
+	for i := 0; i < 25; i++ {
+		cur := mustGet(t, r, tmpl.ID)
+		if _, err := r.SkipNext(bg, cur.ID, cur.Revision, cur.Next); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := r.LateRuns(bg, tmpl.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != late.ID || got[0].Revision != late.Revision {
+		t.Fatalf("LateRuns = %+v, want run #%d", got, late.ID)
+	}
+}
+
 func execSQL(t *testing.T, r *Repo, stmt string, args ...any) {
 	t.Helper()
 	if _, err := rawDB(t, r.Path()).Exec(stmt, args...); err != nil {

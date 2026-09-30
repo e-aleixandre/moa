@@ -2,6 +2,7 @@ package serve
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"sync"
@@ -332,5 +333,71 @@ func TestScheduleReviewLegacyAlreadyDeliveredIsNotReoffered(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("imported %d templates, want 2", len(got))
+	}
+}
+
+type reviewDetail struct {
+	ScheduleState string             `json:"schedule_state"`
+	LateCount     int                `json:"late_count"`
+	Runs          []tasks.Occurrence `json:"runs"`
+	Decisions     []tasks.Occurrence `json:"decisions"`
+}
+
+// A late run older than the Runs page keeps its id and revision in the
+// detail, so it can still be answered.
+func TestScheduleReviewOldLateStaysReachable(t *testing.T) {
+	a := newSchedAPI(t, "2026-09-30T08:00:00Z")
+	schedReviewStopWorkers(t, a.h.mgr)
+	sid := a.h.savedSession()
+	r := a.h.repo()
+	tmpl := mkTemplate(t, r, "late older than Runs page", dailyAt(9, 0, "UTC", toSession(sid), tasks.Delivery{}))
+	a.h.clock.Set(mustUTC("2026-09-30T09:20:00Z"))
+	old, err := r.MaterializeDue(bgc, 100)
+	if err != nil || len(old) != 1 || old[0].State != tasks.OccLate {
+		t.Fatalf("setup old=%+v err=%v", old, err)
+	}
+	for i := 0; i < runsPageSize; i++ {
+		cur, err := r.Get(bgc, tmpl.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.SkipNext(bgc, cur.ID, cur.Revision, cur.Next); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := expect[reviewDetail](a, 200, "GET", fmt.Sprintf("/api/tasks/%d", tmpl.ID), nil)
+	if d.ScheduleState != tasks.OccLate || d.LateCount != 1 || len(d.Runs) != runsPageSize {
+		t.Fatalf("setup detail: state=%s late=%d runs=%d", d.ScheduleState, d.LateCount, len(d.Runs))
+	}
+	if len(d.Decisions) != 1 || d.Decisions[0].ID != old[0].ID || d.Decisions[0].Revision != old[0].Revision {
+		t.Fatalf("detail decisions = %+v, want late run #%d with its revision", d.Decisions, old[0].ID)
+	}
+}
+
+// A late run under a paused recurrence is answered without resuming it: Run
+// delivers that one run and the schedule stays paused.
+func TestScheduleReviewPausedLateCanBeConfirmed(t *testing.T) {
+	a := newSchedAPI(t, "2026-09-30T08:00:00Z")
+	sid := a.h.savedSession()
+	r := a.h.repo()
+	tmpl := mkTemplate(t, r, "paused with a late run", dailyAt(9, 0, "UTC", toSession(sid), tasks.Delivery{Saved: tasks.DeliverWake}))
+	a.h.clock.Set(mustUTC("2026-09-30T09:20:00Z"))
+	a.h.pass()
+	late := oneRun(t, r, tmpl.ID)
+	if late.State != tasks.OccLate {
+		t.Fatalf("setup: %+v", late)
+	}
+	cur := a.rec(tmpl.ID)
+	expect[tasks.Record](a, 200, "POST", fmt.Sprintf("/api/tasks/%d/pause", tmpl.ID), map[string]any{"revision": cur.Revision})
+	expect[tasks.Occurrence](a, 200, "POST", fmt.Sprintf("/api/tasks/occurrences/%d/confirm", late.ID),
+		map[string]any{"revision": late.Revision, "action": tasks.LateRun})
+	a.h.pass()
+	assignedAndDelivered(t, a.h, r, late.ID)
+	d := expect[reviewDetail](a, 200, "GET", fmt.Sprintf("/api/tasks/%d", tmpl.ID), nil)
+	if d.ScheduleState != "paused" || d.LateCount != 0 || len(d.Decisions) != 0 {
+		t.Fatalf("after confirming: state=%s late=%d decisions=%d", d.ScheduleState, d.LateCount, len(d.Decisions))
+	}
+	if runs := runsOfT(t, r, tmpl.ID); len(runs) != 1 {
+		t.Fatalf("confirming under pause created %d runs", len(runs))
 	}
 }

@@ -815,6 +815,16 @@ func (r *Repo) OccurrenceForNotice(ctx context.Context, noticeID string) (Occurr
 	return os[0], true, nil
 }
 
+// LateRuns returns every run of a template waiting for the owner's answer,
+// oldest first, whatever page of Runs they fall on.
+func (r *Repo) LateRuns(ctx context.Context, taskID int64) ([]Occurrence, error) {
+	rd, err := r.reader()
+	if err != nil || rd == nil {
+		return nil, err
+	}
+	return queryOccurrences(ctx, rd, "schedule_task_id = ? AND state = 'late' ORDER BY due_at, id", taskID)
+}
+
 // Runs returns a template's runs newest first, before beforeID when it is not 0.
 func (r *Repo) Runs(ctx context.Context, taskID, beforeID int64, limit int) ([]Occurrence, error) {
 	rd, err := r.reader()

@@ -209,6 +209,15 @@ func handleGetTask(m *Manager) http.HandlerFunc {
 				runs = []tasks.Occurrence{}
 			}
 			detail.Runs = &runs
+			decisions, err := m.tasks.LateRuns(r.Context(), id)
+			if err != nil {
+				writeTaskError(w, err)
+				return
+			}
+			if decisions == nil {
+				decisions = []tasks.Occurrence{}
+			}
+			detail.Decisions = &decisions
 		}
 		writeJSON(w, http.StatusOK, detail)
 	}
@@ -223,6 +232,9 @@ type taskDetail struct {
 	// Runs is a template's history, newest first (a page of runsPageSize;
 	// runs_before pages back). Ordinary tasks have none.
 	Runs *[]tasks.Occurrence `json:"runs,omitempty"`
+	// Decisions are every run of a template waiting for the owner's Run or
+	// Skip (state late), oldest first, whatever Runs page they fall on.
+	Decisions *[]tasks.Occurrence `json:"decisions,omitempty"`
 }
 
 // handleDeliverNotice is "Wake now" / "Retry" on a notice that has not
