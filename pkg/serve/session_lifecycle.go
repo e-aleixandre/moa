@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1938,7 +1939,11 @@ func (m *Manager) settleScheduledWork(id string, sess *ManagedSession) error {
 		return nil
 	}
 	if _, err := os.Stat(m.tasks.Path()); err != nil {
-		return nil // no task database: nothing can be bound to the session
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // no task database: nothing can be bound to the session
+		}
+		// An unreadable database is not an empty one.
+		return fmt.Errorf("settle scheduled work of session %s: %w", id, err)
 	}
 	var meta map[string]any
 	if sess != nil && sess.persister != nil {

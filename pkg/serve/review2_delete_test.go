@@ -1,9 +1,15 @@
 package serve
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
@@ -50,5 +56,42 @@ func TestReview2MoaDeleteSQLRefusalKeepsAutomationKey(t *testing.T) {
 	t.Logf("original=%s retry=%s created=%t sessions=%d", sid, retryID, retryCreated, countSessions(t, h.base))
 	if retryCreated || retryID != sid {
 		t.Errorf("refused Delete lost idempotency: retry created=%t, session=%s, want original=%s", retryCreated, retryID, sid)
+	}
+}
+
+// os.Stat failing to inspect an existing task database is not proof that no
+// runs exist there. The session files are in a separate, accessible directory.
+func TestReview2MoaDeleteStatFailureRefusesRemoval(t *testing.T) {
+	h := newSchedHarness(t, newMockProvider(), "2026-09-30T08:00:00Z")
+	dbDir := t.TempDir()
+	r := tasks.New(filepath.Join(dbDir, tasks.DatabaseName))
+	r.SetClock(h.clock.Now)
+	h.repos = append(h.repos, r)
+	m := NewManager(context.Background(), ManagerConfig{
+		Tasks: r, ProviderFactory: func(core.Model) (core.Provider, error) { return h.prov, nil },
+		DefaultModel:  core.Model{ID: "claude-haiku-4-5-20251001", Provider: "anthropic"},
+		WorkspaceRoot: h.root, MoaCfg: noticeTestConfig,
+		ConfigLoader: isolatedTestConfigLoader(t, noticeTestConfig), SessionBaseDir: h.base, clock: h.clock,
+	})
+	h.mgr = m
+	schedReviewStopWorkers(t, m)
+	o := readyNewRun(t, h, r, newTarget(t, h.root))
+	sid := markedSession(t, h, o.ID, o.ScheduleTaskID)
+	if err := os.Chmod(dbDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(dbDir, 0o700) }()
+	if _, err := os.Stat(r.Path()); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("test setup: wanted database stat EACCES, got %v", err)
+	}
+	deleteErr := m.Delete(sid)
+	if err := os.Chmod(dbDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, _, fileErr := session.FindSessionReadOnly(h.base, sid)
+	after := occNow(t, r, o.ID)
+	t.Logf("database stat=EACCES; Delete=%v file=%v run=%s/%s", deleteErr, fileErr, after.State, after.Reason)
+	if deleteErr == nil || fileErr != nil || after.State != tasks.OccReady {
+		t.Errorf("database stat error did not refuse Delete intact: Delete=%v file=%v run=%s/%s", deleteErr, fileErr, after.State, after.Reason)
 	}
 }
