@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 )
@@ -171,6 +172,31 @@ func TestWriteInitStopsBetweenPartsWhenAborted(t *testing.T) {
 	}
 	if messages != 2 {
 		t.Fatalf("received %d messages, want init_begin and one part before the abort", messages)
+	}
+}
+
+// A full init sends a short tail and leaves older rows to paging; a delta keeps
+// the wider bound so a long absence still resumes instead of starting over.
+func TestFullInitTailIsShortButDeltaKeepsTheWiderBound(t *testing.T) {
+	mgr := newTestManager(t, t.Context(), newMockProvider())
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendTextMessages(sess, 120, 1)
+
+	full := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
+	if len(full.Messages) != initFullTailMaxMessages || !full.HistoryTruncated {
+		t.Fatalf("full init = %d messages (truncated %v), want %d and truncated", len(full.Messages), full.HistoryTruncated, initFullTailMaxMessages)
+	}
+	if full.HistoryBefore != full.Messages[0].MsgID || full.Messages[len(full.Messages)-1].MsgID != "m-119" {
+		t.Fatalf("full tail = %s..%s before %q, want the newest rows with a paging cursor",
+			full.Messages[0].MsgID, full.Messages[len(full.Messages)-1].MsgID, full.HistoryBefore)
+	}
+
+	delta := buildInitData(sess, bus.StreamingAggregate{}, nil, "m-019")
+	if delta.DeltaBase != "m-019" || len(delta.Messages) != 100 {
+		t.Fatalf("delta = base %q with %d messages, want base m-019 with the 100-row suffix", delta.DeltaBase, len(delta.Messages))
 	}
 }
 

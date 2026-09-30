@@ -81,10 +81,12 @@ func TestBuildInitData_TotalPayloadStaysWithinBudget(t *testing.T) {
 
 	// Ten live children, each holding a large transcript of its own.
 	tree := sess.runtime.Context().Tree
-	for i := range 60 {
+	// Few enough parent rows that the full-init tail still reaches launch rows,
+	// so outcomes are part of the budget; as many bytes as sixty of them.
+	for i := range 20 {
 		tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{
 			Role: "assistant", MsgID: fmt.Sprintf("parent-%02d", i),
-			Content: []core.Content{core.TextContent(strings.Repeat("parent transcript line. ", 500))},
+			Content: []core.Content{core.TextContent(strings.Repeat("parent transcript line. ", 1500))},
 		})})
 	}
 

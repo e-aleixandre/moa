@@ -41,6 +41,14 @@ const (
 	historyContentMaxBytes = 64 << 10
 )
 
+// initFullTailMaxMessages bounds the tail of a FULL init — a first open, or a
+// reconnect whose client holds no usable anchor. On a weak mobile link this is
+// the payload the user waits on before seeing anything (150 messages measured
+// ~78 KB compressed, half a minute at 2.5 KB/s); older rows are paged in on
+// scroll. A delta keeps initHistoryMaxMessages: shrinking it would only turn
+// more reconnects after a long absence into full snapshots.
+const initFullTailMaxMessages = 50
+
 // Terminal subagent cards are collapsed summaries, not conversation body, so
 // they get their own — much tighter — budget than historyContentMaxBytes: the
 // card shows a preview and the full text is one tap away through
@@ -688,7 +696,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 	if deltaBase == "" {
 		full, _ := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](b, bus.GetDisplayMessages{})
-		msgs, historyTruncated = limitInitHistory(full)
+		msgs, historyTruncated = limitInitTail(full)
 		if historyTruncated && len(msgs) > 0 {
 			historyBefore = msgs[0].MsgID
 		}
@@ -1037,14 +1045,23 @@ func limitInitHistory(messages []core.AgentMessage) ([]core.AgentMessage, bool) 
 // by the live-subagent section to share one budget across every child instead
 // of granting each of them a full history's worth.
 func limitInitHistoryWithin(messages []core.AgentMessage, maxBytes int) ([]core.AgentMessage, bool) {
+	return limitHistoryTail(messages, maxBytes, initHistoryMaxMessages)
+}
+
+// limitInitTail is the display tail of a full session init.
+func limitInitTail(messages []core.AgentMessage) ([]core.AgentMessage, bool) {
+	return limitHistoryTail(messages, initHistoryMaxBytes, initFullTailMaxMessages)
+}
+
+func limitHistoryTail(messages []core.AgentMessage, maxBytes, maxMessages int) ([]core.AgentMessage, bool) {
 	if len(messages) == 0 {
 		return nil, false
 	}
-	start := boundedHistoryTailStart(messages, maxBytes)
+	start := boundedHistoryTailStart(messages, maxBytes, maxMessages)
 	// Prefer including the call that owns a leading result run, but never at
 	// the cost of dropping the newest transcript messages. Grow the range only
 	// when it still fits the mobile bound in full.
-	if aligned := historyPageStart(messages, len(messages), start); aligned < start && boundedHistoryTailStart(messages[aligned:], maxBytes) == 0 {
+	if aligned := historyPageStart(messages, len(messages), start); aligned < start && boundedHistoryTailStart(messages[aligned:], maxBytes, maxMessages) == 0 {
 		start = aligned
 	}
 	return sanitizeHistoryRange(messages[start:], maxBytes), start > 0
@@ -1057,14 +1074,14 @@ func limitHistoryDelta(messages []core.AgentMessage) ([]core.AgentMessage, bool)
 	if len(messages) == 0 {
 		return nil, false
 	}
-	start := boundedHistoryTailStart(messages, initHistoryMaxBytes)
+	start := boundedHistoryTailStart(messages, initHistoryMaxBytes, initHistoryMaxMessages)
 	return sanitizeHistoryRange(messages[start:], initHistoryMaxBytes), start > 0
 }
 
 // boundedHistoryTailStart returns the newest range that fits maxBytes and the
 // init message count. Starting at the tail is essential: reconnect must never
 // omit the transcript's newest message.
-func boundedHistoryTailStart(messages []core.AgentMessage, maxBytes int) int {
+func boundedHistoryTailStart(messages []core.AgentMessage, maxBytes, maxMessages int) int {
 	bytes := 0
 	firstIndex := len(messages)
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -1072,7 +1089,7 @@ func boundedHistoryTailStart(messages []core.AgentMessage, maxBytes int) int {
 		// An oversized message is not dropped, it is degraded to the budget by
 		// sanitizeHistoryRange, so charge it what it will actually weigh.
 		size = min(size, maxBytes)
-		if len(messages)-i > initHistoryMaxMessages || (i < len(messages)-1 && bytes+size > maxBytes) {
+		if len(messages)-i > maxMessages || (i < len(messages)-1 && bytes+size > maxBytes) {
 			break
 		}
 		firstIndex = i
