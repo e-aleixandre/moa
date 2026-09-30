@@ -2,8 +2,9 @@
 // decisions (no store, no fetch). A scheduled task is a template: an ordinary
 // task record with `when`, `tz`, `target` and `delivery` (docs/serve.md,
 // Scheduled tasks). The server owns the calendar: it reads "When" and decides
-// every run. What lives here is how a schedule is WORDED, in the viewer's
-// zone, and the bodies the editor sends.
+// every run and every instant, the pickers' and presets' included. What lives
+// here is how a schedule is WORDED, in the viewer's zone, what the pickers
+// ask the server, and the bodies the editor sends.
 
 import { projectName, sessionTitle } from './util/format.js';
 
@@ -37,23 +38,6 @@ function fmt(tz) {
 export function wall(ms, tz) {
   const p = Object.fromEntries(fmt(tz).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
   return { y: +p.year, mo: +p.month, d: +p.day, h: +p.hour % 24, mi: +p.minute, dow: WD_SHORT.indexOf(p.weekday.toLowerCase()) };
-}
-
-// zoned — the instant a wall time names in `tz` (a gap moves forward). It
-// only previews the date and time fields; the server resolves what is saved.
-export function zoned(y, mo, d, h, mi, tz) {
-  const want = Date.UTC(y, mo - 1, d, h, mi);
-  let guess = want;
-  for (let i = 0; i < 3; i++) {
-    const w = wall(guess, tz);
-    guess += want - Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi);
-  }
-  return guess;
-}
-
-function addDays(w, n) {
-  const t = new Date(Date.UTC(w.y, w.mo - 1, w.d + n));
-  return { y: t.getUTCFullYear(), mo: t.getUTCMonth() + 1, d: t.getUTCDate(), dow: t.getUTCDay() };
 }
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -125,28 +109,6 @@ export function ruleShort(rule) {
   return t;
 }
 
-// nextOf — the next slot of a rule after `after`, for a draft the server has
-// not answered for yet. A saved schedule's next run is always the server's.
-export function nextOf(rule, after, tz) {
-  const base = wall(after, tz);
-  for (let i = 0; i < 400; i++) {
-    const day = addDays(base, i);
-    const ok = rule.freq === 'daily'
-      || (rule.freq === 'weekdays' && day.dow >= 1 && day.dow <= 5)
-      || (rule.freq === 'weekly' && day.dow === rule.dow)
-      || (rule.freq === 'monthly' && day.d === rule.dom);
-    if (!ok) continue;
-    const t = zoned(day.y, day.mo, day.d, rule.h, rule.mi, tz);
-    if (t > after) return t;
-  }
-  return null;
-}
-
-export function whenNext(when, now, tz) {
-  if (!when) return null;
-  return when.kind === 'repeat' ? nextOf(when.rule, now, tz) : when.at;
-}
-
 export function whenWords(when, tz) {
   if (!when) return '';
   return when.kind === 'repeat' ? ruleText(when.rule) : whenLong(when.at, tz);
@@ -157,51 +119,69 @@ export function whenButton(when, now, tz) {
   return when.kind === 'repeat' ? ruleShort(when.rule) : whenShort(when.at, now, tz);
 }
 
-// Presets the When editor offers before anything is typed.
-export function presets(now, tz) {
-  const cur = wall(now, tz);
-  const tomorrow = addDays(cur, 1);
-  const nextMon = addDays(cur, ((1 - cur.dow + 7) % 7) || 7);
-  return [
-    { label: 'In 20 minutes', at: Math.round((now + 20 * 60000) / 60000) * 60000 },
-    { label: 'Tonight', at: zoned(cur.y, cur.mo, cur.d, 21, 0, tz) },
-    { label: 'Tomorrow morning', at: zoned(tomorrow.y, tomorrow.mo, tomorrow.d, 9, 0, tz) },
-    { label: 'Monday', at: zoned(nextMon.y, nextMon.mo, nextMon.d, 9, 0, tz) },
-  ].filter((p) => p.at > now);
-}
+// Presets the When editor offers before anything is typed: words the server
+// reads, like anything typed.
+export const WHEN_PRESETS = Object.freeze([
+  { label: 'In 20 minutes', text: 'in 20 minutes' },
+  { label: 'Tonight', text: 'tonight' },
+  { label: 'Tomorrow morning', text: 'tomorrow at 09:00' },
+  { label: 'Monday', text: 'monday at 09:00' },
+]);
 
+// dateInputValue — the date field's value for an instant the server gave.
 export function dateInputValue(ms, tz) {
   const w = wall(ms, tz);
   return `${w.y}-${pad(w.mo)}-${pad(w.d)}`;
 }
 
-export function fromInputs(date, time, tz) {
-  const [y, mo, d] = String(date).split('-').map(Number);
-  const [h, mi] = String(time).split(':').map(Number);
-  if (![y, mo, d, h, mi].every(Number.isFinite)) return null;
-  return zoned(y, mo, d, h, mi, tz);
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const TIME_RE = /^(\d{2}):(\d{2})$/;
+
+// civilDay — the day of the month and weekday a date field names. A civil
+// date has no zone and no instant.
+function civilDay(date) {
+  const m = DATE_RE.exec(String(date || ''));
+  if (!m) return null;
+  return { d: +m[3], dow: new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay() };
 }
 
-// repeatOptions — the Repeat field, named after the date it is set on.
-export function repeatOptions(at, tz) {
-  const w = wall(at, tz);
+// repeatOptions — the Repeat field, named after the date field's day.
+export function repeatOptions(date) {
+  const c = civilDay(date) || { d: 1, dow: 1 };
   return [
     { id: 'never', label: 'Never' },
-    { id: 'daily', label: 'Every day', rule: { freq: 'daily' } },
-    { id: 'weekdays', label: 'Weekdays', rule: { freq: 'weekdays' } },
-    { id: 'weekly', label: `Every ${WEEKDAY_NAMES[w.dow]}`, rule: { freq: 'weekly', dow: w.dow } },
-    { id: 'monthly', label: `Monthly on day ${w.d}`, rule: { freq: 'monthly', dom: w.d } },
+    { id: 'daily', label: 'Every day' },
+    { id: 'weekdays', label: 'Weekdays' },
+    { id: 'weekly', label: `Every ${WEEKDAY_NAMES[c.dow]}` },
+    { id: 'monthly', label: `Monthly on day ${c.d}` },
   ];
 }
 
-// pickedWhen — the three fields (date, time, repeat) as a canonical value.
-export function pickedWhen(date, time, repeat, tz) {
-  const base = fromInputs(date, time, tz);
-  if (base == null) return null;
-  const opt = repeatOptions(base, tz).find((o) => o.id === repeat);
-  if (!opt?.rule) return { kind: 'once', at: base };
-  const w = wall(base, tz);
-  return { kind: 'repeat', rule: { ...opt.rule, h: w.h, mi: w.mi } };
+// pickText — the three fields (date, time, repeat) as words for the server,
+// which resolves them like anything typed into When. Null when incomplete.
+export function pickText(date, time, repeat) {
+  const c = civilDay(date);
+  if (!c || !TIME_RE.test(String(time || ''))) return null;
+  const t = `at ${time}`;
+  switch (repeat) {
+    case 'daily': return `every day ${t}`;
+    case 'weekdays': return `weekdays ${t}`;
+    case 'weekly': return `every ${WEEKDAY_NAMES[c.dow].toLowerCase()} ${t}`;
+    case 'monthly': return `every month on the ${ordinal(c.d)} ${t}`;
+    default: return `${date} ${t}`;
+  }
+}
+
+// pickOf — the three fields showing a value the server gave (its next run
+// for a repeat); tomorrow at 09:00 while nothing is chosen.
+export function pickOf(when, next, tz, now) {
+  const at = next ?? (when?.kind === 'once' ? when.at : null);
+  const repeat = when?.kind === 'repeat' ? when.rule.freq : 'never';
+  return {
+    date: dateInputValue(at ?? now + 86400000, tz),
+    time: repeat !== 'never' ? hhmm(when.rule.h, when.rule.mi) : at != null ? clock(at, tz) : '09:00',
+    repeat,
+  };
 }
 
 // ── The list ──────────────────────────────────────────────────────────────
@@ -330,12 +310,15 @@ export function isDefaultDelivery(d) {
 
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
+// schedDraft — the editable fields, and `next`: the server's next run for
+// `when`, never sent and never edited on its own.
 export function schedDraft(t) {
   return {
     title: t?.title || '',
     description: t?.description || '',
     subtasks: (t?.subtasks || []).map((s) => ({ title: s.title, done: !!s.done })),
     when: t?.when ? JSON.parse(JSON.stringify(t.when)) : null,
+    next: t?.next ?? null,
     target: t?.target ? { ...t.target } : null,
     delivery: { ...DEFAULT_DELIVERY, ...(t?.delivery || {}) },
   };
@@ -367,7 +350,14 @@ export function schedulePatch(draft, t, tz) {
 export function rebaseSchedDraft(draft, before, current) {
   const next = schedDraft(current);
   for (const k of schedChanged(draft, before)) next[k] = draft[k];
+  if (schedChanged(draft, before).includes('when')) next.next = draft.next ?? null;
   return next;
+}
+
+// schedReady — Schedule and Save need a title, a When the server resolved,
+// and somewhere to send it.
+export function schedReady(draft) {
+  return !!draft?.title?.trim() && !!draft.when && !!draft.target && (draft.target.kind !== 'new' || !!draft.target.model);
 }
 
 export function scheduleBody(draft, tz) {
@@ -406,20 +396,33 @@ export async function submitSendLater({ text, when, delivery, sessionId, tz }, {
   return true;
 }
 
-// ── When: the server's preview ────────────────────────────────────────────
+// ── When: the server's answer ─────────────────────────────────────────────
 
-// createWhenPreview — each change asks the server; only the answer to the
-// latest question is shown, whatever order the answers arrive in.
-export function createWhenPreview(post, onResult) {
+// createWhenInput — When asks the server one question at a time, whether it
+// was typed, picked or a preset. The value is only ever the server's answer
+// to the latest question: nothing while it is open (hold) or when it failed,
+// and an older answer arriving late is ignored.
+export function createWhenInput(post, { onRead, onValue }) {
   let seq = 0;
-  return (text, tz) => {
+  const ask = (text, tz) => {
     const mine = ++seq;
+    onRead(null);
+    onValue(null);
+    if (!String(text || '').trim()) return Promise.resolve();
     let asked;
     try { asked = Promise.resolve(post({ text, tz })); } catch (error) { asked = Promise.reject(error); }
-    return asked
-      .then((res) => { if (mine === seq) onResult(previewResult(res)); })
-      .catch((error) => { if (mine === seq) onResult(previewResult(null, error)); });
+    return asked.then((res) => {
+      if (mine !== seq) return;
+      const r = previewResult(res);
+      onRead(r);
+      onValue(r?.when ? { when: r.when, next: r.next } : null);
+    }, (error) => {
+      if (mine === seq) onRead(previewResult(null, error));
+    });
   };
+  ask.hold = () => { seq++; onRead(null); onValue(null); };
+  ask.cancel = () => { seq++; };
+  return ask;
 }
 
 const TRY_ONCE = 'Try “in 20 min”, “friday at 18:00” or “every monday at 9”.';
@@ -476,9 +479,16 @@ export function failureWords(reason, note = '') {
 }
 
 // lateRun — the newest run waiting for your OK: the banner's Run and Skip
-// decide it, by its own revision.
+// decide it, by its own revision. It comes from the detail's decisions (every
+// late run, oldest first), never from the page of Runs.
 export function lateRun(detail) {
-  return (detail?.runs || []).find((r) => r.state === 'late') || null;
+  const d = detail?.decisions || [];
+  return d.length ? d[d.length - 1] : null;
+}
+
+// awaitsYou — a run of this template waits for your Run or Skip, paused or not.
+export function awaitsYou(t) {
+  return stateOf(t) === 'late' || (t?.late_count || 0) > 0 || (t?.decisions?.length || 0) > 0;
 }
 
 export function failedRun(detail) {
@@ -527,13 +537,19 @@ export function runOpenSession(run) {
   return run?.session_id || '';
 }
 
+const SKIP_WORDS = {
+  superseded: 'A newer run replaced it',
+  legacy_delivered: 'Already sent before migration',
+};
+
 export function runRows(detail) {
   const rows = [];
   if (detail?.next && stateOf(detail) !== 'paused') rows.push({ id: 'next', at: detail.next, word: 'Next', cls: 'next', note: '' });
   const past = [];
   for (const r of detail?.runs || []) {
     let note = '';
-    if (r.missed_count) note = `${r.missed_count} earlier run${r.missed_count === 1 ? '' : 's'} skipped`;
+    if (r.state === 'skipped' && SKIP_WORDS[r.reason]) note = SKIP_WORDS[r.reason];
+    else if (r.missed_count) note = `${r.missed_count} earlier run${r.missed_count === 1 ? '' : 's'} skipped`;
     else if (r.state === 'failed') note = failureWords(r.reason, r.note);
     else if (r.note && r.state !== 'done') note = r.note;
     past.push({ id: r.id, at: r.at, word: runWord(r), cls: runClass(r), note, run: r });
@@ -546,7 +562,7 @@ export function schedActions(t) {
   const s = stateOf(t);
   if (s === 'late') return ['delete', 'lateSkip', 'lateRun'];
   if (s === 'failed') return ['delete', 'reroute'];
-  if (s === 'paused') return ['delete', 'resume'];
+  if (s === 'paused') return awaitsYou(t) ? ['delete', 'lateSkip', 'lateRun', 'resume'] : ['delete', 'resume'];
   if (isRepeat(t)) return ['delete', 'pause', 'skip', 'runNow'];
   return t.next ? ['delete', 'sendNow'] : ['delete'];
 }

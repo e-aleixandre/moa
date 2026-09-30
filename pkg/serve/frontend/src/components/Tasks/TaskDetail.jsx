@@ -385,7 +385,7 @@ export function TaskDetail({
           )}
           {isNew && whenPop && (
             <div class="sch-inline-pop">
-              <WhenEditor value={null} onChange={(w, text) => { setWhenPop({ text: text || "" }); set({ when: w }); }} />
+              <WhenEditor value={null} onChange={(w, text, next) => { setWhenPop({ text: text || "" }); set({ when: w, next }); }} />
             </div>
           )}
           <div class="tk-prop">

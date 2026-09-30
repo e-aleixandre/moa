@@ -267,3 +267,39 @@ func TestWhenParseResolvesDST(t *testing.T) {
 }
 
 func mustTime(s string) time.Time { return time.UnixMilli(ms(s)).UTC() }
+
+// The web client's date/time/repeat pickers and presets never compute an
+// instant: they send these texts and save the answer. Each must parse to the
+// value the picker names, including on a DST gap day (Madrid, 28 Mar 2027).
+func TestWhenParseClientPickerTexts(t *testing.T) {
+	now := mustTime("2027-03-27T12:00:00Z") // Saturday
+	parse := func(text string) *Parsed {
+		t.Helper()
+		p, err := ParseWhen(text, now, madrid)
+		if err != nil || p == nil {
+			t.Fatalf("ParseWhen(%q) = %+v, %v", text, p, err)
+		}
+		return p
+	}
+	if p := parse("2027-03-28 at 02:30"); p.When.Kind != WhenOnce || p.When.At != ms("2027-03-28T01:30:00Z") || !p.Adjusted {
+		t.Fatalf("once on the gap = %+v", p)
+	}
+	for text, want := range map[string]Rule{
+		"every day at 02:30":               {Freq: FreqDaily, H: 2, Mi: 30},
+		"weekdays at 02:30":                {Freq: FreqWeekdays, H: 2, Mi: 30},
+		"every sunday at 02:30":            {Freq: FreqWeekly, DOW: dow(0), H: 2, Mi: 30},
+		"every month on the 28th at 02:30": {Freq: FreqMonthly, DOM: dow(28), H: 2, Mi: 30},
+	} {
+		p := parse(text)
+		r := p.When.Rule
+		if p.When.Kind != WhenRepeat || r == nil || r.Freq != want.Freq || r.H != 2 || r.Mi != 30 ||
+			(want.DOW != nil && (r.DOW == nil || *r.DOW != *want.DOW)) || (want.DOM != nil && (r.DOM == nil || *r.DOM != *want.DOM)) {
+			t.Fatalf("%q = %+v rule %+v, want %+v", text, p, r, want)
+		}
+	}
+	for _, text := range []string{"in 20 minutes", "tonight", "tomorrow at 09:00", "monday at 09:00"} {
+		if p := parse(text); p.When.Kind != WhenOnce || p.Next <= now.UnixMilli() {
+			t.Fatalf("preset %q = %+v", text, p)
+		}
+	}
+}

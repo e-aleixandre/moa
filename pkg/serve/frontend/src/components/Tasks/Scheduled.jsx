@@ -14,10 +14,10 @@ import {
 } from "../../data/tasks.js";
 import { conflictCurrent, deletePath, errorText, isTypingTarget, projectOptions, sessionName } from "../../data/tasks-model.js";
 import {
-  canReroute, clock, createWhenPreview, dateInputValue, dateLabel, deliveryRows, deliverySummary, deviceZone, failedRun, failureWords,
-  inWords, isDefaultDelivery, isRepeat, lateBanner, lateRun, modelLabel, pickedWhen, presets, rebaseSchedDraft, repeatOptions, ruleShort,
-  ruleText, runOpenSession, runRows, schedActions, schedDirty, schedDraft, schedEyebrow, schedRight, scheduleBody, schedulePatch,
-  scheduledRows, stateOf, targetFromDest, targetName, targetSessionId, waitingCount, whenButton, whenLong, whenNext, whenShort,
+  WHEN_PRESETS, awaitsYou, canReroute, clock, createWhenInput, dateLabel, deliveryRows, deliverySummary, deviceZone, failedRun, failureWords,
+  inWords, isDefaultDelivery, isRepeat, lateBanner, lateRun, modelLabel, pickOf, pickText, rebaseSchedDraft, repeatOptions, ruleShort,
+  ruleText, runOpenSession, runRows, schedActions, schedDirty, schedDraft, schedEyebrow, schedReady, schedRight, scheduleBody, schedulePatch,
+  scheduledRows, stateOf, targetFromDest, targetName, targetSessionId, waitingCount, whenButton, whenLong, whenShort,
 } from "../../data/schedule-model.js";
 import { CloseIcon, Keycap, MOD_ENTER, MoveList, OpenSessionButton, useEscape } from "./parts.jsx";
 
@@ -138,41 +138,63 @@ export function ScheduledGroup({ list, selected, onSelect, phone, context, limit
 
 // WhenEditor — words first, read by the server, with the date they resolve
 // to underneath; and the three fields (date, time, repeat) always in sync
-// with it. The zone is this device's, said once, quietly.
-export function WhenEditor({ value, onChange, text: text0 = "", phone, autoFocus = true, onSubmit }) {
+// with it. The pickers and presets are words for the server too: the value
+// is only ever the server's answer (onChange(when, text, next)), and nothing
+// while a question is open or failed. The zone is this device's, said once.
+export function WhenEditor({ value, next: next0 = null, onChange, text: text0 = "", phone, autoFocus = true, onSubmit }) {
   const tz = deviceZone();
   const now = useNow();
   const [text, setText] = useState(text0);
   const [read, setRead] = useState(null);
+  const [nextAt, setNextAt] = useState(next0);
+  const [pick, setPick] = useState(() => pickOf(value, next0, tz, Date.now()));
+  const [chips, setChips] = useState([]);
+  const [chip, setChip] = useState("");
   const field = useRef(null);
   const timer = useRef(null);
   const change = useRef(onChange);
   change.current = onChange;
   const typed = useRef(text0);
-  const preview = useMemo(() => createWhenPreview((body) => parseWhen(body.text, body.tz), (r) => {
-    setRead(r);
-    if (r?.when) change.current(r.when, typed.current);
+  const ask = useMemo(() => createWhenInput((body) => parseWhen(body.text, body.tz), {
+    onRead: setRead,
+    onValue: (v) => {
+      setNextAt(v?.next ?? null);
+      if (v) setPick(pickOf(v.when, v.next, tz, Date.now()));
+      change.current(v?.when ?? null, typed.current, v?.next ?? null);
+    },
   }), []);
   useEffect(() => {
     if (autoFocus) field.current?.focus({ preventScroll: true });
-    if (text0) preview(text0, tz);
-    return () => clearTimeout(timer.current);
+    if (text0) ask(text0, tz);
+    let live = true;
+    // The presets show the times the server gives them; one it cannot place
+    // (tonight, after 21:00) is not offered.
+    Promise.all(WHEN_PRESETS.map((p) => parseWhen(p.text, tz).then((r) => (r?.when ? { ...p, at: r.next } : null), () => null)))
+      .then((list) => { if (live) setChips(list.filter(Boolean)); });
+    return () => { live = false; clearTimeout(timer.current); ask.cancel(); };
   }, []);
-  const onText = (t) => {
+  const fresh = (t) => {
+    clearTimeout(timer.current);
     setText(t);
     typed.current = t;
-    clearTimeout(timer.current);
-    if (!t.trim()) { setRead(null); preview("", tz); return; }
-    timer.current = setTimeout(() => preview(t, tz), 250);
+    setChip("");
   };
-  const at = whenNext(value, now, tz);
-  const repeatId = value?.kind === "repeat" ? value.rule.freq : "never";
-  const date = at ? dateInputValue(at, tz) : dateInputValue(now + 86400000, tz);
-  const time = at ? clock(at, tz) : "09:00";
-  const setPick = (d, t, rep) => {
-    setText(""); setRead(null);
-    const w = pickedWhen(d, t, rep, tz);
-    if (w) onChange(w);
+  const onText = (t) => {
+    fresh(t);
+    ask.hold();
+    if (t.trim()) timer.current = setTimeout(() => ask(t, tz), 250);
+  };
+  const onPick = (p) => {
+    const nextPick = { ...pick, ...p };
+    fresh("");
+    setPick(nextPick);
+    const words = pickText(nextPick.date, nextPick.time, nextPick.repeat);
+    if (words) ask(words, tz); else ask.hold();
+  };
+  const onPreset = (p) => {
+    fresh("");
+    setChip(p.label);
+    ask(p.text, tz);
   };
 
   return (
@@ -190,31 +212,38 @@ export function WhenEditor({ value, onChange, text: text0 = "", phone, autoFocus
         />
       </label>
       <div class="sch-when-read" role="status">
-        {read?.error && text.trim() ? (
+        {read?.error ? (
           <span class="sch-when-err">{read.error}</span>
         ) : value ? (
           <>
             <span class="sch-when-v">{value.kind === "repeat" ? ruleText(value.rule) : whenLong(value.at, tz)}</span>
-            <span class="tk-data sch-when-in">{value.kind === "repeat" ? (at ? `next ${whenShort(at, now, tz)}` : "") : inWords(value.at, now)}</span>
+            <span class="tk-data sch-when-in">{value.kind === "repeat" ? (nextAt ? `next ${whenShort(nextAt, now, tz)}` : "") : inWords(value.at, now)}</span>
             {read?.adjusted && <span class="sch-when-in">Moved by the clock change</span>}
             {read?.alt && (
               <button
                 type="button"
                 class="tk-link is-accent sch-when-alt"
-                onClick={() => { const alt = read.alt; setRead({ ...read, alt: value.kind === "once" ? value.at : null }); onChange({ kind: "once", at: alt }); }}
+                onClick={() => {
+                  const alt = read.alt;
+                  ask.cancel();
+                  setRead({ ...read, alt: value.kind === "once" ? value.at : null });
+                  setNextAt(alt);
+                  setPick(pickOf({ kind: "once", at: alt }, alt, tz, Date.now()));
+                  onChange({ kind: "once", at: alt }, typed.current, alt);
+                }}
               >
                 {clock(read.alt, tz)} instead
               </button>
             )}
           </>
         ) : (
-          <span class="sch-when-err">Type when, or pick below.</span>
+          <span class="sch-when-err">{text.trim() ? "\u00a0" : "Type when, or pick below."}</span>
         )}
       </div>
-      {!text && (
+      {!text && chips.length > 0 && (
         <div class="sch-when-presets">
-          {presets(now, tz).map((p) => (
-            <button key={p.label} type="button" class={`tk-chip${value?.kind === "once" && value.at === p.at ? " is-on" : ""}`} onClick={() => { setText(""); setRead(null); onChange({ kind: "once", at: p.at }); }}>
+          {chips.map((p) => (
+            <button key={p.label} type="button" class={`tk-chip${value && chip === p.label ? " is-on" : ""}`} onClick={() => onPreset(p)}>
               {p.label}<span class="tk-data sch-chip-t">{whenShort(p.at, now, tz).replace(/^(Today|Tomorrow) /, "")}</span>
             </button>
           ))}
@@ -223,16 +252,16 @@ export function WhenEditor({ value, onChange, text: text0 = "", phone, autoFocus
       <div class="sch-when-pick">
         <label class="sch-pick">
           <span class="sch-pick-k">Date</span>
-          <input type="date" class="sch-pick-in" value={date} onInput={(e) => setPick(e.currentTarget.value, time, repeatId)} />
+          <input type="date" class="sch-pick-in" value={pick.date} onInput={(e) => onPick({ date: e.currentTarget.value })} />
         </label>
         <label class="sch-pick is-time">
           <span class="sch-pick-k">Time</span>
-          <input type="time" class="sch-pick-in" value={time} onInput={(e) => setPick(date, e.currentTarget.value, repeatId)} />
+          <input type="time" class="sch-pick-in" value={pick.time} onInput={(e) => onPick({ time: e.currentTarget.value })} />
         </label>
         <label class="sch-pick is-repeat">
           <span class="sch-pick-k">Repeat</span>
-          <select class="sch-pick-in" value={repeatId} onChange={(e) => setPick(date, time, e.currentTarget.value)}>
-            {repeatOptions(at || now + 86400000, tz).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+          <select class="sch-pick-in" value={pick.repeat} onChange={(e) => onPick({ repeat: e.currentTarget.value })}>
+            {repeatOptions(pick.date).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
         </label>
       </div>
@@ -439,8 +468,8 @@ export function SchedDetail({
   const detail = task ? slice.details[task.id] || task : null;
   const late = lateRun(detail);
   const failRun = failedRun(detail);
-  const nextAt = draft.when ? (!dirty && task?.next ? task.next : whenNext(draft.when, now, tz)) : null;
-  const ready = !!draft.title.trim() && !!draft.when && !!draft.target && (draft.target.kind !== "new" || !!draft.target.model);
+  const nextAt = draft.when ? (!dirty && task?.next ? task.next : draft.next ?? (draft.when.kind === "once" ? draft.when.at : null)) : null;
+  const ready = schedReady(draft);
 
   const save = async () => {
     setBusy(true);
@@ -491,7 +520,7 @@ export function SchedDetail({
         <button type="button" class="zl-ask-btn is-quiet" disabled={busy} onClick={() => { setDraft(schedDraft(base)); setConflict(false); }}>Discard</button>
         <span class="tk-grow" />
         {isRepeat(task) && draft.when?.kind === "repeat" && nextAt && <span class="tk-foot-fact">From {whenShort(nextAt, now, tz)} on</span>}
-        <button type="button" class="zl-ask-btn is-primary" disabled={busy || !draft.title.trim() || !draft.target} onClick={save}>Save</button>
+        <button type="button" class="zl-ask-btn is-primary" disabled={busy || !ready} onClick={save}>Save</button>
       </>
     );
   } else {
@@ -505,7 +534,7 @@ export function SchedDetail({
         {acts.includes("reroute") && canReroute(failRun) && (
           <button type="button" class="zl-ask-btn is-primary" disabled={busy} onClick={() => (onPushReroute ? onPushReroute(failRun) : setPop(pop === "reroute" ? null : "reroute"))}>Send to another session</button>
         )}
-        {acts.includes("resume") && <button type="button" class="zl-ask-btn is-primary" disabled={busy} onClick={() => act("Could not resume it", () => resumeSchedule(task))}><Play size={14} aria-hidden="true" />Resume</button>}
+        {acts.includes("resume") && <button type="button" class={`zl-ask-btn${acts.includes("lateRun") ? "" : " is-primary"}`} disabled={busy} onClick={() => act("Could not resume it", () => resumeSchedule(task))}><Play size={14} aria-hidden="true" />Resume</button>}
         {acts.includes("pause") && <button type="button" class="zl-ask-btn" disabled={busy} onClick={() => act("Could not pause it", () => pauseSchedule(task))}><Pause size={14} aria-hidden="true" />Pause</button>}
         {acts.includes("skip") && <button type="button" class="zl-ask-btn" disabled={busy || !task.next} title="Skips the next run only" onClick={() => act("Could not skip the next run", () => skipScheduleNext(task))}>Skip next</button>}
         {(acts.includes("runNow") || acts.includes("sendNow")) && (
@@ -523,7 +552,7 @@ export function SchedDetail({
     <div class={`tk-detail tk-root sch-detail${phone ? " is-phone" : ""}`}>
       <div class="tk-detail-body">
         {conflict && <p class="tk-conflict" role="status">Changed elsewhere. This is the latest version, with your edits kept.</p>}
-        {!isNew && s === "late" && (
+        {!isNew && awaitsYou(detail) && (
           <div class="sch-late" role="status">
             <span class="sch-late-t">{late ? lateBanner(late, now, tz) : "A run is waiting for your OK."}</span>
             <span class="sch-late-q">Run it now?</span>
@@ -580,7 +609,7 @@ export function SchedDetail({
           </div>
           {pop === "when" && (
             <div class="sch-inline-pop">
-              <WhenEditor value={draft.when} text={init.whenText || ""} onChange={(w) => set({ when: w })} onSubmit={() => setPop(null)} />
+              <WhenEditor value={draft.when} next={draft.next} text={init.whenText || ""} onChange={(w, _text, next) => set({ when: w, next })} onSubmit={() => setPop(null)} />
             </div>
           )}
           <div class="tk-prop">
@@ -659,13 +688,14 @@ export function schedTitle(t) {
 export function WhenPage({ draftKey, onBack }) {
   const entry = peekDraft(draftKey);
   const [when, setWhen] = useState(entry?.draft?.when || null);
+  const [next, setNext] = useState(entry?.draft?.next ?? null);
   const repeat = entry?.base?.when?.kind === "repeat";
   return (
     <div class="tk-phone-body tk-root sch-when-page">
-      <WhenEditor phone value={when} onChange={setWhen} autoFocus={false} />
+      <WhenEditor phone value={when} next={next} onChange={(w, _text, n) => { setWhen(w); setNext(n); }} autoFocus={false} />
       {repeat && <p class="sch-page-fact">Changes apply from the next run.</p>}
       <div class="sch-page-foot">
-        <button type="button" class="zl-ask-btn is-primary tk-wide" disabled={!when} onClick={() => { patchDraft(draftKey, { when }); onBack(); }}>Done</button>
+        <button type="button" class="zl-ask-btn is-primary tk-wide" disabled={!when} onClick={() => { patchDraft(draftKey, { when, next }); onBack(); }}>Done</button>
       </div>
     </div>
   );

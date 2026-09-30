@@ -3,7 +3,7 @@
 // the words do not depend on the machine running the tests.
 import { test, expect } from 'bun:test';
 import {
-  attentionCount, canReroute, confirmBody, createWhenPreview, deliverySummary, isScheduled, lateBanner, lateRun, modelLabel,
+  attentionCount, canReroute, confirmBody, createWhenInput, deliverySummary, isScheduled, lateBanner, lateRun, modelLabel,
   previewResult, rebaseSchedDraft, runOpenSession, runRows, schedActions, schedDraft, schedEyebrow, schedPin, schedRight,
   scheduleBody, schedulePatch, scheduledRows, sendLaterBody, submitSendLater, targetFromDest, targetName, targetSessionId,
   waitingCount, whenLong, whenShort, ruleShort, ruleText, inWords, DEFAULT_DELIVERY,
@@ -192,7 +192,7 @@ test('scheduledWhenUsesServerPreview', async () => {
   const pending = [];
   const post = (body) => new Promise((resolve, reject) => pending.push({ body, resolve, reject }));
   const seen = [];
-  const preview = createWhenPreview(post, (r) => seen.push(r));
+  const preview = createWhenInput(post, { onRead() {}, onValue: (v) => { if (v) seen.push(v); } });
   preview('at 5', TZ);
   preview('at 5pm', TZ);
   expect(pending.map((p) => p.body)).toEqual([{ text: 'at 5', tz: TZ }, { text: 'at 5pm', tz: TZ }]);
@@ -227,6 +227,10 @@ test('runRows lists runs newest first whatever order the server sends', () => {
 test('scheduledLateFailureControls', () => {
   const detail = weekly(2, {
     schedule_state: 'late', late_count: 2,
+    decisions: [
+      { id: 20, revision: 2, at: at(29, 9), state: 'late', observed_at: at(29, 9, 20) },
+      { id: 21, revision: 7, at: at(30, 9), state: 'late', observed_at: at(30, 9, 12), missed_count: 3 },
+    ],
     runs: [
       { id: 21, revision: 7, at: at(30, 9), state: 'late', observed_at: at(30, 9, 12), missed_count: 3 },
       { id: 20, revision: 2, at: at(29, 9), state: 'late', observed_at: at(29, 9, 20) },
@@ -322,4 +326,102 @@ test('scheduledTranscriptRendering', () => {
 
 test('the composer no longer suggests /schedule', () => {
   expect(filterCommands('sch').map((c) => c.name)).not.toContain('schedule');
+});
+
+// ── Review fixes: the server owns every instant ─────────────────────────
+
+import * as model from './schedule-model.js';
+
+const deferred = () => {
+  const pending = [];
+  const post = (body) => new Promise((resolve, reject) => pending.push({ body, resolve, reject }));
+  return { pending, post };
+};
+const flush = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+const parseErr = (code) => Object.assign(new Error(`400: {"code":"${code}","error":"x"}`), { status: 400 });
+
+test('the When pickers and presets ask the server and keep exactly its answer', async () => {
+  // No client calendar: nothing turns a wall time into an instant here.
+  for (const name of ['zoned', 'fromInputs', 'pickedWhen', 'nextOf', 'whenNext', 'presets']) expect(model[name]).toBeUndefined();
+  expect(model.WHEN_PRESETS.map((p) => p.text)).toEqual(['in 20 minutes', 'tonight', 'tomorrow at 09:00', 'monday at 09:00']);
+  expect(model.WHEN_PRESETS.every((p) => p.at === undefined)).toBe(true);
+
+  // Madrid, Sun 28 Mar 2027 02:30 does not exist. The pickers say what was
+  // picked, in words; the server decides the instant and the rule.
+  expect(model.pickText('2027-03-28', '02:30', 'never')).toBe('2027-03-28 at 02:30');
+  expect(model.pickText('2027-03-28', '02:30', 'daily')).toBe('every day at 02:30');
+  expect(model.pickText('2027-03-28', '02:30', 'weekdays')).toBe('weekdays at 02:30');
+  expect(model.pickText('2027-03-28', '02:30', 'weekly')).toBe('every sunday at 02:30');
+  expect(model.pickText('2027-03-28', '02:30', 'monthly')).toBe('every month on the 28th at 02:30');
+  expect(model.pickText('', '02:30', 'never')).toBe(null);
+
+  const { pending, post } = deferred();
+  const values = [];
+  const ask = model.createWhenInput(post, { onRead() {}, onValue: (v) => values.push(v) });
+  ask(model.pickText('2027-03-28', '02:30', 'daily'), 'Europe/Madrid');
+  expect(pending[0].body).toEqual({ text: 'every day at 02:30', tz: 'Europe/Madrid' });
+  // Whatever the server says is what is saved, even an instant no client
+  // arithmetic would produce.
+  const server = { when: { kind: 'repeat', rule: { freq: 'daily', h: 2, mi: 30 } }, tz: 'Europe/Madrid', next: 1806204612345, adjusted: true };
+  pending[0].resolve(server);
+  await flush();
+  expect(values.at(-1)).toEqual({ when: server.when, next: 1806204612345 });
+
+  ask(model.pickText('2027-03-28', '02:30', 'never'), 'Europe/Madrid');
+  pending[1].resolve({ when: { kind: 'once', at: Date.UTC(2027, 2, 28, 1, 30) }, tz: 'Europe/Madrid', next: Date.UTC(2027, 2, 28, 1, 30), adjusted: true });
+  await flush();
+  expect(values.at(-1)).toEqual({ when: { kind: 'once', at: Date.UTC(2027, 2, 28, 1, 30) }, next: Date.UTC(2027, 2, 28, 1, 30) });
+});
+
+test('an invalid When clears the value, and a stale answer never brings it back', async () => {
+  const { pending, post } = deferred();
+  const values = [];
+  const reads = [];
+  const ask = model.createWhenInput(post, { onRead: (r) => reads.push(r), onValue: (v) => values.push(v) });
+  ask('tomorrow at 09:00', TZ);
+  pending[0].resolve({ when: { kind: 'once', at: at(31, 9) }, tz: TZ, next: at(31, 9) });
+  await flush();
+  expect(values.at(-1)?.when).toEqual({ kind: 'once', at: at(31, 9) });
+
+  // Typing again: nothing is chosen until the server answers the new text.
+  ask.hold();
+  expect(values.at(-1)).toBe(null);
+  ask('tomorrow at 10:00', TZ);
+  ask('today at 99:90', TZ);
+  pending[2].reject(parseErr('invalid'));
+  await flush();
+  expect(values.at(-1)).toBe(null);
+  expect(reads.at(-1).error).toBeTruthy();
+  // The older question answers last: ignored.
+  pending[1].resolve({ when: { kind: 'once', at: at(31, 10) }, tz: TZ, next: at(31, 10) });
+  await flush();
+  expect(values.at(-1)).toBe(null);
+
+  // Neither Schedule nor Save is offered without a value.
+  const draft = { ...schedDraft(null), title: 'x', target: { kind: 'session', id: 'ci' } };
+  expect(model.schedReady({ ...draft, when: null })).toBe(false);
+  expect(model.schedReady({ ...draft, when: { kind: 'once', at: at(31, 9) } })).toBe(true);
+});
+
+test('late decisions come from the detail, even beyond Runs and under a pause', () => {
+  const runs = Array.from({ length: 20 }, (_, i) => ({ id: 40 - i, revision: 1, at: at(30, 9) - i * 86400000, state: 'done' }));
+  const detail = weekly(2, { schedule_state: 'late', late_count: 1, runs, decisions: [{ id: 3, revision: 6, at: at(1, 9), state: 'late' }] });
+  expect(lateRun(detail).id).toBe(3);
+  expect(confirmBody(lateRun(detail), 'run')).toEqual({ revision: 6, action: 'run' });
+
+  const paused = weekly(2, { schedule_state: 'paused', late_count: 1, decisions: [{ id: 3, revision: 6, at: at(1, 9), state: 'late' }] });
+  expect(schedActions(paused)).toEqual(['delete', 'lateSkip', 'lateRun', 'resume']);
+  expect(model.awaitsYou(paused)).toBe(true);
+  expect(model.awaitsYou(weekly(2, { schedule_state: 'paused' }))).toBe(false);
+});
+
+test('skipped runs say why: replaced by a newer run, or sent before migration', () => {
+  const detail = weekly(2, { runs: [
+    { id: 2, revision: 1, at: at(29, 9), state: 'skipped', reason: 'superseded', note: 'Superseded by a later run' },
+    { id: 1, revision: 1, at: at(28, 9), state: 'skipped', reason: 'legacy_delivered', note: 'Already sent before migration' },
+  ] });
+  expect(runRows(detail).filter((r) => r.run).map((r) => [r.word, r.note])).toEqual([
+    ['Skipped', 'A newer run replaced it'],
+    ['Skipped', 'Already sent before migration'],
+  ]);
 });
