@@ -4,6 +4,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -118,7 +119,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 				// running. Holding the lifecycle lock through the terminal event
 				// prevents another compact from starting in this narrow interval.
 				if sctx.State != nil {
-					if err != nil {
+					// Stop cancels the compaction through Agent.Abort: that is
+					// the owner's choice, not a failure, so it settles idle.
+					if err != nil && !errors.Is(err, context.Canceled) {
 						_ = sctx.State.TransitionWithError(StateError, err.Error())
 					} else {
 						_ = sctx.State.Transition(StateIdle)

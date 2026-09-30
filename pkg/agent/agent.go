@@ -1518,6 +1518,11 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 		ctx, sumProvider, sumModel, streamOpts,
 		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings, focus,
 	)
+	// A stopped compaction reports the cancellation itself, whatever the
+	// provider made of its closed stream, and never applies a late summary.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		return nil, err
 	}

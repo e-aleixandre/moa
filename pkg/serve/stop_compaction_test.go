@@ -14,6 +14,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
 type preAbortGate struct {
@@ -498,4 +499,45 @@ hold:
 	if !sess.runtime.WaitSettled(context.Background()) {
 		t.Error("runtime did not settle")
 	}
+}
+
+// Stop during a manual compaction is the owner's choice, not a failure: the
+// session settles idle and a task notice queued behind the compaction is
+// folded into the transcript without waking another turn.
+func TestStopDuringManualCompactionSettlesIdle(t *testing.T) {
+	started := make(chan struct{})
+	prov := newMockProvider(func(ctx context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent)
+		close(started)
+		go func() { <-ctx.Done(); close(ch) }()
+		return ch, nil
+	})
+	srv, mgr := newNoticeTestServer(t, prov)
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCompactHistory(t, sess)
+	if err = sess.runtime.Bus.Execute(bus.CompactSession{}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("manual compact did not call provider")
+	}
+	rec := askFrom(t, mgr, sess.ID)
+	completeRequest(t, srv, rec, "", "")
+	n := waitNoticeState(t, mgr, rec.ID, tasks.NoticeSent)
+	pollUntil(t, 5*time.Second, "notice queued during compact", func() bool { return noticeQueued(sess, n) })
+	if _, err = mgr.CancelWithDiscardedSteers(sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "compact settled", func() bool {
+		return !sess.runtime.Context().Agent.IsRunning() && sessState(sess) != StateRunning
+	})
+	if state := sessState(sess); state != StateIdle {
+		t.Fatalf("stopped manual compaction settled as %s, want idle", state)
+	}
+	assertAppendedWithoutTurn(t, mgr, prov, sess, rec.ID, 1)
 }
