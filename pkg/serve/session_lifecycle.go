@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -812,6 +813,18 @@ func (m *Manager) deleteSession(id string) (err error) {
 			}
 		}
 	}()
+	m.mu.RLock()
+	_, resuming := m.resuming[id]
+	m.mu.RUnlock()
+	if resuming {
+		return ErrBusy
+	}
+	// Scheduled work bound to this session is settled in SQLite before its
+	// file goes: once unlinked, nothing may recreate or re-deliver to it.
+	// No Manager lock is held across this write.
+	if err := m.settleScheduledWork(id); err != nil {
+		return err
+	}
 	if m.automation != nil {
 		// A deleted session must not keep answering an idempotency key: the next
 		// retry should create a fresh run rather than resolve to a gone session.
@@ -1916,3 +1929,39 @@ func creatorTZOf(meta map[string]any) string {
 	return tz
 }
 
+// settleScheduledWork settles, before a session is deleted, the scheduled
+// runs bound to it, and the run it was created for if it carries a marker
+// (created, crash, not yet bound). Undelivered work becomes Not sent;
+// delivered work ends with an unknown outcome. A failure refuses the delete:
+// removing the file first could let a restart recreate the session.
+func (m *Manager) settleScheduledWork(id string) error {
+	if m.tasks == nil {
+		return nil
+	}
+	if _, err := os.Stat(m.tasks.Path()); err != nil {
+		return nil // no task database: nothing can be bound to the session
+	}
+	var meta map[string]any
+	if sess, ok := m.Get(id); ok && sess.persister != nil {
+		sess.persister.has(func(s *session.Session) bool {
+			meta = s.Metadata
+			return true
+		})
+	} else if saved, _, err := session.FindSessionReadOnly(m.sessionBaseDir, id); err == nil {
+		meta = saved.Metadata
+	}
+	var marker int64
+	if v, _ := meta[session.MetaScheduledOccurrenceID].(string); v != "" {
+		marker, _ = strconv.ParseInt(v, 10, 64)
+	}
+	if _, err := m.tasks.SettleSessionDeleted(m.baseCtx, id, marker); err != nil {
+		if errors.Is(err, tasks.ErrSchemaTooNew) {
+			// A newer moa owns this database; this binary cannot write it
+			// and must not make sessions undeletable because of it.
+			slog.Warn("scheduled work not settled: task database is newer than this binary", "session", id)
+			return nil
+		}
+		return fmt.Errorf("settle scheduled work of session %s: %w", id, err)
+	}
+	return nil
+}
