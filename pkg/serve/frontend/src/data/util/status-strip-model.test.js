@@ -17,9 +17,8 @@ test("perm mode is always present and defaults to yolo", () => {
 });
 
 test("modes are omitted when empty", () => {
-  const m = statusStripModel({ goalActive: false, tasks: [] }, null);
+  const m = statusStripModel({ goalActive: false }, null);
   expect(m.modes.goal).toBeUndefined();
-  expect(m.modes.tasks).toBeUndefined();
 });
 
 test("goal mode carries verifying/iteration/objective", () => {
@@ -28,15 +27,6 @@ test("goal mode carries verifying/iteration/objective", () => {
     null,
   );
   expect(m.modes.goal).toEqual({ verifying: true, iteration: 3, objective: "ship it" });
-});
-
-test("tasks mode counts done/total and completion", () => {
-  const tasks = [{ status: "done" }, { status: "done" }, { status: "running" }];
-  const m = statusStripModel({ tasks }, null);
-  expect(m.modes.tasks).toEqual({ done: 2, total: 3, complete: false });
-
-  const allDone = statusStripModel({ tasks: [{ status: "done" }] }, null);
-  expect(allDone.modes.tasks).toEqual({ done: 1, total: 1, complete: true });
 });
 
 test("onExtra alert reflects session overage", () => {

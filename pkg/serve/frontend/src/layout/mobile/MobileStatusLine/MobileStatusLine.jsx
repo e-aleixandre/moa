@@ -14,6 +14,7 @@ import { addToast } from "../../../data/notifications.js";
 import { modelCodename, shortModel } from "../../../data/util/format.js";
 import { StatusStrip } from "../../StatusStrip/StatusStrip.jsx";
 import { useOwnerStatusItem } from "../../../components/Owners/OwnerChipEntry.jsx";
+import { useSessionTasksStatus } from "../../../components/Tasks/useSessionTasksStatus.js";
 
 // MobileStatusLine — the phone's host for the status line. The line's FACE is
 // StatusStrip, the same component as desktop and grid; what lives here is what
@@ -48,6 +49,7 @@ export function MobileStatusLine({ session, usage }) {
   const permsPresence = usePresence(permsOpen, MOTION.exitBase);
   const catalog = useStore(modelCatalog);
   const ownerItem = useOwnerStatusItem(session);
+  const taskItem = useSessionTasksStatus(session?.id);
 
   const sessionId = session ? session.id : null;
   const panel = useStore((state) => sessionPanelView(state, sessionId));
@@ -115,6 +117,8 @@ export function MobileStatusLine({ session, usage }) {
       onModel={hasSession ? () => setSessionOpen(true) : undefined}
       modelOpen={sessionOpen}
       owner={ownerItem}
+      tasks={taskItem.tasks}
+      onOpenTasks={taskItem.onOpenTasks}
     >
       {hasSession && sessionPresence.mounted && (
         <PickerSheet

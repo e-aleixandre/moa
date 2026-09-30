@@ -4,10 +4,14 @@
 
 import { navigate } from './router.js';
 import { store } from './store.js';
+import { setTasksSession } from './tasks.js';
 
 let from = null;
 
-export function openTasksView() {
+// openTasksView opens every task, or with { sessionId } only that session's
+// (the status line's Tasks item).
+export function openTasksView({ sessionId = null } = {}) {
+  setTasksSession(sessionId);
   const view = store.get().view;
   if (view === 'tasks') return;
   from = view;
@@ -16,6 +20,7 @@ export function openTasksView() {
 
 export function closeTasksView() {
   if (store.get().view !== 'tasks') return;
+  setTasksSession(null);
   const back = from === 'tasks' ? null : from;
   from = null;
   navigate(back);

@@ -48,6 +48,9 @@ export const TASKS_INITIAL = Object.freeze({
   loaded: false,
   error: null,
   agents: false,
+  // The session the Tasks view is narrowed to (opened from its status line),
+  // or null for every task.
+  session: null,
   projects: [],
   bySession: {},
   details: {},

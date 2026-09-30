@@ -257,6 +257,15 @@ export function sessionTasksVerdict(data) {
   return parts.join(' · ') || 'none';
 }
 
+// sessionTasksStatus — the status line's Tasks item: the panel row's words,
+// or null when the session has nothing to show.
+export function sessionTasksStatus(data) {
+  if (!data) return null;
+  const verdict = sessionTasksVerdict(data);
+  if (verdict === 'none') return null;
+  return { text: verdict, forYou: openSessionRequests(data).length };
+}
+
 export function sessionGroups(data, sessionId = '') {
   const { requests: reqs, checklist } = sessionRecords(data, sessionId);
   const list = [...checklist].sort(byId);
@@ -450,12 +459,12 @@ export function errorText(error) {
 export function projectOptions(projects, list) {
   const out = [];
   const seen = new Set();
-  const add = (key, cwd) => {
+  const add = (key, cwd, cwds) => {
     if (!key || seen.has(key)) return;
     seen.add(key);
-    out.push({ key, cwd: cwd || '' });
+    out.push(cwds?.length ? { key, cwd: cwd || '', cwds } : { key, cwd: cwd || '' });
   };
-  for (const p of projects || []) add(p.key, p.cwd);
+  for (const p of projects || []) add(p.key, p.cwd, p.cwds);
   for (const t of list || []) add(t.project_key, t.project_cwd);
   return out.sort((a, b) => projectLabelOf(a).localeCompare(projectLabelOf(b)));
 }

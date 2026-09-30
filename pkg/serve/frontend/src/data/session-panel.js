@@ -28,6 +28,7 @@ export const PANEL_PAGES = {
   tasks: 'Tasks',
   taskNew: 'New task',
   taskNewDeps: 'Waits for',
+  taskNewMove: 'Move to',
 };
 
 // Pages that carry an id: one task of the session, and Move for that task.
@@ -79,6 +80,7 @@ export const PANEL_PAGE_PARENT = {
   ownerEdit: 'overview',
   taskNew: 'tasks',
   taskNewDeps: 'taskNew',
+  taskNewMove: 'taskNew',
 };
 
 // panelPageParent — where "back" goes from a page. The root's parent is the

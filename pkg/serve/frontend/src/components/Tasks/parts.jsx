@@ -1,14 +1,19 @@
-import { useEffect, useRef, useState } from "preact/hooks";
-import { Check, ChevronDown, Link2, Plus, Search } from "lucide-preact";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Link2, Plus, Search } from "lucide-preact";
 import { Kbd } from "../../primitives/Kbd/Kbd.jsx";
 import { formatShortcut } from "../../data/util/shortcut.js";
-import { projectName } from "../../data/util/format.js";
 import { addToast } from "../../data/notifications.js";
 import { loadTask, patchTask, isNewRequest } from "../../data/tasks.js";
 import {
   completeNotifies, completePatch, deliverOptions, errorText, isHere, isOpen, isRequest, needsDeliverChoice, noticeStateWords,
   projectLabelOf, recipientFor, relAge, sessionName, startNotifyGesture, taskProjectName,
 } from "../../data/tasks-model.js";
+import { moveIndex, moveSearch } from "../../data/tasks-move.js";
+import { openSession } from "../../data/tile-actions.js";
+import { openOwnerConversation, ownersSlice } from "../../data/owners.js";
+import { store } from "../../data/store.js";
+import { ownerState } from "../../data/owners-model.js";
+import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { TasksGlyph } from "./TasksGlyph.jsx";
 import "./Tasks.css";
 
@@ -432,10 +437,21 @@ export function useRowChecks(inline = completesInline) {
   return { completingId, setCompletingId, onCheck };
 }
 
-export function Filters({ agents, setAgents, project, setProject, projects, phone }) {
+export function Filters({ agents, setAgents, project, setProject, projects, phone, session, onClearSession }) {
   const [menu, setMenu] = useState(false);
   useEscape(menu, () => setMenu(false));
   const current = projects.find((p) => p.key === project);
+  // Narrowed to one session (its status line opened the view): that is the
+  // only filter, and clearing it shows every task again.
+  if (session) {
+    return (
+      <div class={`tk-filters${phone ? " is-phone" : ""}`}>
+        <button type="button" class="tk-chip is-on tk-chip-session" aria-label={`Show every task, not only ${session}'s`} onClick={onClearSession}>
+          <span class="tk-chip-t">{session}</span><CloseIcon />
+        </button>
+      </div>
+    );
+  }
   return (
     <div class={`tk-filters${phone ? " is-phone" : ""}`}>
       <div class="tk-anchor">
@@ -483,26 +499,64 @@ export function EmptyState({ onNew, phone, compact, text = "Nothing pending." })
 
 // ── Move ─────────────────────────────────────────────────────────────────
 
-// moveSessions — where a task can be assigned: loaded sessions first, then
-// saved ones, most recent first. Without a query the saved tail is capped;
-// finding one is what the search field is for.
-export function moveSessions(sessions, q) {
-  const all = Object.values(sessions || {});
-  const needle = q.trim().toLowerCase();
-  const hits = needle ? all.filter((s) => (s.title || "").toLowerCase().includes(needle)) : all;
-  const live = hits.filter((s) => s.state !== "saved").sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  const saved = hits.filter((s) => s.state === "saved").sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  return [...live, ...(needle ? saved : saved.slice(0, 12))];
+// openTaskSession — a task's session, opened as the sidebar opens it: shown,
+// never prompted. An owner's own conversation is not in the session roster
+// until it is asked for, so it goes through the owner.
+export function openTaskSession(id) {
+  if (!id) return false;
+  if (openSession(id)) return true;
+  const own = ownersSlice(store.get()).list.find((o) => o.session_id === id);
+  return own ? openOwnerConversation(own) : false;
 }
 
-// MoveList — You, a project's backlog, or a session. Choosing a session is
-// not the move yet: it asks to confirm, because assigning tells that session
-// (and, when it is saved, asks wake or hold instead). `direct` is for a task
-// being written: there the choice only sets where it will go, and the
-// confirmation is the create button itself.
-export function MoveList({ task, projects, sessions, phone, onPick, direct = false, pending: pending0 = null }) {
+// OpenSessionButton — the way from a task to the session it belongs to (its
+// assignee) or that asked for it. Opening shows the session, as the sidebar
+// would: it does not start a turn.
+export function OpenSessionButton({ sessions, id, phone, onOpen }) {
+  const name = sessionName(sessions, id);
+  const owner = sessions[id]?.kind === "owner";
+  return (
+    <button type="button" class={`tk-open${phone ? " is-phone" : ""}`} aria-label={`Open ${name}`} title={owner ? `Open ${name}` : "Open the session"} onClick={() => onOpen?.(id)}>
+      Open<ArrowUpRight size={phone ? 16 : 14} aria-hidden="true" />
+    </button>
+  );
+}
+
+const STATE_WORDS = { running: "Working", permission: "Waiting on you" };
+
+function stateWord(state) {
+  const w = STATE_WORDS[state];
+  if (!w) return null;
+  return <span class={state === "running" ? "tk-word-working" : "tk-word-waiting"}>{w}</span>;
+}
+
+function joinMeta(parts) {
+  const items = parts.filter(Boolean);
+  return items.map((m, i) => <>{i > 0 && <span class="tk-sep">·</span>}{m}</>);
+}
+
+// MoveList — where a task goes: You, an owner, a recent session, or a
+// project, which holds its backlog and its sessions. Hundreds of sessions
+// never make one list: a project opens as its own level, and the search
+// reaches every level at once.
+//
+// Choosing a session is not the move yet: it asks to confirm, because
+// assigning tells that session (and, when it is saved, asks wake or hold
+// instead). `direct` is for a task being written: there the choice only sets
+// where it will go, and the confirmation is the create button itself.
+//
+// The project level is the picker's own unless `onLevel` is given: the
+// phone's Tasks screen makes it a page of the sheet, so ‹ walks it back.
+export function MoveList({
+  task, projects, sessions, owners = [], phone, onPick, direct = false, pending: pending0 = null,
+  level: levelProp = null, onLevel,
+}) {
   const [q, setQ] = useState("");
   const [pending, setPending] = useState(pending0);
+  const [ownLevel, setOwnLevel] = useState(null);
+  const [full, setFull] = useState(null);
+  const level = onLevel ? levelProp : ownLevel;
+  const goLevel = (key) => { setQ(""); setFull(null); if (onLevel) onLevel(key); else setOwnLevel(key); };
   const target = pending ? sessions[pending] : null;
   const savedTarget = needsDeliverChoice({ state: target?.state === "saved" ? "saved" : "live" });
   // A loaded session: Assign and notify confirms. A saved one: the
@@ -512,6 +566,7 @@ export function MoveList({ task, projects, sessions, phone, onPick, direct = fal
     onPick({ place: "agent", sessionId: pending }, choice);
   };
   useEscape(!!pending && !direct, () => setPending(null));
+  useEscape(!pending && !onLevel && !!level, () => goLevel(null));
   useEffect(() => {
     if (!pending || phone) return undefined;
     const onKey = (e) => {
@@ -523,41 +578,146 @@ export function MoveList({ task, projects, sessions, phone, onPick, direct = fal
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [pending, phone, savedTarget]);
-  const Item = ({ dest, label, sub }) => (
+
+  const index = useMemo(() => moveIndex({ sessions, owners, projects }), [sessions, owners, projects]);
+  // A new level starts at its top (its back row, its backlog), not where the
+  // list above it was scrolled to.
+  const root = useRef(null);
+  const shownLevel = useRef(level);
+  useEffect(() => {
+    if (shownLevel.current === level) return;
+    shownLevel.current = level;
+    let el = root.current?.parentElement;
+    while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement;
+    if (el && el !== document.documentElement && el !== document.body) el.scrollTop = 0;
+  }, [level]);
+  const project = level ? index.projects.find((p) => p.key === level) : null;
+  const cls = (extra = "") => `tk-pop-item${extra}${phone ? " is-phone" : ""}`;
+
+  const Item = ({ dest, label, sub, lead }) => (
     <button
       type="button"
-      class={`tk-pop-item${sub ? " is-two" : ""}${dest.place === "agent" && pending === dest.sessionId ? " is-pending" : ""}${phone ? " is-phone" : ""}`}
+      class={cls(`${sub ? " is-two" : ""}${lead ? " has-lead" : ""}${dest.place === "agent" && pending === dest.sessionId ? " is-pending" : ""}`)}
       onClick={() => (dest.place === "agent" && !direct ? setPending(dest.sessionId) : onPick(dest, null))}
     >
-      <span class="tk-pop-t">{label}</span>
-      {sub && <span class="tk-pop-sub">{sub}</span>}
+      {lead}
+      <span class="tk-pop-main">
+        <span class="tk-pop-t">{label}</span>
+        {sub && <span class="tk-pop-sub">{sub}</span>}
+      </span>
       {isHere(task, dest) && <Check size={14} class="tk-pop-on" aria-hidden="true" />}
     </button>
   );
-  const list = moveSessions(sessions, q);
+  const SessionItem = ({ s, withProject = true }) => (
+    <Item
+      key={s.id}
+      dest={{ place: "agent", sessionId: s.id }}
+      label={s.title || "Untitled"}
+      sub={joinMeta([withProject && index.projectOfSession(s), stateWord(s.state) || (s.updated ? relAge(s.updated) : null)])}
+    />
+  );
+  const OwnerItem = ({ o }) => (
+    <Item
+      key={o.id}
+      dest={{ place: "agent", sessionId: o.id }}
+      label={o.name}
+      lead={<span class="tk-pop-lead"><OwnerAvatarFor owner={o.owner} state={ownerState(o.owner)} size={phone ? 24 : 20} /></span>}
+      sub={stateWord(o.state)}
+    />
+  );
+  const backlog = (p) => (
+    <Item key={`b-${p.key}`} dest={{ place: "backlog", key: p.key, cwd: p.cwd }} label={level ? "Backlog" : `Backlog · ${p.label}`} />
+  );
+  const projectSub = (p) => joinMeta([
+    p.sessions.length ? `${p.sessions.length} session${p.sessions.length === 1 ? "" : "s"}` : "No sessions",
+    p.working ? <span class="tk-word-working">{p.working} working</span> : null,
+  ]);
+  const ProjectRow = ({ p }) => (
+    <button key={p.key} type="button" class={cls(" is-two is-nav")} onClick={() => goLevel(p.key)}>
+      <span class="tk-pop-main">
+        <span class="tk-pop-t">{p.label}</span>
+        <span class="tk-pop-sub">{projectSub(p)}</span>
+      </span>
+      <ChevronRight size={15} class="tk-pop-chev" aria-hidden="true" />
+    </button>
+  );
+  const PAGE = 30;
+  const sessionsOf = (p) => {
+    const shown = full === p.key ? p.sessions : p.sessions.slice(0, PAGE);
+    return (
+      <>
+        {shown.map((s) => <SessionItem key={s.id} s={s} withProject={false} />)}
+        {shown.length < p.sessions.length && (
+          <button type="button" class={cls(" is-more")} onClick={() => setFull(p.key)}>
+            Show all {p.sessions.length}
+          </button>
+        )}
+      </>
+    );
+  };
+
+  let body;
+  const needle = q.trim();
+  if (project) {
+    const hits = moveSearch(index, q, project.key);
+    body = (
+      <>
+        {!needle && backlog(project)}
+        {project.sessions.length > 0 && <div class="tk-pop-label">Sessions</div>}
+        {needle ? hits.sessions.map((s) => <SessionItem key={s.id} s={s} withProject={false} />) : sessionsOf(project)}
+        {needle && hits.sessions.length === 0 && <div class="tk-pop-none">No session matches.</div>}
+      </>
+    );
+  } else if (needle) {
+    const hits = moveSearch(index, q);
+    const none = !hits.owners.length && !hits.projects.length && !hits.sessions.length;
+    body = (
+      <>
+        {hits.owners.length > 0 && <div class="tk-pop-label">Owners</div>}
+        {hits.owners.map((o) => <OwnerItem key={o.id} o={o} />)}
+        {hits.projects.length > 0 && <div class="tk-pop-label">Backlogs</div>}
+        {hits.projects.map((p) => backlog(p))}
+        {hits.sessions.length > 0 && <div class="tk-pop-label">Sessions</div>}
+        {hits.sessions.map((s) => <SessionItem key={s.id} s={s} />)}
+        {hits.more > 0 && <div class="tk-pop-none">{hits.more} more. Keep typing to narrow it.</div>}
+        {none && <div class="tk-pop-none">Nothing matches.</div>}
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <Item dest={{ place: "you" }} label="You" />
+        {index.owners.length > 0 && <div class="tk-pop-label">Owners</div>}
+        {index.owners.map((o) => <OwnerItem key={o.id} o={o} />)}
+        {index.recent.length > 0 && <div class="tk-pop-label">Recent</div>}
+        {index.recent.map((s) => <SessionItem key={s.id} s={s} />)}
+        {index.projects.length > 0 && <div class="tk-pop-label">Projects</div>}
+        {index.projects.map((p) => <ProjectRow key={p.key} p={p} />)}
+      </>
+    );
+  }
+
   const search = (
     <label class={`tk-search${phone ? " is-phone" : ""}`}>
       <Search size={phone ? 15 : 14} aria-hidden="true" />
-      <input class="tk-field" placeholder={phone ? "Find a session" : "Move to…"} aria-label="Find a session" value={q} onInput={(e) => setQ(e.currentTarget.value)} />
+      <input
+        class="tk-field"
+        placeholder={project ? `Search ${project.label}` : "Search owners, projects, sessions"}
+        aria-label="Search where to move it"
+        value={q}
+        onInput={(e) => setQ(e.currentTarget.value)}
+      />
     </label>
   );
   return (
-    <div class={`tk-move${phone ? " is-phone" : ""}`} onClick={(e) => e.stopPropagation()}>
-      {!phone && search}
-      {!q && <Item dest={{ place: "you" }} label="You" />}
-      {!q && projects.length > 0 && <div class="tk-pop-label">Backlog</div>}
-      {!q && projects.map((p) => <Item key={p.key} dest={{ place: "backlog", key: p.key, cwd: p.cwd }} label={projectLabelOf(p)} />)}
-      <div class="tk-pop-label">Assign to a session</div>
-      {phone && search}
-      {list.map((s) => (
-        <Item
-          key={s.id}
-          dest={{ place: "agent", sessionId: s.id }}
-          label={s.title || "Untitled"}
-          sub={<>{projectName(s.cwd)}{s.state === "running" && <> · <span class="tk-word-working">Working</span></>}{s.state === "saved" && " · saved"}</>}
-        />
-      ))}
-      {q && list.length === 0 && <div class="tk-pop-none">No session matches.</div>}
+    <div class={`tk-move${phone ? " is-phone" : ""}`} ref={root} onClick={(e) => e.stopPropagation()}>
+      {project && !onLevel && (
+        <button type="button" class={cls(" is-back")} onClick={() => goLevel(null)}>
+          <ChevronLeft size={15} aria-hidden="true" /><span class="tk-pop-t">{project.label}</span>
+        </button>
+      )}
+      {search}
+      {body}
       {pending && (
         <div class="tk-move-confirm">
           {savedTarget ? (

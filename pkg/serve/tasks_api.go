@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -260,6 +261,15 @@ func (m *Manager) projectKey(cwd string) string {
 	return key
 }
 
+// taskProject is a backlog the owner can pick, with every directory the
+// server knows that belongs to it, so the client can put each session under
+// its project (worktrees of one repository share a key).
+type taskProject struct {
+	Key  string   `json:"key"`
+	CWD  string   `json:"cwd,omitempty"`
+	CWDs []string `json:"cwds,omitempty"`
+}
+
 func handleTaskProjects(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		known, err := m.tasks.TaskProjects(r.Context())
@@ -267,14 +277,18 @@ func handleTaskProjects(m *Manager) http.HandlerFunc {
 			writeTaskError(w, err)
 			return
 		}
-		seen := map[string]bool{}
-		out := []tasks.Project{}
-		add := func(p tasks.Project) {
-			if p.Key == "" || seen[p.Key] {
-				return
+		index := map[string]int{}
+		out := []taskProject{}
+		add := func(p tasks.Project) *taskProject {
+			if p.Key == "" {
+				return nil
 			}
-			seen[p.Key] = true
-			out = append(out, p)
+			if i, ok := index[p.Key]; ok {
+				return &out[i]
+			}
+			index[p.Key] = len(out)
+			out = append(out, taskProject{Key: p.Key, CWD: p.CWD})
+			return &out[len(out)-1]
 		}
 		for _, p := range known {
 			add(p)
@@ -293,8 +307,15 @@ func handleTaskProjects(m *Manager) http.HandlerFunc {
 				cwds[c] = true
 			}
 		}
+		sorted := make([]string, 0, len(cwds))
 		for cwd := range cwds {
-			add(tasks.Project{Key: m.projectKey(cwd), CWD: cwd})
+			sorted = append(sorted, cwd)
+		}
+		sort.Strings(sorted)
+		for _, cwd := range sorted {
+			if p := add(tasks.Project{Key: m.projectKey(cwd), CWD: cwd}); p != nil {
+				p.CWDs = append(p.CWDs, cwd)
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"projects": out})
 	}

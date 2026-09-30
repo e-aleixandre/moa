@@ -2,15 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Plus } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { hasBlockingOverlay } from "../../data/overlays.js";
-import { openSession } from "../../data/tile-actions.js";
 import { addToast } from "../../data/notifications.js";
 import {
-  loadTaskProjects, markTasksSeen, patchTask, selectSessionDirectory, setTasksAgents, tasksSlice,
+  loadTaskProjects, markTasksSeen, patchTask, selectSessionDirectory, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
 } from "../../data/tasks.js";
 import {
-  errorText, flatRows, groupTasks, isTypingTarget, movePatch, nextSelection, openOwnCount, projectOptions,
+  errorText, flatRows, groupTasks, isTypingTarget, movePatch, nextSelection, openOwnCount, projectOptions, sessionGroups, sessionName,
 } from "../../data/tasks-model.js";
-import { CloseIcon, EmptyState, Filters, Keycap, TaskGroups, completesInline, useRowChecks } from "./parts.jsx";
+import { CloseIcon, EmptyState, Filters, Keycap, TaskGroups, completesInline, openTaskSession, useRowChecks } from "./parts.jsx";
 import { TaskDetail, taskEyebrow, useTaskLookup } from "./TaskDetail.jsx";
 
 // TasksScreen — the global view, in the desktop's middle zone. You (requests
@@ -31,14 +30,18 @@ export function TasksScreen() {
   const lookup = useTaskLookup();
 
   useEffect(() => { markTasksSeen(); loadTaskProjects(); }, []);
+  // Narrowed to a session: its own tasks, read (and kept fresh) per session.
+  const only = slice.session;
+  useEffect(() => (only ? watchSessionTasks(only) : undefined), [only]);
+  const onlyData = only ? slice.bySession[only] : null;
 
   const groups = useMemo(
-    () => groupTasks(slice.list, { agents: slice.agents, project, sessions }),
-    [slice.list, slice.agents, project, sessions],
+    () => (only ? sessionGroups(onlyData, only).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions })),
+    [only, onlyData, slice.list, slice.agents, project, sessions],
   );
   const rows = flatRows(groups, doneOpen);
   const projects = projectOptions(slice.projects, slice.list);
-  const task = sel ? slice.list.find((t) => t.id === sel) || slice.details[sel] || null : null;
+  const task = sel ? slice.list.find((t) => t.id === sel) || slice.details[sel] || lookup(sel) : null;
 
   const open = (id) => { setSel(id); setCreating(false); setDropInit(null); };
   const nav = useRef({});
@@ -79,17 +82,25 @@ export function TasksScreen() {
         <header class="zl-desk-head tk-head">
           <div class="tk-crumb">
             <span class="zl-crumb-title">Tasks</span>
-            {count > 0 && <span class="tk-crumb-n zl-data">{count} open</span>}
+            {count > 0 && !only && <span class="tk-crumb-n zl-data">{count} open</span>}
           </div>
           <span class="tk-grow" />
           <button type="button" class="zl-ask-btn tk-newbtn" onClick={() => { setCreating(true); setSel(null); }}>
             <Plus size={15} aria-hidden="true" />New task<Keycap>C</Keycap>
           </button>
         </header>
-        <Filters agents={slice.agents} setAgents={setTasksAgents} project={project} setProject={setProject} projects={projects} />
+        <Filters
+          agents={slice.agents}
+          setAgents={setTasksAgents}
+          project={project}
+          setProject={setProject}
+          projects={projects}
+          session={only ? sessionName(sessions, only) : null}
+          onClearSession={() => setTasksSession(null)}
+        />
         <div class="tk-scroll" ref={listRef}>
           {slice.error && !slice.loaded && <p class="tk-banner" role="status">Couldn't load tasks: {slice.error}</p>}
-          {slice.loaded && !hasOpen && <EmptyState compact={hasDone} onNew={() => setCreating(true)} />}
+          {(only ? !!onlyData?.loaded : slice.loaded) && !hasOpen && <EmptyState compact={hasDone} onNew={() => setCreating(true)} />}
           {(hasOpen || hasDone) && (
             <TaskGroups
               groups={groups}
@@ -117,7 +128,7 @@ export function TasksScreen() {
               <button type="button" class="zl-x" onClick={() => { setSel(null); setCreating(false); }} aria-label="Close"><CloseIcon /></button>
             </div>
             {creating ? (
-              <TaskDetail isNew key="new" onCreated={(id) => { setCreating(false); if (id) setSel(id); }} />
+              <TaskDetail isNew key="new" newDest={only ? { place: "agent", sessionId: only } : null} onCreated={(id) => { setCreating(false); if (id) setSel(id); }} />
             ) : (
               <TaskDetail
                 key={task.id}
@@ -125,7 +136,7 @@ export function TasksScreen() {
                 keys
                 init={dropInit || {}}
                 onOpenTask={open}
-                onOpenSession={(id) => openSession(id)}
+                onOpenSession={openTaskSession}
                 onClose={() => setSel(null)}
               />
             )}

@@ -225,3 +225,13 @@ test("a server error about #8 names the task by its title", () => {
     .toBe("invalid task: waiting for “Deploy staging” would close a dependency cycle");
   expect(nameTaskRefs("waiting for #9", lookup)).toBe("waiting for #9");
 });
+
+test("the status line's Tasks item speaks the panel row's words, and is absent with nothing", async () => {
+  const { sessionTasksStatus } = await import("./tasks-model.js");
+  expect(sessionTasksStatus(null)).toBeNull();
+  expect(sessionTasksStatus({ requests: [], checklist: [] })).toBeNull();
+  expect(sessionTasksStatus({
+    requests: [{ id: 1, status: "pending" }],
+    checklist: [{ id: 2, status: "done" }, { id: 3, status: "pending" }],
+  })).toEqual({ text: "1 for you · 1/2", forYou: 1 });
+});

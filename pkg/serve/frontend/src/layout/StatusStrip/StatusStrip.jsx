@@ -91,6 +91,8 @@ export function StatusStrip({
   modelPopover,
   modelAnchorRef,
   owner,
+  tasks = null,
+  onOpenTasks,
   children,
 }) {
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
@@ -205,16 +207,27 @@ export function StatusStrip({
           </span>
         )}
 
-        {!compact && modes.tasks && (
-          <span
-            class={`zl-st zl-st-ev zl-${statusItemPriority("tasks")}`}
-            title={`Tasks: ${modes.tasks.done} of ${modes.tasks.total} done`}
-          >
-            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l1.5 1.5 3-3M3 10.5l1.5 1.5 3-3M9 5h4M9 11h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-            <span class="zl-st-word">tasks</span>
-            <span class="zl-data">{modes.tasks.done}/{modes.tasks.total}</span>
-          </span>
-        )}
+        {/* Tasks: what this session asked of you and its checklist, in the
+            words of the panel's Tasks row. A door at every density: it opens
+            the Tasks view narrowed to this session. Requests waiting on you
+            keep it in view longer than a checklist's progress. */}
+        {tasks && (() => {
+          const cls = `zl-st zl-st-ev zl-st-tasks zl-${tasks.forYou ? "p2" : statusItemPriority("tasks")}`;
+          const body = (
+            <>
+              <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l1.5 1.5 3-3M3 10.5l1.5 1.5 3-3M9 5h4M9 11h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              <span class="zl-st-word">tasks</span>
+              <span class="zl-data">{tasks.text}</span>
+            </>
+          );
+          return onOpenTasks ? (
+            <button type="button" class={cls} onClick={onOpenTasks} aria-label={`Tasks: ${tasks.text} — open this session's tasks`} title={`Tasks: ${tasks.text}`}>
+              {body}
+            </button>
+          ) : (
+            <span class={cls} title={`Tasks: ${tasks.text}`}>{body}</span>
+          );
+        })()}
 
         {/* MCP takes its priority from its STATE, not its type: healthy it
             drops early, while failures and sign-in both stay in view. */}

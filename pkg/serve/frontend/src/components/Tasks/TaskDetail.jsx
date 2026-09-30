@@ -9,12 +9,13 @@ import {
 } from "../../data/tasks.js";
 import {
   completeNotifies, conflictCurrent, createBody, depCandidates, nameTaskRefs, needsDeliverChoice, deleteNotifies, deletePath, draftDirty, editorActions, editorDraft,
-  errorText, isOpen, isRequest, isTypingTarget, latestUndelivered, movePatch, noticeLine, placeLabel, projectLabelOf,
+  errorText, isAgentTask, isOpen, isRequest, isTypingTarget, listenerOf, latestUndelivered, movePatch, noticeLine, placeLabel, projectLabelOf,
   projectOptions, rebaseDraft, recipientFor, relAge, reopenPatch, savePatch, sessionName, sessionNoticeState, taskProjectName, completePatch,
 } from "../../data/tasks-model.js";
 import {
-  CheckRing, CloseIcon, CompletionFlow, DeliverChoice, Keycap, MOD_ENTER, MoveList, useEscape, useNotifyGesture,
+  CheckRing, CloseIcon, CompletionFlow, DeliverChoice, Keycap, MOD_ENTER, MoveList, OpenSessionButton, useEscape, useNotifyGesture,
 } from "./parts.jsx";
+import { ownersSlice } from "../../data/owners.js";
 
 function failed(title, error, lookup) {
   addToast({ title, detail: nameTaskRefs(errorText(error), lookup), type: "error" });
@@ -94,10 +95,11 @@ export function DepList({ taskId, current, phone, onPick, onClose }) {
 // the task as it is now and keeps what was typed.
 export function TaskDetail({
   taskId, isNew = false, newDest = null, phone = false, keys = false,
-  onOpenTask, onOpenSession, onPushMove, onPushDeps, onClose, onCreated, init = {},
+  onOpenTask, onOpenSession, onPushMove, onPushDeps, onClose, onCreated, init = {}, hereSessionId = null,
 }) {
   const slice = useStore(tasksSlice);
   const sessions = useStore(selectSessionDirectory);
+  const owners = useStore((st) => ownersSlice(st).list);
   const rec = isNew ? null : (slice.details[taskId] || slice.list.find((t) => t.id === taskId) || null);
 
   useEffect(() => (isNew ? undefined : watchTask(taskId)), [taskId, isNew]);
@@ -139,7 +141,13 @@ export function TaskDetail({
     if (isRequest(task) || completeNotifies(task)) { setMode("completing"); return; }
     patchTask(task.id, completePatch(task)).catch((error) => fail("Could not complete the task", error));
   };
-  const openMove = () => (onPushMove && !isNew ? onPushMove() : setMenu(true));
+  // A page on the phone (one sheet at a time), for a new task too: its
+  // draft waits in the stash, as it does for "Waits for".
+  const openMove = () => {
+    if (!onPushMove) { setMenu(true); return; }
+    if (isNew) stashDraft(draftKey, { base, draft, dest });
+    onPushMove();
+  };
 
   const keysRef = useRef({});
   keysRef.current = { startDone, openMove };
@@ -229,6 +237,10 @@ export function TaskDetail({
   const line = notice ? noticeLine(notice, sessionName(sessions, notice.recipient_session_id)) : null;
   const actions = editorActions({ dirty, recipient });
   const projects = projectOptions(slice.projects, slice.list);
+  // The session this task belongs to (its assignee) or that asked for it:
+  // a way there, unless it is the one already showing.
+  const listener = isNew ? '' : listenerOf(task);
+  const openable = !!listener && !!sessions[listener] && listener !== hereSessionId && !!onOpenSession;
   const moveTask = isNew ? { place: dest.place, project_key: dest.key, assignee_session_id: dest.sessionId } : task;
 
   let foot;
@@ -331,18 +343,20 @@ export function TaskDetail({
         <dl class="tk-props">
           <div class="tk-prop">
             <dt>Where</dt>
-            <dd class="tk-anchor">
+            <dd class="tk-anchor tk-where">
               <button type="button" class="tk-prop-btn" aria-expanded={menu} aria-haspopup="menu" onClick={() => (menu ? setMenu(false) : openMove())}>
                 <span class="tk-prop-v">{whereText}</span>
                 {!phone && !isNew && <Keycap>M</Keycap>}
                 <ChevronDown size={13} aria-hidden="true" />
               </button>
+              {openable && isAgentTask(task) && <OpenSessionButton sessions={sessions} id={listener} phone={phone} onOpen={onOpenSession} />}
               {menu && (
                 <div class="tk-pop is-move" role="menu">
                   <MoveList
                     task={moveTask}
                     projects={projects}
                     sessions={sessions}
+                    owners={owners}
                     direct={isNew}
                     pending={init.pending || null}
                     onPick={move}
@@ -354,11 +368,12 @@ export function TaskDetail({
           {!isNew && isRequest(task) && (
             <div class="tk-prop">
               <dt>Asked by</dt>
-              <dd>
-                <button type="button" class="tk-link" onClick={() => onOpenSession?.(task.requester_session_id)}>
+              <dd class="tk-where">
+                <span class="tk-sess">
                   <span class={`tk-sdot${sessions[task.requester_session_id]?.state === "running" ? " is-working" : ""}`} aria-hidden="true" />
-                  {sessionName(sessions, task.requester_session_id)}
-                </button>
+                  <span class="tk-prop-v">{sessionName(sessions, task.requester_session_id)}</span>
+                </span>
+                {openable && <OpenSessionButton sessions={sessions} id={listener} phone={phone} onOpen={onOpenSession} />}
               </dd>
             </div>
           )}

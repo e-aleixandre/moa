@@ -246,23 +246,37 @@ export function isNewRequest(task, newSince) {
 // every streamed token, so this keeps one reference until something a task
 // shows (id, title, state, folder, kind) actually changes.
 
-let directory = { sessions: null, sig: '', value: {} };
+// Owners' own conversations are left out of the session roster
+// (GET /api/sessions), yet a task can be asked by, or assigned to, an owner:
+// the owners roster fills them in, named after the owner, so a task never
+// calls one of them a deleted session.
+
+let directory = { sessions: null, owners: null, sig: '', value: {} };
 
 export function selectSessionDirectory(state) {
   const sessions = state?.sessions || {};
-  if (sessions === directory.sessions) return directory.value;
-  const rows = Object.values(sessions).filter((s) => s?.id)
-    .map((s) => [s.id, s.title || '', s.state || '', s.cwd || '', s.kind || '']);
+  const owners = state?.owners?.list || [];
+  if (sessions === directory.sessions && owners === directory.owners) return directory.value;
+  const ownerOf = new Map(owners.filter((o) => o?.session_id).map((o) => [o.session_id, o]));
+  const entry = (s) => {
+    const own = ownerOf.get(s.id);
+    return {
+      id: s.id, title: own?.name || s.title || '', state: s.state || '', cwd: s.cwd || own?.root || '',
+      kind: own ? 'owner' : (s.kind || ''), updated: s.updated || 0,
+    };
+  };
+  const all = Object.values(sessions).filter((s) => s?.id).map(entry);
+  for (const own of ownerOf.values()) {
+    if (!sessions[own.session_id]) all.push({ ...entry({ id: own.session_id }), state: own.session_state || 'saved' });
+  }
+  const rows = all.map((s) => [s.id, s.title, s.state, s.cwd, s.kind]);
   const sig = JSON.stringify(rows);
   if (sig !== directory.sig) {
     const value = {};
-    for (const s of Object.values(sessions)) {
-      if (!s?.id) continue;
-      value[s.id] = { id: s.id, title: s.title || '', state: s.state || '', cwd: s.cwd || '', kind: s.kind || '', updated: s.updated || 0 };
-    }
-    directory = { sessions, sig, value };
+    for (const s of all) value[s.id] = s;
+    directory = { sessions, owners, sig, value };
   } else {
-    directory = { ...directory, sessions };
+    directory = { ...directory, sessions, owners };
   }
   return directory.value;
 }
@@ -310,4 +324,18 @@ export function addDraftWait(key, id) {
   const entry = drafts.get(String(key));
   if (!entry || entry.draft.waits_for.includes(id)) return;
   drafts.set(String(key), { ...entry, draft: { ...entry.draft, waits_for: [...entry.draft.waits_for, id] } });
+}
+
+// setDraftDest — Where, chosen on its own page (phone) for a task still being
+// written: the stashed draft keeps it until the editor takes the draft back.
+export function setDraftDest(key, dest) {
+  const entry = drafts.get(String(key));
+  if (!entry) return;
+  drafts.set(String(key), { ...entry, dest });
+}
+
+// setTasksSession — narrow the Tasks view to one session's tasks (what it
+// asked of you and its checklist), or widen it back with null.
+export function setTasksSession(sessionId) {
+  patch({ session: sessionId || null });
 }

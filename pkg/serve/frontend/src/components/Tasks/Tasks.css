@@ -174,7 +174,16 @@ button.tk-group:hover { color: var(--zl-t2); }
   letter-spacing: inherit; text-align: left; cursor: pointer;
 }
 .tk-pop-item:hover { background: var(--zl-hi); }
-.tk-pop-item.is-two { flex-direction: column; align-items: flex-start; gap: 0; }
+.tk-pop-item.is-two { padding-top: 5px; padding-bottom: 5px; }
+.tk-pop-main { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; }
+.tk-pop-lead { flex: none; display: inline-flex; }
+.tk-pop-item.is-nav { padding-right: 10px; }
+.tk-pop-chev { flex: none; color: var(--zl-t4); }
+.tk-pop-item.is-more { color: var(--zl-t3); font-size: var(--zl-fs-meta); }
+.tk-pop-item.is-back { gap: 6px; padding-left: 4px; color: var(--zl-t2); font-weight: 500; }
+.tk-pop-item.is-back svg { flex: none; color: var(--zl-t4); }
+.tk-pop-sub { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.tk-word-waiting { color: var(--zl-yellow); font-weight: 500; }
 .tk-pop-item.is-pending { background: var(--zl-accent-dim); box-shadow: inset 0 0 0 1px var(--zl-accent-line); }
 .tk-pop-item.is-phone { min-height: 48px; }
 .tk-pop-t { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -182,6 +191,8 @@ button.tk-group:hover { color: var(--zl-t2); }
 .tk-pop-on { position: absolute; right: 10px; top: 50%; margin-top: -7px; color: var(--zl-accent); }
 .tk-pop-none { padding: 8px 10px; color: var(--zl-t4); font-size: var(--zl-fs-meta); }
 .tk-search { display: flex; align-items: center; gap: 8px; height: 36px; margin: 0 0 4px; padding: 0 10px; border-bottom: 1px solid var(--zl-line); color: var(--zl-t4); }
+.tk-search .tk-field:focus-visible { outline: none; }
+.tk-search.is-phone:focus-within { box-shadow: inset 0 0 0 1px var(--zl-accent-line); }
 .tk-search.is-phone { height: 44px; margin: 2px 4px 6px; border: 0; border-radius: var(--zl-r-md); background: var(--zl-canvas); box-shadow: var(--zl-rim); }
 .tk-move-confirm { position: sticky; bottom: -6px; margin: 6px -6px -6px; padding: 8px; background: var(--zl-sheet); border-top: 1px solid var(--zl-line); }
 .tk-move.is-phone .tk-move-confirm { bottom: 0; margin: 8px 0 0; padding: 12px 4px; }
@@ -189,6 +200,7 @@ button.tk-group:hover { color: var(--zl-t2); }
 .tk-wide { width: 100%; justify-content: center; }
 .tk-move.is-phone { padding: 0 8px; }
 .tk-move.is-phone .tk-pop-label { padding: 14px 10px 6px; }
+.tk-move.is-phone .tk-pop-item.is-more { min-height: 44px; }
 
 /* ── A task's body (dossier column, panel page, phone page) ────────────── */
 .tk-dossier .zl-side-right { z-index: auto; }
@@ -219,6 +231,19 @@ button.tk-group:hover { color: var(--zl-t2); }
 }
 .tk-link:hover { text-decoration: underline; text-decoration-color: var(--zl-t4); text-underline-offset: 3px; }
 .tk-link.is-accent { color: var(--zl-accent); font-weight: 500; }
+.tk-where { display: flex; align-items: center; gap: 8px; }
+.tk-where > .tk-prop-btn { min-width: 0; }
+.tk-sess { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tk-sess-t { flex: 0 1 auto; }
+.tk-open {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; height: 26px; margin-left: auto; padding: 0 8px 0 10px; border: 0;
+  border-radius: var(--zl-r-md); background: var(--zl-raised); box-shadow: var(--zl-rim); color: var(--zl-t2); font-family: inherit;
+  font-size: var(--zl-fs-meta); font-weight: 500; cursor: pointer; transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
+}
+.tk-open:hover { background: var(--zl-hi); color: var(--zl-t1); }
+.tk-open svg { color: var(--zl-t4); }
+.tk-open.is-phone { height: 40px; padding: 0 12px 0 14px; font-size: var(--zl-fs-body); }
+.tk-root .tk-open:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
 .tk-sdot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--zl-t4); }
 .tk-sdot.is-working { background: var(--blue); box-shadow: 0 0 0 3px rgba(137, 180, 250, 0.18); }
 
@@ -304,3 +329,7 @@ button.tk-group:hover { color: var(--zl-t2); }
 /* "Waits for" on the desktop opens in the detail's own flow, not over it:
    floating, it slid under the pinned foot and needed a scroll to reach. */
 .tk-pop.is-inline { position: static; width: auto; max-height: none; margin: 4px 0 0; }
+
+.tk-chip-session { max-width: 100%; }
+.tk-chip-session .tk-chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-chip-session svg { flex: none; width: 12px; height: 12px; }

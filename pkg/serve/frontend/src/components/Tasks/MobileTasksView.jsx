@@ -3,12 +3,13 @@ import { Plus } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { useEdgeSwipeBack } from "../../hooks/useEdgeSwipeBack.js";
 import { addToast } from "../../data/notifications.js";
-import { openSession } from "../../data/tile-actions.js";
+import { ownersSlice } from "../../data/owners.js";
 import {
-  loadTask, loadTaskProjects, markTasksSeen, patchTask, selectSessionDirectory, setTasksAgents, tasksSlice,
+  loadTask, loadTaskProjects, markTasksSeen, patchTask, peekDraft, selectSessionDirectory, setDraftDest, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
 } from "../../data/tasks.js";
-import { errorText, groupTasks, movePatch, projectOptions } from "../../data/tasks-model.js";
-import { BackIcon, EmptyState, Filters, MoveList, TaskGroups, useEscape, useRowChecks, completesInline } from "./parts.jsx";
+import { errorText, groupTasks, movePatch, projectOptions, sessionGroups, sessionName } from "../../data/tasks-model.js";
+import { projectLabels } from "../../data/tasks-move.js";
+import { BackIcon, EmptyState, Filters, MoveList, TaskGroups, openTaskSession, useEscape, useRowChecks, completesInline } from "./parts.jsx";
 import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
 import "../../layout/mobile/MobileConversationScreen/MobileInboxView.css";
 
@@ -19,6 +20,7 @@ import "../../layout/mobile/MobileConversationScreen/MobileInboxView.css";
 export function MobileTasksView({ onBack }) {
   const slice = useStore(tasksSlice);
   const sessions = useStore(selectSessionDirectory);
+  const owners = useStore((st) => ownersSlice(st).list);
   const [stack, setStack] = useState([]);
   const [project, setProject] = useState(null);
   const [doneOpen, setDoneOpen] = useState(false);
@@ -27,6 +29,7 @@ export function MobileTasksView({ onBack }) {
   useEffect(() => { markTasksSeen(); loadTaskProjects(); }, []);
 
   const top = stack[stack.length - 1] || null;
+  useEffect(() => { if (top?.kind === "move") loadTaskProjects(); }, [top?.kind]);
   const push = (p) => setStack([...stack, p]);
   const pop = () => setStack(stack.slice(0, -1));
   const back = top ? pop : onBack;
@@ -35,9 +38,13 @@ export function MobileTasksView({ onBack }) {
   // first: it is newer on the escape stack).
   useEscape(!!top, pop);
 
+  // Narrowed to a session (its status line opened the view): its own tasks.
+  const only = slice.session;
+  useEffect(() => (only ? watchSessionTasks(only) : undefined), [only]);
+  const onlyData = only ? slice.bySession[only] : null;
   const groups = useMemo(
-    () => groupTasks(slice.list, { agents: slice.agents, project, sessions }),
-    [slice.list, slice.agents, project, sessions],
+    () => (only ? sessionGroups(onlyData, only).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions })),
+    [only, onlyData, slice.list, slice.agents, project, sessions],
   );
   const projects = projectOptions(slice.projects, slice.list);
   const hasOpen = groups.some((g) => g.id !== "done" && g.rows.length);
@@ -48,8 +55,17 @@ export function MobileTasksView({ onBack }) {
   if (!top) {
     body = (
       <div class="tk-phone-body">
-        <Filters phone agents={slice.agents} setAgents={setTasksAgents} project={project} setProject={setProject} projects={projects} />
-        {slice.loaded && !hasOpen && <EmptyState phone compact={hasDone} onNew={() => push({ kind: "new" })} />}
+        <Filters
+          phone
+          agents={slice.agents}
+          setAgents={setTasksAgents}
+          project={project}
+          setProject={setProject}
+          projects={projects}
+          session={only ? sessionName(sessions, only) : null}
+          onClearSession={() => setTasksSession(null)}
+        />
+        {(only ? !!onlyData?.loaded : slice.loaded) && !hasOpen && <EmptyState phone compact={hasDone} onNew={() => push({ kind: "new" })} />}
         {(hasOpen || hasDone) && (
           <TaskGroups
             groups={groups}
@@ -69,24 +85,46 @@ export function MobileTasksView({ onBack }) {
     );
   } else if (top.kind === "new") {
     title = "New task";
-    body = <TaskDetail isNew phone onPushDeps={() => push({ kind: "deps", id: null })} onCreated={(id) => setStack(id ? [{ kind: "task", id }] : [])} />;
+    body = (
+      <TaskDetail
+        isNew
+        phone
+        onPushDeps={() => push({ kind: "deps", id: null })}
+        onPushMove={() => push({ kind: "move", id: null })}
+        onCreated={(id) => setStack(id ? [{ kind: "task", id }] : [])}
+      />
+    );
   } else if (top.kind === "deps") {
     title = "Waits for";
     body = <DepsPage taskId={top.id} onBack={pop} />;
   } else if (top.kind === "move") {
-    title = "Move to";
-    const task = slice.details[top.id];
+    // Move is a page, and a project opened inside it is the next page, so ‹
+    // walks back one level at a time. A task still being written only
+    // chooses where it will go: its draft waits in the stash.
+    const isNew = top.id == null;
+    const dest = isNew ? peekDraft("new")?.dest || { place: "you" } : null;
+    const task = isNew
+      ? { place: dest.place, project_key: dest.key, assignee_session_id: dest.sessionId }
+      : slice.details[top.id];
+    title = top.level ? projectLabels(projects).get(top.level) || "Project" : "Move to";
+    const done = () => setStack(stack.filter((p) => p.kind !== "move"));
     body = (
       <div class="tk-phone-body">
         {task && !task.gone && (
           <MoveList
+            key={top.level || "top"}
             task={task}
             phone
+            direct={isNew}
             projects={projects}
             sessions={sessions}
-            onPick={(dest, choice) => {
-              patchTask(task.id, movePatch(task, dest, choice))
-                .then(pop)
+            owners={owners}
+            level={top.level || null}
+            onLevel={(level) => (level ? push({ kind: "move", id: top.id, level }) : pop())}
+            onPick={(to, choice) => {
+              if (isNew) { setDraftDest("new", to); done(); return; }
+              patchTask(task.id, movePatch(task, to, choice))
+                .then(done)
                 .catch((error) => {
                   if (error?.status === 409) loadTask(task.id);
                   addToast({ title: "Could not move the task", detail: errorText(error), type: "error" });
@@ -104,7 +142,7 @@ export function MobileTasksView({ onBack }) {
         taskId={top.id}
         phone
         onOpenTask={(id) => push({ kind: "task", id })}
-        onOpenSession={(id) => { if (openSession(id)) onBack(); }}
+        onOpenSession={openTaskSession}
         onPushMove={() => push({ kind: "move", id: top.id })}
         onPushDeps={() => push({ kind: "deps", id: top.id })}
         onClose={pop}

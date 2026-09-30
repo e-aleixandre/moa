@@ -34,6 +34,7 @@ import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, 
 import { toggleSessionPanel, sessionPanelView, openSessionPanel, taskPanelPage } from "../../data/session-panel.js";
 import { PinnedTaskLine } from "../../components/Tasks/PinnedTaskLine.jsx";
 import { useOwnerStatusItem } from "../../components/Owners/OwnerChipEntry.jsx";
+import { useSessionTasksStatus } from "../../components/Tasks/useSessionTasksStatus.js";
 import { cacheAlertLabel } from "../../data/cache-usage.js";
 import { setPopoverOpenFromClick } from "../../data/popover-click.js";
 import { positionModelPopover } from "../PaneGrid/model-popover-position.js";
@@ -149,6 +150,7 @@ export function ConversationScreen() {
   // the body branches: a screen with no session still has to call them.
   const busy = !!session && (session.state === "running" || session.state === "permission");
   const ownerItem = useOwnerStatusItem(session);
+  const taskItem = useSessionTasksStatus(session?.id);
   const permMenu = usePermissionMenu({
     mode: session?.permissionMode || "yolo",
     onChange: (mode) => configureSession(session.id, { permissionMode: mode }),
@@ -359,6 +361,8 @@ export function ConversationScreen() {
                   modelPopover={modelPopover}
                   modelAnchorRef={modelAnchorRef}
                   owner={ownerItem}
+                  tasks={taskItem.tasks}
+                  onOpenTasks={taskItem.onOpenTasks}
                 />
               </div>
             </div>

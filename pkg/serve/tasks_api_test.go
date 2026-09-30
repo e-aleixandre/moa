@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -430,4 +432,40 @@ func TestTasksAPIAssignmentProjectAlwaysComesFromTheTargetSession(t *testing.T) 
 		t.Fatalf("project-only patch = %d", resp.StatusCode)
 	}
 	wantB(decode[tasks.Record](t, resp), "project-only patch")
+}
+
+func TestTaskProjectsListEveryDirectoryOfAProject(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	tree := filepath.Join(root, "repo-feature")
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main", repo},
+		{"-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"},
+		{"-C", repo, "worktree", "add", "-q", "-b", "feature", tree},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Skipf("git %v: %v %s", args, err, out)
+		}
+	}
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	for _, dir := range []string{repo, tree} {
+		if _, err := mgr.CreateSession(CreateOpts{CWD: dir}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := decode[struct {
+		Projects []taskProject `json:"projects"`
+	}](t, apiReq(t, srv, "GET", "/api/tasks/projects", ""))
+	key := core.CodebaseKey(repo)
+	for _, p := range got.Projects {
+		if p.Key != key {
+			continue
+		}
+		if len(p.CWDs) != 2 || p.CWDs[0] != repo || p.CWDs[1] != tree {
+			t.Fatalf("project %s cwds = %v, want both worktrees", key, p.CWDs)
+		}
+		return
+	}
+	t.Fatalf("project %s missing from %+v", key, got.Projects)
 }

@@ -31,13 +31,6 @@ function activeModes(session) {
     };
   }
 
-  const tasks = s.tasks || [];
-  if (tasks.length > 0) {
-    const total = tasks.length;
-    const done = tasks.filter((t) => t.status === "done").length;
-    modes.tasks = { done, total, complete: done === total && total > 0 };
-  }
-
   return modes;
 }
 
@@ -56,7 +49,6 @@ export function spendLevel(usage) {
 //     perm: { mode },                       // always present; the tappable control
 //     modes: {                              // only the ones currently active
 //       goal?:  { verifying, iteration, objective },
-//       tasks?: { done, total, complete },
 //     },
 //     alerts: { onExtra: bool },            // 🔥 pay-as-you-go, only when active
 //     spendLevel: 'normal'|'med'|'high'|null,

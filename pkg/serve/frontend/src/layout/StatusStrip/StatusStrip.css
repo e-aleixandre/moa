@@ -193,7 +193,7 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
    Specificity beats `.zl-p2 .zl-st-word { display: none }` on purpose. */
 .zl-st-ev.is-alarm-yellow .zl-st-word { display: inline; }
 
-/* Compact (grid pane, phone): goal and tasks are already dropped in the JSX;
+/* Compact (grid pane, phone): goal is already dropped in the JSX;
    the line itself only tightens. */
 .zl-status.is-compact { gap: 2px; }
 .zl-status.is-compact .zl-st { padding: 0 6px; }

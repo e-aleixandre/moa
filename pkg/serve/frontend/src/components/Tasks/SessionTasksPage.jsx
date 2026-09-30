@@ -1,11 +1,11 @@
 import { useEffect, useMemo } from "preact/hooks";
 import { useStore } from "../../hooks/useStore.js";
-import { openSession } from "../../data/tile-actions.js";
+import { ownersSlice } from "../../data/owners.js";
 import { addToast } from "../../data/notifications.js";
 import { parsePanelPage, taskDepsPanelPage, taskMovePanelPage, taskPanelPage } from "../../data/session-panel.js";
-import { loadTask, loadTaskProjects, patchTask, selectSessionDirectory, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
+import { loadTask, loadTaskProjects, patchTask, peekDraft, selectSessionDirectory, setDraftDest, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
 import { errorText, movePatch, projectOptions, sessionGroups } from "../../data/tasks-model.js";
-import { EmptyState, MoveList, TaskGroups, useRowChecks, completesInline } from "./parts.jsx";
+import { EmptyState, MoveList, TaskGroups, openTaskSession, useRowChecks, completesInline } from "./parts.jsx";
 import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
 
 // SessionTasksPage — the session panel's Tasks pages. Tasks lists what this
@@ -16,16 +16,16 @@ import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
 export function SessionTasksPage({ session, page, sheet, goPage }) {
   const slice = useStore(tasksSlice);
   const sessions = useStore(selectSessionDirectory);
+  const owners = useStore((st) => ownersSlice(st).list);
   const { kind, id } = parsePanelPage(page);
   const checks = useRowChecks(completesInline);
   const lookup = useTaskLookup();
   useEffect(() => watchSessionTasks(session.id), [session.id]);
-  useEffect(() => { if (kind === "taskMove") loadTaskProjects(); }, [kind]);
+  useEffect(() => { if (kind === "taskMove" || kind === "taskNewMove") loadTaskProjects(); }, [kind]);
 
   const data = slice.bySession[session.id];
   const groups = useMemo(() => sessionGroups(data, session.id), [data, session.id]);
 
-  const openOther = (sid) => openSession(sid);
 
   if (kind === "tasks") {
     return (
@@ -56,6 +56,7 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
           phone={sheet}
           newDest={{ place: "agent", sessionId: session.id }}
           onPushDeps={sheet ? () => goPage("taskNewDeps") : undefined}
+          onPushMove={sheet ? () => goPage("taskNewMove") : undefined}
           onCreated={() => goPage("tasks")}
         />
       </div>
@@ -71,6 +72,23 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
     );
   }
 
+  if (kind === "taskNewMove") {
+    const dest = peekDraft("new")?.dest || { place: "agent", sessionId: session.id };
+    return (
+      <div class="zl-panel-body is-sub tk-panel-body tk-root">
+        <MoveList
+          task={{ place: dest.place, project_key: dest.key, assignee_session_id: dest.sessionId }}
+          phone
+          direct
+          projects={projectOptions(slice.projects, slice.list)}
+          sessions={sessions}
+          owners={owners}
+          onPick={(to) => { setDraftDest("new", to); goPage("taskNew"); }}
+        />
+      </div>
+    );
+  }
+
   if (kind === "taskMove") {
     const task = slice.details[id] || null;
     return (
@@ -81,6 +99,7 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
             phone
             projects={projectOptions(slice.projects, slice.list)}
             sessions={sessions}
+            owners={owners}
             onPick={(dest, choice) => {
               patchTask(task.id, movePatch(task, dest, choice))
                 .then(() => goPage(taskPanelPage(task.id)))
@@ -103,7 +122,8 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
         phone={sheet}
         keys={!sheet}
         onOpenTask={(tid) => goPage(taskPanelPage(tid))}
-        onOpenSession={openOther}
+        onOpenSession={openTaskSession}
+        hereSessionId={session.id}
         onPushMove={sheet ? () => goPage(taskMovePanelPage(id)) : undefined}
         onPushDeps={sheet ? () => goPage(taskDepsPanelPage(id)) : undefined}
         onClose={() => goPage("tasks")}

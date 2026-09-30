@@ -24,6 +24,7 @@ import { allTileIds } from "../../data/tileTree.js";
 import { getTileCount, updateSession } from "../../data/store.js";
 import { ownersSlice } from "../../data/owners.js";
 import { useOwnerStatusItem } from "../../components/Owners/OwnerChipEntry.jsx";
+import { useSessionTasksStatus } from "../../components/Tasks/useSessionTasksStatus.js";
 import { useStore } from "../../hooks/useStore.js";
 import { usePresence } from "../../hooks/usePresence.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
@@ -115,6 +116,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const sessionId = node.sessionId || null;
   const session = useStore((s) => (sessionId ? s.sessions[sessionId] : null));
   const owner = useOwnerStatusItem(session);
+  const taskItem = useSessionTasksStatus(session?.id);
   const liveAgents = useStore((s) => session ? liveTrayAgents(session, s.sessions, ownersSlice(s).list) : []);
   const focused = useStore((s) => s.focusedTile === tileId);
   const usage = useStore((s) => s.usage);
@@ -444,6 +446,8 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
             spend={fmtCost(session.costUSD)}
             session={session}
             owner={owner}
+            tasks={taskItem.tasks}
+            onOpenTasks={taskItem.onOpenTasks}
             usage={usage}
             // The grid has no dossier (DesktopDossier/dossier.js), so both
             // doors take the tile's session to the conversation view and open
