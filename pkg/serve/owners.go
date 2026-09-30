@@ -255,6 +255,9 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 				return OwnerInfo{}, err
 			}
 		}
+		if m.afterOwnerClose != nil && *opts.Closed {
+			m.afterOwnerClose()
+		}
 		// The flag is the user's act and is kept whatever the runtime does
 		// next: a report may wake the conversation again a moment later.
 		own.Closed = *opts.Closed
@@ -286,6 +289,10 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 // reopenOwnerSession clears the closed flag once the owner's conversation is
 // active again, by whatever route it was loaded. Best effort: the flag is a
 // sidebar hint, and a failure to clear it must not fail a resume.
+//
+// Serialized with Close on ownerEdit: an event that lands while an owner is
+// being closed clears the flag only after Close has saved it, so the event
+// wins and the owner ends up raised.
 func (m *Manager) reopenOwnerSession(sessionID string) {
 	m.ownerEdit.Lock()
 	defer m.ownerEdit.Unlock()

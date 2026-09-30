@@ -878,3 +878,52 @@ func TestEventOnAClosedOwnerBringsItBack(t *testing.T) {
 		t.Fatal("an event left the owner closed")
 	}
 }
+
+// A report or schedule can wake the conversation in the middle of Close. The
+// flag is the user's act and must survive it.
+func TestCloseOwnerKeepsTheFlagWhenAWakeUpLandsMidClose(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, _ := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	mgr.afterOwnerClose = func() {
+		if _, err := mgr.ResumeSession(info.SessionID); err != nil {
+			t.Error(err)
+		}
+	}
+	if resp := patchOwner(t, mgr, info.ID, `{"closed":true}`); resp.Code != http.StatusOK {
+		t.Fatalf("close = %d %s", resp.Code, resp.Body)
+	}
+	if !ownerClosedOnDisk(t, mgr, info.ID) {
+		t.Fatal("a wake-up during Close discarded the flag")
+	}
+}
+
+// The event wins: one that lands mid-Close clears the flag once Close has
+// saved it, so the owner ends raised and not closed-but-loaded.
+func TestEventLandingMidCloseWinsOverTheFlag(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, _ := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "build ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routed := make(chan error, 1)
+	mgr.afterOwnerClose = func() {
+		go func() {
+			_, err := mgr.routeEventToOwner(ev, info.SessionID, false)
+			routed <- err
+		}()
+		// Let the delivery reach its flag clear, which waits on Close's lock.
+		time.Sleep(300 * time.Millisecond)
+	}
+	if resp := patchOwner(t, mgr, info.ID, `{"closed":true}`); resp.Code != http.StatusOK {
+		t.Fatalf("close = %d %s", resp.Code, resp.Body)
+	}
+	if err := <-routed; err != nil {
+		t.Fatal(err)
+	}
+	if ownerClosedOnDisk(t, mgr, info.ID) {
+		t.Fatal("an event landing mid-Close left the owner closed")
+	}
+}
