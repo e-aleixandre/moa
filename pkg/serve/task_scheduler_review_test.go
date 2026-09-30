@@ -81,8 +81,8 @@ func schedReviewCrash(t *testing.T, h *schedHarness, boundary string) {
 }
 
 // Q1: a crash after the assignment was reserved (sent) but before it was
-// admitted leaves no trace in the transcript. At a restart ten minutes late
-// with late=ask, the run waits for the owner's OK instead of running.
+// admitted leaves no trace in the transcript. At the restart, the run waits
+// for the owner's OK as an uncertain delivery instead of running.
 func TestScheduleReviewReservedNotAdmittedIsRegated(t *testing.T) {
 	prov := newMockProvider(simpleResponseHandler("ran without owner OK"))
 	h := newSchedHarness(t, prov, "2026-09-30T08:00:00Z")
@@ -106,53 +106,15 @@ func TestScheduleReviewReservedNotAdmittedIsRegated(t *testing.T) {
 	h.clock.Advance(12 * time.Minute)
 	h.start()
 	h.pass()
-	after := occNow(t, r, before.ID)
-	if after.State != tasks.OccLate {
-		t.Fatalf("Q1: never-admitted run after restart = %s/%s (provider calls %d), want late", after.State, after.Reason, prov.calls.Load())
+	after := waitOcc(t, r, before.ID, "settled by the dispatcher", func(o tasks.Occurrence) bool { return o.State != tasks.OccAssigned })
+	if after.State != tasks.OccLate || after.Reason != tasks.ReasonUncertain {
+		t.Fatalf("Q1: never-admitted run after restart = %s/%s (provider calls %d), want late/%s", after.State, after.Reason, prov.calls.Load(), tasks.ReasonUncertain)
 	}
 	if got := noticeByID(t, r, n.ID); got.State != tasks.NoticeFailed {
 		t.Errorf("withdrawn assignment = %s/%s, want failed", got.State, got.Reason)
 	}
 	if got := transcriptNoticeCount(t, h.base, sid, n.ID); got != 0 || prov.calls.Load() != 0 {
 		t.Errorf("assignment delivered %d time(s), %d provider calls; want none", got, prov.calls.Load())
-	}
-}
-
-// Q1 control: a reservation whose notice did reach the transcript is
-// delivered, not re-gated, however late the restart.
-func TestScheduleReviewReservedAndSavedIsNotRegated(t *testing.T) {
-	h := newSchedHarness(t, newMockProvider(simpleResponseHandler("ok")), "2026-09-30T08:00:00Z")
-	h.start()
-	sid := h.savedSession()
-	h.stop()
-	r := h.repo()
-	tmpl := mkTemplate(t, r, "saved before crash", onceAt(h.clock.Now().Add(time.Minute), toSession(sid), tasks.Delivery{Saved: tasks.DeliverHold}))
-	h.clock.Advance(time.Minute)
-	due, err := r.MaterializeDue(bgc, 10)
-	if err != nil || len(due) != 1 {
-		t.Fatalf("test setup: T0 = %+v / %v", due, err)
-	}
-	o, err := r.AssignOccurrence(bgc, due[0].ID, tasks.Destination{SessionID: sid})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The assignment reached the saved transcript, then the process died
-	// before recording it: the notice is still sent.
-	h.start()
-	sess, err := h.mgr.ResumeSession(sid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	n := waitNoticeByID(t, r, o.NoticeID, tasks.NoticeDelivered)
-	pollUntil(t, 10*time.Second, "idle", func() bool { return sessState(sess) == StateIdle })
-	h.stop()
-	sqlExec(t, h.dbPath(), "UPDATE task_notifications SET state = 'sent' WHERE id = ?", n.ID)
-	sqlExec(t, h.dbPath(), "UPDATE task_occurrences SET admitted_at = NULL WHERE id = ?", o.ID)
-	h.clock.Advance(20 * time.Minute)
-	h.start()
-	got := waitOcc(t, r, o.ID, "admitted", func(o tasks.Occurrence) bool { return o.AdmittedAt != 0 })
-	if got.State != tasks.OccAssigned || noticeByID(t, r, n.ID).State != tasks.NoticeDelivered || oneRun(t, r, tmpl.ID).ID != o.ID {
-		t.Fatalf("saved assignment was re-gated: %+v", got)
 	}
 }
 

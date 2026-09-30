@@ -69,6 +69,10 @@ const (
 	ReasonRerouted             = "rerouted"
 	ReasonDeletedDuringDeliver = "session_deleted_during_delivery"
 	ReasonDeletedAfterDeliver  = "session_deleted_after_delivery"
+	// ReasonUncertain: the assignment was reserved for delivery but its
+	// admission was never recorded, so it may or may not have reached its
+	// session. It is never sent again without the owner.
+	ReasonUncertain = "delivery_uncertain"
 )
 
 // LateAfter is the first-observation delay from which a run is late:

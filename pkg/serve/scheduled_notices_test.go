@@ -442,40 +442,12 @@ func fireOnceExpect(t *testing.T, h *schedHarness, r *tasks.Repo, title string, 
 	return oneRun(t, r, tmpl.ID)
 }
 
-// A reservation (sent) whose process died before injection is found missing
-// from the transcript and delivered again — the same child and notice, once.
-func TestScheduledNoticeReservationBeforeAdmission(t *testing.T) {
-	h := newSchedHarness(t, newMockProvider(simpleResponseHandler("ok")), "2026-09-30T08:00:00Z")
-	h.start()
-	sid := h.savedSession()
-	h.stop()
-	r := h.repo()
-	tmpl := mkTemplate(t, r, "reserved", onceAt(h.clock.Now().Add(time.Minute), toSession(sid), tasks.Delivery{}))
-	h.clock.Advance(time.Minute)
-	os, _ := r.MaterializeDue(bgc, 10)
-	o, err := r.AssignOccurrence(bgc, os[0].ID, tasks.Destination{SessionID: sid})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := r.SetNoticeState(bgc, o.NoticeID, tasks.NoticeChange{From: []string{tasks.NoticePending}, State: tasks.NoticeSent, SteerID: "s-lost"}); !ok || err != nil {
-		t.Fatal(ok, err)
-	}
-	h.start()
-	got := assignedAndDelivered(t, h, r, o.ID)
-	if got.ChildTaskID != o.ChildTaskID || got.NoticeID != o.NoticeID {
-		t.Fatalf("recovery minted new links: %+v", got)
-	}
-	oneRun(t, r, tmpl.ID)
-	if n := sqlCount(t, h.dbPath(), "SELECT COUNT(*) FROM task_notifications"); n != 1 {
-		t.Fatalf("%d notices", n)
-	}
-}
-
-// An assignment already saved in the transcript whose acknowledgment was
-// lost (row still sent or pending) is recognized by its notice ID: no second
-// message or run, and the admission time is repaired.
+// An assignment already saved in the transcript whose row is still pending
+// (an older binary) is recognized by its notice ID: no second message or
+// run, and the admission time is repaired. A sent row is settled by its
+// recorded admission instead (TestRound3AckNotTranscriptDecides).
 func TestScheduledNoticePersistedBeforeAcknowledgment(t *testing.T) {
-	for _, state := range []string{tasks.NoticeSent, tasks.NoticePending} {
+	for _, state := range []string{tasks.NoticePending} {
 		t.Run(state, func(t *testing.T) {
 			prov := newMockProvider(simpleResponseHandler("ok"))
 			h := newSchedHarness(t, prov, "2026-09-30T08:00:00Z")

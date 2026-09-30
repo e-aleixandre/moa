@@ -1221,6 +1221,53 @@ func (r *Repo) RegateOnRestart(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// MarkDeliveryUncertain settles a scheduled assignment that was reserved
+// for delivery (sent) but whose admission was never recorded, once no
+// attempt is in flight: it may or may not have reached its session, so it is
+// never sent again on its own, whatever its transcript says. Its run becomes
+// the owner's decision (late, delivery_uncertain): Run sends it again, which
+// may duplicate the work; Skip settles it. Like a re-gated run, it gives up
+// its child and assignment, so Run goes through T1 again. A run whose
+// template is gone cannot be answered and is skipped. It reports whether the
+// notice was settled.
+func (r *Repo) MarkDeliveryUncertain(ctx context.Context, noticeID string) (bool, error) {
+	var marked bool
+	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
+		marked = false
+		os, err := queryOccurrences(ctx, tx, "notice_id = ? AND state = 'assigned' AND admitted_at IS NULL", noticeID)
+		if err != nil || len(os) == 0 {
+			return false, err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE task_notifications SET state = 'failed', reason = ?, updated_at = ?
+			WHERE id = ? AND state = 'sent'`, ReasonUncertain, r.now().UnixMilli(), noticeID)
+		if err != nil {
+			return false, err
+		}
+		if k, _ := res.RowsAffected(); k != 1 {
+			return false, nil
+		}
+		o := os[0]
+		var parent int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE id = ?", o.ScheduleTaskID).Scan(&parent); err != nil {
+			return false, err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM tasks WHERE id = ? AND status = ?", o.ChildTaskID, StatusPending); err != nil {
+			return false, err
+		}
+		o.ChildTaskID, o.NoticeID, o.SessionID, o.ConfirmedAt = 0, "", "", 0
+		o.State, o.Reason, o.Note = OccLate, ReasonUncertain, "It may already have been delivered"
+		if parent == 0 {
+			o.State = OccSkipped
+		}
+		if err := r.saveOccurrence(ctx, tx, o); err != nil {
+			return false, err
+		}
+		marked = true
+		return true, r.touchTemplateByID(ctx, tx, o)
+	})
+	return marked, err
+}
+
 // SettleSessionDeleted settles, before a session's file is removed, every
 // unfinished run bound to it, plus markerOccurrenceID (a run whose new
 // session was created but not yet bound; 0 for none). Undelivered work fails

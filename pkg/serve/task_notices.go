@@ -311,7 +311,8 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 			return n
 		}
 		if hasNotice(sess.History(), n.ID) || noticeQueued(sess, n) {
-			d.setState(ctx, &n, tasks.NoticeChange{State: tasks.NoticeSent, SteerID: n.SteerID})
+			// Seen in the session: for a scheduled run, that is its admission.
+			d.setState(ctx, &n, tasks.NoticeChange{State: tasks.NoticeSent, SteerID: n.SteerID, Admitted: occ != nil})
 			d.markInflight(to)
 			return n
 		}
@@ -504,10 +505,25 @@ func transcriptHasNotice(s *session.Session, id string) bool {
 // reconcileSent settles a sent notice against the saved transcript: there, it
 // is delivered; nowhere (not saved, not in history, not queued), it goes back
 // to pending and is delivered again. A notice is never lost, and one already
-// saved is never injected a second time. Must run under d.mu.
+// saved is never injected a second time. A scheduled run's assignment is
+// settled by its recorded admission instead (reconcileScheduled). Must run
+// under d.mu.
 func (d *noticeDispatcher) reconcileSent(ctx context.Context, n tasks.Notice) {
 	m := d.m
 	to := n.RecipientSessionID
+	if n.Kind == tasks.NoticeAssigned {
+		o, ok, err := m.tasks.OccurrenceForNotice(ctx, n.ID)
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Warn("task notices: reading the notice's run failed", "notice", n.ID, "error", err)
+			}
+			return
+		}
+		if ok {
+			d.reconcileScheduled(ctx, n, o)
+			return
+		}
+	}
 	if sess, live := m.Get(to); live {
 		if sess.persister != nil && sess.persister.has(func(s *session.Session) bool { return transcriptHasNotice(s, n.ID) }) {
 			d.delivered(ctx, n)
@@ -543,23 +559,34 @@ func (d *noticeDispatcher) reconcileSent(ctx context.Context, n tasks.Notice) {
 	d.nudge()
 }
 
-// reconcileSentAtStartup runs reconcileSent on every sent notice before the
-// dispatcher starts. Nothing is resident yet, so each is settled against its
-// saved transcript: delivered if it is there, pending if not (and left sent
-// when the transcript cannot be read).
-func (d *noticeDispatcher) reconcileSentAtStartup(ctx context.Context) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	notices, err := d.m.tasks.OpenNotices(ctx)
-	if err != nil {
-		slog.Warn("task notices: reading the outbox at startup failed", "error", err)
+// reconcileScheduled settles a scheduled run's sent assignment by its
+// persisted admission, never by the transcript. Every attempt holds d.mu from
+// its reservation to its acknowledgment or refusal, so here none is in
+// flight. Admitted, it is never sent again: a live session's is delivered
+// once saved, or once it has been missing for noticeLostAfter (a steer the
+// owner discarded is meanwhile kept as an append by steersCanceled). Not
+// admitted, it may or may not have arrived: the owner decides.
+func (d *noticeDispatcher) reconcileScheduled(ctx context.Context, n tasks.Notice, o tasks.Occurrence) {
+	if o.AdmittedAt == 0 {
+		ok, err := d.m.tasks.MarkDeliveryUncertain(ctx, n.ID)
+		switch {
+		case err != nil:
+			if ctx.Err() == nil {
+				slog.Warn("task notices: recording an uncertain delivery failed", "notice", n.ID, "error", err)
+			}
+		case ok:
+			slog.Warn("task notices: a scheduled assignment's admission was never recorded; waiting for the owner", "notice", n.ID, "run", o.ID)
+		}
 		return
 	}
-	for _, n := range notices {
-		if n.State == tasks.NoticeSent && ctx.Err() == nil {
-			d.reconcileSent(ctx, n)
+	if sess, live := d.m.Get(n.RecipientSessionID); live {
+		saved := sess.persister != nil && sess.persister.has(func(s *session.Session) bool { return transcriptHasNotice(s, n.ID) })
+		if !saved && (hasNotice(sess.History(), n.ID) || noticeQueued(sess, n) ||
+			d.m.clock.Now().Sub(time.UnixMilli(n.UpdatedAt)) < noticeLostAfter) {
+			return
 		}
 	}
+	d.delivered(ctx, n)
 }
 
 func (d *noticeDispatcher) delivered(ctx context.Context, n tasks.Notice) tasks.Notice {

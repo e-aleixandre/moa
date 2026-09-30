@@ -336,11 +336,12 @@ func (r *Repo) SetNoticeState(ctx context.Context, id string, c NoticeChange) (b
 
 // latestNoticeStates maps each task to the state of its newest notice. A
 // scheduled assignment withdrawn because its run finished, was removed or was
-// re-gated is not a delivery failure, and is reported as nothing.
+// re-gated, or left to the owner as an uncertain delivery, is not a delivery
+// failure, and is reported as nothing.
 func latestNoticeStates(ctx context.Context, q querier) (map[int64]string, error) {
-	rows, err := q.QueryContext(ctx, `SELECT task_id, CASE WHEN state = 'failed' AND reason IN (?,?,?) THEN '' ELSE state END
+	rows, err := q.QueryContext(ctx, `SELECT task_id, CASE WHEN state = 'failed' AND reason IN (?,?,?,?) THEN '' ELSE state END
 		FROM task_notifications WHERE rowid IN (SELECT MAX(rowid) FROM task_notifications GROUP BY task_id)`,
-		ReasonChildDone, ReasonChildRemoved, ReasonRegated)
+		ReasonChildDone, ReasonChildRemoved, ReasonRegated, ReasonUncertain)
 	if err != nil {
 		return nil, err
 	}
