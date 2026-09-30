@@ -1,22 +1,18 @@
-import { test, expect, mock } from "bun:test";
+import { test, expect, mock, beforeEach } from "bun:test";
 
 // The pieces are walked as vnode trees (no DOM), so the hooks are stubbed:
 // `pick` decides what each useState returns, in call order.
-const realHooks = await import("preact/hooks");
+const { hooks, runtime } = await import("./hook-runtime.js");
+mock.module("preact/hooks", () => hooks);
 let pick = () => undefined;
 let calls = 0;
-mock.module("preact/hooks", () => ({
-  ...realHooks,
-  useState(initial) {
+beforeEach(() => {
+  runtime.useState = (initial) => {
     const chosen = pick(calls++);
     return [chosen === undefined ? (typeof initial === "function" ? initial() : initial) : chosen, () => {}];
-  },
-  useEffect() {},
-  useLayoutEffect() {},
-  useRef(initial) { return { current: initial }; },
-  useCallback(cb) { return cb; },
-  useMemo(f) { return f(); },
-}));
+  };
+  runtime.useRef = (initial) => ({ current: initial });
+});
 
 const { MoveList, CompleteNote } = await import("./parts.jsx");
 const { MobileTasksView } = await import("./MobileTasksView.jsx");

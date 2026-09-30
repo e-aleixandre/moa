@@ -231,6 +231,7 @@ button.tk-group:hover { color: var(--zl-t2); }
 }
 .tk-link:hover { text-decoration: underline; text-decoration-color: var(--zl-t4); text-underline-offset: 3px; }
 .tk-link.is-accent { color: var(--zl-accent); font-weight: 500; }
+.tk-prop .tk-link { margin-left: 10px; }
 .tk-where { display: flex; align-items: center; gap: 8px; }
 .tk-where > .tk-prop-btn { min-width: 0; }
 .tk-sess { display: flex; align-items: center; gap: 8px; min-width: 0; }

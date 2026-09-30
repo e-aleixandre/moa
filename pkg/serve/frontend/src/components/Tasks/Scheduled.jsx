@@ -14,7 +14,7 @@ import {
 } from "../../data/tasks.js";
 import { conflictCurrent, deletePath, errorText, isTypingTarget, projectOptions, sessionName } from "../../data/tasks-model.js";
 import {
-  WHEN_PRESETS, awaitsYou, canReroute, clock, createWhenInput, dateLabel, deliveryRows, deliverySummary, deviceZone, failedRun, failureWords,
+  WHEN_PRESETS, awaitsYou, canReroute, clock, createWhenInput, whenMountQuestion, dateLabel, deliveryRows, deliverySummary, deviceZone, failedRun, failureWords,
   inWords, isDefaultDelivery, isRepeat, lateBanner, lateRun, modelLabel, pickOf, pickText, rebaseSchedDraft, repeatOptions, ruleShort,
   ruleText, runOpenSession, runRows, schedActions, schedDirty, schedDraft, schedEyebrow, schedReady, schedRight, scheduleBody, schedulePatch,
   scheduledRows, stateOf, targetFromDest, targetName, targetSessionId, uncertainRun, waitingCount, whenButton, whenLong, whenShort,
@@ -165,7 +165,8 @@ export function WhenEditor({ value, next: next0 = null, onChange, text: text0 = 
   }), []);
   useEffect(() => {
     if (autoFocus) field.current?.focus({ preventScroll: true });
-    if (text0) ask(text0, tz);
+    const question = whenMountQuestion(text0, value);
+    if (question) ask(question, tz);
     let live = true;
     // The presets show the times the server gives them; one it cannot place
     // (tonight, after 21:00) is not offered.
@@ -424,6 +425,9 @@ export function SchedDetail({
     return schedDraft(rec);
   });
   const [pop, setPop] = useState(init.pop || null); // 'when' | 'target' | 'reroute'
+  // The words behind the current When: what reopening the editor shows, so it
+  // never asks the server for text the user has since replaced.
+  const [whenText, setWhenText] = useState(init.whenText || "");
   const [sub, setSub] = useState("");
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
@@ -517,7 +521,8 @@ export function SchedDetail({
   } else if (dirty) {
     foot = (
       <>
-        <button type="button" class="zl-ask-btn is-quiet" disabled={busy} onClick={() => { setDraft(schedDraft(base)); setConflict(false); }}>Discard</button>
+        {/* Closing the editor cancels the question it may still have open. */}
+        <button type="button" class="zl-ask-btn is-quiet" disabled={busy} onClick={() => { setPop(null); setWhenText(""); setDraft(schedDraft(base)); setConflict(false); }}>Discard</button>
         <span class="tk-grow" />
         {isRepeat(task) && draft.when?.kind === "repeat" && nextAt && <span class="tk-foot-fact">From {whenShort(nextAt, now, tz)} on</span>}
         <button type="button" class="zl-ask-btn is-primary" disabled={busy || !ready} onClick={save}>Save</button>
@@ -609,7 +614,7 @@ export function SchedDetail({
           </div>
           {pop === "when" && (
             <div class="sch-inline-pop">
-              <WhenEditor value={draft.when} next={draft.next} text={init.whenText || ""} onChange={(w, _text, next) => set({ when: w, next })} onSubmit={() => setPop(null)} />
+              <WhenEditor value={draft.when} next={draft.next} text={whenText} onChange={(w, words, next) => { setWhenText(words || ""); set({ when: w, next }); }} onSubmit={() => setPop(null)} />
             </div>
           )}
           <div class="tk-prop">

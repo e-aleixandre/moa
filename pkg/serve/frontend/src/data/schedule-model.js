@@ -425,6 +425,14 @@ export function createWhenInput(post, { onRead, onValue }) {
   return ask;
 }
 
+// whenMountQuestion — what a When editor asks the server when it opens: the
+// text that has no answer yet. A value the server already resolved is shown
+// as it is; asking its first words again would bring back a choice the user
+// has since replaced.
+export function whenMountQuestion(text, value) {
+  return !value && String(text || '').trim() ? text : null;
+}
+
 const TRY_ONCE = 'Try “in 20 min”, “friday at 18:00” or “every monday at 9”.';
 const PREVIEW_ERRORS = {
   past: 'That time has passed. Pick a later one.',

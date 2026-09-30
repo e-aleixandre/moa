@@ -169,6 +169,11 @@ export function TaskDetail({
   useEscape(menu, () => setMenu(false));
   useEffect(() => { if (menu) loadTaskProjects(); }, [menu]);
   const [whenPop, setWhenPop] = useState(null); // null | { text }
+  // Once the user has started a When (words, a pick, a preset) the task is
+  // meant to be scheduled: creation waits for the server to resolve it, even
+  // with the editor closed. Only "Remove When" gives that intent up.
+  const [whenStarted, setWhenStarted] = useState(false);
+  const [whenText, setWhenText] = useState("");
   useEscape(!!whenPop, () => setWhenPop(null));
 
   // A scheduled task is edited by its own detail (When, Send to, runs); so
@@ -233,8 +238,9 @@ export function TaskDetail({
   // button, so there is never a confirmation after it — and ⌘↵, which has
   // no answer to give, does nothing there.
   const createSaved = dest.place === "agent" && needsDeliverChoice({ state: sessionNoticeState(sessions[dest.sessionId]) });
+  const whenBlocked = whenStarted && !draft.when;
   const create = (choice = null) => {
-    if (!draft.title.trim() || busy || (createSaved && choice == null)) return;
+    if (!draft.title.trim() || busy || whenBlocked || (createSaved && choice == null)) return;
     setBusy(true);
     createTask(createBody(draft, dest, choice))
       .then((r) => onCreated?.(r?.id))
@@ -276,7 +282,7 @@ export function TaskDetail({
         verb="Assign"
         phone={phone}
         autoFocus={false}
-        busy={busy || !draft.title.trim()}
+        busy={busy || whenBlocked || !draft.title.trim()}
         onChoose={create}
       />
     );
@@ -284,7 +290,7 @@ export function TaskDetail({
     foot = (
       <>
         <span class="tk-grow" />
-        <button type="button" class="zl-ask-btn is-primary" disabled={!draft.title.trim() || busy} onClick={() => create(null)}>
+        <button type="button" class="zl-ask-btn is-primary" disabled={!draft.title.trim() || busy || whenBlocked} onClick={() => create(null)}>
           {dest.place === "agent" ? "Assign and notify" : "Add task"}{!phone && <Keycap>{MOD_ENTER}</Keycap>}
         </button>
       </>
@@ -373,19 +379,32 @@ export function TaskDetail({
                   aria-expanded={!!whenPop}
                   onClick={() => {
                     if (onPushWhen) { stashDraft(draftKey, { base, draft, dest }); onPushWhen(); return; }
-                    setWhenPop(whenPop ? null : { text: "" });
+                    setWhenPop(whenPop ? null : { text: whenText });
                   }}
                 >
                   <Clock3 size={13} aria-hidden="true" />
-                  <span class="tk-prop-v">Not scheduled</span>
+                  <span class="tk-prop-v">{whenStarted ? "Pick a time" : "Not scheduled"}</span>
                   <ChevronDown size={13} aria-hidden="true" />
                 </button>
+                {whenStarted && (
+                  <button
+                    type="button"
+                    class="tk-link"
+                    onClick={() => { setWhenStarted(false); setWhenText(""); setWhenPop(null); set({ when: null, next: null }); }}
+                  >
+                    Remove When
+                  </button>
+                )}
               </dd>
             </div>
           )}
           {isNew && whenPop && (
             <div class="sch-inline-pop">
-              <WhenEditor value={null} onChange={(w, text, next) => { setWhenPop({ text: text || "" }); set({ when: w, next }); }} />
+              <WhenEditor
+                value={null}
+                text={whenText}
+                onChange={(w, text, next) => { setWhenStarted(true); setWhenText(text || ""); setWhenPop({ text: text || "" }); set({ when: w, next }); }}
+              />
             </div>
           )}
           <div class="tk-prop">
