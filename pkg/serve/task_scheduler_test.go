@@ -293,7 +293,10 @@ func TestTaskSchedulerClockJump(t *testing.T) {
 	h.clock.Set(mustUTC("2026-10-04T09:00:00Z"))
 	pollUntil(t, 10*time.Second, "next slot", func() bool { return len(runsOfT(t, r, tmpl.ID)) == 2 })
 	h.pass()
-	if os := runsOfT(t, r, tmpl.ID); len(os) != 2 || os[1].State == tasks.OccLate || os[1].MissedCount != 0 {
+	// The unanswered late run is coalesced into the next slot's run, which
+	// stands for it and for the three it already stood for.
+	if os := runsOfT(t, r, tmpl.ID); len(os) != 2 || os[1].State == tasks.OccLate || os[1].MissedCount != 4 ||
+		os[0].State != tasks.OccSkipped || os[0].Reason != tasks.ReasonSuperseded {
 		t.Fatalf("runs = %+v", os)
 	}
 }

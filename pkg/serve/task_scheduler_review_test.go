@@ -138,3 +138,42 @@ func TestScheduleReviewReservedAndSavedIsNotRegated(t *testing.T) {
 		t.Fatalf("saved assignment was re-gated: %+v", got)
 	}
 }
+
+// Q2: a recurring run materialized before a crash and never assigned is
+// coalesced with the runs missed during the downtime into the latest one.
+func TestScheduleReviewRecurringCrashCoalesces(t *testing.T) {
+	for _, late := range []string{tasks.LateAsk, tasks.LateRun} {
+		t.Run(late, func(t *testing.T) {
+			prov := newMockProvider(simpleResponseHandler("newest run"), simpleResponseHandler("older run"))
+			h := newSchedHarness(t, prov, "2026-09-30T08:00:00Z")
+			h.start()
+			sid := h.savedSession()
+			h.stop()
+			r := h.repo()
+			tmpl := mkTemplate(t, r, "daily interrupted before T1", dailyAt(9, 0, "UTC", toSession(sid), tasks.Delivery{Late: late}))
+			h.clock.Set(mustUTC("2026-09-30T09:00:00Z"))
+			due, err := r.MaterializeDue(bgc, 10)
+			if err != nil || len(due) != 1 || due[0].State != tasks.OccReady {
+				t.Fatalf("test setup: T0 = %+v / %v", due, err)
+			}
+			schedReviewCrash(t, h, "after_t0")
+			if old := occNow(t, r, due[0].ID); old.State != tasks.OccReady || old.ChildTaskID != 0 {
+				t.Fatalf("test setup: SIGKILL did not preserve an unassigned run: %+v", old)
+			}
+			h.clock.Set(mustUTC("2026-10-03T09:01:00Z"))
+			h.start()
+			h.pass()
+			runs := runsOfT(t, r, tmpl.ID)
+			if len(runs) != 2 {
+				t.Fatalf("test setup: expected stored original and latest slot, got %+v", runs)
+			}
+			latest := assignedAndDelivered(t, h, r, runs[1].ID)
+			old := occNow(t, r, runs[0].ID)
+			delivered := sqlCount(t, h.dbPath(), "SELECT COUNT(*) FROM task_notifications WHERE state = 'delivered'")
+			if old.State != tasks.OccSkipped || old.Reason != tasks.ReasonSuperseded || latest.MissedCount != 3 || delivered != 1 {
+				t.Errorf("Q2: old run %s/%s, latest missed_count=%d, delivered notices=%d; want superseded, 3, 1",
+					old.State, old.Reason, latest.MissedCount, delivered)
+			}
+		})
+	}
+}

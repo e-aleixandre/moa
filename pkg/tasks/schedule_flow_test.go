@@ -519,12 +519,20 @@ func TestScheduleEditFromNext(t *testing.T) {
 	def := dailyDef(9, 0, "UTC", "")
 	def.Delivery.Saved = DeliverHold
 	tmpl := mkSchedule(t, r, "daily", def)
-	// Sep 26 on time → ready, then assigned with a held notice.
-	clock.Set(utc("2026-09-26T09:00:00Z"))
-	held := mustAssign(t, r, materializeOne(t, r).ID, "s1")
-	// Sep 27 on time → ready (left unassigned).
-	clock.Set(utc("2026-09-27T09:00:00Z"))
-	ready := materializeOne(t, r)
+	// Sep 26 run by hand → assigned with a held notice. Runs the owner
+	// authorized are not coalesced into later slots.
+	byHand, err := r.RunNow(bg, tmpl.ID, tmpl.Revision, tmpl.Next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := mustAssign(t, r, byHand.ID, "s1")
+	// Sep 27 observed late, then confirmed → ready (left unassigned).
+	clock.Set(utc("2026-09-27T09:30:00Z"))
+	first := materializeOne(t, r)
+	ready, err := r.ConfirmOccurrence(bg, first.ID, first.Revision, LateRun)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Sep 28 observed late → late.
 	clock.Set(utc("2026-09-28T09:30:00Z"))
 	late := materializeOne(t, r)
@@ -1189,8 +1197,11 @@ func TestScheduleRegateOnRestart(t *testing.T) {
 func TestScheduleParentDeleteSettlesLate(t *testing.T) {
 	r, clock := schedRepo(t, "2026-09-29T08:00:00Z")
 	tmpl := mkSchedule(t, r, "daily", dailyDef(9, 0, "UTC", ""))
-	clock.Set(utc("2026-09-29T09:00:00Z"))
-	ready := materializeOne(t, r)
+	// Run by hand: an authorized run is not coalesced into the next slot.
+	ready, err := r.RunNow(bg, tmpl.ID, tmpl.Revision, tmpl.Next)
+	if err != nil {
+		t.Fatal(err)
+	}
 	clock.Set(utc("2026-09-30T09:30:00Z"))
 	late := materializeOne(t, r)
 	if err := r.Delete(bg, tmpl.ID, mustGet(t, r, tmpl.ID).Revision, ""); err != nil {
@@ -1283,14 +1294,17 @@ func TestScheduleCountsLateOccurrences(t *testing.T) {
 		}
 	}
 	rep := mkSchedule(t, r, "daily", dailyDef(9, 0, "UTC", ""))
+	rep2 := mkSchedule(t, r, "another daily", dailyDef(9, 0, "UTC", ""))
 	paused := mkSchedule(t, r, "paused daily", dailyDef(9, 0, "UTC", ""))
 	failedTmpl := mkSchedule(t, r, "fails", dailyDef(9, 0, "UTC", LateRun))
 	mustCreate(t, r, CreateInput{Title: "private note", Place: PlaceYou})
 	var lates []Occurrence
-	for _, day := range []string{"2026-09-28T09:30:00Z", "2026-09-29T09:30:00Z"} {
+	// One late run per recurring template: a later slot coalesces an
+	// unanswered earlier one.
+	for _, day := range []string{"2026-09-28T09:30:00Z"} {
 		clock.Set(utc(day))
 		for _, o := range materialize(t, r) {
-			if o.ScheduleTaskID == rep.ID {
+			if o.ScheduleTaskID == rep.ID || o.ScheduleTaskID == rep2.ID {
 				lates = append(lates, o)
 			}
 			if o.ScheduleTaskID == failedTmpl.ID {

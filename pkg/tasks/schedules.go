@@ -360,6 +360,13 @@ func (r *Repo) consume(ctx context.Context, taskID, expectRev, expectDue int64, 
 			}
 			return false, &ConflictError{Current: cur}
 		}
+		if trigger == TriggerTimer && s.Def.When.Kind == WhenRepeat {
+			superseded, err := r.supersedeUndelivered(ctx, tx, taskID)
+			if err != nil {
+				return false, err
+			}
+			plan.missed += superseded
+		}
 		o := Occurrence{ScheduleTaskID: taskID, DueAt: plan.due, DefinitionRevision: cur.Revision,
 			Spec: specOf(cur, s.Def), Trigger: trigger, ObservedAt: now.UnixMilli(), MissedCount: plan.missed}
 		switch {
@@ -394,6 +401,57 @@ func (r *Repo) consume(ctx context.Context, taskID, expectRev, expectDue int64, 
 		return true, err
 	})
 	return out, err
+}
+
+// supersedeUndelivered coalesces a recurring template's earlier runs into the
+// one its timer is about to create: every run that never reached its session
+// and that the owner did not authorize by hand (ready, late, or assigned with
+// its notice still waiting) is skipped as superseded, its undelivered
+// assignment withdrawn. It returns how many slots the new run stands for in
+// their place, their own coalesced slots included. An assignment already on
+// its way (sent) or admitted, or a child someone started, is left alone.
+func (r *Repo) supersedeUndelivered(ctx context.Context, tx *sql.Tx, taskID int64) (int, error) {
+	os, err := queryOccurrences(ctx, tx, `schedule_task_id = ? AND state IN ('ready','assigned','late')
+		AND admitted_at IS NULL AND confirmed_at IS NULL AND trigger <> 'run_now' ORDER BY id`, taskID)
+	if err != nil {
+		return 0, err
+	}
+	now := r.now().UnixMilli()
+	n := 0
+	for _, o := range os {
+		if o.ChildTaskID != 0 {
+			var status string
+			err := tx.QueryRowContext(ctx, "SELECT status FROM tasks WHERE id = ?", o.ChildTaskID).Scan(&status)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return 0, err
+			}
+			if err == nil && status != StatusPending {
+				continue
+			}
+		}
+		if o.NoticeID != "" {
+			res, err := tx.ExecContext(ctx, `UPDATE task_notifications SET state = 'failed', reason = ?, updated_at = ?
+				WHERE id = ? AND state IN ('pending','held')`, ReasonSuperseded, now, o.NoticeID)
+			if err != nil {
+				return 0, err
+			}
+			if k, _ := res.RowsAffected(); k != 1 && o.State == OccAssigned {
+				continue
+			}
+		}
+		if o.ChildTaskID != 0 {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM tasks WHERE id = ?", o.ChildTaskID); err != nil {
+				return 0, err
+			}
+		}
+		o.ChildTaskID, o.NoticeID, o.SessionID = 0, "", ""
+		o.State, o.Reason, o.Note = OccSkipped, ReasonSuperseded, "Superseded by a later run"
+		if err := r.saveOccurrence(ctx, tx, o); err != nil {
+			return 0, err
+		}
+		n += 1 + o.MissedCount
+	}
+	return n, nil
 }
 
 // controlTarget is the error for an owner control on a task that is not an

@@ -512,12 +512,13 @@ func TestScheduleFooterCountsOccurrences(t *testing.T) {
 	if r := a.runs(failing.ID); len(r) != 1 || r[0].State != tasks.OccFailed {
 		t.Fatalf("failing run = %+v", r)
 	}
-	// Two late runs of one recurring task (the second day's slot is seen late
-	// too), and one late run under a parent that is then paused.
+	// Two recurring tasks with a late run each, and one late run under a
+	// parent that is then paused. (A later slot of the same task would
+	// coalesce an unanswered late run into itself.)
 	repeat := expect[tasks.Record](a, 201, "POST", "/api/tasks", dailyBody("repeats", sessionTarget(sid)))
-	first := a.lateRun(repeat)
+	expect[tasks.Record](a, 201, "POST", "/api/tasks", dailyBody("repeats too", sessionTarget(sid)))
 	paused := expect[tasks.Record](a, 201, "POST", "/api/tasks", dailyBody("will pause", sessionTarget(sid)))
-	a.lateRun(a.rec(repeat.ID))
+	first := a.lateRun(repeat)
 	if r := a.runs(paused.ID); len(r) != 1 || r[0].State != tasks.OccLate {
 		t.Fatalf("paused template runs = %+v", r)
 	}

@@ -63,6 +63,8 @@ const (
 	ReasonChildDone            = "child_done"
 	ReasonChildRemoved         = "child_removed"
 	ReasonScheduleDeleted      = "schedule_deleted"
+	ReasonSuperseded           = "superseded"
+	ReasonLegacyDelivered      = "legacy_delivered"
 	ReasonTemplateInvalid      = "template_invalid"
 	ReasonRerouted             = "rerouted"
 	ReasonDeletedDuringDeliver = "session_deleted_during_delivery"
