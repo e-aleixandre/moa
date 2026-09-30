@@ -1,0 +1,283 @@
+/* Owner faces · identity lab (?view=faces-id). Lab only. Every class is
+   prefixed `fi`. SVG elements animate in viewBox units: a CSS px inside the
+   <svg> is one user unit, so the same keyframes serve every size. */
+
+.fi {
+  position: relative;
+  flex: none;
+  display: inline-block;
+  line-height: 0;
+  --fi-ink: #12121a;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.45));
+}
+.fi svg { display: block; overflow: visible; }
+.fi .fi-body { fill: var(--fi-body); stroke: var(--fi-body); stroke-width: 1.2; stroke-linejoin: round; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fi * { animation: none !important; }
+}
+
+/* ── A · Visor ─────────────────────────────────────────────────────────── */
+.fi-visor .fi-v-slot { fill: rgba(8, 8, 16, 0.55); }
+.fi-visor .fi-v-trail { opacity: 0; }
+
+.fi-visor.is-idle .fi-v-light {
+  opacity: 0.72;
+  animation: fi-v-drift 9s ease-in-out var(--fi-at) infinite;
+}
+@keyframes fi-v-drift {
+  0%, 100% { transform: translateX(-3px); }
+  30% { transform: translateX(2.5px); }
+  55% { transform: translateX(1px); }
+  75% { transform: translateX(-1.5px); }
+}
+
+.fi-visor.is-working .fi-v-light,
+.fi-visor.is-working .fi-v-trail {
+  animation: fi-v-scan 1.5s cubic-bezier(0.45, 0, 0.55, 1) var(--fi-at) infinite alternate;
+}
+.fi-visor.is-working .fi-v-trail {
+  opacity: 0.35;
+  animation-delay: calc(var(--fi-at) - 0.12s);
+}
+@keyframes fi-v-scan {
+  from { transform: translateX(-8px); }
+  to { transform: translateX(8px); }
+}
+
+.fi-visor.is-asks .fi-v-slot { fill: rgba(8, 8, 16, 0.4); }
+.fi-visor.is-asks .fi-v-light {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fi-v-call 1.6s ease-out infinite;
+}
+@keyframes fi-v-call {
+  0%, 100% { transform: scaleX(1.5); opacity: 0.85; }
+  18% { transform: scale(2, 1.2); opacity: 1; }
+  40% { transform: scaleX(1.5); opacity: 0.85; }
+}
+
+/* ── B · Núcleo ────────────────────────────────────────────────────────── */
+.fi-nucleo .fi-n-core { fill: #fff; }
+.fi-nucleo .fi-n-tail { fill: #fff; opacity: 0; }
+.fi-nucleo .fi-n-orbit { transform-box: view-box; transform-origin: var(--fi-cx) var(--fi-cy); }
+.fi-nucleo .fi-n-halo,
+.fi-nucleo .fi-n-core { transform-box: fill-box; transform-origin: center; }
+
+.fi-nucleo.is-idle .fi-n-pos { animation: fi-n-wander 11s ease-in-out var(--fi-at) infinite; }
+.fi-nucleo.is-idle .fi-n-halo { animation: fi-n-breathe 5.5s ease-in-out var(--fi-at) infinite alternate; }
+.fi-nucleo.is-idle .fi-n-core { opacity: 0.7; }
+@keyframes fi-n-wander {
+  0%, 100% { transform: translate(-3px, -1px); }
+  25% { transform: translate(2.5px, -2.5px); }
+  50% { transform: translate(3px, 2px); }
+  75% { transform: translate(-1.5px, 2.5px); }
+}
+@keyframes fi-n-breathe {
+  from { opacity: 0.45; transform: scale(0.85); }
+  to { opacity: 0.8; transform: scale(1.05); }
+}
+
+.fi-nucleo.is-working .fi-n-pos { transform: translateY(-5.2px); }
+.fi-nucleo.is-working .fi-n-orbit { animation: fi-n-spin 1.4s linear var(--fi-at) infinite; }
+.fi-nucleo.is-working .fi-n-o1 { animation-delay: calc(var(--fi-at) + 0.09s); }
+.fi-nucleo.is-working .fi-n-o2 { animation-delay: calc(var(--fi-at) + 0.18s); }
+.fi-nucleo.is-working .fi-n-o1 .fi-n-tail { opacity: 0.55; }
+.fi-nucleo.is-working .fi-n-o2 .fi-n-tail { opacity: 0.28; }
+.fi-nucleo.is-working .fi-n-halo { transform: scale(0.75); opacity: 0.8; }
+@keyframes fi-n-spin {
+  to { transform: rotate(360deg); }
+}
+
+.fi-nucleo.is-asks .fi-n-core,
+.fi-nucleo.is-asks .fi-n-halo { animation: fi-n-beat 1.5s ease-out infinite; }
+@keyframes fi-n-beat {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  12% { transform: scale(1.45); opacity: 1; }
+  24% { transform: scale(1.1); }
+  36% { transform: scale(1.35); opacity: 1; }
+  60% { transform: scale(1); opacity: 0.85; }
+}
+
+/* ── C · Tres puntos ───────────────────────────────────────────────────── */
+.fi-puntos .fi-p-dot { fill: #fff; transform-box: fill-box; transform-origin: center; }
+
+.fi-puntos.is-idle .fi-p-slot { animation: fi-p-float 6s ease-in-out var(--fi-at) infinite; }
+.fi-puntos.is-idle .fi-p-1 { animation-duration: 6.8s; }
+.fi-puntos.is-idle .fi-p-2 { animation-duration: 5.3s; animation-direction: reverse; }
+.fi-puntos.is-idle .fi-p-3 { animation-duration: 7.4s; }
+.fi-puntos.is-idle .fi-p-dot { opacity: 0.8; }
+@keyframes fi-p-float {
+  0%, 100% { transform: translate(0, -1.2px); }
+  33% { transform: translate(0.8px, 1px); }
+  66% { transform: translate(-0.7px, 0.2px); }
+}
+
+.fi-puntos.is-working .fi-p-slot { animation: fi-p-type 1.2s ease-in-out infinite; }
+.fi-puntos.is-working .fi-p-2 { animation-delay: 0.15s; }
+.fi-puntos.is-working .fi-p-3 { animation-delay: 0.3s; }
+@keyframes fi-p-type {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.55; }
+  25% { transform: translateY(-2.6px); opacity: 1; }
+}
+.fi-puntos.is-working .fi-p-slot { opacity: 0.55; }
+
+.fi-puntos.is-asks .fi-p-dot { animation: fi-p-knock 1.8s ease-out infinite; }
+@keyframes fi-p-knock {
+  0%, 100% { transform: scale(1); }
+  8% { transform: scale(1.4); }
+  18% { transform: scale(1); }
+  26% { transform: scale(1.4); }
+  38% { transform: scale(1); }
+}
+
+/* ── D · Trazo ─────────────────────────────────────────────────────────── */
+.fi-trazo .fi-t-line,
+.fi-trazo .fi-t-wave,
+.fi-trazo .fi-t-ring { fill: none; stroke: #fff; stroke-linecap: round; stroke-linejoin: round; }
+.fi-trazo .fi-t-wave { animation: fi-t-travel 0.9s linear var(--fi-at) infinite; }
+@keyframes fi-t-travel {
+  from { transform: translateX(0); }
+  to { transform: translateX(7px); }
+}
+.fi-trazo .fi-t-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fi-t-call 1.6s ease-out infinite;
+}
+@keyframes fi-t-call {
+  0%, 100% { transform: scale(1); }
+  12% { transform: scale(1.3); }
+  26% { transform: scale(1); }
+  38% { transform: scale(1.2); }
+  55% { transform: scale(1); }
+}
+
+/* ── E · Moa ───────────────────────────────────────────────────────────── */
+.fi-moa .fi-m-beak { fill: rgba(8, 8, 16, 0.5); }
+.fi-moa .fi-m-white { fill: #fff; }
+.fi-moa .fi-m-pupil { fill: var(--fi-ink); }
+.fi-moa .fi-m-glint { fill: #fff; }
+.fi-moa .fi-m-lid { fill: var(--fi-body); transform: translateX(10px); }
+.fi-moa .fi-head { transform-box: view-box; transform-origin: 16px 29px; }
+.fi-moa .fi-m-eye { transform-box: fill-box; transform-origin: center; }
+
+.fi-moa.is-idle .fi-head { animation: fi-m-bob 5.2s ease-in-out var(--fi-at) infinite; }
+.fi-moa.is-idle .fi-m-lid { animation: fi-m-nictitate 6.5s ease-in-out var(--fi-at) infinite; }
+.fi-moa.is-idle .fi-m-pupil,
+.fi-moa.is-idle .fi-m-glint { transform: translateX(0.9px); }
+@keyframes fi-m-bob {
+  0%, 100% { transform: rotate(-2deg) translateY(0); }
+  50% { transform: rotate(2.5deg) translateY(-0.5px); }
+}
+/* The bird's third eyelid: sweeps across front to back, not top to bottom. */
+@keyframes fi-m-nictitate {
+  0%, 88%, 100% { transform: translateX(10px); }
+  92% { transform: translateX(0); }
+  96% { transform: translateX(-10px); }
+  96.01% { transform: translateX(10px); }
+}
+
+.fi-moa.is-working .fi-head { animation: fi-m-peck 1.5s ease-in var(--fi-at) infinite; }
+.fi-moa.is-working .fi-m-pupil,
+.fi-moa.is-working .fi-m-glint { transform: translate(1.4px, 1.2px); }
+@keyframes fi-m-peck {
+  0%, 44%, 100% { transform: rotate(0); }
+  10% { transform: rotate(13deg) translateY(1px); }
+  20% { transform: rotate(0); }
+  30% { transform: rotate(13deg) translateY(1px); }
+}
+
+.fi-moa.is-asks .fi-head { animation: fi-m-cock 3s cubic-bezier(0.3, 1.4, 0.5, 1) infinite; }
+.fi-moa.is-asks .fi-m-eye { transform: scale(1.12); }
+@keyframes fi-m-cock {
+  0%, 100% { transform: rotate(-14deg); }
+  40% { transform: rotate(-14deg); }
+  48% { transform: rotate(-4deg); }
+  58% { transform: rotate(-16deg); }
+}
+
+/* ── The page ──────────────────────────────────────────────────────────── */
+
+.fi-lab {
+  min-height: 100vh;
+  padding: 28px 24px 80px;
+  background: var(--zl-canvas);
+  color: var(--zl-t1);
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+}
+.fi-lab.is-solo { padding-top: 20px; }
+.fi-lab-head { max-width: 760px; margin: 0 auto 28px; text-align: center; }
+.fi-lab-head h1 { margin: 0 0 8px; font-size: var(--zl-fs-display); font-weight: 600; }
+.fi-lab-head p { margin: 0 0 14px; line-height: 1.6; color: var(--zl-t3); }
+.fi-nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; }
+.fi-nav a { color: var(--zl-t2); font-size: var(--zl-fs-meta); }
+
+.fi-sec {
+  max-width: 1040px;
+  margin: 0 auto 28px;
+  padding: 20px 24px 22px;
+  border: 1px solid var(--zl-rim);
+  border-radius: var(--zl-r-xl);
+  background: var(--zl-sheet);
+}
+.fi-sec-head h2 { margin: 0 0 4px; font-size: var(--zl-fs-title); font-weight: 600; }
+.fi-sec-head p { margin: 0 0 16px; color: var(--zl-t3); line-height: 1.5; }
+
+.fi-hero { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+.fi-hero-cell {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 12px 14px;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+}
+.fi-hero-cell figcaption { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.fi-hero-cell figcaption b { font-weight: 600; font-size: var(--zl-fs-meta); }
+.fi-hero-cell figcaption span { color: var(--zl-t3); font-size: var(--zl-fs-meta); line-height: 1.4; }
+b.is-working, .fi-lead.is-working { color: var(--blue, #89b4fa); }
+b.is-asks { color: var(--yellow, #f9e2af); }
+
+.fi-real { display: grid; grid-template-columns: 1fr 1.1fr 1.2fr; gap: 20px; }
+.fi-real h3 { margin: 0 0 8px; font-size: var(--zl-fs-micro); font-weight: 500; color: var(--zl-t4); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.fi-row { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px; border-radius: var(--zl-r-md); }
+.fi-row:hover { background: var(--zl-raised); }
+.fi-row-name { font-weight: 500; }
+.fi-lead { margin-left: auto; font-size: var(--zl-fs-meta); }
+.fi-lead.is-asks {
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--yellow, #f9e2af);
+  background: color-mix(in srgb, var(--yellow, #f9e2af) 14%, transparent);
+}
+
+.fi-status { display: flex; align-items: center; gap: 10px; height: 44px; font-size: var(--zl-fs-meta); color: var(--zl-t3); }
+.fi-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 4px;
+  border: 1px solid var(--zl-rim);
+  border-radius: 999px;
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-micro);
+}
+.fi-chip.is-20 { padding: 3px 10px 3px 4px; font-size: var(--zl-fs-meta); }
+
+.fi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.fi-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px 10px;
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-canvas);
+  font-size: var(--zl-fs-micro);
+  color: var(--zl-t2);
+}

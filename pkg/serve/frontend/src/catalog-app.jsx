@@ -23,6 +23,7 @@ import { Scene } from "./catalog/scene.jsx";
 import { InboxLab } from "./catalog/zones-inbox.jsx";
 import { OwnersLab } from "./catalog/owners-lab.jsx";
 import { OwnerFacesLab } from "./catalog/owner-faces-lab.jsx";
+import { OwnerFacesIdentityLab } from "./catalog/owner-faces-identity.jsx";
 import { WorkLab } from "./catalog/zones-work.jsx";
 import { U2Lab } from "./catalog/u2-lab.jsx";
 import { U6Lab } from "./catalog/u6-lab.jsx";
@@ -55,6 +56,7 @@ const LINKS = [
   { key: "inbox", label: "Inbox", href: "?view=inbox" },
   { key: "owners", label: "Owners", href: "?view=owners" },
   { key: "faces", label: "Owner faces", href: "?view=faces" },
+  { key: "faces-id", label: "Faces · identity", href: "?view=faces-id" },
   { key: "work", label: "Work", href: "?view=work" },
   { key: "u2", label: "User 2", href: "?view=u2" },
   { key: "u6", label: "User 6", href: "?view=u6" },
@@ -201,6 +203,7 @@ function CatalogApp() {
   else if (view === "owners") body = <OwnersLab />;
   // Owner faces — animated candidates for the owner mark (lab only).
   else if (view === "faces") body = <OwnerFacesLab />;
+  else if (view === "faces-id") body = <OwnerFacesIdentityLab />;
   else if (view === "work") body = <WorkLab />;
   else if (view === "u2") body = <U2Lab />;
   else if (view === "u6") body = <U6Lab />;
