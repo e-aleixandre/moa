@@ -306,7 +306,9 @@ func (m *Manager) ownerDestination(ownerID string) (tasks.Destination, string, e
 
 // provisionNew creates the run's session, or finds the one a previous
 // attempt created: the run's ID is written in that session's first save, and
-// a full scan of the saved sessions finds it after a crash.
+// a full scan of the saved sessions finds it after a crash. A damaged file
+// older than the run's observation cannot be its session: no attempt can
+// precede the row, so the scan skips it instead of failing every run.
 //
 // The scan reads every session header, so it runs before automationMu, which
 // session Delete and Close also take. The creation and T1 run under it, after
@@ -316,7 +318,7 @@ func (m *Manager) ownerDestination(ownerID string) (tasks.Destination, string, e
 func (s *taskScheduler) provisionNew(ctx context.Context, o tasks.Occurrence) bool {
 	m := s.m
 	occKey, parentKey := strconv.FormatInt(o.ID, 10), strconv.FormatInt(o.ScheduleTaskID, 10)
-	found, err := session.FindByMetadata(m.sessionBaseDir, session.MetaScheduledOccurrenceID, occKey)
+	found, err := session.FindByMetadata(m.sessionBaseDir, session.MetaScheduledOccurrenceID, occKey, time.UnixMilli(o.ObservedAt))
 	if err != nil {
 		s.fail(ctx, o.ID, reasonDestinationUncertain, err.Error())
 		return false

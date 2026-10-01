@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // FindByMetadata returns the saved sessions whose metadata holds key with the
@@ -19,7 +20,10 @@ import (
 // header reached the disk whole (its bytes go on to the transcript) and does
 // not mention key cannot be the one looked for and is skipped, as List does;
 // one cut short before that may have lost the key, so it fails too.
-func FindByMetadata(baseDir, key, value string) ([]Summary, error) {
+//
+// A damaged file last modified before since is skipped: whatever wrote it
+// did so before the thing looked for could exist. The zero since skips none.
+func FindByMetadata(baseDir, key, value string, since time.Time) ([]Summary, error) {
 	if baseDir == "" {
 		var err error
 		baseDir, err = defaultBaseDir()
@@ -53,6 +57,9 @@ func FindByMetadata(baseDir, key, value string) ([]Summary, error) {
 			path := filepath.Join(dir, f.Name())
 			sum, err := readSummary(path)
 			if err != nil || sum.ID == "" {
+				if info, ierr := f.Info(); ierr == nil && info.ModTime().Before(since) {
+					continue
+				}
 				raw, rerr := os.ReadFile(path)
 				switch {
 				case rerr != nil && !os.IsNotExist(rerr):

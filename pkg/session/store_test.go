@@ -1035,7 +1035,7 @@ func TestTruncatedHeaderIsUnreadableForEveryCaller(t *testing.T) {
 	if scan.Unreadable != 1 || scan.NoCWD != 0 {
 		t.Errorf("ScanCWDs = %+v; want it unreadable", scan)
 	}
-	if _, err := FindByMetadata(base, MetaCWD, "/x"); err == nil {
+	if _, err := FindByMetadata(base, MetaCWD, "/x", time.Time{}); err == nil {
 		t.Error("FindByMetadata skipped a header that may have lost the key")
 	}
 }

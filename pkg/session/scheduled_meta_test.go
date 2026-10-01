@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The scheduled-destination markers and the creator's timezone are written at
@@ -44,7 +45,7 @@ func TestFindByMetadata(t *testing.T) {
 	a := mk("/w/a", map[string]any{MetaScheduledOccurrenceID: "7"})
 	mk("/w/b", map[string]any{MetaScheduledOccurrenceID: "8"})
 	mk("/w/b", nil)
-	got, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7")
+	got, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7", time.Time{})
 	if err != nil || len(got) != 1 || got[0].ID != a.ID {
 		t.Fatalf("find = %+v, %v", got, err)
 	}
@@ -62,21 +63,36 @@ func TestFindByMetadata(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(storeDir, "broken.json"), []byte(`{"id":"zz","metadata":{"`+MetaScheduledOccurrenceID+`":"7"`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7"); err == nil || !strings.Contains(err.Error(), "broken.json") {
+	if _, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7", time.Time{}); err == nil || !strings.Contains(err.Error(), "broken.json") {
 		t.Fatalf("unreadable candidate ignored: %v", err)
 	}
 	// A file cut before its header ended may have lost the key: incomplete.
 	if err := os.WriteFile(filepath.Join(storeDir, "broken.json"), []byte(`{"id":"zz"`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7"); err == nil || !strings.Contains(err.Error(), "broken.json") {
+	if _, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7", time.Time{}); err == nil || !strings.Contains(err.Error(), "broken.json") {
 		t.Fatalf("truncated header ignored: %v", err)
 	}
 	// An unrelated unreadable file whose header is whole does not block the search.
 	if err := os.WriteFile(filepath.Join(storeDir, "broken.json"), []byte(`{"id":zz,"entries":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7"); err != nil || len(got) != 1 {
+	if got, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7", time.Time{}); err != nil || len(got) != 1 {
 		t.Fatalf("unrelated broken file: %+v %v", got, err)
+	}
+	// A truncated file older than since is skipped; one as new as since is not.
+	broken := filepath.Join(storeDir, "broken.json")
+	if err := os.WriteFile(broken, []byte(`{"id":"zz"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mtime := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(broken, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7", mtime.Add(time.Millisecond)); err != nil || len(got) != 1 {
+		t.Fatalf("old truncated file: %+v %v", got, err)
+	}
+	if _, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7", mtime); err == nil {
+		t.Fatal("truncated file as new as since ignored")
 	}
 }

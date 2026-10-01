@@ -379,7 +379,7 @@ func transcriptNoticeCount(t *testing.T, base, sessionID, id string) int {
 
 func markedSessions(t *testing.T, base string, occID int64) []session.Summary {
 	t.Helper()
-	got, err := session.FindByMetadata(base, session.MetaScheduledOccurrenceID, fmt.Sprint(occID))
+	got, err := session.FindByMetadata(base, session.MetaScheduledOccurrenceID, fmt.Sprint(occID), time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
