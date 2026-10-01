@@ -578,3 +578,54 @@ func TestDeviceClaimSourceUsesDirectPeerNotForwardedHeaders(t *testing.T) {
 		t.Fatalf("claim source = %q", got)
 	}
 }
+
+// SEC-03: a 24h browser cookie must not mint its own successor. Only the
+// durable credential in the Authorization header (held by native code) may
+// issue a device browser session, so a stolen cookie dies at its own expiry.
+func TestPulseDeviceSessionRejectsCookieRenewal(t *testing.T) {
+	if !deviceStoreLockSupported() {
+		t.Skip("device auth fails closed where advisory process locks are unavailable")
+	}
+	for _, mode := range []string{"token", "network"} {
+		t.Run(mode, func(t *testing.T) {
+			mgr := newTestManager(t, context.Background(), newMockProvider(simpleResponseHandler("ok")))
+			path := filepath.Join(t.TempDir(), "devices.json")
+			var handler http.Handler
+			var owner *http.Cookie
+			if mode == "token" {
+				handler = NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(path))
+				owner = &http.Cookie{Name: authCookieName, Value: "owner"}
+			} else {
+				handler = NewServer(mgr, WithDeviceStorePath(path))
+			}
+			device := pairedDevice(t, handler, owner, "phone")
+			other := pairedDevice(t, handler, owner, "other phone")
+			cookie := deviceBrowserSession(t, handler, device.Credential)
+
+			rec := pairingRequest(handler, http.MethodPost, "/api/pulse/device-session", `{}`, cookie, "")
+			if rec.Code != http.StatusForbidden || len(rec.Result().Cookies()) != 0 {
+				t.Fatalf("cookie-only renewal = %d with %d cookies, want 403 and none", rec.Code, len(rec.Result().Cookies()))
+			}
+
+			revoke := pairingRequest(handler, http.MethodPost, "/api/pulse/devices/"+other.DeviceID+"/revoke", `{}`, owner, "")
+			if revoke.Code != http.StatusNoContent {
+				t.Fatalf("revoke other = %d: %s", revoke.Code, revoke.Body.String())
+			}
+			for name, credential := range map[string]string{"invalid header": device.DeviceID + ".bogus", "revoked header": other.Credential} {
+				rec := pairingRequest(handler, http.MethodPost, "/api/pulse/device-session", `{}`, cookie, credential)
+				if rec.Code == http.StatusNoContent || len(rec.Result().Cookies()) != 0 {
+					t.Fatalf("cookie + %s renewal = %d with %d cookies, want rejection", name, rec.Code, len(rec.Result().Cookies()))
+				}
+			}
+
+			// The cookie keeps its ordinary surface until its own expiry, and the
+			// durable header keeps the existing exchange contract.
+			if got := pairingRequest(handler, http.MethodGet, "/api/sessions", "", cookie, ""); got.Code != http.StatusOK {
+				t.Fatalf("cookie REST after rejected renewal = %d", got.Code)
+			}
+			if fresh := deviceBrowserSession(t, handler, device.Credential); fresh.Value == cookie.Value {
+				t.Fatal("durable header exchange did not mint a fresh session")
+			}
+		})
+	}
+}

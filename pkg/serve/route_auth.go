@@ -67,7 +67,9 @@ func serveRouteAccess(r *http.Request) routeAccess {
 	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/pairings/claim":
 		return routePairingClaim
 	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/device-session":
-		return routeDeviceSession
+		// Only the durable header may mint a browser session; otherwise a 24h
+		// cookie could renew itself until the device credential expires.
+		return routeNativeDevice
 	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/device/revoke":
 		return routeDeviceSession
 	case r.URL.Path == "/api/push/native" || r.URL.Path == "/api/push/native/status":

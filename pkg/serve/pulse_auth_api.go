@@ -124,8 +124,8 @@ func handlePulseDeviceSession(store *deviceStore) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		if identity.Kind != "device" {
-			http.Error(w, "paired device authentication required", http.StatusForbidden)
+		if identity.Kind != "device" || !identity.Header {
+			http.Error(w, "native device authentication required", http.StatusForbidden)
 			return
 		}
 		var body struct{}
