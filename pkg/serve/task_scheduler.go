@@ -33,7 +33,6 @@ const (
 	reasonModelUnavailable     = "model_unavailable"
 	reasonCreateFailed         = "create_failed"
 	reasonDestinationUncertain = "destination_unverifiable"
-	reasonDestinationAmbiguous = "destination_ambiguous"
 	reasonResumeFailed         = "resume_failed"
 	reasonSteerQueueFull       = "steer_queue_full"
 	reasonAdmissionFailed      = "admission_failed"
@@ -67,14 +66,14 @@ func (t systemTimer) Stop() bool          { return t.t.Stop() }
 // taskSchedulerHooks are test seams at crash and race boundaries. All nil in
 // production.
 type taskSchedulerHooks struct {
-	beforePass      func(ctx context.Context)
+	beforePass       func(ctx context.Context)
 	afterReserve     func(sessionID string, occurrenceID int64)
 	afterSessionSave func(sessionID string, occurrenceID int64)
-	beforeAssign    func(occurrenceID int64)
-	afterAssign     func(occurrenceID int64)
-	attempted       func(noticeID string)
-	beforeAdmit     func(noticeID string)
-	legacyRename    func(from, to string) error
+	beforeAssign     func(occurrenceID int64)
+	afterAssign      func(occurrenceID int64)
+	attempted        func(noticeID string)
+	beforeAdmit      func(noticeID string)
+	legacyRename     func(from, to string) error
 }
 
 // taskScheduler is the Manager's single planner for scheduled tasks.

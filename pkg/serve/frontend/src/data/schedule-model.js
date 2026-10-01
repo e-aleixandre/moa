@@ -474,7 +474,6 @@ const REASON_WORDS = {
   model_unavailable: 'the model is not available',
   create_failed: 'the session could not be created',
   destination_unverifiable: "moa couldn't tell whether the session was already made",
-  destination_ambiguous: 'more than one session claims it',
   template_invalid: 'the schedule is no longer valid',
   busy_wait: 'waiting for the session to be free',
   regated: 'moa restarted before it was sent',
