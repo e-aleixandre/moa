@@ -378,7 +378,8 @@ func openPermission(t *testing.T, sess *ManagedSession) {
 	t.Cleanup(func() { cancel(); <-done })
 	go func() {
 		defer close(done)
-		sess.runtime.Context().GetGate().Check(ctx, "review_write", map[string]any{})
+		d := sess.runtime.Context().GetGate().Check(ctx, "review_write", map[string]any{})
+		t.Logf("DEBUG check returned %+v mode=%v kind=%v origin=%v", d, sess.runtime.Context().GetGate().Mode(), sess.Kind, sess.Origin)
 	}()
 	pollUntil(t, 5*time.Second, "permission pending", func() bool {
 		info, err := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
