@@ -475,6 +475,7 @@ export async function closeSession(id) {
 // the UI updates without waiting for the next poll (which can lag up to ~15s
 // on mobile). Also used by Close owner, whose one server call does the close.
 export function markSessionClosedLocally(id) {
+  closeCount.set(id, (closeCount.get(id) || 0) + 1);
   updateSession(id, {
     state: 'saved',
     readCandidateSeq: 0,
@@ -1013,8 +1014,13 @@ export async function resolveAskUser(sessionId, askId, answers) {
   updateSession(sessionId, { pendingAsk: null });
 }
 
+// closeCount counts the closes of each session, so a resume that was in flight
+// when the user closed it can tell its answer is stale.
+const closeCount = new Map();
+
 // resumeSession loads a saved session and shows it.
 export async function resumeSession(id) {
+  const closes = closeCount.get(id) || 0;
   let sess;
   try {
     sess = await api('POST', `/api/sessions/${id}/resume`, undefined, { timeoutMs: 0 });
@@ -1027,6 +1033,8 @@ export async function resumeSession(id) {
     throw e;
   }
   await loadSessions();
+  // Closed while this was in flight: the later act of the user wins.
+  if ((closeCount.get(id) || 0) !== closes) return sess;
   const state = store.get();
   if (state.isMobile) {
     setActiveSession(sess.id);

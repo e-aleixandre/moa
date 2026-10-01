@@ -7,6 +7,7 @@ import { test, expect, beforeEach } from 'bun:test';
 const { setState, store } = await import('./store.js');
 const { closeOwner } = await import('./owners.js');
 const { __resetBootForTests } = await import('./tile-actions.js');
+const { resumeSession } = await import('./session-actions.js');
 const { splitOwners, ownerRows } = await import('./owners-model.js');
 
 const own = { id: 'own_a', name: 'A', session_id: 'oa' };
@@ -53,4 +54,25 @@ test('a refused Close (409) leaves the owner open', async () => {
   expect(store.get().activeSession).toBe('oa');
   const { owners, sessions } = store.get();
   expect(splitOwners(ownerRows(owners.list, sessions)).closed).toEqual([]);
+});
+
+// A Resume whose answer is still on its way when the user closes the session
+// must not select it again: the later act of the user wins.
+test('a Resume answered after Close does not select the closed session again', async () => {
+  let release;
+  const held = new Promise((r) => { release = r; });
+  const base = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).endsWith('/resume')) {
+      await held;
+      return new Response(JSON.stringify({ id: 'oa', kind: 'owner', state: 'idle' }), { status: 200 });
+    }
+    return base(url, init);
+  };
+  setState({ activeSession: null, sessions: { oa: { id: 'oa', kind: 'owner', state: 'saved', updated: 1 } } });
+  const pending = resumeSession('oa');
+  expect(await closeOwner(own)).toBe(true);
+  release();
+  await pending;
+  expect(store.get().activeSession).toBeNull();
 });
