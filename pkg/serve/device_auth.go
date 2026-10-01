@@ -969,15 +969,31 @@ var (
 )
 
 func deviceTransportAllowed(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
+	return r.TLS != nil || peerIsLoopback(r)
+}
+
+func peerIsLoopback(r *http.Request) bool {
 	peer, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		peer = r.RemoteAddr
 	}
 	ip := net.ParseIP(peer)
 	return ip != nil && ip.IsLoopback()
+}
+
+// browserUsesTLS reports whether the browser reached moa over HTTPS. A TLS
+// terminating proxy on loopback (tailscale serve) talks plain HTTP to moa and
+// reports the scheme in X-Forwarded-Proto; the header is trusted only from a
+// loopback peer and only when it carries a single unambiguous value.
+func browserUsesTLS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if !peerIsLoopback(r) {
+		return false
+	}
+	values := r.Header.Values("X-Forwarded-Proto")
+	return len(values) == 1 && strings.EqualFold(strings.TrimSpace(values[0]), "https")
 }
 
 func rejectInsecureDeviceTransport(w http.ResponseWriter) {
@@ -1038,7 +1054,7 @@ func authMiddleware(token string, secureCookie bool, devices *deviceStore, next 
 				MaxAge:   authCookieMaxAge,
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
-				Secure:   secureCookie,
+				Secure:   secureCookie || browserUsesTLS(r),
 			})
 			u := *r.URL
 			params := u.Query()

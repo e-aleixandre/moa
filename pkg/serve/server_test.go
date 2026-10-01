@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -759,6 +760,59 @@ func TestAuthMiddleware(t *testing.T) {
 			t.Fatalf("got %d, want 401", rec.Code)
 		}
 	})
+}
+
+// SEC-01 (partial): the auth cookie is Secure whenever the browser reached moa
+// over TLS, including through a loopback reverse proxy such as tailscale serve,
+// which speaks plain HTTP to moa and reports the scheme in X-Forwarded-Proto.
+func TestAuthCookieSecureWhenBrowserUsesTLS(t *testing.T) {
+	const secret = "s3cr3t"
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	cases := []struct {
+		name       string
+		force      bool
+		remote     string
+		tls        bool
+		proto      []string
+		wantSecure bool
+	}{
+		{name: "ipv4 loopback proxy https", remote: "127.0.0.1:40000", proto: []string{"https"}, wantSecure: true},
+		{name: "ipv6 loopback proxy https", remote: "[::1]:40000", proto: []string{"HTTPS"}, wantSecure: true},
+		{name: "direct tls", remote: "192.0.2.1:1234", tls: true, wantSecure: true},
+		{name: "forced", force: true, remote: "127.0.0.1:40000", wantSecure: true},
+		{name: "plain local http", remote: "127.0.0.1:40000"},
+		{name: "loopback proxy http", remote: "127.0.0.1:40000", proto: []string{"http"}},
+		{name: "forged header off loopback", remote: "192.0.2.1:1234", proto: []string{"https"}},
+		{name: "ambiguous header values", remote: "127.0.0.1:40000", proto: []string{"https", "http"}},
+		{name: "ambiguous header list", remote: "127.0.0.1:40000", proto: []string{"https, http"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := authMiddleware(secret, tc.force, nil, next)
+			req := httptest.NewRequest("GET", "/?token="+secret, nil)
+			req.RemoteAddr = tc.remote
+			if tc.tls {
+				req.TLS = &tls.ConnectionState{}
+			}
+			for _, v := range tc.proto {
+				req.Header.Add("X-Forwarded-Proto", v)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			var authCookie *http.Cookie
+			for _, c := range rec.Result().Cookies() {
+				if c.Name == authCookieName {
+					authCookie = c
+				}
+			}
+			if authCookie == nil {
+				t.Fatalf("no auth cookie (status %d)", rec.Code)
+			}
+			if authCookie.Secure != tc.wantSecure {
+				t.Fatalf("Secure = %v, want %v", authCookie.Secure, tc.wantSecure)
+			}
+		})
+	}
 }
 
 func TestServer_NoToken_NoAuthRequired(t *testing.T) {

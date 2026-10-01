@@ -125,7 +125,8 @@ func runServe(args []string) {
 	})
 
 	// serve speaks plain HTTP (the security boundary is Tailscale), so the auth
-	// cookie must not be Secure or the browser would drop it over http://.
+	// cookie is not forced Secure: it becomes Secure per request when the
+	// browser arrived over TLS, directly or through a loopback proxy.
 	//
 	// The preview proxy is NOT started here. moa serve is a long-lived process
 	// running several agent sessions at once, so needing a restart to turn the
