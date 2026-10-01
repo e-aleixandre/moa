@@ -189,7 +189,7 @@ export function MobileTasksView({ onBack }) {
   return (
     <div class={dragging ? "minbox is-swiping" : "minbox"} ref={screenRef} {...swipeBind}>
       <div class="zi-inbox is-phone tk-push-in tk-root">
-        <div class="zi-head is-sheet">
+        <div class="zi-head">
           <button type="button" class="zi-back" onClick={back} aria-label={top ? "Back" : "Back to the conversation"}><BackIcon /></button>
           <span class="zi-title">{title}</span>
           {!top && (
