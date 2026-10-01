@@ -343,3 +343,16 @@ test("RECENT without a query hides owner-launched sessions; typing brings them b
   expect(rowTexts().join(" ")).toContain("Child of owner");
   setState({ sessions: {}, owners: { list: [], loaded: true } });
 });
+
+test("the search footer counts sessions and actions apart, not one opaque total", async () => {
+  const { setState } = await import("../../data/store.js");
+  const now = Date.now();
+  setState({
+    sessions: { u1: { id: "u1", title: "Work", cwd: "/home/u/dev/app", state: "idle", updated: now } },
+    owners: { list: [{ id: "ow1", name: "Winerim", root: "/home/u/dev/winerim", session_id: "o1", session_state: "saved", updated: now }], loaded: true },
+  });
+  await mount({ initialStep: "search", context: "conversation" });
+  const foot = text(byClass("ctxhint")[0]);
+  expect(foot).toMatch(/^2 sessions · \d+ actions?$/);
+  setState({ sessions: {}, owners: { list: [], loaded: true } });
+});

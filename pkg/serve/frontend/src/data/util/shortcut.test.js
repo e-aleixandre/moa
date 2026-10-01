@@ -37,3 +37,9 @@ test("the palette chord is named ⌘K on mac and Ctrl K elsewhere", () => {
   expect(paletteShortcutFor(true)).toBe("⌘K");
   expect(paletteShortcutFor(false)).toBe("Ctrl K");
 });
+
+test("the empty conversation screen names the chord with the palette label", () => {
+  const src = require("node:fs").readFileSync(new URL("../../layout/ConversationScreen/ConversationScreen.jsx", import.meta.url), "utf8");
+  expect(src).toContain("<Kbd>{paletteShortcut}</Kbd> to jump.");
+  expect(src).not.toContain('formatShortcut("K"');
+});

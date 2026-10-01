@@ -27,7 +27,7 @@ import { openPalette } from "../../data/palette.js";
 import { registerOverlay } from "../../data/overlays.js";
 import { shortModel, shortPath, modelCodename, sessionTitle } from "../../data/util/format.js";
 import { fmtCost } from "../../data/util/usage-pills.js";
-import { formatShortcut } from "../../data/util/shortcut.js";
+import { paletteShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast, stopRun } from "../../data/session-actions.js";
@@ -167,7 +167,7 @@ export function ConversationScreen() {
         <p class="conversation-empty-title">No session open</p>
         <p class="conversation-empty-hint">
           Pick a session from the sidebar, or press{" "}
-          <Kbd>{formatShortcut("K", { mod: true })}</Kbd> to jump.
+          <Kbd>{paletteShortcut}</Kbd> to jump.
         </p>
         <div class="conversation-empty-actions">
           <Button variant="solid" size="md" onClick={() => openPalette("create")}>

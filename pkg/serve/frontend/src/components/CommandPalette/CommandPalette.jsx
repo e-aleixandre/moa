@@ -570,6 +570,18 @@ export function CommandPalette({
     setSelectedIdx(at > 0 ? at : 0);
   }, [step, selectable, model]);
 
+  // The search footer says WHAT it counts: the sessions (owners included) and
+  // the actions below them, not one opaque total.
+  const searchCount = useMemo(() => {
+    const n = (pred) => selectable.filter(pred).length;
+    const sess = n((it) => it.kind === "session" || it.kind === "owner");
+    const acts = n((it) => it.kind === "action");
+    const parts = [];
+    if (sess) parts.push(`${sess} session${sess === 1 ? "" : "s"}`);
+    if (acts) parts.push(`${acts} action${acts === 1 ? "" : "s"}`);
+    return parts.length ? parts.join(" · ") : `${selectable.length} result${selectable.length === 1 ? "" : "s"}`;
+  }, [selectable]);
+
   // Clamp selection when the list shrinks.
   useEffect(() => {
     if (selectedIdx >= selectable.length) setSelectedIdx(Math.max(0, selectable.length - 1));
@@ -866,7 +878,7 @@ export function CommandPalette({
       onClick: () => { setSelectedIdx(si); requestAnimationFrame(() => activateSelectedFor(si)); },
     };
     if (it.kind === "owner") {
-      const face = <span class="pal-face"><OwnerAvatarFor owner={it.owner} state={ownerState(it.owner)} size={isMobile ? 24 : 20} /></span>;
+      const face = <span class="pal-face"><OwnerAvatarFor owner={it.owner} state={ownerState(it.owner)} size={20} /></span>;
       const hl = <Highlight text={it.title} query={query.toLowerCase().trim()} />;
       if (isMobile) {
         return (
@@ -1161,7 +1173,7 @@ export function CommandPalette({
             <span class="ctxhint" aria-live="polite">
               {context === "grid" && focusedPane != null && step === "search"
                 ? `grid · pane ${focusedPane} focused`
-                : `${selectable.length} result${selectable.length === 1 ? "" : "s"}`}
+                : step === "search" ? searchCount : `${selectable.length} result${selectable.length === 1 ? "" : "s"}`}
             </span>
           </div>
         )}

@@ -271,7 +271,10 @@
 .row:has(.pal-sess) .when {
   margin-top: 4px;
 }
-.pal-face { display: inline-flex; flex: none; }
+/* The face takes the state dot's column: a 7px slot the face overhangs
+   evenly, so owner and session titles start at the same x. */
+.pal-face { display: inline-flex; flex: none; width: 7px; justify-content: center; overflow: visible; }
+.pal-face > * { flex: none; }
 .row .cwd {
   font-family: var(--mono);
   font-size: var(--zl-fs-meta);
