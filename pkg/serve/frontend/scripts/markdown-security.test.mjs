@@ -6,7 +6,7 @@
 // playwright-core is deliberately NOT in package.json (see fidelity.mjs). Point
 // MOA_PLAYWRIGHT_CORE at an installed copy, or install it into the gitignored
 // tmp/redesign/fidelity/vendor directory. Chromium comes from
-// PLAYWRIGHT_BROWSERS_PATH / the default Playwright cache.
+// MOA_CHROMIUM_PATH (CI uses the runner's Chrome) or the Playwright cache.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -96,8 +96,15 @@ if (!skip) before(async () => {
   portB = await listen(serverB);
 
   const chromium = await loadChromium();
-  browser = await chromium.launch();
-  page = await browser.newPage();
+  // CI points this at the runner's preinstalled Chrome instead of downloading one.
+  browser = await chromium.launch({ executablePath: process.env.MOA_CHROMIUM_PATH || undefined });
+  const context = await browser.newContext();
+  page = await context.newPage();
+  // A cached response never reaches server B, so a bypass seen once would hide
+  // behind the cache on the next entry point.
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
   await page.goto(`http://127.0.0.1:${portA}/`);
 });
 
@@ -221,4 +228,101 @@ run("legitimate markdown structure survives", async () => {
 
   const caret = await render("renderMarkdownWithCaret", "streaming **text**");
   assert.ok(caret.includes('class="zl-caret"'), caret);
+});
+
+const SVG_DATA =
+  "data:image/svg+xml;base64," +
+  Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="red"/></svg>').toString("base64");
+
+// Every payload that could make the browser fetch from another origin, or
+// carry CSS/JS, as soon as the sanitized HTML is inserted.
+function hostilePayloads(tag) {
+  const b = `127.0.0.1:${portB}`;
+  const remote = `http://${b}`;
+  const a = `127.0.0.1:${portA}`;
+  return [
+    ["markdown-img", `![remote](${remote}/md.png?${tag})`],
+    ["raw-img", `<img src="${remote}/raw.png?${tag}" alt="remote">`],
+    ["other-host", `<img src="http://localhost:${portB}/host.png?${tag}" alt="remote">`],
+    ["protocol-relative", `<img src="//${b}/proto.png?${tag}" alt="remote">`],
+    ["uppercase", `<IMG SRC="HTTP://${b}/upper.png?${tag}" ALT="remote">`],
+    ["entities", `<img src="http&#58;//127.0.0.1&#58;${portB}/entity.png?${tag}" alt="remote">`],
+    ["newline-url", `<img src="h&#10;ttp://${b}/newline.png?${tag}" alt="remote">`],
+    ["backslashes", `<img src="http:\\\\${b}/back.png?${tag}" alt="remote">`],
+    ["userinfo", `<img src="http://${a}@${b}/user.png?${tag}" alt="remote">`],
+    ["srcset", `<img src="/same.png" srcset="${remote}/srcset.png?${tag} 1x, ${remote}/srcset2.png?${tag} 2x">`],
+    ["picture-source", `<picture><source srcset="${remote}/source.png?${tag}"><img src="/same.png"></picture>`],
+    ["picture-only-source", `<picture><source srcset="${remote}/source-only.png?${tag}"></picture>`],
+    ["svg-image", `<svg><image href="${remote}/svg.png?${tag}"/></svg>`],
+    ["svg-xlink", `<svg><image xlink:href="${remote}/svg-xlink.png?${tag}"/></svg>`],
+    ["svg-foreignobject", `<svg><foreignObject><img src="${remote}/foreign.png?${tag}"></foreignObject></svg>`],
+    ["style-tag", `intro\n\n<style>body{background-image:url(${remote}/css-tag.png?${tag});--review-injected:yes}</style>`],
+    ["style-attribute", `<span style="background-image:url(${remote}/css-attr.png?${tag})">hello</span>`],
+    ["style-entity", `<div STYLE="background:url(&quot;${remote}/css-entity.png?${tag}&quot;)">hello</div>`],
+    ["link-stylesheet", `<link rel="stylesheet" href="${remote}/sheet.css?${tag}">`],
+    ["link-preload", `<link rel="preload" as="image" href="${remote}/preload.png?${tag}">`],
+    ["video-poster", `<video poster="${remote}/poster.png?${tag}"></video>`],
+    ["video-src", `<video src="${remote}/video.mp4?${tag}" autoplay></video>`],
+    ["audio-src", `<audio src="${remote}/audio.mp3?${tag}" autoplay></audio>`],
+    ["table-background", `<table background="${remote}/background.png?${tag}"><tr><td>x</td></tr></table>`],
+    ["body-background", `<body background="${remote}/body.png?${tag}">x</body>`],
+    ["object", `<object data="${remote}/object.html?${tag}"></object>`],
+    ["iframe", `<iframe src="${remote}/frame.html?${tag}"></iframe>`],
+    ["embed", `<embed src="${remote}/embed.html?${tag}">`],
+    ["input-image", `<input type="image" src="${remote}/input-image.png?${tag}" alt="input">`],
+    ["input-image-uppercase", `<input TYPE="IMAGE" SRC="${remote}/input-upper.png?${tag}" alt="input">`],
+    ["input-image-entities", `<input type="im&#97;ge" src="http&#58;//127.0.0.1:${portB}/input-entity.png?${tag}" alt="input">`],
+    ["input-checkbox-src", `<input type="checkbox" src="${remote}/input-checkbox.png?${tag}" disabled checked>`],
+    ["input-button-formaction", `<input type="submit" formaction="${remote}/submit?${tag}" value="go">`],
+    ["button-formaction", `<button formaction="${remote}/button?${tag}">go</button>`],
+    ["data-text", `<img src="data:text/html,hello" alt="non-image">`],
+    ["data-svg-nonimage", `<img src="data:application/svg+xml;base64,${SVG_DATA.split(",")[1]}" alt="non-image">`],
+    ["anchor-link", `[normal external link](${remote}/navigate?${tag})`],
+    ["adjacent-script", `<img src="${remote}/first.png?${tag}" alt="first"><script>window.reviewPwn=1</script><img src="${remote}/last.png?${tag}" onerror="window.reviewPwn=1">`],
+    ["meta-refresh", `<meta http-equiv="refresh" content="0;url=${remote}/meta?${tag}">`],
+    ["base-href", `<base href="${remote}/"><img src="relative.png?${tag}" alt="based">`],
+  ];
+}
+
+run("no hostile payload fetches remotely or carries CSS/JS, in either entry point", async () => {
+  const failures = [];
+  for (const fn of ["renderMarkdown", "renderMarkdownWithCaret"]) {
+    for (const [name, source] of hostilePayloads(fn)) {
+      bRequests.length = 0;
+      await render(fn, source);
+      await page.waitForTimeout(150);
+      const r = await page.evaluate(() => {
+        const root = document.getElementById("root");
+        return {
+          css: root.querySelectorAll("style,[style],link,base,meta").length,
+          injected: getComputedStyle(document.body).getPropertyValue("--review-injected").trim(),
+          script: window.reviewPwn ?? null,
+          inputs: [...root.querySelectorAll("input")].filter((i) => i.type !== "checkbox" || i.hasAttribute("src") || !i.disabled).length,
+          formaction: root.querySelectorAll("[formaction]").length,
+        };
+      });
+      if (bRequests.length || r.css || r.injected || r.script || r.inputs || r.formaction) {
+        failures.push({ fn, name, requests: bRequests.length, ...r });
+      }
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+run("image allowlist keeps same-origin and data images, including SVG", async () => {
+  const origin = `http://127.0.0.1:${portA}`;
+  const keep = [
+    `<img src="${SVG_DATA}" alt="svg">`,
+    `<img src="${DATA_PNG}" alt="png">`,
+    `<img src="${origin}/same.png?abs" alt="abs">`,
+    `<img src="same.png?rel" alt="rel">`,
+    `<img src="/same.png?root" alt="root">`,
+  ].join("\n");
+  for (const fn of ["renderMarkdown", "renderMarkdownWithCaret"]) {
+    await render(fn, keep);
+    await page.waitForFunction(() => [...document.querySelectorAll("#root img")].every((i) => i.complete));
+    const widths = await page.evaluate(() => [...document.querySelectorAll("#root img")].map((i) => i.naturalWidth));
+    assert.equal(widths.length, 5, fn);
+    assert.ok(widths.every((w) => w > 0), `${fn}: ${JSON.stringify(widths)}`);
+  }
 });

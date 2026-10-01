@@ -74,6 +74,29 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
 
 
+  # The Markdown sanitizer is security-relevant and only testable in a real
+  # browser (bun tests stub DOMPurify). The runner's preinstalled Chrome avoids
+  # a browser download; playwright-core stays out of package.json on purpose.
+  markdown-security:
+    name: Markdown security (Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            pkg/serve/frontend/package-lock.json
+
+      - name: Test
+        working-directory: pkg/serve/frontend
+        run: |
+          npm ci
+          npm i --no-save playwright-core@1.63.0
+          MOA_CHROMIUM_PATH="$(command -v google-chrome)" node --test scripts/markdown-security.test.mjs
+
   relay:
     name: Push relay
     runs-on: ubuntu-latest

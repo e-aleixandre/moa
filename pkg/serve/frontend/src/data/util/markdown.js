@@ -178,13 +178,29 @@ const SANITIZE_CONFIG = {
   FORBID_ATTR: ['style', 'srcset'],
 };
 
-const RASTER_DATA_URL_RE = /^data:image\/(png|jpeg|gif|webp);base64,[a-z0-9+/=\s]*$/i;
+// DOMPurify's ALLOWED_ATTR is global; these narrow it per element so, e.g.,
+// `src` is only honoured on <img> (an image-type input with a src would otherwise
+// fetch from any origin).
+const ATTRS_BY_TAG = {
+  A: ['href', 'title', 'target', 'rel'],
+  IMG: ['src', 'alt', 'title', 'width', 'height'],
+  INPUT: ['type', 'checked', 'disabled'],
+  OL: ['start'],
+  TH: ['align', 'colspan', 'rowspan'],
+  TD: ['align', 'colspan', 'rowspan'],
+  DETAILS: ['open'],
+  DIV: ['data-lang'],
+  BUTTON: ['type'],
+};
+
+// Images may be SVG too: as an <img> it runs no script and loads nothing.
+const IMAGE_DATA_URL_RE = /^data:image\/(png|jpeg|gif|webp|svg\+xml)[;,]/i;
 
 // Only moa's own images (same origin: attachments, relative URLs) and inline
-// raster data may load. A remote <img> would fire a request the moment the
+// image data may load. A remote <img> would fire a request the moment the
 // HTML is inserted, leaking the reader's IP and acting as a tracking pixel.
 function isLoadableImageSrc(src) {
-  if (RASTER_DATA_URL_RE.test(src)) return true;
+  if (IMAGE_DATA_URL_RE.test(src)) return true;
   try {
     const url = new URL(src, location.href);
     return (url.protocol === 'http:' || url.protocol === 'https:')
@@ -194,19 +210,40 @@ function isLoadableImageSrc(src) {
   }
 }
 
-// Remote images degrade to their alt text. No DOM (bun tests) means DOMPurify
-// is a stub without addHook, same guard as util/sanitize.js. The hook runs on
-// the shared DOMPurify instance but only touches IMG nodes.
+// The hooks live on the shared DOMPurify instance (util/sanitize.js uses it
+// too), so they only act while Markdown is being sanitized. No DOM (bun
+// tests) means DOMPurify is a stub without addHook.
+let sanitizingMarkdown = false;
 if (typeof DOMPurify.addHook === 'function') {
+  DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+    if (!sanitizingMarkdown || data.attrName === 'class') return;
+    if (!ATTRS_BY_TAG[node.nodeName]?.includes(data.attrName)) data.keepAttr = false;
+  });
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-    if (node.tagName !== 'IMG') return;
-    if (isLoadableImageSrc(node.getAttribute('src') || '')) return;
-    node.replaceWith(node.ownerDocument.createTextNode(node.getAttribute('alt') || ''));
+    if (!sanitizingMarkdown) return;
+    if (node.nodeName === 'INPUT') {
+      // Only GFM task-list checkboxes, which are read-only.
+      if ((node.getAttribute('type') || '').toLowerCase() !== 'checkbox') {
+        node.remove();
+        return;
+      }
+      node.setAttribute('disabled', '');
+    }
+    if (node.nodeName === 'IMG' && !isLoadableImageSrc(node.getAttribute('src') || '')) {
+      // Remote images degrade to their alt text.
+      node.replaceWith(node.ownerDocument.createTextNode(node.getAttribute('alt') || ''));
+    }
   });
 }
 
 function renderAndSanitizeMarkdown(text) {
-  return DOMPurify.sanitize(marked.parse(text), SANITIZE_CONFIG);
+  const raw = marked.parse(text);
+  sanitizingMarkdown = true;
+  try {
+    return DOMPurify.sanitize(raw, SANITIZE_CONFIG);
+  } finally {
+    sanitizingMarkdown = false;
+  }
 }
 
 export function renderMarkdown(text) {
