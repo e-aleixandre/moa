@@ -342,6 +342,21 @@ func (am *ApprovalManager) ValidatePending(id string) error {
 	return nil
 }
 
+// PermissionPending reports whether this exact permission request is still
+// waiting for a decision. PendingInfo is a UI projection that returns one
+// arbitrary request of each kind, so it cannot answer for a specific ID.
+func (am *ApprovalManager) PermissionPending(id string) bool {
+	return am.ValidatePending(id) == nil
+}
+
+// AskPending reports whether this exact ask_user request is still unanswered.
+func (am *ApprovalManager) AskPending(id string) bool {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	a, ok := am.asks[id]
+	return ok && !a.resolved
+}
+
 // ---------------------------------------------------------------------------
 // Ask user bridge
 // ---------------------------------------------------------------------------

@@ -1320,6 +1320,9 @@ func (m *Manager) Shutdown() {
 	// keeps ACCEPTING: a turn reported below must still reach the outbox.
 	m.heartbeat.Close()
 	m.reports.BeginShutdown()
+	if m.pushPolicy != nil {
+		m.pushPolicy.Close() // pending summaries are not persisted; see push.Policy
+	}
 
 	m.mu.RLock()
 	sessions := make([]*ManagedSession, 0, len(m.sessions))

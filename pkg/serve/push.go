@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -14,93 +13,135 @@ import (
 	"github.com/e-aleixandre/moa/pkg/session"
 )
 
-// minRunForPush gates the "finished" notification: a run must take at least this
+// minRunForPush (a var so tests need not wait a minute) gates the "finished" notification: a run must take at least this
 // long to be worth a buzz. A quick answer shouldn't notify; a long run (where
 // you likely stepped away) still does. Blocking events (ask/permission) and
 // errors are never gated by duration.
-const minRunForPush = 60 * time.Second
+var minRunForPush = 60 * time.Second
 
-// subscribePush wires a session's bus to Web Push notifications following the
-// trigger policy in plans/pwa-web-push-plan.md §D3:
+// subscribePush feeds a session's bus to the push policy (pkg/push/policy.go,
+// where every rule lives). This only says what happened and what is known
+// about it: who is looking, whether the run was a report being digested.
 //
-//   - ask_user / permission → always (blocking events; the agent is waiting on
-//     you, and missing one costs more than a redundant buzz).
-//   - run finished OK → only when no browser is watching the session live
-//     (wsConns == 0) AND the run lasted at least minRunForPush, so quick answers
-//     and turns you're looking at don't buzz.
-//   - run errored → only when no browser is watching the session live.
-//
-// Errors dedupe to one source: success comes from RunEnded{Err==nil}, failure
-// from StateChanged("error") — never both, so an errored run notifies once.
+// Each trigger dedupes to one source: success comes from RunEnded{Err==nil,
+// !Cancelled}, failure from StateChanged("error") — never both, and a run the
+// user cancelled says nothing.
 //
 // The unsubscribe funcs are stored on the session and invoked by Delete BEFORE
 // the runtime closes, so an event drained during shutdown cannot notify for a
 // session that is already gone (the deleted guard is belt-and-suspenders).
 func (m *Manager) subscribePush(sess *ManagedSession) {
-	if m.pushDispatcher == nil {
+	if m.pushPolicy == nil {
 		return
 	}
+	pol := m.pushPolicy
 	b := sess.runtime.Bus
 
-	// notify shows the action as the Title; the Body is only ever the session
-	// title (the "which session"), never the specifics. Notifications land on
-	// the device lock screen and in the OS notification history, so — per the
-	// push.Notification contract — they must not carry prompts, tool
-	// args/commands, paths, diffs, final text or error detail. E2E encryption
-	// hides the payload from the push service but NOT from the lock screen, so
-	// the content is dropped here; open the app to see it.
+	// Only the action is the Title and only the session title the Body, never
+	// the specifics: notifications land on the device lock screen and in the OS
+	// notification history, so — per the push.Notification contract — they must
+	// not carry prompts, tool args/commands, paths, diffs, final text or error
+	// detail. Open the app to see it.
 	//
 	// A session an owner launched (origin "owner", not the owner's own
 	// conversation) never pushes: its owner hears about it through its
 	// reports. Origin and Kind are assigned after the session is built, so they
 	// are read here, when an event arrives, not at subscription time.
-	notify := func(title string) {
+	allowed := func() bool {
 		if sess.deleted.Load() {
-			return
+			return false
 		}
-		if sess.Origin == "owner" && sess.Kind != session.KindOwner {
-			return
-		}
-		m.pushDispatcher.Notify(push.Notification{
-			Title:     title,
-			Body:      sess.title(),
-			SessionID: sess.ID,
-			Tag:       sess.ID, // coalesce same-session notifications on the device
-		})
+		return sess.Origin != "owner" || sess.Kind == session.KindOwner
 	}
-	notifyIfAway := func(title string) {
-		if sess.wsConns.Load() == 0 {
-			notify(title)
+	signal := func(kind push.Kind) push.Signal {
+		return push.Signal{
+			Kind:      kind,
+			SessionID: sess.ID,
+			Title:     sess.title(),
+			Watched:   sess.presence.watched(),
 		}
+	}
+	// A question or permission someone was looking at waits out a grace period;
+	// it is sent only if that very request is still open, which is also checked
+	// before an immediate send (the request may have been answered while this
+	// event waited its turn).
+	request := func(kind push.Kind, id string) {
+		if !allowed() {
+			return
+		}
+		approvals := sess.runtime.Context().Approvals
+		s := signal(kind)
+		s.RequestID = id
+		s.StillPending = func() bool {
+			if !allowed() {
+				return false
+			}
+			if kind == push.KindAsk {
+				return approvals.AskPending(id)
+			}
+			return approvals.PermissionPending(id)
+		}
+		pol.Handle(s)
 	}
 
-	// runStartNano records when the current run began so RunEnded can gate the
-	// "finished" push on duration. RunStarted and RunEnded are handled on
-	// separate subscriber goroutines, so the timestamp is shared atomically; in
-	// practice RunStarted is processed long before RunEnded (a run takes real
-	// time), and if the start is somehow unknown we fail open and notify.
-	var runStartNano atomic.Int64
+	// One subscriber sees the run's events in the order they were published, so
+	// what a run was (a digest of a report, when it began) is learnt before it
+	// ends. Runs are told apart by generation, not by "the current one": the
+	// runtime can publish the next run's start before the previous run's end.
+	type runInfo struct {
+		start  time.Time
+		digest bool
+	}
+	runs := map[uint64]*runInfo{}
+	// An input that lands in a digest run and did not come from a report (the
+	// user's own instruction) makes it a turn somebody asked for.
+	landed := func(gen uint64, custom map[string]any) {
+		if r := runs[gen]; r != nil && r.digest {
+			if o := bus.OriginOfInput(custom); o.Explicit && o.Source != reportSource {
+				r.digest = false
+			}
+		}
+	}
 
 	sess.pushUnsubs = append(sess.pushUnsubs,
-		b.Subscribe(func(bus.AskUserRequested) {
-			notify("moa necesita tu decisión")
-		}),
-		b.Subscribe(func(bus.PermissionRequested) {
-			notify("moa espera tu aprobación")
-		}),
-		b.Subscribe(func(bus.RunStarted) { runStartNano.Store(time.Now().UnixNano()) }),
-		b.Subscribe(func(e bus.RunEnded) {
-			if e.Err != nil {
-				return
-			}
-			if start := runStartNano.Load(); start != 0 && time.Since(time.Unix(0, start)) < minRunForPush {
-				return // quick answer — not worth a buzz
-			}
-			notifyIfAway("moa terminó")
-		}),
-		b.Subscribe(func(e bus.StateChanged) {
-			if e.State == string(bus.StateError) {
-				notifyIfAway("moa falló")
+		func() { pol.CancelSession(sess.ID) },
+		b.SubscribeAll(func(event any) {
+			switch e := event.(type) {
+			case bus.AskUserRequested:
+				request(push.KindAsk, e.ID)
+			case bus.PermissionRequested:
+				request(push.KindPermission, e.ID)
+			case bus.AskUserResolved:
+				pol.Resolved(push.KindAsk, sess.ID, e.ID)
+			case bus.PermissionResolved:
+				pol.Resolved(push.KindPermission, sess.ID, e.ID)
+			case bus.RunStarted:
+				runs[e.RunGen] = &runInfo{start: e.At, digest: e.Origin.Source == reportSource}
+			case bus.Steered:
+				landed(e.RunGen, e.Custom)
+			case bus.UserMessageAppended:
+				landed(e.RunGen, e.Custom)
+			case bus.RunEnded:
+				r := runs[e.RunGen]
+				delete(runs, e.RunGen)
+				if e.Err != nil || e.Cancelled || !allowed() {
+					return
+				}
+				switch {
+				case r != nil && r.digest:
+					s := signal(push.KindDigest)
+					s.Project = sess.CWD
+					s.StillPending = allowed // a deleted session announces nothing
+					pol.Handle(s)
+				case r != nil && !r.start.IsZero() && !e.At.IsZero() && e.At.Sub(r.start) < minRunForPush:
+					// quick answer — not worth a buzz
+				default:
+					pol.Handle(signal(push.KindDone))
+				}
+			case bus.StateChanged:
+				if e.State == string(bus.StateError) && allowed() {
+					pol.Handle(signal(push.KindFailed))
+				}
 			}
 		}),
 	)

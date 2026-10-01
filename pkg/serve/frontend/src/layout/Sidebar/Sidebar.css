@@ -612,3 +612,39 @@ a.zl-ver.is-update:focus-visible {
    takes the slack instead and the controls stay together on the right. */
 .zl-side-body.is-phone .zl-side-title { flex: 1; min-width: 0; }
 .zl-side-body.is-phone .zl-gear { width: 44px; height: 44px; }
+
+/* ── Owners: the session ⋯ on an owner row, and the closed group ──────────
+   The owner row's state dot steps aside on hover as a session's age does. */
+@media (hover: hover) {
+  .zl-side-body:not(.is-phone) .ofl-omenu:hover .ow-orow .zl-row-meta { opacity: 0; }
+}
+.zl-side-body:not(.is-phone) .ofl-omenu:focus-within .ow-orow .zl-row-meta { opacity: 0; }
+
+.ofl-fold {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; margin-top: 2px; padding: 6px 12px;
+  border: 0; border-radius: var(--zl-r-md); background: none; color: var(--zl-t3);
+  font-family: var(--font); font-size: var(--zl-fs-body); text-align: left; cursor: pointer;
+  transition: background var(--motion-hover) ease;
+}
+.ofl-fold.is-phone { min-height: 48px; }
+@media (hover: hover) { .ofl-fold:hover { background: var(--zl-hi); color: var(--zl-t1); } }
+.ofl-fold:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: -2px; }
+.ofl-stack { display: inline-flex; flex: none; padding-left: 4px; }
+.ofl-stack-face { display: inline-flex; margin-left: -6px; border-radius: 50%; box-shadow: 0 0 0 2px var(--zl-canvas); background: var(--zl-canvas); }
+.ofl-stack-face:first-child { margin-left: 0; }
+.ofl-fold-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ofl-fold-n { font-variant-numeric: tabular-nums; }
+.ofl-fold-sum { flex: none; color: var(--blue); font-size: var(--zl-fs-meta); font-weight: 500; }
+.ofl-fold-chev { flex: none; color: var(--zl-t4); transition: transform var(--motion-fast) var(--motion-ease); }
+.ofl-fold.is-open .ofl-fold-chev { transform: rotate(90deg); }
+
+.ofl-folded { display: flex; flex-direction: column; padding-bottom: 4px; }
+.zl-row.ofl-crow { min-height: 36px; gap: 10px; padding: 4px 12px 4px 16px; }
+.zl-side-body.is-phone .zl-row.ofl-crow { min-height: 44px; padding-right: 40px; }
+.ofl-crow-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--zl-t2); font-size: var(--zl-fs-body); text-align: left; }
+.ofl-crow-age { flex: none; color: var(--zl-t4); }
+.ofl-crow-state { flex: none; color: var(--blue); font-size: var(--zl-fs-meta); font-weight: 500; }
+.zl-row.ofl-crow.is-current { background: var(--zl-raised); box-shadow: var(--zl-rim); }
+/* A 36px row centres the 26px ⋯ instead of pinning it to the top. */
+.zl-side-body:not(.is-phone) .ofl-cslot .session-card-menu { top: 5px; }
+.zl-side-body.is-phone .ofl-cslot .session-card-menu { top: 0; }

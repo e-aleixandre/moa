@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import {
   bookTree, childGroup, childrenSummary, groupChildren, ownerDotState, ownerLine,
   ownerOfSession, ownerRows, ownerRowState, ownersWaiting, ownerState,
-  waitingChildren, worstOwnerState,
+  waitingChildren, worstOwnerState, splitOwners, closedSummary, ownerNeedsYou,
 } from "./owners-model.js";
 
 const child = (over) => ({ id: "c", title: "t", state: "idle", ...over });
@@ -332,4 +332,36 @@ test("ownerRows uses its loaded conversation's live state over the owner snapsho
     30,
   );
   expect(ownerState(row)).toBe("working");
+});
+
+/* ── Closed owners ───────────────────────────────────────────────────────── */
+
+const own = (over) => ({ id: "o", name: "O", session_state: "saved", children: [], ...over });
+
+test("only the flag groups an owner: saved after a restart stays in the column", () => {
+  const { top, closed } = splitOwners([
+    own({ id: "a", session_state: "saved" }),
+    own({ id: "b", session_state: "saved", closed: true }),
+  ]);
+  expect(top.map((o) => o.id)).toEqual(["a"]);
+  expect(closed.map((o) => o.id)).toEqual(["b"]);
+});
+
+test("a closed owner rises when it asks, wrote unread, or a child waits", () => {
+  const asks = own({ id: "x", closed: true, session_state: "permission" });
+  const wrote = own({ id: "y", closed: true, session_state: "idle", unseen: true });
+  const childWaits = own({ id: "z", closed: true, children: [waiting] });
+  const { top, closed } = splitOwners([asks, wrote, childWaits]);
+  expect(top.map((o) => o.id)).toEqual(["x", "y", "z"]);
+  expect(closed).toEqual([]);
+  expect(ownerNeedsYou(asks)).toBe(true);
+});
+
+test("working alone does not raise a closed owner, and the group says so", () => {
+  const reading = own({ id: "r", closed: true, session_state: "running" });
+  const resting = own({ id: "s", closed: true });
+  const { top, closed } = splitOwners([reading, resting]);
+  expect(top).toEqual([]);
+  expect(closedSummary(closed)).toBe("1 working");
+  expect(closedSummary([resting])).toBe("");
 });

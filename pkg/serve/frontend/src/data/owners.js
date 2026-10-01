@@ -73,11 +73,44 @@ export async function createOwner({ root, name, model, thinking, avatar }) {
 
 // updateOwner reloads both projections because an owner rename can also
 // retitle its standing conversation, which is carried by the session list.
-export async function updateOwner(id, { name, avatar }) {
-  const info = await api('PATCH', `/api/owners/${id}`, { name, avatar });
+export async function updateOwner(id, { name, avatar, closed }) {
+  const info = await api('PATCH', `/api/owners/${id}`, { name, avatar, closed });
   await loadOwners();
   await loadSessions();
   return info;
+}
+
+// closeOwner is Close session on the owner's conversation plus the flag that
+// sends it to the closed group, in one server call. The server refuses while
+// the owner works (409); the toast says so, as it does for a session.
+export async function closeOwner(own) {
+  try {
+    await api('PATCH', `/api/owners/${own.id}`, { closed: true });
+  } catch (e) {
+    const busy = String(e.message || e).startsWith('409');
+    addToast({
+      title: busy ? 'Owner is still working' : 'Could not close owner',
+      detail: busy
+        ? 'Wait for it to finish before closing it.'
+        : String(e.message || e),
+      type: busy ? 'info' : 'error',
+    });
+    return false;
+  }
+  // The server's one call already unloaded the conversation; mirror it in the
+  // store and free the pane that was showing it, without a second request.
+  // The flag first, so the landing the local close triggers already knows this
+  // owner is closed and does not select it again.
+  setState((s) => ({
+    owners: {
+      ...ownersSlice(s),
+      list: (ownersSlice(s).list || []).map((o) => (o.id === own.id ? { ...o, closed: true } : o)),
+    },
+  }));
+  const { markSessionClosedLocally } = await import('./session-actions.js');
+  markSessionClosedLocally(own.session_id);
+  await loadOwners();
+  return true;
 }
 
 // openOwnerConversation opens the owner's own session in the pane. The backend

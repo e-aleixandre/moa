@@ -163,7 +163,10 @@ type ManagedSession struct {
 	// non-blocking notifications), a "deleted" guard against late pushes, and
 	// the bus unsubscribe funcs registered by subscribePush.
 	wsConns atomic.Int32
-	deleted atomic.Bool
+	// presence tracks which of those viewers actually have the session visible
+	// (see presence.go); it, not wsConns, is what push asks.
+	presence presenceSet
+	deleted  atomic.Bool
 	// closing marks a session whose runtime is being torn down by CloseSession.
 	// Set atomically with respect to run-start (under the state lock) so a /send
 	// admitted just before cannot begin a run into a runtime that is going away,
@@ -777,6 +780,7 @@ type Manager struct {
 	usagePoller                 *usage.MultiPoller // nil when plan usage tracking is unavailable
 	pushStore                   *push.Store        // nil when Web Push is unavailable
 	pushDispatcher              *push.Dispatcher   // nil when Web Push is unavailable
+	pushPolicy                  *push.Policy       // decides what reaches pushDispatcher; nil with it
 	// wake-on-event: the external event inbox and the file backing it. events is
 	// nil when that file could not be opened, which disables the feature instead
 	// of the server.
@@ -859,6 +863,12 @@ type Manager struct {
 	beforeReadThroughAdvance          func()
 	attentionRuntimeDeactivateBlocked func()
 	beforeCloseSessionLifecycleLock   func()
+	// afterOwnerClose is a test hook: it runs between closing an owner's
+	// conversation and saving its flag, the window where a wake-up can land.
+	afterOwnerClose func()
+	// afterEventInject is a test hook between an event reaching a session and
+	// the owner flag clear that follows it.
+	afterEventInject func()
 	// afterAutoTitleGeneration reports that a title goroutine finished, so a
 	// test can join it instead of polling for a write that may never come.
 	afterAutoTitleGeneration func(*ManagedSession)
@@ -1058,6 +1068,11 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		attention:                   attention.New(attention.Config{Lang: core.GetSTTLanguage(cfg.MoaCfg)}),
 		conversationKey:             conversationKey,
 		version:                     release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
+	}
+	if cfg.PushDispatcher != nil {
+		m.pushPolicy = push.NewPolicy(cfg.PushDispatcher, push.PolicyConfig{
+			Summaries: push.ParseSummaries(cfg.MoaCfg.PushSummaries),
+		})
 	}
 	// Read the persisted roster once for all startup consumers. The automation
 	// index requires the read error to preserve its fail-closed behavior; the

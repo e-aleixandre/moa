@@ -230,12 +230,23 @@ func launchQueuedSteers(sctx *SessionContext, items []core.SteerItem) {
 // treating it as a mere continuation would lose their instruction's outcome.
 func originFromItems(items []core.SteerItem) RunOrigin {
 	var jobIDs []string
-	for _, item := range items {
+	explicit := false
+	source := ""
+	for i, item := range items {
 		origin := originFromCustom(item.Custom)
+		if i == 0 {
+			source = origin.Source
+		} else if source != origin.Source {
+			source = "" // mixed inputs: nothing specific to say about the run
+		}
 		if origin.Explicit {
-			return RunOrigin{Explicit: true}
+			explicit = true
+			continue
 		}
 		jobIDs = append(jobIDs, origin.ContinuationOf...)
+	}
+	if explicit {
+		return RunOrigin{Explicit: true, Source: source}
 	}
 	return RunOrigin{ContinuationOf: jobIDs}
 }

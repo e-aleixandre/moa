@@ -93,3 +93,17 @@ test("selectMobileChrome carries the owner's face into the header, and only for 
   __resetMobileChromeForTests();
   expect(selectMobileChrome({ ...base, activeSession: "a" }).titleOwner).toBeNull();
 });
+
+test("selectMobileChrome repaints when the server closes an owner", () => {
+  __resetMobileChromeForTests();
+  const own = { id: "o1", name: "Winerim", session_id: "os", session_state: "saved" };
+  const base = {
+    isMobile: true, activeSession: null, sessions: {},
+    drawerOpen: false, drawerStep: "list", groupByProject: false, soundEnabled: true,
+    drawerCollapsed: {},
+  };
+  const open = selectMobileChrome({ ...base, owners: { list: [own], loaded: true } });
+  const closed = selectMobileChrome({ ...base, owners: { list: [{ ...own, closed: true }], loaded: true } });
+  expect(closed).not.toBe(open);
+  expect(closed.owners[0].closed).toBe(true);
+});

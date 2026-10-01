@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -524,9 +525,15 @@ func originFromCustom(custom map[string]any) RunOrigin {
 	default:
 		// owner, report, heartbeat, event, secret_batch, schedule: somebody
 		// (or something acting for them) asked for this turn.
-		return RunOrigin{Explicit: true}
+		return RunOrigin{Explicit: true, Source: source}
 	}
 }
+
+// OriginOfInput is the provenance of one input message, read off the Custom
+// metadata it carries (nil for a plain typed message). Consumers that watch
+// inputs land in a run, as push does, classify them with the same rules that
+// admit a run.
+func OriginOfInput(custom map[string]any) RunOrigin { return originFromCustom(custom) }
 
 // continuationOrigin describes a run started by a background job's own
 // notification. A notification that lost its job ID is unknown provenance, not
@@ -606,7 +613,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 
 	// Notify subscribers of the run generation (single source of truth for
 	// runGen) and the provenance decided at admission.
-	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen, Origin: sctx.takePendingRunOrigin()})
+	sctx.Bus.Publish(RunStarted{SessionID: sctx.SessionID, RunGen: gen, Origin: sctx.takePendingRunOrigin(), At: time.Now()})
 
 	go func() {
 		defer func() {
@@ -624,7 +631,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 				if settled != nil {
 					settled(false, err)
 				}
-				sctx.Bus.Publish(RunEnded{SessionID: sctx.SessionID, RunGen: gen, Err: err})
+				sctx.Bus.Publish(RunEnded{SessionID: sctx.SessionID, RunGen: gen, Err: err, At: time.Now()})
 				// Terminal barrier last, as in the normal path: a settle
 				// waiter must not be released before RunEnded is on the bus.
 				sctx.settleRun(gen)
@@ -717,6 +724,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 			Cancelled: cancelled,
 			HadEdits:  stats.hadEdits,
 			Cost:      stats.costUSD,
+			At:        time.Now(),
 		})
 		// The run's start anchor is released only now, after its terminal event
 		// is on the bus. Between the state going idle and this point the run is

@@ -853,7 +853,9 @@ survives a restart (`~/.config/moa/events.json`).
 A push notification announces each arriving event, and opens the inbox rather
 than the home screen. Following the push contract it carries only what happened
 and, at most, the session title — never the event's own text, which is external
-content that would land on a lock screen.
+content that would land on a lock screen. It is quiet and one per source: the
+next event of a source replaces the previous notification (see
+[Push notifications](#push-notifications)).
 
 In a conversation, an event is a monochrome timestamped mark with its payload on
 the tool code surface: it neither impersonates you nor competes with the
@@ -930,6 +932,45 @@ A session that is working gets the notice as a queued message; one that is stopp
 A notice that cannot go in stays visible in the task's detail with the reason: the session was deleted (final), too many sessions are open, or the session is waiting for your answer to a question or permission. It is not retried in a loop and never goes to another session. It is tried again when that session opens, when it goes idle after your answer, when `moa serve` starts, or when you press **Wake now** / **Retry**.
 
 If you press **Stop** or pull the queue back before the agent read a queued notice, the notice stays in the conversation without starting a turn, and it does not come back to your message box. A notice counts as delivered once it is saved in the conversation; after a restart, one that was accepted but never saved is delivered again, and one already saved is not repeated.
+
+## Push notifications
+
+What is worth a notification is decided on the server, in one place
+(`pkg/push/policy.go`); Web Push only delivers it.
+
+| What happened | How it arrives |
+|---|---|
+| A question (`ask_user`) or a permission request | Urgent, with sound, at once |
+| …that you have open and visible on another device | Waits **60 s** and goes only if it is still unanswered. If whoever was looking leaves sooner, it still goes at the 60 s mark |
+| A run you started finishes (≥ 60 s), or fails | Sound, unless you are looking at the session. If your own instruction landed in a run that began as a report digest, it counts as yours |
+| An owner finishes digesting a report | No sound; **one per project**, sent after 15 minutes without another one, each replacing the previous. A digest is never held back for being short |
+| A wake-on-event delivery | No sound; one per source, sent after 15 minutes without another one |
+| A run you cancelled; sessions an owner launched | Nothing (the owner reports on them) |
+
+Everything except questions and permissions stops after 150 notifications a
+day. Waiting summaries and notifications not yet sent are kept in memory only: a
+restart forgets them. Delivery uses four workers, one of them only for
+questions and permissions; a tag is never sent twice at once and a newer
+notification replaces an older one still waiting, and at most 64 quiet ones wait
+(the oldest is dropped). Questions and permissions are never dropped.
+
+The two quiet rows are provisional and set by [`push_summaries`](./configuration.md)
+(`passive` by default, `active` or `off`). Quiet hours are iOS's own (Focus and
+Scheduled Summary); moa has none.
+
+"Looking at" is reported by each open tab over the session WebSocket as
+`{"type":"presence","visible":true|false}`: true only for a conversation the
+screen is rendering, once its history has been shown and while the page is
+visible; it is renewed every 15 s and lapses after 45 s, so a phone that was
+put away stops counting without sending anything. A connected socket does not
+count by itself: neither a session that is connected but not shown (the other
+tiles while one conversation is open; the Tasks screen, or the inbox on a
+phone; a subagent or bash detail covering it) nor one still loading.
+
+On the device, quiet notifications are `silent` and a notification replaces the
+previous one with the same `tag`; urgent and ordinary ones alert again when they
+replace one (`renotify`). Safari on iOS ignores both options, so there the
+replacement and the sound are the OS's.
 
 ## REST endpoints
 

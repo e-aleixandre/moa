@@ -157,3 +157,24 @@ func TestBackgroundWorkCountsEverySource(t *testing.T) {
 		t.Fatalf("background work = %d after everything ended, want 0", got)
 	}
 }
+
+// Push tells an owner digesting a report from a turn somebody asked for by the
+// run's source; a batch is a digest only when every input was a report.
+func TestRunOriginCarriesTheSourceOnlyWhenEveryInputSharesIt(t *testing.T) {
+	report := map[string]any{"source": "report"}
+	if got := originFromCustom(report); !got.Explicit || got.Source != "report" {
+		t.Fatalf("a report prompt: %+v", got)
+	}
+	if got := originFromCustom(nil); got.Source != "" {
+		t.Fatalf("a typed prompt has no source: %+v", got)
+	}
+	if got := originFromItems([]core.SteerItem{{Custom: report}, {Custom: report}}); got.Source != "report" {
+		t.Fatalf("two reports: %+v", got)
+	}
+	if got := originFromItems([]core.SteerItem{{Custom: report}, {}}); got.Source != "" || !got.Explicit {
+		t.Fatalf("a report mixed with a typed message is not a digest: %+v", got)
+	}
+	if got := originFromItems([]core.SteerItem{{Custom: report}, {Custom: map[string]any{"source": "bash_job", "bash_job_id": "b1"}}}); got.Source != "" {
+		t.Fatalf("a report mixed with a job notification is not a pure digest: %+v", got)
+	}
+}

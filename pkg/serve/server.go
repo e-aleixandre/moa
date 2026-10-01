@@ -799,12 +799,33 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		if lease != nil {
 			leaseDone = lease.Done()
 		}
-		// Track live viewers of this session — gates "run finished / errored"
-		// push notifications (see subscribePush): if a browser is watching, no push.
 		sess.wsConns.Add(1)
 		defer sess.wsConns.Add(-1)
 
-		ctx := conn.CloseRead(r.Context())
+		// Whether this viewer actually has the session on screen is what push
+		// asks (see subscribePush). A connected socket alone proves nothing: a
+		// backgrounded tab keeps its socket, and a phone keeps it for ~90 s
+		// after the screen locks.
+		viewer := sess.presence.join()
+		defer sess.presence.leave(viewer)
+
+		// The client speaks on this socket only to report presence. Reading is
+		// also what answers the keepalive pings, as CloseRead used to.
+		ctx, stopReading := context.WithCancel(r.Context())
+		defer stopReading()
+		conn.SetReadLimit(presenceMaxMessage)
+		go func() {
+			defer stopReading()
+			for {
+				kind, data, err := conn.Read(ctx)
+				if err != nil {
+					return
+				}
+				if kind == websocket.MessageText {
+					viewer.apply(data)
+				}
+			}
+		}()
 		query := r.URL.Query()
 
 		// Subscribe before taking the init snapshot. Events published while the
@@ -859,7 +880,7 @@ func handleWebSocket(mgr *Manager) http.HandlerFunc {
 		// on mobile network switches, where no close frame ever arrives) is
 		// detected. A dead ping (see wsMaxMissedPongs) returns from the handler, which decrements
 		// wsConns via defer — otherwise a zombie viewer would freeze the session
-		// AND suppress its "finished/errored" push (gated on wsConns == 0).
+		// AND keep counting as a live viewer.
 		pingTicker := time.NewTicker(wsPingInterval)
 		defer pingTicker.Stop()
 		missedPongs := 0

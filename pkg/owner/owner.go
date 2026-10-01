@@ -76,7 +76,11 @@ type Owner struct {
 	// Heartbeat tunes the owner's own clock (see heartbeat.go). Additive and
 	// optional: nil means the defaults.
 	Heartbeat *Heartbeat `json:"heartbeat,omitempty"`
-	Created   time.Time  `json:"created"`
+	// Closed records that the user put this owner away from the sidebar column.
+	// Additive and optional: absent means open. It is the user's act, not the
+	// runtime state — after a restart every owner is saved, closed or not.
+	Closed  bool      `json:"closed,omitempty"`
+	Created time.Time `json:"created"`
 }
 
 // Store reads and writes owners under a config directory.

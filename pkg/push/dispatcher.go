@@ -24,6 +24,10 @@ type Notification struct {
 	// Inbox asks the client to open the event inbox (pending events have no
 	// session to deep-link). The service worker turns this into /?inbox=1.
 	Inbox bool `json:"inbox,omitempty"`
+	// Kind and Level come from the policy. Level is how the device should
+	// present it: passive means no sound, replacing the previous one of its tag.
+	Kind  Kind  `json:"kind,omitempty"`
+	Level Level `json:"level,omitempty"`
 }
 
 const (
@@ -53,19 +57,27 @@ func (d *Dispatcher) VAPIDPublicKey() string { return d.vapid.Public }
 // Notify fans n out to all subscriptions, pruning any the push service reports
 // as gone (404/410). Best-effort: per-subscription failures are logged, not
 // returned.
-func (d *Dispatcher) Notify(n Notification) {
+func (d *Dispatcher) Notify(ctx context.Context, n Notification) {
 	payload, err := json.Marshal(n)
 	if err != nil {
 		slog.Warn("push: marshal notification", "error", err)
 		return
 	}
+	// A passive notification is not worth waking a phone in battery saver for.
+	urgency := webpush.UrgencyHigh
+	if n.Level == LevelPassive {
+		urgency = webpush.UrgencyNormal
+	}
 	for _, sub := range d.store.All() {
-		d.send(payload, sub)
+		if ctx.Err() != nil {
+			return
+		}
+		d.send(ctx, payload, sub, urgency)
 	}
 }
 
-func (d *Dispatcher) send(payload []byte, sub webpush.Subscription) {
-	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+func (d *Dispatcher) send(parent context.Context, payload []byte, sub webpush.Subscription, urgency webpush.Urgency) {
+	ctx, cancel := context.WithTimeout(parent, sendTimeout)
 	defer cancel()
 
 	s := sub // SendNotificationWithContext takes a pointer; avoid aliasing the loop var
@@ -74,7 +86,7 @@ func (d *Dispatcher) send(payload []byte, sub webpush.Subscription) {
 		VAPIDPublicKey:  d.vapid.Public,
 		VAPIDPrivateKey: d.vapid.Private,
 		TTL:             ttlSeconds,
-		Urgency:         webpush.UrgencyHigh,
+		Urgency:         urgency,
 	})
 	if err != nil {
 		slog.Warn("push: send failed", "error", err)

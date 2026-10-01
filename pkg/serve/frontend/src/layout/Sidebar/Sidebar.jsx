@@ -15,7 +15,8 @@ import {
   visibleProjectSessions,
 } from "../../data/util/project-sessions.js";
 import { projectName } from "../../data/util/format.js";
-import { worstOwnerState } from "../../data/owners-model.js";
+import { closedSummary, ownerIsWorking, ownerState, splitOwners, worstOwnerState } from "../../data/owners-model.js";
+import { OwnerAvatarFor } from "../../components/Owners/OwnerAvatar.jsx";
 import { OwnerRow, SectionHead } from "../../components/Owners/OwnerRow.jsx";
 import { TasksGlyph } from "../../components/Tasks/TasksGlyph.jsx";
 import "./Sidebar.css";
@@ -196,6 +197,78 @@ function sectionWorst(section) {
   return kinds.sort((a, b) => ATTENTION_RANK[a] - ATTENTION_RANK[b])[0];
 }
 
+// The same ⋯ menu as a session row, on an owner: `saved` is the closed flag,
+// so a closed owner offers Reopen even while a report has it awake.
+function OwnerMenu({ owner, onClose, onReopen }) {
+  return (
+    <SessionCardMenu
+      owner
+      session={{ id: owner.id, saved: !!owner.closed }}
+      onClose={() => onClose?.(owner)}
+      onReopen={() => onReopen?.(owner)}
+      scrollContainerSelector=".zl-list"
+    />
+  );
+}
+
+function closedAge(updated) {
+  if (!updated) return "";
+  const min = Math.floor((Date.now() - updated) / 60000);
+  if (min < 60) return min < 1 ? "now" : `${min}m`;
+  const h = Math.floor(min / 60);
+  return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
+}
+
+// One line for the closed owners: faces, how many, what moves.
+function ClosedOwnersHead({ closed, open, onToggle, phone }) {
+  const summary = closedSummary(closed);
+  return (
+    <button
+      type="button"
+      class={`ofl-fold${open ? " is-open" : ""}${phone ? " is-phone" : ""}`}
+      aria-expanded={open}
+      aria-label={`${closed.length} closed${summary ? `, ${summary}` : ""}`}
+      onClick={onToggle}
+    >
+      <span class="ofl-stack" aria-hidden="true">
+        {closed.slice(0, 3).map((o) => (
+          <span class="ofl-stack-face" key={o.id}><OwnerAvatarFor owner={o} state="saved" size={phone ? 20 : 18} /></span>
+        ))}
+      </span>
+      <span class="ofl-fold-label"><span class="ofl-fold-n">{closed.length}</span> closed</span>
+      {summary && <span class="ofl-fold-sum">{summary}</span>}
+      <svg class="ofl-fold-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <path d="M6 3.5L10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </button>
+  );
+}
+
+function ClosedOwnerRow({ owner, phone, active, onOpen, onClose }) {
+  const working = ownerIsWorking(owner);
+  const age = closedAge(owner.updated);
+  return (
+    <div class="zl-session is-menu ofl-omenu ofl-cslot" data-owner={owner.id}>
+      <span class="zl-row-slot">
+        <button
+          type="button"
+          class={`zl-row ofl-crow${active ? " is-current" : ""}`}
+          onClick={() => onOpen?.(owner)}
+          aria-current={active ? "true" : undefined}
+          aria-label={`${owner.name}, project owner, closed${working ? ", working" : ""}`}
+        >
+          <OwnerAvatarFor owner={owner} state={ownerState(owner)} size={phone ? 24 : 20} />
+          <span class="ofl-crow-name">{owner.name}</span>
+          {working
+            ? <span class="ofl-crow-state zl-row-when">working</span>
+            : age && <span class="ofl-crow-age zl-row-when zl-data">{age}</span>}
+        </button>
+      </span>
+      {onClose && <OwnerMenu owner={owner} onClose={onClose} onReopen={onOpen} />}
+    </div>
+  );
+}
+
 export function Sidebar({
   density = "desktop",
   version = null,
@@ -251,6 +324,9 @@ export function Sidebar({
   owners = [],
   activeOwnerId = null,
   onOpenOwner,
+  // Close on an owner's ⋯ (the session menu, same gesture). Reopening is
+  // opening it.
+  onCloseOwner,
   // Creating an owner is no longer a page of this column: the shells own the
   // modal (desktop) / bottom sheet (phone) and this is just its door.
   onNewOwner,
@@ -285,7 +361,11 @@ export function Sidebar({
   // The section accordion, and what a folded OWNERS heading shows beside its
   // count: the most urgent thing it is hiding, and nothing else.
   const sectionOpen = (key) => !sectionCollapsed(key, collapsedSections);
-  const ownersDot = worstOwnerState(owners);
+  // Closed owners leave the column for one grouped row; the ones that need
+  // you stay in it (data/owners-model.js splitOwners).
+  const { top: topOwners, closed: closedOwners } = useMemo(() => splitOwners(owners), [owners]);
+  const [closedOpen, setClosedOpen] = useState(false);
+  const ownersDot = worstOwnerState(topOwners);
   const ownersOpen = sectionOpen("owners");
   const activeOpen = sectionOpen("active");
   const savedOpen = sectionOpen("saved");
@@ -302,7 +382,7 @@ export function Sidebar({
   const order = (groupByProject
     ? projectSections.flatMap((section) => section.sessions.map((s) => s.id))
     : [
-      ...(ownersOpen ? owners.map((o) => `owner:${o.id}`) : []),
+      ...(ownersOpen ? topOwners.map((o) => `owner:${o.id}`) : []),
       ...needsAttention.map((s) => s.id),
       ...(activeOpen ? restActive.map((s) => s.id) : []),
       ...(savedOpen ? savedPreview.visible.map((s) => s.id) : []),
@@ -518,15 +598,45 @@ export function Sidebar({
                   />
                   {ownersOpen && (
                     <>
-                      {owners.map((owner) => (
-                        <div class="zl-session" key={`owner:${owner.id}`} data-flip={`owner:${owner.id}`}>
+                      {topOwners.map((owner) => (
+                        <div
+                          class={`zl-session${onCloseOwner ? " is-menu ofl-omenu" : ""}`}
+                          key={`owner:${owner.id}`}
+                          data-flip={`owner:${owner.id}`}
+                          data-owner={owner.id}
+                        >
                           <OwnerRow
                             owner={owner}
                             active={owner.id === activeOwnerId}
                             onOpen={onOpenOwner}
                           />
+                          {onCloseOwner && <OwnerMenu owner={owner} onClose={onCloseOwner} onReopen={onOpenOwner} />}
                         </div>
                       ))}
+                      {closedOwners.length > 0 && (
+                        <>
+                          <ClosedOwnersHead
+                            closed={closedOwners}
+                            open={closedOpen}
+                            phone={phone}
+                            onToggle={() => setClosedOpen(!closedOpen)}
+                          />
+                          {closedOpen && (
+                            <div class="ofl-folded">
+                              {closedOwners.map((owner) => (
+                                <ClosedOwnerRow
+                                  key={`closed:${owner.id}`}
+                                  owner={owner}
+                                  phone={phone}
+                                  active={owner.id === activeOwnerId}
+                                  onOpen={onOpenOwner}
+                                  onClose={onCloseOwner}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
                       {/* Empty, the section says what an owner IS in one line
                           and offers the action — inside the section, above a
                           list of real sessions. It does not take half the

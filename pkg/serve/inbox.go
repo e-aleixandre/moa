@@ -634,11 +634,27 @@ func (m *Manager) releaseRouting(id string) {
 // turn; idle+!autorun only appends; busy/queued + !autorun leaves the event
 // in the inbox.
 func (m *Manager) deliverEvent(sessionID string, ev events.Event, autorun bool) error {
+	// Whether this is an owner is decided before the delivery: a Close racing
+	// it can unload the conversation, and the flag clear must not depend on it
+	// still being loaded afterwards.
+	toOwner := false
+	if sess, ok := m.Get(sessionID); ok {
+		toOwner = sess.Kind == session.KindOwner
+	}
 	_, err := m.injectEvent(sessionID, eventInjection{
 		Text:    func() string { return m.eventMessage(ev) },
 		Custom:  func(steer bool) map[string]any { return eventCustom(ev, autorun, steer) },
 		Autorun: autorun,
 	})
+	if m.afterEventInject != nil {
+		m.afterEventInject()
+	}
+	if err == nil && toOwner {
+		// An event landing on a closed owner is one of the things that
+		// brings it back to the column; it goes through ownerEdit, so it
+		// lands after any Close in flight.
+		m.reopenOwnerSession(sessionID)
+	}
 	return err
 }
 
@@ -823,14 +839,14 @@ func (m *Manager) writeEventBody(ev events.Event) (string, error) {
 	return path, nil
 }
 
-// notifyEvent buzzes the phone once per event. Per the push contract it names
-// the action and at most the session title — never the event's own title or
-// body, which are external text that would land on a lock screen.
+// notifyEvent announces an event. Per the push contract it names the action
+// and at most the session title — never the event's own title or body, which
+// are external text that would land on a lock screen. How loud it is, and that
+// one source's events replace each other, is the push policy's call.
 func (m *Manager) notifyEvent(ev events.Event) {
-	if m.pushDispatcher == nil {
+	if m.pushPolicy == nil {
 		return
 	}
-	n := push.Notification{Tag: ev.ID}
 	source := sanitizeEventHeader(ev.Source)
 	if len(source) > events.MaxSourceBytes {
 		source = source[:events.MaxSourceBytes]
@@ -838,32 +854,34 @@ func (m *Manager) notifyEvent(ev events.Event) {
 	if source == "" {
 		source = "event"
 	}
+	s := push.Signal{Kind: push.KindEvent, Source: source}
 	if ev.RoutedTo != "" {
-		n.Title = "Event from " + source
-		n.SessionID = ev.RoutedTo
+		s.Headline = "Event from " + source
+		s.SessionID = ev.RoutedTo
 		if sess, ok := m.Get(ev.RoutedTo); ok {
-			n.Body = sess.title()
+			s.Title = sess.title()
 		}
 	} else {
-		n.Title = "Event from " + source + " waiting"
-		n.Inbox = true
+		s.Headline = "Event from " + source + " waiting"
+		s.Inbox = true
 	}
-	m.pushDispatcher.Notify(n)
+	m.pushPolicy.Handle(s)
 }
 
 func (m *Manager) notifyEventRateLimited(source string) {
-	if m.pushDispatcher == nil {
+	if m.pushPolicy == nil {
 		return
 	}
 	source = sanitizeEventHeader(source)
 	if source == "" {
 		source = "event"
 	}
-	m.pushDispatcher.Notify(push.Notification{
-		Tag:   "event-rate:" + source,
-		Title: "Event source rate-limited",
-		Body:  source + " is sending too many events; new ones wait in the inbox",
-		Inbox: true,
+	m.pushPolicy.Handle(push.Signal{
+		Kind:     push.KindEvent,
+		Source:   source,
+		Headline: "Event source rate-limited",
+		Title:    source + " is sending too many events; new ones wait in the inbox",
+		Inbox:    true,
 	})
 }
 
