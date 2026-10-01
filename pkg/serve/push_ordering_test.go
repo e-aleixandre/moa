@@ -136,6 +136,13 @@ func TestUserInstructionConsumedInAReportRunIsNotADigest(t *testing.T) {
 					t.Fatal("real agent run did not settle")
 				}
 				sess.runtime.Bus.Drain(time.Second)
+				// The terminal event can land just after the state settles.
+				pollUntil(t, 5*time.Second, "RunEnded", func() bool {
+					eventMu.Lock()
+					defer eventMu.Unlock()
+					return len(ends) > 0
+				})
+				sess.runtime.Bus.Drain(time.Second)
 				eventMu.Lock()
 				gotStarts, gotSteers, gotEnds := append([]bus.RunStarted(nil), starts...), append([]bus.Steered(nil), steers...), append([]bus.RunEnded(nil), ends...)
 				eventMu.Unlock()
