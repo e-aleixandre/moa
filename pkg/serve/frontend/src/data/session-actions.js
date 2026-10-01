@@ -11,7 +11,6 @@ import {
 import { allSessionIds, clearSession } from './tileTree.js';
 import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } from './attention-arrivals.js';
 import { loadEvents } from './events.js'; // wake-on-event
-import { reopenClosedOwnerOf } from './owner-closed.js';
 import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 import { closeSessionPanelForSession } from './session-panel.js';
 import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.js';
@@ -346,8 +345,8 @@ export function startPolling() {
     if (!pollTimer) return; // stopped (hidden) while it waited
     loadSessions();
     loadEvents();
-    // An event can clear an owner's closed flag on the server; the owners
-    // roster is the only place the client learns it.
+    // An event or a report can wake a closed owner; the owners roster is the
+    // only place the client learns it.
     import('./owners.js').then((m) => m.loadOwners()).catch(() => {});
   }), interval);
 }
@@ -476,7 +475,6 @@ export async function closeSession(id) {
 // the UI updates without waiting for the next poll (which can lag up to ~15s
 // on mobile). Also used by Close owner, whose one server call does the close.
 export function markSessionClosedLocally(id) {
-  closeGeneration.set(id, (closeGeneration.get(id) || 0) + 1);
   updateSession(id, {
     state: 'saved',
     readCandidateSeq: 0,
@@ -1015,16 +1013,8 @@ export async function resolveAskUser(sessionId, askId, answers) {
   updateSession(sessionId, { pendingAsk: null });
 }
 
-// closeGeneration counts the closes of each session, so a resume that was in
-// flight when the user closed it can tell it has been overtaken.
-const closeGeneration = new Map();
-
-// resumeSession loads a saved session and shows it. `explicit` is the user
-// asking for it (a click, the palette, Reopen); the automatic resume of a saved
-// session that merely became visible passes false and must not bring a closed
-// owner back.
-export async function resumeSession(id, { explicit = true } = {}) {
-  const generation = closeGeneration.get(id) || 0;
+// resumeSession loads a saved session and shows it.
+export async function resumeSession(id) {
   let sess;
   try {
     sess = await api('POST', `/api/sessions/${id}/resume`, undefined, { timeoutMs: 0 });
@@ -1037,9 +1027,6 @@ export async function resumeSession(id, { explicit = true } = {}) {
     throw e;
   }
   await loadSessions();
-  // Closed while this was in flight: the later act of the user wins.
-  if ((closeGeneration.get(id) || 0) !== generation) return sess;
-  if (explicit) reopenClosedOwnerOf(sess.id);
   const state = store.get();
   if (state.isMobile) {
     setActiveSession(sess.id);

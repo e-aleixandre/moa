@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import {
   bookTree, childGroup, childrenSummary, groupChildren, ownerDotState, ownerLine,
   ownerOfSession, ownerRows, ownerRowState, ownersWaiting, ownerState,
-  waitingChildren, worstOwnerState, splitOwners, closedSummary, ownerNeedsYou,
+  waitingChildren, worstOwnerState, splitOwners,
 } from "./owners-model.js";
 
 const child = (over) => ({ id: "c", title: "t", state: "idle", ...over });
@@ -338,30 +338,20 @@ test("ownerRows uses its loaded conversation's live state over the owner snapsho
 
 const own = (over) => ({ id: "o", name: "O", session_state: "saved", children: [], ...over });
 
-test("only the flag groups an owner: saved after a restart stays in the column", () => {
+test("an owner whose session is not loaded is closed; a loaded one stays in the column", () => {
   const { top, closed } = splitOwners([
-    own({ id: "a", session_state: "saved" }),
-    own({ id: "b", session_state: "saved", closed: true }),
+    own({ id: "a", session_state: "idle" }),
+    own({ id: "b", session_state: "saved" }),
+    own({ id: "c", session_state: "running" }),
   ]);
-  expect(top.map((o) => o.id)).toEqual(["a"]);
+  expect(top.map((o) => o.id)).toEqual(["a", "c"]);
   expect(closed.map((o) => o.id)).toEqual(["b"]);
 });
 
-test("a closed owner rises when it asks, wrote unread, or a child waits", () => {
-  const asks = own({ id: "x", closed: true, session_state: "permission" });
-  const wrote = own({ id: "y", closed: true, session_state: "idle", unseen: true });
-  const childWaits = own({ id: "z", closed: true, children: [waiting] });
-  const { top, closed } = splitOwners([asks, wrote, childWaits]);
-  expect(top.map((o) => o.id)).toEqual(["x", "y", "z"]);
-  expect(closed).toEqual([]);
-  expect(ownerNeedsYou(asks)).toBe(true);
-});
-
-test("working alone does not raise a closed owner, and the group says so", () => {
-  const reading = own({ id: "r", closed: true, session_state: "running" });
-  const resting = own({ id: "s", closed: true });
-  const { top, closed } = splitOwners([reading, resting]);
-  expect(top).toEqual([]);
-  expect(closedSummary(closed)).toBe("1 working");
-  expect(closedSummary([resting])).toBe("");
+test("a woken owner leaves the closed group", () => {
+  const rows = ownerRows(
+    [{ id: "o1", name: "A", session_id: "s", session_state: "saved" }],
+    { s: { id: "s", state: "idle", updated: 5 } },
+  );
+  expect(splitOwners(rows).closed).toEqual([]);
 });

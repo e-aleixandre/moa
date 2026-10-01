@@ -321,7 +321,7 @@ test("opening an owner from the palette is an explicit resume", async () => {
   for (let i = 0; i < 6; i++) { render(); for (let t = 0; t < 8; t++) await Promise.resolve(); }
   await type("winerim");
   await press("Enter");
-  expect(calls).toEqual([["o1", { explicit: true }]]);
+  expect(calls).toEqual([["o1"]]);
   setState({ sessions: {}, owners: { list: [], loaded: true } });
 });
 

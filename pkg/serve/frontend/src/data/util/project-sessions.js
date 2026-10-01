@@ -47,12 +47,8 @@ export function ordinarySessions(sessions = []) {
 // which the product owner chose over hiding live work behind the empty state.
 export function landingOrder(sessions = {}, owners = []) {
   const ownerSessionIds = new Map();
-  // A closed owner is never landed on: landing resumes it, and the user just
-  // put it away. Its live children are not credited to it either.
-  const closedSessionIds = new Set();
   for (const own of owners || []) {
-    if (own?.closed && own.session_id) closedSessionIds.add(own.session_id);
-    else if (own?.id && own.session_id && sessions[own.session_id]) ownerSessionIds.set(own.id, own.session_id);
+    if (own?.id && own.session_id && sessions[own.session_id]) ownerSessionIds.set(own.id, own.session_id);
   }
   const recency = new Map();
   const credit = (id, at) => {
@@ -60,7 +56,6 @@ export function landingOrder(sessions = {}, owners = []) {
   };
   for (const sess of Object.values(sessions || {})) {
     if (!sess || sess.state === "saved") continue;
-    if (closedSessionIds.has(sess.id)) continue;
     if (isOrdinarySession(sess) || sess.kind === "owner") {
       credit(sess.id, sess.updated || 0);
       continue;

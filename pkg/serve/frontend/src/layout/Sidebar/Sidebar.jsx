@@ -15,7 +15,7 @@ import {
   visibleProjectSessions,
 } from "../../data/util/project-sessions.js";
 import { projectName } from "../../data/util/format.js";
-import { closedSummary, ownerIsWorking, ownerState, splitOwners, worstOwnerState } from "../../data/owners-model.js";
+import { ownerState, splitOwners, worstOwnerState } from "../../data/owners-model.js";
 import { OwnerAvatarFor } from "../../components/Owners/OwnerAvatar.jsx";
 import { OwnerRow, SectionHead } from "../../components/Owners/OwnerRow.jsx";
 import { TasksGlyph } from "../../components/Tasks/TasksGlyph.jsx";
@@ -197,13 +197,12 @@ function sectionWorst(section) {
   return kinds.sort((a, b) => ATTENTION_RANK[a] - ATTENTION_RANK[b])[0];
 }
 
-// The same ⋯ menu as a session row, on an owner: `saved` is the closed flag,
-// so a closed owner offers Reopen even while a report has it awake.
+// The same ⋯ menu as a session row, on an owner: a closed owner is a saved one.
 function OwnerMenu({ owner, onClose, onReopen }) {
   return (
     <SessionCardMenu
       owner
-      session={{ id: owner.id, saved: !!owner.closed }}
+      session={{ id: owner.id, saved: owner.session_state === "saved" }}
       onClose={() => onClose?.(owner)}
       onReopen={() => onReopen?.(owner)}
       scrollContainerSelector=".zl-list"
@@ -219,15 +218,14 @@ function closedAge(updated) {
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
 
-// One line for the closed owners: faces, how many, what moves.
+// One line for the closed owners: faces and how many.
 function ClosedOwnersHead({ closed, open, onToggle, phone }) {
-  const summary = closedSummary(closed);
   return (
     <button
       type="button"
       class={`ofl-fold${open ? " is-open" : ""}${phone ? " is-phone" : ""}`}
       aria-expanded={open}
-      aria-label={`${closed.length} closed${summary ? `, ${summary}` : ""}`}
+      aria-label={`${closed.length} closed`}
       onClick={onToggle}
     >
       <span class="ofl-stack" aria-hidden="true">
@@ -236,7 +234,6 @@ function ClosedOwnersHead({ closed, open, onToggle, phone }) {
         ))}
       </span>
       <span class="ofl-fold-label"><span class="ofl-fold-n">{closed.length}</span> closed</span>
-      {summary && <span class="ofl-fold-sum">{summary}</span>}
       <svg class="ofl-fold-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
         <path d="M6 3.5L10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
@@ -245,7 +242,6 @@ function ClosedOwnersHead({ closed, open, onToggle, phone }) {
 }
 
 function ClosedOwnerRow({ owner, phone, active, onOpen, onClose }) {
-  const working = ownerIsWorking(owner);
   const age = closedAge(owner.updated);
   return (
     <div class="zl-session is-menu ofl-omenu ofl-cslot" data-owner={owner.id}>
@@ -255,13 +251,11 @@ function ClosedOwnerRow({ owner, phone, active, onOpen, onClose }) {
           class={`zl-row ofl-crow${active ? " is-current" : ""}`}
           onClick={() => onOpen?.(owner)}
           aria-current={active ? "true" : undefined}
-          aria-label={`${owner.name}, project owner, closed${working ? ", working" : ""}`}
+          aria-label={`${owner.name}, project owner, closed`}
         >
           <OwnerAvatarFor owner={owner} state={ownerState(owner)} size={phone ? 24 : 20} />
           <span class="ofl-crow-name">{owner.name}</span>
-          {working
-            ? <span class="ofl-crow-state zl-row-when">working</span>
-            : age && <span class="ofl-crow-age zl-row-when zl-data">{age}</span>}
+          {age && <span class="ofl-crow-age zl-row-when zl-data">{age}</span>}
         </button>
       </span>
       {onClose && <OwnerMenu owner={owner} onClose={onClose} onReopen={onOpen} />}

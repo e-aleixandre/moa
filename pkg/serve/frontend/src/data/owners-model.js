@@ -303,43 +303,18 @@ export function ownerRows(owners = [], sessions = {}, now = Date.now()) {
 
 /* ── The closed owners ────────────────────────────────────────────────────
 
-   An owner the user closed leaves the column for one grouped row. "Closed" is
-   the server's flag on owner.json — never the runtime's saved state, because
-   after a restart every owner is saved and none of them is closed. The rule
-   that lifts one back is about what it wants from you: working alone does not.
-   (An event landing on it clears the flag on the server, so it rises through
-   the flag itself.) */
+   "Closed" is what it is for a session: the conversation is not loaded. Those
+   owners leave the column for one grouped row. After a restart every owner is
+   closed until it is opened or woken by a report or an event. */
 
-// ownerNeedsYou — its own question or error, something it wrote that has not
-// been read, or a child stopped on you.
-export function ownerNeedsYou(owner) {
-  const state = ownerState(owner);
-  if (state === "asks" || state === "unread") return true;
-  return childrenSummary(owner?.children || []).waiting > 0;
-}
-
-// ownerIsWorking — it runs something of its own, or one of its children does.
-export function ownerIsWorking(owner) {
-  return ownerState(owner) === "working" || childrenSummary(owner?.children || []).working > 0;
-}
-
-// splitOwners keeps the owners' order in both halves: a closed owner that
-// needs you takes its usual place in the column instead of jumping to the top.
 export function splitOwners(owners = []) {
   const top = [];
   const closed = [];
   for (const owner of owners) {
-    if (owner.closed && !ownerNeedsYou(owner)) closed.push(owner);
+    if (owner.session_state === "saved") closed.push(owner);
     else top.push(owner);
   }
   return { top, closed };
-}
-
-// closedSummary says only what moves, nothing when all rest
-// (decisions/lenguaje-de-estado.md).
-export function closedSummary(closed = []) {
-  const working = closed.filter(ownerIsWorking).length;
-  return working > 0 ? `${working} working` : "";
 }
 
 // ownerOfSession finds the owner row a session belongs to, for the chip.

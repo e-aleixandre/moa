@@ -30,7 +30,6 @@ import { ordinarySessions, sessionSearchMatch } from "../../data/util/project-se
 import { modLabel } from "../../data/util/shortcut.js";
 import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { ownerState } from "../../data/owners-model.js";
-import { reopenClosedOwnerOf } from "../../data/owner-closed.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
 import { defaultModelSpec, modelStepItems, stepBack } from "./command-palette-model.js";
 import "./CommandPalette.css";
@@ -637,12 +636,10 @@ export function CommandPalette({
     // for the explicit conversation-open path so the reader gets immediate focus.
     try {
       if (item.kind === "owner" && item.saved) {
-        // Opening an owner from the palette is an explicit act: it clears the
-        // owner's closed flag (a plain assign of a saved session would not).
-        await resumeSession(id, { explicit: true });
+        // A closed owner is an unloaded session: loading it opens it.
+        await resumeSession(id);
         if (secondary && context === "conversation") navigate("grid");
       } else if (context === "grid") {
-        if (item.kind === "owner") reopenClosedOwnerOf(id);
         if (secondary) { openSession(id); onClose(); inFlightRef.current = false; navigate(null); return; }
         // focusedPane is a 1-based DFS index (for copy/footer); resolve it to the
         // real tileId — after presets/splits the ids don't line up with 1..N.

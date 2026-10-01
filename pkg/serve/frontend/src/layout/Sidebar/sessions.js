@@ -133,7 +133,7 @@ function spineListSig(list) {
 
 function ownersSig(list) {
   return (list || []).map((o) => [
-    o.id, o.name, o.session_state || "", o.unseen ? 1 : 0, o.closed ? 1 : 0, o.updated || 0, o.ownReason || "",
+    o.id, o.name, o.session_state || "", o.unseen ? 1 : 0, o.updated || 0, o.ownReason || "",
     o.avatar?.shape || "", o.avatar?.color || "",
     (o.children || []).map((c) => c.id + c.state + (c.unseen ? 1 : 0)).join(","),
   ].join("\0")).join("\n");
