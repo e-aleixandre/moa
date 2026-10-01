@@ -5,6 +5,74 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.0] - 2026-10-01
+
+### Added
+
+- **Global tasks.** Tasks now live in a shared SQLite database instead of
+  inside each session. The web UI has a Tasks view with **You**, **Backlog**
+  and **Agents** groups, task dependencies ("Waits for"), a Move picker, and a
+  task count in the status line. Agents use the `tasks` tool, scoped to their
+  own work, and are notified of the gestures you make on their tasks. Checklists
+  that older versions kept inside the session file are not imported. See
+  [Tasks](docs/serve.md).
+- **Scheduled and recurring tasks.** A task can run later or repeat, set from
+  Tasks or from the clock next to Send. Write *When* in plain English or
+  Spanish; each run is delivered to a session, to an owner, or to a new session
+  created for the run. Agents can schedule too, in the timezone of the session's
+  creator. If a delivery is uncertain you decide whether to run it again.
+  `/schedule` is retired and its pending prompts are imported automatically.
+  The task database migrates to a new schema on first start: once it has,
+  an older moa binary opens Tasks read-only.
+- **Close owner.** Send an owner away without deleting it: a closed owner is a
+  closed session and folds into a single "N closed" row in the sidebar.
+- Owners appear in the Cmd+K palette, and the sidebar search shows a ⌘K /
+  Ctrl K chip.
+- The **Serena** owner face.
+- **Native push, server side.** A notification policy that uses real presence
+  (no push while you are looking at the session, a daily cap, summaries), and
+  a stateless, end-to-end encrypted relay in `relay/` for the iOS app. The
+  relay is **not deployed yet**, so native push does not work end to end in
+  this release.
+
+### Changed
+
+- Opening a session or reconnecting on a slow network is more robust: the
+  initial state arrives in pieces and a slow init is kept alive while data is
+  still arriving. A first open now carries the newest 50 messages instead of
+  150 (about 107 KB of JSON instead of about 260 KB on the measured session);
+  older ones load on scroll.
+- Polling the session list uses conditional requests (ETag) and gets a
+  bodyless `304` when nothing changed.
+- Tapping a notification in the native app opens that session in place.
+
+### Fixed
+
+- **Stop.** No tool starts after Stop, and queued messages that Stop discards
+  are restored to the composer, each once, instead of being lost. Stop no
+  longer races with queued steers, and a stopped manual compaction settles
+  idle.
+- Compactions: a compaction summary rebuilt on reopen is no longer appended as
+  a new message each time, and sessions already affected drop the repeated
+  summaries. A session whose compaction cut was left dangling is recovered.
+- A session header cut short is refused instead of loading as damaged data.
+- Closing an owner holds up against automatic resumes, races and invalid
+  requests, and the UI never lands on a closed owner.
+- The Tasks header on the phone clears the status bar in the native app.
+- Tasks on the phone: the Where picker is a page, and move drafts and
+  session-scoped creation are preserved.
+- Deleting a session settles its scheduled work first, and the delete survives
+  a lost settlement.
+
+### Security
+
+- Rendered Markdown no longer applies CSS or loads remote images (they show as
+  alt text), and the attributes it keeps are restricted per element.
+- A Pulse browser session can only be minted with the durable device
+  credential; the cookie is not renewed without it.
+- The auth cookie is marked `Secure` when the browser arrived over TLS or
+  through a loopback proxy.
+
 ## [0.44.2] - 2026-09-29
 
 ### Added
