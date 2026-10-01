@@ -82,13 +82,16 @@ func TestPushSkipsSessionsTheOwnerLaunched(t *testing.T) {
 		return hits.Load() - before
 	}
 
+	// The owner's conversation goes first: a child's pending permission is
+	// reported to its owner, whose resulting run would end by clearing the
+	// permissions of the owner's own session.
+	if got := ask(ownerSess); got != 2 {
+		t.Fatalf("the owner's own conversation pushed %d notifications, want 2", got)
+	}
 	if got := ask(launched); got != 0 {
 		t.Fatalf("a session the owner launched pushed %d notifications to the user", got)
 	}
 	if got := ask(userSess); got != 2 {
 		t.Fatalf("a user session in an owner's codebase pushed %d notifications, want 2", got)
-	}
-	if got := ask(ownerSess); got != 2 {
-		t.Fatalf("the owner's own conversation pushed %d notifications, want 2", got)
 	}
 }
