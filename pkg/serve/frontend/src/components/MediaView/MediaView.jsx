@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Loader2 } from 'lucide-preact';
+import { openPdfSession } from '../../data/util/pdf-session.js';
 import './MediaView.css';
 
 // Cap on a PDF read into memory. Video and audio never are: the element
@@ -48,32 +49,32 @@ function PdfView({ name, url, onFail }) {
   const [doc, setDoc] = useState(null);
 
   useEffect(() => {
-    let cancelled = false;
-    let loaded = null;
     setDoc(null);
-    (async () => {
-      const response = await fetch(url, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`pdf failed: ${response.status}`);
-      if (Number(response.headers.get('content-length')) > MAX_PDF_SIZE) throw new Error('pdf too large');
-      const bytes = await response.arrayBuffer();
-      if (bytes.byteLength > MAX_PDF_SIZE) throw new Error('pdf too large');
-      const pdfjs = await import('pdfjs-dist/build/pdf.min.mjs');
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL('./pdf-worker.js', import.meta.url).href;
-      const task = pdfjs.getDocument({ data: bytes });
-      loaded = await task.promise;
-      if (cancelled) {
-        loaded.destroy();
-        return;
-      }
-      const first = await loaded.getPage(1);
-      const { width, height } = first.getViewport({ scale: 1 });
-      setDoc({ pdf: loaded, pages: loaded.numPages, ratio: height / width });
-    })().catch(() => {
+    const base = new URL('./', import.meta.url).href;
+    const session = openPdfSession({
+      fetchBytes: async () => {
+        const response = await fetch(url, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`pdf failed: ${response.status}`);
+        if (Number(response.headers.get('content-length')) > MAX_PDF_SIZE) throw new Error('pdf too large');
+        const bytes = await response.arrayBuffer();
+        if (bytes.byteLength > MAX_PDF_SIZE) throw new Error('pdf too large');
+        return bytes;
+      },
+      loadPdfjs: () => import('pdfjs-dist/build/pdf.min.mjs'),
+      workerSrc: `${base}pdf-worker.js`,
+      // CCITT/JBig2/JPEG2000 images (scanned PDFs) decode through wasm that
+      // pdf.js fetches from this directory: same origin, lazy.
+      wasmUrl: base,
+    });
+    let cancelled = false;
+    session.ready.then((loaded) => {
+      if (!cancelled && loaded) setDoc(loaded);
+    }, () => {
       if (!cancelled) onFail();
     });
     return () => {
       cancelled = true;
-      loaded?.destroy();
+      session.destroy();
     };
   }, [url]);
 

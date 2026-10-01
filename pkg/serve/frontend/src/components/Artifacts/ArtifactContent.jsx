@@ -5,7 +5,7 @@ import { readCapped, MAX_PREVIEW_SIZE, MAX_HIGHLIGHT_SIZE } from '../../data/uti
 import { buildHTMLSrcdoc, HTML_PREVIEW_SANDBOX } from '../../data/util/html-preview.js';
 import { looksBinary } from '../../data/util/file-card.js';
 import { usePinchZoom } from '../../hooks/usePinchZoom.js';
-import { artifactFailure, artifactKind, artifactRevision } from '../../data/artifacts-model.js';
+import { artifactFailure, artifactKind, artifactRevision, mediaViewKey } from '../../data/artifacts-model.js';
 import { ShareButton } from './ArtifactRow.jsx';
 import { MediaView } from '../MediaView/MediaView.jsx';
 
@@ -88,7 +88,7 @@ export function ArtifactContent({ artifact, onEscapeFrame }) {
     return <div class="af-loading" role="status"><Loader2 class="spin" size={16} /> Opening…</div>;
   }
   if (state.kind === 'media') {
-    return <MediaView kind={artifactKind(artifact)} name={artifact.name} url={artifact.url} />;
+    return <MediaView key={mediaViewKey(artifact)} kind={artifactKind(artifact)} name={artifact.name} url={artifact.url} />;
   }
   if (state.kind === 'image') {
     return (

@@ -27,6 +27,8 @@ const staticAssets = [
   "apple-touch-icon.png",
 ];
 
+const pdfWasm = ["jbig2.wasm", "openjpeg.wasm", "qcms_bg.wasm"];
+
 const publishFrontend = {
   name: "publish-frontend",
   setup(b) {
@@ -110,6 +112,11 @@ function collectBuild(outputFiles) {
   }
   for (const file of staticAssets) {
     files.set(file, readFileSync(`src/${file}`));
+  }
+  // pdf.js decodes scanned PDFs (CCITT, JBig2, JPEG 2000) and ICC profiles
+  // with wasm it fetches next to its worker; without these a scan renders blank.
+  for (const file of pdfWasm) {
+    files.set(file, readFileSync(`node_modules/pdfjs-dist/wasm/${file}`));
   }
   for (const required of ["app.js", "app.css", ...staticAssets]) {
     if (!files.has(required)) throw new Error(`frontend build did not produce ${required}`);

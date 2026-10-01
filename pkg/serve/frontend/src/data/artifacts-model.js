@@ -194,3 +194,10 @@ export function acceptsResponse(slice, { sessionId, token }) {
   if (!slice || !slice.view) return false;
   return slice.ownerSessionId === sessionId && slice.token === token;
 }
+
+// mediaViewKey — identity of an open player. A resend keeps the id and the URL,
+// so without the revision the <video>/<audio> (or PDF document) would keep the
+// old bytes while the reader's contract says it re-reads on republication.
+export function mediaViewKey(artifact) {
+  return artifactRevision(artifact);
+}

@@ -3,7 +3,7 @@
 import { test, expect } from 'bun:test';
 import {
   ARTIFACTS_CLOSED, acceptsResponse, artifactFailure, artifactFileId, artifactKind, artifactSessionId,
-  artifactPosition, currentArtifact, filterArtifacts, isHtmlArtifact, normalizeArtifacts, seedFromFile,
+  artifactPosition, currentArtifact, filterArtifacts, isHtmlArtifact, mediaViewKey, normalizeArtifacts, seedFromFile,
 } from './artifacts-model.js';
 
 const payload = {
@@ -141,4 +141,10 @@ test('too large and binary are not retried, but the file can still be taken away
     expect(failure.retryable).toBe(false);
     expect(failure.shareable).toBe(true);
   }
+});
+
+test('a republished video, audio or PDF gets a new player identity', () => {
+  const video = { id: 'v', url: '/api/sessions/s/files/v', name: 'clip.mp4', mime: 'video/mp4', updatedAt: '2026-10-01T10:00:00Z' };
+  expect(mediaViewKey(video)).toBe(mediaViewKey({ ...video }));
+  expect(mediaViewKey({ ...video, updatedAt: '2026-10-01T10:05:00Z' })).not.toBe(mediaViewKey(video));
 });
