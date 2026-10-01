@@ -24,7 +24,7 @@ func round4DeleteFixture(t *testing.T) (*schedHarness, *tasks.Repo, tasks.Occurr
 	schedReviewStopWorkers(t, m)
 	r := h.repo()
 	o := readyNewRun(t, h, r, newTarget(t, h.root))
-	sid := markedSession(t, h, o.ID, o.ScheduleTaskID)
+	sid := round7Created(t, h, r, o, "", false)
 	closeSession(t, m, sid) // saved: its file is unlinked inside Delete
 	store, err := session.FindSessionStoreReadOnly(h.base, sid)
 	if err != nil {
@@ -138,7 +138,7 @@ func TestRound4DeletePostUnlinkSIGKILLCannotRecreate(t *testing.T) {
 // at once.
 func TestRound4DeleteMarkWithoutUnlinkIsUndone(t *testing.T) {
 	h, r, o, sid, path := round4DeleteFixture(t)
-	if err := r.MarkSessionDiscarding(bgc, sid, o.ID); err != nil {
+	if err := r.MarkSessionDiscarding(bgc, sid); err != nil {
 		t.Fatal(err)
 	}
 	if h.mgr.planner.provisionNew(bgc, o) {

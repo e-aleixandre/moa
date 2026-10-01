@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/url"
 	"path/filepath"
 	"sort"
@@ -375,15 +374,6 @@ func transcriptNoticeCount(t *testing.T, base, sessionID, id string) int {
 		t.Fatal(err)
 	}
 	return savedNoticeCount(s, id)
-}
-
-func markedSessions(t *testing.T, base string, occID int64) []session.Summary {
-	t.Helper()
-	got, err := session.FindByMetadata(base, session.MetaScheduledOccurrenceID, fmt.Sprint(occID), time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return got
 }
 
 // blockingHandler holds a run until release is closed.

@@ -1232,7 +1232,22 @@ func TestScheduleSessionDeletedSettlement(t *testing.T) {
 	pending := mustAssign(t, r, mk("pending").ID, "gone")
 	sent := mustAssign(t, r, mk("sent").ID, "gone")
 	admitted := mustAssign(t, r, mk("admitted").ID, "gone")
-	marker := mk("new session")
+	mkNew := func(title string) Occurrence {
+		mkSchedule(t, r, title, newSessionDef(clock.Now().Add(time.Minute)))
+		clock.Add(time.Minute)
+		return materializeOne(t, r)
+	}
+	// A run for a new session belongs to its reserved session until it is
+	// bound; one rerouted elsewhere no longer does.
+	reserved := mkNew("new session")
+	if _, err := r.ReserveSession(bg, reserved.ID, "gone"); err != nil {
+		t.Fatal(err)
+	}
+	rerouted := mkNew("rerouted")
+	if _, err := r.ReserveSession(bg, rerouted.ID, "gone-too"); err != nil {
+		t.Fatal(err)
+	}
+	rerouted = mustAssign(t, r, rerouted.ID, "kept")
 	elsewhere := mustAssign(t, r, mk("elsewhere").ID, "kept")
 	if _, err := r.SetNoticeState(bg, sent.NoticeID, NoticeChange{From: []string{NoticePending}, State: NoticeSent}); err != nil {
 		t.Fatal(err)
@@ -1243,7 +1258,7 @@ func TestScheduleSessionDeletedSettlement(t *testing.T) {
 	if _, err := r.SetNoticeState(bg, admitted.NoticeID, NoticeChange{From: []string{NoticeSent}, State: NoticeSent, Admitted: true}); err != nil {
 		t.Fatal(err)
 	}
-	n, err := r.SettleSessionDeleted(bg, "gone", marker.ID)
+	n, err := r.SettleSessionDeleted(bg, "gone")
 	if err != nil || n != 4 {
 		t.Fatalf("settled %d, %v", n, err)
 	}
@@ -1254,7 +1269,7 @@ func TestScheduleSessionDeletedSettlement(t *testing.T) {
 		{pending, OccFailed, ReasonSessionDeleted},
 		{sent, OccSkipped, ReasonDeletedDuringDeliver},
 		{admitted, OccSkipped, ReasonDeletedAfterDeliver},
-		{marker, OccFailed, ReasonSessionDeleted},
+		{reserved, OccFailed, ReasonSessionDeleted},
 		{elsewhere, OccAssigned, ""},
 	} {
 		got := mustOcc(t, r, c.o.ID)
@@ -1266,6 +1281,9 @@ func TestScheduleSessionDeletedSettlement(t *testing.T) {
 				t.Errorf("notice of run #%d still %s", got.ID, nt.State)
 			}
 		}
+	}
+	if n, err := r.SettleSessionDeleted(bg, "gone-too"); err != nil || n != 0 || mustOcc(t, r, rerouted.ID).State != OccAssigned {
+		t.Fatalf("deleting a rerouted run's reserved session settled %d (%v): %+v", n, err, mustOcc(t, r, rerouted.ID))
 	}
 	// The dispatcher finding the recipient gone after a reservation is the
 	// same uncertain outcome, never "not sent".

@@ -15,11 +15,12 @@ import (
 func TestScheduledNewSessionDeleteBeforeBinding(t *testing.T) {
 	setup := func(t *testing.T) (*schedHarness, *tasks.Repo, tasks.Occurrence, string, chan struct{}) {
 		h := newSchedHarness(t, newMockProvider(simpleResponseHandler("ok")), "2026-09-30T08:00:00Z")
-		h.start()
-		sid := markedSession(t, h, 1, 1)
-		h.stop()
 		r := h.repo()
 		o := readyNewRun(t, h, r, newTarget(t, h.root))
+		h.hooks.beforePass = func(ctx context.Context) { <-ctx.Done() }
+		h.start()
+		sid := round7Created(t, h, r, o, "", false)
+		h.stop()
 		release := make(chan struct{})
 		var once sync.Once
 		h.hooks.beforePass = func(ctx context.Context) {

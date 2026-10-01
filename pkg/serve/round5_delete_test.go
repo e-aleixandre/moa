@@ -21,7 +21,7 @@ func round5Fixture(t *testing.T) (*schedHarness, *tasks.Repo, tasks.Occurrence, 
 	schedReviewStopWorkers(t, m)
 	r := h.repo()
 	o := readyNewRun(t, h, r, newTarget(t, h.root))
-	sid := markedSession(t, h, o.ID, o.ScheduleTaskID)
+	sid := round7Created(t, h, r, o, "", false)
 	store, err := session.FindSessionStoreReadOnly(h.base, sid)
 	if err != nil {
 		t.Fatal(err)
@@ -58,26 +58,12 @@ func round5TruncateAfterID(t *testing.T, path, sid string) {
 	}
 }
 
-func TestRound5DeleteTruncatedHeaderFailsClosed(t *testing.T) {
-	h, r, o, sid, path := round5Fixture(t)
-	round5TruncateAfterID(t, path, sid)
-	_, headerErr := session.FindSummaryReadOnly(h.base, sid)
-	deleteErr := h.mgr.Delete(sid)
-	_, fileErr := os.Stat(path)
-	provisioned := h.mgr.planner.provisionNew(bgc, o)
-	after := occNow(t, r, o.ID)
-	files := round5SessionFiles(t, h.base)
-	t.Logf("truncated header: header=%v Delete=%v file=%v provision=%t run=%s/%s files=%d", headerErr, deleteErr, fileErr, provisioned, after.State, after.Reason, files)
-	// The uncertain scan fails the run like any other unverifiable destination.
-	if headerErr == nil || deleteErr == nil || fileErr != nil || provisioned || files != 1 ||
-		after.State != tasks.OccFailed || after.Reason != reasonDestinationUncertain {
-		t.Error("an incomplete header was treated as an unmarked session")
-	}
-}
-
+// A delete intent whose file is still there, even damaged, was never
+// unlinked: the start withdraws it, and the damaged file still stops its
+// run instead of letting it create another session.
 func TestRound5TruncatedHeaderRecoveryKeepsMark(t *testing.T) {
 	h, r, o, sid, path := round5Fixture(t)
-	if err := r.MarkSessionDiscarding(bgc, sid, o.ID); err != nil {
+	if err := r.MarkSessionDiscarding(bgc, sid); err != nil {
 		t.Fatal(err)
 	}
 	round5TruncateAfterID(t, path, sid)
@@ -88,10 +74,11 @@ func TestRound5TruncatedHeaderRecoveryKeepsMark(t *testing.T) {
 	}
 	provisioned := m.planner.provisionNew(bgc, o)
 	_, fileErr := os.Stat(path)
-	files := round5SessionFiles(t, h.base)
-	t.Logf("startup with incomplete header: marks=%d file=%v provision=%t files=%d", len(ds), fileErr, provisioned, files)
-	if len(ds) != 1 || fileErr != nil || provisioned || files != 1 {
-		t.Error("startup cleared the mark of an unreadable header and created another session for the run")
+	files := round7Files(t, h.base)
+	after := occNow(t, r, o.ID)
+	t.Logf("startup with incomplete header: marks=%d file=%v provision=%t run=%s/%s files=%d", len(ds), fileErr, provisioned, after.State, after.Reason, files)
+	if len(ds) != 0 || fileErr != nil || provisioned || files != 1 || after.Reason != reasonDestinationUncertain {
+		t.Error("startup kept the intent of a delete that never unlinked, or the run made another session")
 	}
 }
 
@@ -132,7 +119,7 @@ func TestRound5SettlementCoversLateRuns(t *testing.T) {
 		t.Run(c.reason, func(t *testing.T) {
 			h, r, o, sid, path := round5Fixture(t)
 			closeSession(t, h.mgr, sid)
-			if err := r.MarkSessionDiscarding(bgc, sid, o.ID); err != nil {
+			if err := r.MarkSessionDiscarding(bgc, sid); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Remove(path); err != nil {
@@ -148,14 +135,4 @@ func TestRound5SettlementCoversLateRuns(t *testing.T) {
 			}
 		})
 	}
-}
-
-// round5SessionFiles counts session files on disk, readable or not.
-func round5SessionFiles(t *testing.T, base string) int {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(base, "*", "*.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return len(matches)
 }

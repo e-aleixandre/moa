@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
-	"strconv"
 	"time"
 
-	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
@@ -69,7 +68,8 @@ func (t systemTimer) Stop() bool          { return t.t.Stop() }
 // production.
 type taskSchedulerHooks struct {
 	beforePass      func(ctx context.Context)
-	afterMarkedSave func(sessionID string, occurrenceID int64)
+	afterReserve     func(sessionID string, occurrenceID int64)
+	afterSessionSave func(sessionID string, occurrenceID int64)
 	beforeAssign    func(occurrenceID int64)
 	afterAssign     func(occurrenceID int64)
 	attempted       func(noticeID string)
@@ -305,109 +305,127 @@ func (m *Manager) ownerDestination(ownerID string) (tasks.Destination, string, e
 }
 
 // provisionNew creates the run's session, or finds the one a previous
-// attempt created: the run's ID is written in that session's first save, and
-// a full scan of the saved sessions finds it after a crash. A damaged file
-// older than the run's observation cannot be its session: no attempt can
-// precede the row, so the scan skips it instead of failing every run.
+// attempt created. The session's ID is reserved in SQLite before it is
+// created, so the run's session is exactly one path, derived from the run's
+// fixed target directory: absent, it is created with that ID (never
+// replacing anything); present, it is the run's, and if it cannot be read
+// as that session the run stops there, fail-closed. No other file counts.
 //
-// The scan reads every session header, so it runs before automationMu, which
-// session Delete and Close also take. The creation and T1 run under it, after
-// the run is read again: a Delete of the session the scan found settles the
-// run through its marker (no longer ready), and only this planner creates
-// marked sessions, so an empty scan cannot go stale.
+// It runs under automationMu, which session Delete also takes: a delete of
+// the reserved session settles the run (no longer ready) or leaves a
+// discard intent that keeps it from being created again.
 func (s *taskScheduler) provisionNew(ctx context.Context, o tasks.Occurrence) bool {
 	m := s.m
-	occKey, parentKey := strconv.FormatInt(o.ID, 10), strconv.FormatInt(o.ScheduleTaskID, 10)
-	found, err := session.FindByMetadata(m.sessionBaseDir, session.MetaScheduledOccurrenceID, occKey, time.UnixMilli(o.ObservedAt))
-	if err != nil {
-		s.fail(ctx, o.ID, reasonDestinationUncertain, err.Error())
-		return false
-	}
 	m.automationMu.Lock()
 	defer m.automationMu.Unlock()
 	cur, err := m.tasks.Occurrence(ctx, o.ID)
 	if err != nil || cur.State != tasks.OccReady {
 		return false
 	}
+	id := cur.ReservedSessionID
+	if id == "" {
+		candidate, err := session.NewID()
+		if err != nil {
+			s.fail(ctx, o.ID, reasonCreateFailed, err.Error())
+			return false
+		}
+		if id, err = m.tasks.ReserveSession(ctx, o.ID, candidate); err != nil {
+			if ctx.Err() == nil {
+				slog.Warn("task scheduler: reserving a run's session failed; will retry", "run", o.ID, "error", err)
+			}
+			return false
+		}
+		if s.hooks.afterReserve != nil {
+			s.hooks.afterReserve(id, o.ID)
+		}
+	}
 	// A delete of the run's session that lost its settlement (a crash, SQL)
 	// leaves the run ready until a start finishes it: never a new session.
-	if discarding, err := m.tasks.MarkerDiscarding(ctx, o.ID); err != nil || discarding {
+	if discarding, err := m.tasks.SessionDiscarding(ctx, id); err != nil || discarding {
 		return false
 	}
+	t := cur.Spec.Target
 	var dest tasks.Destination
-	switch len(found) {
-	case 0:
-		t := o.Spec.Target
-		sess, err := m.CreateSession(CreateOpts{
-			Title: o.Spec.Title, CWD: t.CWD, Model: t.Model, Thinking: t.Thinking,
-			Origin: scheduledOrigin, TZ: o.Spec.TZ,
-			extraMeta: map[string]any{session.MetaScheduledOccurrenceID: occKey, session.MetaScheduledTaskID: parentKey},
-		})
-		if err != nil {
-			reason := reasonCreateFailed
-			switch {
-			case errors.Is(err, ErrInvalidModel), errors.Is(err, ErrInvalidThinking):
-				reason = reasonModelUnavailable
-			case errors.Is(err, ErrInvalidCWD):
-				reason = reasonProjectMissing
-			}
-			s.fail(ctx, o.ID, reason, err.Error())
-			return false
-		}
-		if s.hooks.afterMarkedSave != nil {
-			s.hooks.afterMarkedSave(sess.ID, o.ID)
-		}
-		dest = tasks.Destination{SessionID: sess.ID, ProjectKey: m.projectKey(sess.CWD), ProjectCWD: sess.CWD}
-	case 1:
-		sum := found[0]
-		if p, _ := sum.Metadata[session.MetaScheduledTaskID].(string); p != parentKey {
-			s.fail(ctx, o.ID, reasonDestinationAmbiguous, fmt.Sprintf("session %s carries run #%d for another task", sum.ID, o.ID))
-			return false
-		}
-		cwd, _ := sum.Metadata[session.MetaCWD].(string)
-		if sess, ok := m.Get(sum.ID); ok {
-			cwd = sess.CWD
-		}
-		dest = tasks.Destination{SessionID: sum.ID, ProjectKey: m.projectKey(cwd), ProjectCWD: cwd}
-	default:
-		s.fail(ctx, o.ID, reasonDestinationAmbiguous, fmt.Sprintf("%d sessions claim run #%d", len(found), o.ID))
+	if sess, ok := m.Get(id); ok {
+		dest = tasks.Destination{SessionID: id, ProjectKey: m.projectKey(sess.CWD), ProjectCWD: sess.CWD}
+		return s.assign(ctx, o.ID, dest)
+	}
+	m.mu.RLock()
+	_, resuming := m.resuming[id]
+	m.mu.RUnlock()
+	if resuming {
+		return false // the next pass finds it loaded
+	}
+	store, err := session.OpenFileStoreReadOnly(m.sessionBaseDir, t.CWD)
+	if err != nil {
+		s.fail(ctx, o.ID, reasonDestinationUncertain, err.Error())
 		return false
 	}
+	present, err := store.Exists(id)
+	if err != nil {
+		s.fail(ctx, o.ID, reasonDestinationUncertain, err.Error())
+		return false
+	}
+	if present {
+		saved, err := store.LoadReadOnly(id)
+		if err != nil {
+			s.fail(ctx, o.ID, reasonDestinationUncertain, fmt.Sprintf("session %s: %v", id, err))
+			return false
+		}
+		_, cwd, _, _ := saved.RuntimeMeta()
+		if cwd == "" {
+			cwd = t.CWD
+		}
+		return s.assign(ctx, o.ID, tasks.Destination{SessionID: id, ProjectKey: m.projectKey(cwd), ProjectCWD: cwd})
+	}
+	sess, err := m.CreateSession(CreateOpts{
+		Title: cur.Spec.Title, CWD: t.CWD, Model: t.Model, Thinking: t.Thinking,
+		Origin: scheduledOrigin, TZ: cur.Spec.TZ, sessionID: id,
+	})
+	if err != nil {
+		reason := reasonCreateFailed
+		switch {
+		case errors.Is(err, ErrBusy):
+			return false
+		case errors.Is(err, fs.ErrExist):
+			reason = reasonDestinationUncertain
+		case errors.Is(err, ErrInvalidModel), errors.Is(err, ErrInvalidThinking):
+			reason = reasonModelUnavailable
+		case errors.Is(err, ErrInvalidCWD):
+			reason = reasonProjectMissing
+		}
+		s.fail(ctx, o.ID, reason, err.Error())
+		return false
+	}
+	if s.hooks.afterSessionSave != nil {
+		s.hooks.afterSessionSave(sess.ID, o.ID)
+	}
+	dest = tasks.Destination{SessionID: sess.ID, ProjectKey: m.projectKey(sess.CWD), ProjectCWD: sess.CWD}
 	return s.assign(ctx, o.ID, dest)
 }
 
 // finishSessionDiscards completes the saved-session deletes a crash or a
-// SQL failure left between their discard mark and their settlement: a file
-// that is gone is settled as deleted; one still there was never unlinked,
-// and keeps its session and its work.
+// SQL failure left between their discard intent and their settlement: a
+// session whose file is gone is settled as deleted; one whose file is still
+// there, readable or not, was never unlinked and keeps its session and its
+// work. A file that cannot be checked leaves the intent for the next start.
 func (m *Manager) finishSessionDiscards(ctx context.Context) {
-	ds, err := m.tasks.SessionDiscards(ctx)
+	ids, err := m.tasks.SessionDiscards(ctx)
 	if err != nil {
 		slog.Warn("task scheduler: reading interrupted session deletes failed", "error", err)
 		return
 	}
-	if len(ds) == 0 {
-		return
-	}
-	base := m.sessionBaseDir
-	if base == "" {
-		base = core.ConfigSubdir("sessions")
-	}
-	// An unreadable sessions directory would look like gone files.
-	if _, err := os.ReadDir(base); err != nil && !errors.Is(err, os.ErrNotExist) {
-		slog.Warn("task scheduler: interrupted session deletes left for the next start", "error", err)
-		return
-	}
-	for _, d := range ds {
-		_, err := session.FindSessionStoreReadOnly(m.sessionBaseDir, d.SessionID)
+	for _, id := range ids {
+		present, err := session.ExistsByID(m.sessionBaseDir, id)
 		switch {
-		case errors.Is(err, session.ErrNotFound):
-			_, err = m.tasks.SettleSessionDeleted(ctx, d.SessionID, d.MarkerOccurrenceID)
-		case err == nil:
-			err = m.tasks.ClearSessionDiscard(ctx, d.SessionID)
+		case err != nil:
+		case present:
+			err = m.tasks.ClearSessionDiscard(ctx, id)
+		default:
+			_, err = m.tasks.SettleSessionDeleted(ctx, id)
 		}
 		if err != nil {
-			slog.Warn("task scheduler: finishing an interrupted session delete failed", "session", d.SessionID, "error", err)
+			slog.Warn("task scheduler: finishing an interrupted session delete failed", "session", id, "error", err)
 		}
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1981,16 +1980,17 @@ func creatorTZOf(meta map[string]any) string {
 var afterSessionUnlink func(sessionID string)
 
 // settleScheduledWork settles, before a session is deleted, the scheduled
-// runs bound to it, and the run it was created for if it carries a marker
-// (created, crash, not yet bound). Undelivered work becomes Not sent;
+// runs bound to it, including a run that reserved it and is not yet bound
+// (created, crash, before T1). The runs are found in SQLite alone: the
+// session's file is never read. Undelivered work becomes Not sent;
 // delivered work ends with an unknown outcome. A failure refuses the delete:
 // removing the file first could let a restart recreate the session.
 //
 // unlink, when not nil, removes a saved session's file. SQLite cannot roll
 // an unlink back, so a saved delete goes in three steps: a committed discard
-// mark (nothing recreates or delivers to the session meanwhile), the unlink,
-// and the settlement, which clears the mark. A refused unlink withdraws the
-// mark and settles nothing; its error is returned as is. Once the file is
+// intent (nothing recreates or delivers to the session meanwhile), the
+// unlink, and the settlement, which clears the intent. A refused unlink
+// withdraws the intent and settles nothing; its error is returned as is. Once the file is
 // gone the delete has happened: a settlement that fails then is logged and
 // finished at the next start (finishSessionDiscards).
 //
@@ -2011,33 +2011,11 @@ func (m *Manager) settleScheduledWork(id string, sess *ManagedSession, unlink fu
 		// An unreadable database is not an empty one.
 		return fmt.Errorf("settle scheduled work of session %s: %w", id, err)
 	}
-	var meta map[string]any
-	if sess != nil && sess.persister != nil {
-		sess.persister.has(func(s *session.Session) bool {
-			meta = s.Metadata
-			return true
-		})
-	} else {
-		// The header alone carries the marker: a damaged transcript body must
-		// not turn a marked session into an unmarked one. A header that
-		// cannot be read refuses the delete; an absent file has no marker.
-		sum, err := session.FindSummaryReadOnly(m.sessionBaseDir, id)
-		switch {
-		case err == nil:
-			meta = sum.Metadata
-		case !errors.Is(err, session.ErrNotFound):
-			return fmt.Errorf("settle scheduled work of session %s: %w", id, err)
-		}
-	}
-	var marker int64
-	if v, _ := meta[session.MetaScheduledOccurrenceID].(string); v != "" {
-		marker, _ = strconv.ParseInt(v, 10, 64)
-	}
 	var err error
 	if saved {
-		err = m.tasks.MarkSessionDiscarding(m.baseCtx, id, marker)
+		err = m.tasks.MarkSessionDiscarding(m.baseCtx, id)
 	} else {
-		_, err = m.tasks.SettleSessionDeleted(m.baseCtx, id, marker)
+		_, err = m.tasks.SettleSessionDeleted(m.baseCtx, id)
 	}
 	if err != nil {
 		if errors.Is(err, tasks.ErrSchemaTooNew) {
@@ -2060,7 +2038,7 @@ func (m *Manager) settleScheduledWork(id string, sess *ManagedSession, unlink fu
 	if afterSessionUnlink != nil {
 		afterSessionUnlink(id)
 	}
-	if _, err := m.tasks.SettleSessionDeleted(m.baseCtx, id, marker); err != nil {
+	if _, err := m.tasks.SettleSessionDeleted(m.baseCtx, id); err != nil {
 		slog.Warn("deleted session's scheduled work not settled; the next start settles it", "session", id, "error", err)
 	}
 	return nil

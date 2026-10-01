@@ -1205,8 +1205,7 @@ func (r *Repo) RegateOnRestart(ctx context.Context) (int, error) {
 		// settlement: re-gating it would hide it from the discard.
 		cands, err := queryOccurrences(ctx, tx, `state IN ('ready','assigned') AND admitted_at IS NULL AND confirmed_at IS NULL
 			AND trigger <> 'run_now' AND due_at <= ?
-			AND NOT EXISTS (SELECT 1 FROM session_discards d WHERE d.marker_occurrence_id = task_occurrences.id
-				OR (COALESCE(task_occurrences.resolved_session_id, '') <> '' AND d.session_id = task_occurrences.resolved_session_id))
+			AND NOT EXISTS (SELECT 1 FROM session_discards d WHERE `+boundToSession("d.session_id")+`)
 			ORDER BY id`, now-LateAfter.Milliseconds())
 		if err != nil {
 			return false, err
@@ -1339,20 +1338,28 @@ func (r *Repo) MarkDeliveryUncertain(ctx context.Context, noticeID string) (bool
 	return marked, err
 }
 
+// boundToSession is the SQL condition of a task_occurrences row whose
+// session is the one named by the SQL expression id: the session it is
+// delivered to now or, while it has none, the one reserved for it. A run
+// rerouted elsewhere no longer belongs to its reserved session.
+func boundToSession(id string) string {
+	return `(task_occurrences.resolved_session_id = ` + id + `
+		OR (COALESCE(task_occurrences.resolved_session_id, '') = '' AND task_occurrences.reserved_session_id = ` + id + `))`
+}
+
 // SettleSessionDeleted settles every unfinished run bound to a deleted
-// session, plus markerOccurrenceID (a run whose new session was created but
-// not yet bound; 0 for none), whatever gate it waits at, and clears the
-// session's discard mark.
+// session (see boundToSession), whatever gate it waits at, and clears the
+// session's discard intent.
 // Undelivered work fails (session_deleted) and can be sent elsewhere; work
 // reserved or admitted is skipped with an unknown outcome. Finished history
 // is unchanged.
-func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, markerOccurrenceID int64) (int, error) {
+func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string) (int, error) {
 	var n int
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		n = 0
 		now := r.now().UnixMilli()
-		os, err := queryOccurrences(ctx, tx, `(resolved_session_id = ? AND state IN ('ready','assigned','late'))
-			OR (id = ? AND state IN ('ready','late')) ORDER BY id`, sessionID, markerOccurrenceID)
+		os, err := queryOccurrences(ctx, tx, boundToSession("?")+` AND state IN ('ready','assigned','late') ORDER BY id`,
+			sessionID, sessionID)
 		if err != nil {
 			return false, err
 		}
@@ -1391,26 +1398,19 @@ func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, marke
 	return n, err
 }
 
-// SessionDiscard is a saved session's delete that committed its mark but
-// not yet its settlement.
-type SessionDiscard struct {
-	SessionID          string
-	MarkerOccurrenceID int64
-}
-
 // MarkSessionDiscarding records, before a saved session's file is unlinked,
-// that its delete is under way: markerOccurrenceID (0 for none) is never
-// given a new session while the mark stands. Invisible to readers: it does
+// that its delete is under way: the runs bound to it are neither given it
+// again nor re-gated while the intent stands. Invisible to readers: it does
 // not change the revision.
-func (r *Repo) MarkSessionDiscarding(ctx context.Context, sessionID string, markerOccurrenceID int64) error {
+func (r *Repo) MarkSessionDiscarding(ctx context.Context, sessionID string) error {
 	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
-		_, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO session_discards (session_id, marker_occurrence_id, created_at)
-			VALUES (?, ?, ?)`, sessionID, markerOccurrenceID, r.now().UnixMilli())
+		_, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO session_discards (session_id, created_at) VALUES (?, ?)`,
+			sessionID, r.now().UnixMilli())
 		return false, err
 	})
 }
 
-// ClearSessionDiscard withdraws the mark of a delete whose file was not
+// ClearSessionDiscard withdraws the intent of a delete whose file was not
 // unlinked: the session and its work stay as they were.
 func (r *Repo) ClearSessionDiscard(ctx context.Context, sessionID string) error {
 	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
@@ -1419,37 +1419,37 @@ func (r *Repo) ClearSessionDiscard(ctx context.Context, sessionID string) error 
 	})
 }
 
-// SessionDiscards lists the marks a start must finish or undo.
-func (r *Repo) SessionDiscards(ctx context.Context) ([]SessionDiscard, error) {
+// SessionDiscards lists the sessions whose delete a start must finish or undo.
+func (r *Repo) SessionDiscards(ctx context.Context) ([]string, error) {
 	rd, err := r.reader()
 	if err != nil || rd == nil {
 		return nil, err
 	}
-	rows, err := rd.QueryContext(ctx, "SELECT session_id, marker_occurrence_id FROM session_discards ORDER BY session_id")
+	rows, err := rd.QueryContext(ctx, "SELECT session_id FROM session_discards ORDER BY session_id")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []SessionDiscard
+	var out []string
 	for rows.Next() {
-		var d SessionDiscard
-		if err := rows.Scan(&d.SessionID, &d.MarkerOccurrenceID); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		out = append(out, d)
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }
 
-// MarkerDiscarding reports whether the session created for a run is being
-// deleted: the run must not get another one meanwhile.
-func (r *Repo) MarkerDiscarding(ctx context.Context, occurrenceID int64) (bool, error) {
+// SessionDiscarding reports whether a session's delete is under way: a run
+// must not be given it meanwhile.
+func (r *Repo) SessionDiscarding(ctx context.Context, sessionID string) (bool, error) {
 	rd, err := r.reader()
 	if err != nil || rd == nil {
 		return false, err
 	}
 	var found bool
-	err = rd.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM session_discards WHERE marker_occurrence_id = ?)", occurrenceID).Scan(&found)
+	err = rd.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM session_discards WHERE session_id = ?)", sessionID).Scan(&found)
 	return found, err
 }
 
