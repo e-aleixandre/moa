@@ -271,6 +271,7 @@
 .row:has(.pal-sess) .when {
   margin-top: 4px;
 }
+.pal-face { display: inline-flex; flex: none; }
 .row .cwd {
   font-family: var(--mono);
   font-size: var(--zl-fs-meta);

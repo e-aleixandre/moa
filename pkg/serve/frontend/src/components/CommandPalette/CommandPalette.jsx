@@ -28,6 +28,9 @@ import {
 } from "../../data/util/format.js";
 import { ordinarySessions, sessionSearchMatch } from "../../data/util/project-sessions.js";
 import { modLabel } from "../../data/util/shortcut.js";
+import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
+import { ownerState } from "../../data/owners-model.js";
+import { reopenClosedOwnerOf } from "../../data/owner-closed.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
 import { defaultModelSpec, modelStepItems, stepBack } from "./command-palette-model.js";
 import "./CommandPalette.css";
@@ -173,7 +176,7 @@ function Highlight({ text, query }) {
 }
 
 const CAP_NO_QUERY = 8; // spec §2 — cap the no-query session list; scroll for more
-const PALETTE_CLOSED = Object.freeze({ sessions: {}, tileTree: null, focusedTile: null });
+const PALETTE_CLOSED = Object.freeze({ sessions: {}, tileTree: null, focusedTile: null, owners: null });
 
 // shareSummary — the one line that says WHAT is being placed, so the list of
 // sessions is not a question without a subject. Names the files (the useful
@@ -424,7 +427,9 @@ export function CommandPalette({
       if (q) {
         if (!sessionSearchMatch(query, { ...sess, title, path: cwdLabel })) continue;
       } else {
-        if (!isRecentSession(sess)) continue;
+        // Sessions an owner launched stay out of RECENT (they would push the
+        // user's own down); typing anything brings them back.
+        if (sess.origin === "owner" || !isRecentSession(sess)) continue;
       }
       sessRows.push({
         kind: "session",
@@ -437,7 +442,31 @@ export function CommandPalette({
         paneN: paneOf(state.tileTree, sess.id),
         saved: sess.state === "saved",
         origin: sess.origin || "",
+        updated: sess.updated || 0,
       });
+    }
+    // Project owners live in their own slice: their conversation is filtered
+    // out above, so each owner appears once, as a row of its own. They join
+    // the same list by recency, and are searchable by name or project.
+    if (!sharing) {
+      for (const own of state.owners?.list || []) {
+        if (!own.session_id) continue;
+        const place = projectLabel(own.root || "");
+        if (q) {
+          if (!sessionSearchMatch(query, { title: own.name, path: place, cwd: own.root })) continue;
+        } else if (!isRecentSession(own)) continue;
+        sessRows.push({
+          kind: "owner",
+          id: own.session_id,
+          owner: own,
+          title: own.name,
+          cwdLabel: place,
+          when: relativeWhen(own.updated),
+          updated: own.updated || 0,
+          saved: own.session_state === "saved",
+        });
+      }
+      sessRows.sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0));
     }
     const cappedSessions = q ? sessRows : sessRows.slice(0, CAP_NO_QUERY);
     if (cappedSessions.length) {
@@ -463,7 +492,7 @@ export function CommandPalette({
         : { kind: "create-from-query", query });
     }
     return out;
-  }, [state.sessions, state.tileTree, query, actions, sharing]);
+  }, [state.sessions, state.owners, state.tileTree, query, actions, sharing]);
 
   // ── Build the flat item list for the CREATE step ───────────────────────────
   const createItems = useMemo(() => {
@@ -595,7 +624,13 @@ export function CommandPalette({
     // already ported) — assigning/opening is enough; resumeSession is only used
     // for the explicit conversation-open path so the reader gets immediate focus.
     try {
-      if (context === "grid") {
+      if (item.kind === "owner" && item.saved) {
+        // Opening an owner from the palette is an explicit act: it clears the
+        // owner's closed flag (a plain assign of a saved session would not).
+        await resumeSession(id, { explicit: true });
+        if (secondary && context === "conversation") navigate("grid");
+      } else if (context === "grid") {
+        if (item.kind === "owner") reopenClosedOwnerOf(id);
         if (secondary) { openSession(id); onClose(); inFlightRef.current = false; navigate(null); return; }
         // focusedPane is a 1-based DFS index (for copy/footer); resolve it to the
         // real tileId — after presets/splits the ids don't line up with 1..N.
@@ -680,7 +715,7 @@ export function CommandPalette({
       if (step === "create") doCreate();
       return;
     }
-    if (sel.kind === "session") { activateSession(sel, secondary); return; }
+    if (sel.kind === "session" || sel.kind === "owner") { activateSession(sel, secondary); return; }
     if (sel.kind === "action") { sel.run(); return; }
     if (sel.kind === "create-from-query") {
       // CORE fallback: open create with the query preserved (recents/browse
@@ -830,6 +865,31 @@ export function CommandPalette({
       onMouseEnter: isMobile ? undefined : () => { syncModelSelectionRef.current = false; setSelectedIdx(si); },
       onClick: () => { setSelectedIdx(si); requestAnimationFrame(() => activateSelectedFor(si)); },
     };
+    if (it.kind === "owner") {
+      const face = <span class="pal-face"><OwnerAvatarFor owner={it.owner} state={ownerState(it.owner)} size={isMobile ? 24 : 20} /></span>;
+      const hl = <Highlight text={it.title} query={query.toLowerCase().trim()} />;
+      if (isMobile) {
+        return (
+          <div {...common} key={`owner:${it.owner.id}`}>
+            {face}
+            <span class="name">{hl}</span>
+            <span class="cwd">{it.cwdLabel}</span>
+            {it.when && <span class="when">{it.when}</span>}
+          </div>
+        );
+      }
+      return (
+        <div {...common} key={`owner:${it.owner.id}`}>
+          {face}
+          <span class="pal-sess">
+            <span class="name">{hl}</span>
+            {it.cwdLabel && <span class="live">{it.cwdLabel}</span>}
+          </span>
+          <span class="badge origin">owner</span>
+          {it.when && <span class="when">{it.when}</span>}
+        </div>
+      );
+    }
     if (it.kind === "session") {
       if (isMobile) {
         return (
@@ -921,7 +981,7 @@ export function CommandPalette({
   function activateSelectedFor(si) {
     const sel = selectable[si];
     if (!sel) return;
-    if (sel.kind === "session") { activateSession(sel, false); return; }
+    if (sel.kind === "session" || sel.kind === "owner") { activateSession(sel, false); return; }
     if (sel.kind === "action") { sel.run(); return; }
     if (sel.kind === "create-from-query") { goToCreate(); return; }
     if (sel.kind === "project") { doCreate(sel.cwd); return; }

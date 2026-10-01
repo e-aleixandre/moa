@@ -58,3 +58,8 @@ test("the two orders are Recent and By project", () => {
   expect(source).toMatch(/title=\{label\}/);
   expect(source).toMatch(/aria-label=\{hint\}/);
 });
+
+test("the search door names the chord as a chip on desktop and not on the phone", () => {
+  expect(source).toMatch(/\{!phone && <kbd class="zl-search-kbd"[^>]*>\{paletteShortcut\}<\/kbd>\}/);
+  expect(source).toMatch(/title=\{`Search \$\{paletteShortcut\}`\}/);
+});

@@ -113,6 +113,20 @@
   cursor: pointer;
 }
 .zl-search.is-inert { cursor: default; }
+/* The chord, named beside the icon on desktop. The door widens by the chip
+   (36px square -> a pill); the phone has no keyboard and keeps the square. */
+.zl-search-kbd {
+  margin-left: 3px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  line-height: 16px;
+  letter-spacing: 0;
+  color: var(--zl-t4);
+  white-space: nowrap;
+}
+.zl-search.is-door:has(.zl-search-kbd) { width: auto; padding: 0 6px 0 9px; }
+.zl-search.is-door:hover .zl-search-kbd { color: var(--zl-t3); }
 .zl-search.is-door:hover { color: var(--zl-t2); }
 .zl-search.is-door:focus-visible {
   outline: 2px solid var(--zl-accent);

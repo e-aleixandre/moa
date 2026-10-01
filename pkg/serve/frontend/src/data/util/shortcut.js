@@ -39,3 +39,12 @@ export function formatShortcutFor(mac, key, { mod = false, shift = false } = {})
 export function formatShortcut(key, opts) {
   return formatShortcutFor(isMac, key, opts);
 }
+
+// paletteShortcutFor — how the command palette's chord is NAMED. Unlike the
+// other labels here it says Ctrl off Mac, because Ctrl+K is the chord the
+// global handler (app.jsx) actually listens for there; Alt+K is not bound.
+export function paletteShortcutFor(mac) {
+  return mac ? "⌘K" : "Ctrl K";
+}
+
+export const paletteShortcut = paletteShortcutFor(isMac);

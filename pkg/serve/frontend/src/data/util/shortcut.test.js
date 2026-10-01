@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { formatShortcut, formatShortcutFor } from "./shortcut.js";
+import { formatShortcut, formatShortcutFor, paletteShortcutFor } from "./shortcut.js";
 
 test("formatShortcutFor renders ⌘ on mac, Alt+ elsewhere", () => {
   expect(formatShortcutFor(true, "k", { mod: true })).toBe("⌘K");
@@ -31,4 +31,9 @@ test("formatShortcutFor passes glyph keys through (upper-case is a no-op)", () =
 test("formatShortcut resolves against the current platform (no throw)", () => {
   const out = formatShortcut("k", { mod: true });
   expect(out === "⌘K" || out === "Alt+K").toBe(true);
+});
+
+test("the palette chord is named ⌘K on mac and Ctrl K elsewhere", () => {
+  expect(paletteShortcutFor(true)).toBe("⌘K");
+  expect(paletteShortcutFor(false)).toBe("Ctrl K");
 });

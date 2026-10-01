@@ -3,7 +3,7 @@ import { useFlip } from "../../hooks/useFlip.js";
 import { InboxView } from "../../components/InboxView/InboxView.jsx";
 import { SessionCardMenu } from "../../components/SessionCardMenu/SessionCardMenu.jsx";
 import { SessionRow, Dot } from "../../components/SessionRow/SessionRow.jsx";
-import { formatShortcut } from "../../data/util/shortcut.js";
+import { paletteShortcut } from "../../data/util/shortcut.js";
 import {
   attentionKind,
   groupProjectSessions,
@@ -369,9 +369,6 @@ export function Sidebar({
   const ownersOpen = sectionOpen("owners");
   const activeOpen = sectionOpen("active");
   const savedOpen = sectionOpen("saved");
-  // The catalogue draws ⌘K. The binding still accepts both modifiers
-  // (formatShortcut is how the palette NAMES the same shortcut); the keycap
-  // is the accepted drawing, not a platform translation of it.
 
   // The order of the rows as rendered: a session that answers moves from
   // Active to Needs attention, a saved one rises to the top of Saved. useFlip
@@ -436,18 +433,19 @@ export function Sidebar({
               and not a labelled box, because the label never fitted: measured
               in the head, a box wanting 10+16+8+45("Search")+8+24(⌘K)+8 = 119px
               was handed 73, so the keycap sat on top of the word and the head
-              read "S⌘Kch". Dropping the cap still needs 87. The shortcut and
-              the name live in the tooltip and the accessible name, where they
-              cost no width at all. */}
+              read "S⌘Kch". The door is therefore the icon plus the bare chord
+              (no word), on desktop only; the name lives in the tooltip and
+              the accessible name. */}
           {onSearch ? (
             <button
               type="button"
               class="zl-search is-door"
               onClick={onSearch}
-              aria-label={`Search ${formatShortcut("K", { mod: true })}`}
-              title={`Search ${formatShortcut("K", { mod: true })}`}
+              aria-label={`Search ${paletteShortcut}`}
+              title={`Search ${paletteShortcut}`}
             >
               <SearchIcon />
+              {!phone && <kbd class="zl-search-kbd" aria-hidden="true">{paletteShortcut}</kbd>}
             </button>
           ) : (
             <span class="zl-search is-door is-inert" title="Search">

@@ -276,3 +276,70 @@ test("the double-activation guard is synchronous, not reactive state", () => {
   expect(source).toMatch(/inFlightRef = useRef\(false\)/);
   expect(source).toMatch(/if \(inFlightRef\.current\) return/);
 });
+
+test("owners are listed in Recent by recency, with their face, and searchable by name or project", async () => {
+  const { setState } = await import("../../data/store.js");
+  const now = Date.now();
+  setState({
+    sessions: {
+      s1: { id: "s1", title: "Fix login", cwd: "/home/u/dev/app", state: "idle", updated: now - 1000 },
+      o1: { id: "o1", title: "Winerim", kind: "owner", cwd: "/home/u/dev/winerim", state: "idle", updated: now },
+    },
+    owners: { list: [{ id: "ow1", name: "Winerim", root: "/home/u/dev/winerim", session_id: "o1", session_state: "saved", closed: true, updated: now }], loaded: true },
+  });
+  await mount({ initialStep: "search" });
+  expect(groups()).toContain("Recent");
+  const rows = rowTexts();
+  // Owner first (more recent), exactly once: its conversation row is hidden.
+  expect(rows.filter((r) => r.includes("Winerim"))).toHaveLength(1);
+  expect(rows[0]).toContain("Winerim");
+  expect(byClass("pal-face")).toHaveLength(1);
+
+  await type("winerim");
+  expect(rowTexts().some((r) => r.includes("Winerim"))).toBe(true);
+  await type("zzz-no-match");
+  expect(byClass("pal-face")).toHaveLength(0);
+  setState({ sessions: {}, owners: { list: [], loaded: true } });
+});
+
+test("opening an owner from the palette is an explicit resume", async () => {
+  const { setState } = await import("../../data/store.js");
+  const calls = [];
+  mock.module("../../data/session-actions.js", () => ({
+    ...realSessionActions,
+    createSession: () => Promise.resolve("s1"),
+    resumeSession: (id, opts) => { calls.push([id, opts]); return Promise.resolve(); },
+  }));
+  const { CommandPalette: Fresh } = await import("./CommandPalette.jsx?owner-open");
+  const now = Date.now();
+  setState({
+    sessions: { o1: { id: "o1", title: "Winerim", kind: "owner", state: "saved", updated: now } },
+    owners: { list: [{ id: "ow1", name: "Winerim", root: "/home/u/dev/winerim", session_id: "o1", session_state: "saved", closed: true, updated: now }], loaded: true },
+  });
+  hooks = []; effects = []; props = { open: true, onClose: () => {}, context: "conversation", initialStep: "search" };
+  const render = () => { cursor = 0; tree = Fresh(props); const q = effects; effects = []; q.forEach((f) => f()); };
+  for (let i = 0; i < 6; i++) { render(); for (let t = 0; t < 8; t++) await Promise.resolve(); }
+  await type("winerim");
+  await press("Enter");
+  expect(calls).toEqual([["o1", { explicit: true }]]);
+  setState({ sessions: {}, owners: { list: [], loaded: true } });
+});
+
+test("RECENT without a query hides owner-launched sessions; typing brings them back", async () => {
+  const { setState } = await import("../../data/store.js");
+  const now = Date.now();
+  setState({
+    sessions: {
+      u1: { id: "u1", title: "My own work", cwd: "/home/u/dev/app", state: "idle", updated: now - 2000 },
+      c1: { id: "c1", title: "Child of owner", origin: "owner", cwd: "/home/u/dev/app", state: "idle", updated: now },
+    },
+    owners: { list: [], loaded: true },
+  });
+  await mount({ initialStep: "search" });
+  expect(rowTexts().join(" ")).toContain("My own work");
+  expect(rowTexts().join(" ")).not.toContain("Child of owner");
+
+  await type("child");
+  expect(rowTexts().join(" ")).toContain("Child of owner");
+  setState({ sessions: {}, owners: { list: [], loaded: true } });
+});
