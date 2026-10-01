@@ -586,8 +586,10 @@ func TestScheduledNoticeStopKeepsOneAppend(t *testing.T) {
 	o := fireOnce(t, h, r, "steered", toSession(sess.ID), tasks.Delivery{})
 	pollUntil(t, 10*time.Second, "steer queued", func() bool { return steerQueued(sess, o.NoticeID) })
 	resp := mustAPI(t, srv, "POST", "/api/sessions/"+sess.ID+"/cancel-and-recall", "", http.StatusOK)
-	out := decode[map[string][]string](t, resp)
-	if ids := out["discarded_steer_ids"]; len(ids) != 0 {
+	out := decode[struct {
+		IDs []string `json:"discarded_steer_ids"`
+	}](t, resp)
+	if ids := out.IDs; len(ids) != 0 {
 		t.Fatalf("scheduled steer recalled to the composer: %v", ids)
 	}
 	pollUntil(t, 5*time.Second, "idle", func() bool { return sessState(sess) == StateIdle })
