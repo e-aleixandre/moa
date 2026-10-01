@@ -157,12 +157,56 @@ export function parseMarkdown(text) {
   return marked.parse(text);
 }
 
-function renderAndSanitizeMarkdown(text) {
-  const raw = marked.parse(text);
-  return DOMPurify.sanitize(raw, {
-    ADD_TAGS: ['div', 'button', 'span'],
-    ADD_ATTR: ['class', 'data-lang'],
+// Markdown output is inserted into the main document, so it gets an explicit
+// allowlist (not DOMPurify's defaults): no <style>/style= (CSS injection and
+// UI overlays) and no srcset. Only the tags and attributes our own renderers
+// and GFM emit are listed.
+const SANITIZE_CONFIG = {
+  ALLOWED_TAGS: [
+    'p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'pre',
+    'code', 'em', 'strong', 'b', 'i', 'del', 's', 'ul', 'ol', 'li', 'a',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'div', 'span',
+    'button', 'input', 'details', 'summary', 'img',
+  ],
+  ALLOWED_ATTR: [
+    'class', 'data-lang', 'href', 'title', 'target', 'rel', 'align', 'type',
+    'disabled', 'checked', 'start', 'open', 'colspan', 'rowspan', 'src', 'alt',
+    'width', 'height',
+  ],
+  ALLOW_DATA_ATTR: false,
+  FORBID_TAGS: ['style'],
+  FORBID_ATTR: ['style', 'srcset'],
+};
+
+const RASTER_DATA_URL_RE = /^data:image\/(png|jpeg|gif|webp);base64,[a-z0-9+/=\s]*$/i;
+
+// Only moa's own images (same origin: attachments, relative URLs) and inline
+// raster data may load. A remote <img> would fire a request the moment the
+// HTML is inserted, leaking the reader's IP and acting as a tracking pixel.
+function isLoadableImageSrc(src) {
+  if (RASTER_DATA_URL_RE.test(src)) return true;
+  try {
+    const url = new URL(src, location.href);
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+      && url.origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
+// Remote images degrade to their alt text. No DOM (bun tests) means DOMPurify
+// is a stub without addHook, same guard as util/sanitize.js. The hook runs on
+// the shared DOMPurify instance but only touches IMG nodes.
+if (typeof DOMPurify.addHook === 'function') {
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName !== 'IMG') return;
+    if (isLoadableImageSrc(node.getAttribute('src') || '')) return;
+    node.replaceWith(node.ownerDocument.createTextNode(node.getAttribute('alt') || ''));
   });
+}
+
+function renderAndSanitizeMarkdown(text) {
+  return DOMPurify.sanitize(marked.parse(text), SANITIZE_CONFIG);
 }
 
 export function renderMarkdown(text) {
