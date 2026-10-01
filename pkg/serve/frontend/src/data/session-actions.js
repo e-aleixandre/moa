@@ -474,6 +474,7 @@ export async function closeSession(id) {
 // the UI updates without waiting for the next poll (which can lag up to ~15s
 // on mobile). Also used by Close owner, whose one server call does the close.
 export function markSessionClosedLocally(id) {
+  closeGeneration.set(id, (closeGeneration.get(id) || 0) + 1);
   updateSession(id, {
     state: 'saved',
     readCandidateSeq: 0,
@@ -1030,7 +1031,16 @@ export async function resolveAskUser(sessionId, askId, answers) {
   updateSession(sessionId, { pendingAsk: null });
 }
 
-export async function resumeSession(id) {
+// closeGeneration counts the closes of each session, so a resume that was in
+// flight when the user closed it can tell it has been overtaken.
+const closeGeneration = new Map();
+
+// resumeSession loads a saved session and shows it. `explicit` is the user
+// asking for it (a click, the palette, Reopen); the automatic resume of a saved
+// session that merely became visible passes false and must not bring a closed
+// owner back.
+export async function resumeSession(id, { explicit = true } = {}) {
+  const generation = closeGeneration.get(id) || 0;
   let sess;
   try {
     sess = await api('POST', `/api/sessions/${id}/resume`, undefined, { timeoutMs: 0 });
@@ -1043,7 +1053,9 @@ export async function resumeSession(id) {
     throw e;
   }
   await loadSessions();
-  reopenClosedOwnerOf(sess.id);
+  // Closed while this was in flight: the later act of the user wins.
+  if ((closeGeneration.get(id) || 0) !== generation) return sess;
+  if (explicit) reopenClosedOwnerOf(sess.id);
   const state = store.get();
   if (state.isMobile) {
     setActiveSession(sess.id);

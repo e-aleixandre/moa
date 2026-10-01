@@ -634,17 +634,26 @@ func (m *Manager) releaseRouting(id string) {
 // turn; idle+!autorun only appends; busy/queued + !autorun leaves the event
 // in the inbox.
 func (m *Manager) deliverEvent(sessionID string, ev events.Event, autorun bool) error {
+	// Whether this is an owner is decided before the delivery: a Close racing
+	// it can unload the conversation, and the flag clear must not depend on it
+	// still being loaded afterwards.
+	toOwner := false
+	if sess, ok := m.Get(sessionID); ok {
+		toOwner = sess.Kind == session.KindOwner
+	}
 	_, err := m.injectEvent(sessionID, eventInjection{
 		Text:    func() string { return m.eventMessage(ev) },
 		Custom:  func(steer bool) map[string]any { return eventCustom(ev, autorun, steer) },
 		Autorun: autorun,
 	})
-	if err == nil {
+	if m.afterEventInject != nil {
+		m.afterEventInject()
+	}
+	if err == nil && toOwner {
 		// An event landing on a closed owner is one of the things that
-		// brings it back to the column.
-		if sess, ok := m.Get(sessionID); ok && sess.Kind == session.KindOwner {
-			m.reopenOwnerSession(sessionID)
-		}
+		// brings it back to the column; it goes through ownerEdit, so it
+		// lands after any Close in flight.
+		m.reopenOwnerSession(sessionID)
 	}
 	return err
 }

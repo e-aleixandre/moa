@@ -866,6 +866,9 @@ type Manager struct {
 	// afterOwnerClose is a test hook: it runs between closing an owner's
 	// conversation and saving its flag, the window where a wake-up can land.
 	afterOwnerClose func()
+	// afterEventInject is a test hook between an event reaching a session and
+	// the owner flag clear that follows it.
+	afterEventInject func()
 	// afterAutoTitleGeneration reports that a title goroutine finished, so a
 	// test can join it instead of polling for a write that may never come.
 	afterAutoTitleGeneration func(*ManagedSession)

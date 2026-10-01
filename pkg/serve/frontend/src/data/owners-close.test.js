@@ -7,6 +7,7 @@ import { test, expect, beforeEach } from 'bun:test';
 const { setState, store } = await import('./store.js');
 const { closeOwner } = await import('./owners.js');
 const { openSession, autoSelectMobile, __resetBootForTests } = await import('./tile-actions.js');
+const { resumeSession, markSessionClosedLocally } = await import('./session-actions.js');
 const { landingOrder } = await import('./util/project-sessions.js');
 
 const own = { id: 'own_a', name: 'A', session_id: 'oa', closed: false };
@@ -62,4 +63,40 @@ test('auto-selection leaves the flag; an explicit opening clears it', async () =
   expect(openSession('oa')).toBe(true);
   expect(store.get().owners.list[0].closed).toBe(false);
   expect(calls.filter((c) => c.startsWith('PATCH'))).toHaveLength(1);
+});
+
+function resumeFetch(release) {
+  globalThis.fetch = async (url, init = {}) => {
+    const method = init.method || 'GET';
+    calls.push(`${method} ${String(url).replace(/^https?:\/\/[^/]+/, '')}`);
+    if (method === 'POST' && String(url).endsWith('/resume')) {
+      await release;
+      return new Response(JSON.stringify({ id: 'oa', kind: 'owner', state: 'idle' }), { status: 200 });
+    }
+    if (String(url).includes('/api/sessions')) return new Response('[]', { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+}
+
+test('an automatic resume does not clear the flag; an explicit one does', async () => {
+  setState({ activeSession: null, owners: { list: [{ ...own, closed: true }], loaded: true, error: null, retrying: false } });
+  resumeFetch(Promise.resolve());
+  await resumeSession('oa', { explicit: false });
+  expect(store.get().owners.list[0].closed).toBe(true);
+  expect(calls.some((c) => c.startsWith('PATCH'))).toBe(false);
+
+  await resumeSession('oa');
+  expect(store.get().owners.list[0].closed).toBe(false);
+});
+
+test('a resume answered after the owner was closed does not select it again', async () => {
+  setState({ activeSession: null, owners: { list: [{ ...own, closed: true }], loaded: true, error: null, retrying: false } });
+  let release;
+  resumeFetch(new Promise((r) => { release = r; }));
+  const pending = resumeSession('oa', { explicit: false });
+  markSessionClosedLocally('oa');
+  release();
+  await pending;
+  expect(store.get().activeSession).not.toBe('oa');
+  expect(store.get().owners.list[0].closed).toBe(true);
 });

@@ -322,7 +322,7 @@ export function afterVisibilityChange() {
       if (sess?.state === 'saved' && !resumingIds.has(id)) {
         resumingIds.add(id);
         getResumeSession().then(resume =>
-          resume(id)
+          resume(id, { explicit: false })
             .catch(e => console.error('Auto-resume failed for', id, e))
             .finally(() => resumingIds.delete(id))
         );

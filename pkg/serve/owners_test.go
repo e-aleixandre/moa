@@ -927,3 +927,32 @@ func TestEventLandingMidCloseWinsOverTheFlag(t *testing.T) {
 		t.Fatal("an event landing mid-Close left the owner closed")
 	}
 }
+
+// The event reached the owner, then the conversation was unloaded before the
+// delivery looked at it again: the flag must still be cleared.
+func TestEventClearsTheFlagEvenIfTheOwnerIsUnloadedRightAfter(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	info, _ := ownerWithSession(t, mgr, t.TempDir(), "Winerim")
+	if resp := patchOwner(t, mgr, info.ID, `{"closed":true}`); resp.Code != http.StatusOK {
+		t.Fatalf("close = %d %s", resp.Code, resp.Body)
+	}
+	if _, err := mgr.ResumeSession(info.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	ev, _, err := mgr.events.Add(events.Event{Source: "ci", Title: "build ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.afterEventInject = func() {
+		if err := mgr.CloseSession(info.SessionID); err != nil {
+			t.Error(err)
+		}
+	}
+	if err := mgr.deliverEvent(info.SessionID, ev, false); err != nil {
+		t.Fatal(err)
+	}
+	if ownerClosedOnDisk(t, mgr, info.ID) {
+		t.Fatal("an event that raced the unload left the owner closed")
+	}
+}
