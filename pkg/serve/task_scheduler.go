@@ -329,7 +329,8 @@ func (s *taskScheduler) provisionNew(ctx context.Context, o tasks.Occurrence) bo
 			return false
 		}
 		if id, err = m.tasks.ReserveSession(ctx, o.ID, candidate); err != nil {
-			if ctx.Err() == nil {
+			var conflict *tasks.OccurrenceConflictError
+			if !errors.As(err, &conflict) && ctx.Err() == nil {
 				slog.Warn("task scheduler: reserving a run's session failed; will retry", "run", o.ID, "error", err)
 			}
 			return false
