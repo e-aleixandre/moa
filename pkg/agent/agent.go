@@ -2021,10 +2021,15 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		a.steerMu.Lock()
 		discarded := a.steers.clear()
 		a.steerMu.Unlock()
-		emitLifecycle(cfg, core.AgentEvent{
-			Type:          core.AgentEventSteersCanceled,
-			AttachmentIDs: steerAttachmentIDs(discarded),
-		})
+		// An empty unwind discarded nothing. Announcing it anyway reaches
+		// clients as a bare steers_canceled that clears every chip, ahead of
+		// the Stop's own correlated discard that needs those chips' text.
+		if len(discarded) > 0 {
+			emitLifecycle(cfg, core.AgentEvent{
+				Type:          core.AgentEventSteersCanceled,
+				AttachmentIDs: steerAttachmentIDs(discarded),
+			})
+		}
 	}
 
 	// If the run ended before the model replied (last message is still the

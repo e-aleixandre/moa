@@ -1,10 +1,16 @@
 package serve
 
 import (
+	"context"
 	"net/http"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 )
@@ -115,5 +121,64 @@ func TestSteerOperationIDIsBounded(t *testing.T) {
 	}
 	if sessState(sess) != StateRunning {
 		t.Fatalf("a rejected Stop changed the run: %s", sessState(sess))
+	}
+}
+
+// The stopped run's own unwind finds the queue already claimed by Stop. It
+// must not announce that empty discard: clients would receive a bare
+// steers_canceled that clears the chips before the Stop's correlated one,
+// whose text a client with a lost reply can only recover from those chips.
+// abortAfterUnwind holds Stop until the unwind has run, the adverse order.
+func TestEmptyUnwindDoesNotPrecedeTheStopDiscard(t *testing.T) {
+	ts, mgr := newNoticeTestServer(t, newMockProvider(delayedResponseHandler(time.Minute, "unused")))
+	sess, err := mgr.CreateSession(CreateOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{})
+	var once sync.Once
+	unsub := sess.runtime.Bus.Subscribe(func(bus.RunEnded) { once.Do(func() { close(ended) }) })
+	defer unsub()
+	sctx := sess.runtime.Context()
+	sctx.Agent = &abortAfterUnwind{AgentController: sctx.Agent, ended: ended}
+	if _, _, _, err := mgr.Send(sess.ID, "start", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, time.Second, "running", func() bool { return sessState(sess) == StateRunning })
+	for _, id := range []string{"q-first", "q-second"} {
+		if _, _, _, err := mgr.Send(sess.ID, id+" text", nil, id, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, ts.URL+"/api/sessions/"+sess.ID+"/ws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow() //nolint:errcheck
+	var init Event
+	if err := wsjson.Read(ctx, conn, &init); err != nil || init.Type != "init" {
+		t.Fatalf("first event = %+v, %v", init, err)
+	}
+
+	postOperation(t, ts.Client(), ts.URL+"/api/sessions/"+sess.ID+"/cancel-and-recall", `{"stop_id":"unwind-stop"}`, nil)
+	for {
+		var e Event
+		if err := wsjson.Read(ctx, conn, &e); err != nil {
+			t.Fatal(err)
+		}
+		if e.Type != "steers_canceled" {
+			continue
+		}
+		data := e.Data.(map[string]any)
+		if data["stop_id"] != "unwind-stop" {
+			t.Fatalf("an uncorrelated discard came before the Stop's: %v", data)
+		}
+		if !reflect.DeepEqual(data["discarded_steer_ids"], []any{"q-first", "q-second"}) {
+			t.Fatalf("Stop discard = %v, want both steers in queue order", data["discarded_steer_ids"])
+		}
+		return
 	}
 }
