@@ -1201,8 +1201,13 @@ func (r *Repo) RegateOnRestart(ctx context.Context) (int, error) {
 		}
 		orphans, _ := res.RowsAffected()
 		n += int(orphans)
+		// A run whose session's delete is still unsettled is left for that
+		// settlement: re-gating it would hide it from the discard.
 		cands, err := queryOccurrences(ctx, tx, `state IN ('ready','assigned') AND admitted_at IS NULL AND confirmed_at IS NULL
-			AND trigger <> 'run_now' AND due_at <= ? ORDER BY id`, now-LateAfter.Milliseconds())
+			AND trigger <> 'run_now' AND due_at <= ?
+			AND NOT EXISTS (SELECT 1 FROM session_discards d WHERE d.marker_occurrence_id = task_occurrences.id
+				OR (COALESCE(task_occurrences.resolved_session_id, '') <> '' AND d.session_id = task_occurrences.resolved_session_id))
+			ORDER BY id`, now-LateAfter.Milliseconds())
 		if err != nil {
 			return false, err
 		}
@@ -1305,7 +1310,8 @@ func (r *Repo) MarkDeliveryUncertain(ctx context.Context, noticeID string) (bool
 
 // SettleSessionDeleted settles every unfinished run bound to a deleted
 // session, plus markerOccurrenceID (a run whose new session was created but
-// not yet bound; 0 for none), and clears the session's discard mark.
+// not yet bound; 0 for none), whatever gate it waits at, and clears the
+// session's discard mark.
 // Undelivered work fails (session_deleted) and can be sent elsewhere; work
 // reserved or admitted is skipped with an unknown outcome. Finished history
 // is unchanged.
@@ -1314,8 +1320,8 @@ func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, marke
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		n = 0
 		now := r.now().UnixMilli()
-		os, err := queryOccurrences(ctx, tx, `(resolved_session_id = ? AND state IN ('ready','assigned'))
-			OR (id = ? AND state = 'ready') ORDER BY id`, sessionID, markerOccurrenceID)
+		os, err := queryOccurrences(ctx, tx, `(resolved_session_id = ? AND state IN ('ready','assigned','late'))
+			OR (id = ? AND state IN ('ready','late')) ORDER BY id`, sessionID, markerOccurrenceID)
 		if err != nil {
 			return false, err
 		}
@@ -1333,7 +1339,7 @@ func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string, marke
 			switch {
 			case o.AdmittedAt != 0 || state == NoticeDelivered:
 				o.State, o.Reason, o.Note = OccSkipped, ReasonDeletedAfterDeliver, "Removed after delivery; outcome unknown"
-			case state == NoticeSent:
+			case state == NoticeSent || (o.State == OccLate && o.Reason == ReasonUncertain):
 				o.State, o.Reason, o.Note = OccSkipped, ReasonDeletedDuringDeliver, "Removed during delivery; outcome unknown"
 			default:
 				o.State, o.Reason = OccFailed, ReasonSessionDeleted

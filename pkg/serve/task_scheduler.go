@@ -422,6 +422,8 @@ func (m *Manager) recoverScheduledTasks(ctx context.Context) {
 		return
 	}
 	m.finishSessionDiscards(ctx)
+	// Runs of a delete left unsettled stay out of the re-gate, so the next
+	// start still finds them.
 	if n, err := m.tasks.RegateOnRestart(ctx); err != nil {
 		slog.Warn("task scheduler: re-gating runs at startup failed", "error", err)
 	} else if n > 0 {
