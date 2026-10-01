@@ -164,13 +164,13 @@ func (m *Manager) SetPermissionMode(sessionID, modeStr string) (string, error) {
 
 // Cancel aborts the running agent in a session via bus command.
 func (m *Manager) Cancel(sessionID string) error {
-	_, err := m.CancelWithDiscardedSteers(sessionID)
+	_, err := m.CancelWithDiscardedSteers(sessionID, "")
 	return err
 }
 
 // CancelWithDiscardedSteers aborts the running agent and returns the queued
 // steers atomically discarded by that operation.
-func (m *Manager) CancelWithDiscardedSteers(sessionID string) ([]core.SteerItem, error) {
+func (m *Manager) CancelWithDiscardedSteers(sessionID, stopID string) ([]core.SteerItem, error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return nil, ErrNotFound
@@ -186,7 +186,7 @@ func (m *Manager) CancelWithDiscardedSteers(sessionID string) ([]core.SteerItem,
 		return nil, err
 	}
 	var discarded []core.SteerItem
-	if err := sess.runtime.Bus.Execute(bus.AbortAndRecall{RunGen: runGen, DiscardedSteers: &discarded}); err != nil {
+	if err := sess.runtime.Bus.Execute(bus.AbortAndRecall{RunGen: runGen, DiscardedSteers: &discarded, StopID: stopID}); err != nil {
 		return nil, err
 	}
 	return discarded, nil

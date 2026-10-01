@@ -13,7 +13,7 @@ import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } fro
 import { loadEvents } from './events.js'; // wake-on-event
 import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 import { closeSessionPanelForSession } from './session-panel.js';
-import { beginStop, endStop, restoreSteers } from './steer-restore.js';
+import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -785,8 +785,8 @@ export async function sendMessage(id, text, attachments = []) {
   }
 }
 
-export async function cancelRun(id) {
-  return api('POST', `/api/sessions/${id}/cancel-and-recall`);
+export async function cancelRun(id, stopId) {
+  return api('POST', `/api/sessions/${id}/cancel-and-recall`, stopId ? { stop_id: stopId } : undefined);
 }
 
 // stopRun aborts the run AND puts the queue back where the owner can edit it.
@@ -801,38 +801,44 @@ export async function cancelRun(id) {
 // Queued images cannot be pulled back (only their count was ever tracked
 // client-side), so they are reported instead.
 export async function stopRun(id) {
-  beginStop(id);
+  const stopId = beginOperation('stop');
   let result;
   try {
-    result = await cancelRun(id);
+    result = await cancelRun(id, stopId);
   } catch (err) {
-    // A 4xx is moa refusing the Stop, so nothing was discarded. Anything else
-    // (network, timeout, a proxy's 5xx) may hide a Stop the server did apply.
-    endStop(id, { answered: err?.status >= 400 && err?.status < 500 });
+    forgetAnsweredOperation(stopId, err);
     throw err;
   }
-  endStop(id, { answered: true });
-  const discarded = result?.discarded_steer_ids || [];
-  // The server's own items win: a steer admitted from another tab may have no
-  // chip here yet.
-  const known = new Map([
-    ...(store.get().sessions[id]?.pendingSteers || []),
-    ...(result?.discarded_steers || []),
-  ].map((s) => [s.id, s]));
-  restoreSteers(id, discarded.map((sid) => known.get(sid)).filter(Boolean));
+  endOperation(stopId);
+  applyDiscardReply(id, result);
+  return result;
+}
+
+// applyDiscardReply restores what this client's Stop or recall discarded, in
+// the server's order, and drops those chips. The server's own items win over
+// the chips: a steer admitted from another tab may have no chip here yet.
+function applyDiscardReply(id, result) {
+  const discarded = result?.discarded_steer_ids || (result?.discarded_steers || []).map((s) => s.id);
+  restoreDiscarded(id, discarded, result?.discarded_steers, store.get().sessions[id]?.pendingSteers);
   const current = store.get().sessions[id];
   if (discarded.length > 0 && current?.pendingSteers) {
     const gone = new Set(discarded);
     const kept = current.pendingSteers.filter((s) => !gone.has(s.id));
     updateSession(id, { pendingSteers: kept.length > 0 ? kept : null });
   }
-  return result;
+}
+
+// A 4xx is moa refusing the operation, so nothing was discarded. Anything else
+// (network, timeout, a proxy's 5xx) may hide one the server applied: its
+// broadcast still names it.
+function forgetAnsweredOperation(opId, err) {
+  if (err?.status >= 400 && err?.status < 500) endOperation(opId);
 }
 
 // cancelSteers drops every steer message still queued (not yet delivered) on
 // the server and returns the precise server-owned set it removed.
-export async function cancelSteers(id) {
-  return api('POST', `/api/sessions/${id}/steers/cancel`, undefined, {
+export async function cancelSteers(id, recallId) {
+  return api('POST', `/api/sessions/${id}/steers/cancel`, recallId ? { recall_id: recallId } : undefined, {
     headers: { 'X-Moa-Steers-Cancel-Response': 'discarded' },
   });
 }
@@ -867,24 +873,20 @@ export function recallQueuedSteers(id) {
     queuedRecalls.set(id, recall);
   }
   recall.pending = true;
-  cancelSteers(id)
+  const recallId = beginOperation('recall');
+  cancelSteers(id, recallId)
     .then((result) => {
-      const discarded = result?.discarded_steers || [];
-      restoreSteers(id, discarded);
-
-      const discardedIDs = new Set(result?.discarded_steer_ids || discarded.map((steer) => steer.id));
-      const current = store.get().sessions[id];
-      const pendingSteers = (current?.pendingSteers || []).filter((steer) => !discardedIDs.has(steer.id));
-      if (current?.pendingSteers?.length) {
-        updateSession(id, { pendingSteers: pendingSteers.length > 0 ? pendingSteers : null });
-      }
+      endOperation(recallId);
+      applyDiscardReply(id, result);
       if (queuedRecalls.get(id) === recall) queuedRecalls.delete(id);
     })
     .catch((e) => {
       recall.pending = false;
-      restoreSteers(id, queued);
+      // The queue is still the server's unless its broadcast says otherwise;
+      // restoring the local chips here could send the same text twice.
+      forgetAnsweredOperation(recallId, e);
       console.error('cancelSteers failed:', e);
-      addToast({ sessionId: id, title: 'Could not cancel queued messages', detail: e.message, type: 'error' });
+      addToast({ sessionId: id, title: "Couldn't recall — try again", type: 'error' });
     });
   return true;
 }

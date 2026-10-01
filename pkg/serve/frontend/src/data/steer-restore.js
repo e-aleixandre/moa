@@ -1,28 +1,61 @@
 // steer-restore.js — the one rule for putting discarded steers back in the
 // composer.
 //
-// The server owns the queue, so it alone says which steers were discarded: the
-// Stop or recall reply (`discarded_steers`), or the `steers_canceled` broadcast.
-// Either can arrive first, twice, or not at all, so the text is restored per
-// steer ID, at most once, and appended to whatever drop the composer has not
-// consumed yet — it never replaces it.
+// The server owns the queue, so it alone says which steers were discarded and
+// in which order. A Stop or queue recall of this client carries an operation ID
+// the server echoes in its reply and in the `steers_canceled` broadcast; only a
+// discard carrying one of those IDs is this client's to restore. Reply and
+// broadcast may arrive in either order, or one of them not at all, so each
+// steer ID is restored at most once and appended to whatever drop the composer
+// has not consumed yet — it never replaces it. A broadcast without one of our
+// IDs only removes chips.
 
 import { setState } from './store.js';
 import { addToast } from './notifications.js';
 import { combineQueueText, droppedImageCount } from './composer-queue.js';
 
 const restoredIDs = new Map(); // sessionId → Set of steer IDs already restored
-const stops = new Map(); // sessionId → { inFlight, unresolved }
+const ownOperations = new Set(); // operation IDs this client sent and may still hear about
 
-// restoreSteers appends the owner's text of `steers` to the session's composer
-// drop, skipping task notices and any ID restored before.
-export function restoreSteers(sessionId, steers) {
+// beginOperation mints the correlation ID for one Stop or recall.
+export function beginOperation(kind) {
+  let id;
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) id = `${kind}-${crypto.randomUUID()}`;
+  } catch { /* fall through */ }
+  id ||= `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  ownOperations.add(id);
+  return id;
+}
+
+// endOperation forgets an operation once moa has answered it: its reply named
+// every discard. A request that never got an answer stays known, because the
+// server may have applied it and its broadcast is then the only word left.
+export function endOperation(id) {
+  ownOperations.delete(id);
+}
+
+export function isOwnOperation(id) {
+  return !!id && ownOperations.has(id);
+}
+
+// restoreDiscarded restores, in the server's order, the steers it discarded.
+// `sources` resolve an ID to its text, the first that knows it winning.
+export function restoreDiscarded(sessionId, ids, ...sources) {
+  const byID = new Map();
+  for (const source of sources.reverse()) {
+    for (const steer of source || []) byID.set(steer.id, steer);
+  }
+  restoreSteers(sessionId, [...new Set(ids || [])].map((id) => byID.get(id)).filter(Boolean));
+}
+
+function restoreSteers(sessionId, steers) {
   let seen = restoredIDs.get(sessionId);
   if (!seen) {
     seen = new Set();
     restoredIDs.set(sessionId, seen);
   }
-  const fresh = (steers || []).filter((s) => s && !s.non_recallable && !seen.has(s.id));
+  const fresh = steers.filter((s) => !s.non_recallable && !seen.has(s.id));
   if (fresh.length === 0) return;
   fresh.forEach((s) => seen.add(s.id));
   setState((state) => {
@@ -45,35 +78,7 @@ export function restoreSteers(sessionId, steers) {
   }
 }
 
-// A Stop of this client is armed from its request until its reply tells what
-// was discarded. A failed request stays armed: the server may have stopped
-// anyway, and then its broadcast is the only word on the discarded text.
-export function beginStop(sessionId) {
-  const stop = stops.get(sessionId) || { inFlight: 0, unresolved: false };
-  stop.inFlight += 1;
-  stops.set(sessionId, stop);
-}
-
-export function endStop(sessionId, { answered }) {
-  const stop = stops.get(sessionId);
-  if (!stop) return;
-  stop.inFlight -= 1;
-  if (!answered) stop.unresolved = true;
-  if (stop.inFlight === 0 && !stop.unresolved) stops.delete(sessionId);
-}
-
-// restoreBroadcastDiscards is called with the chips a `steers_canceled`
-// broadcast is about to remove. Only a Stop of this client restores them: a
-// recall reports through its own reply, and another client's Stop is theirs.
-export function restoreBroadcastDiscards(sessionId, steers) {
-  const stop = stops.get(sessionId);
-  if (!stop) return;
-  restoreSteers(sessionId, steers);
-  stop.unresolved = false;
-  if (stop.inFlight === 0) stops.delete(sessionId);
-}
-
 export function __resetSteerRestoreForTests() {
   restoredIDs.clear();
-  stops.clear();
+  ownOperations.clear();
 }

@@ -588,7 +588,7 @@ function routeEvent(sessionId, evt) {
       handleWsSteer(sessionId, evt.data);
       break;
     case 'steers_canceled':
-      handleWsSteersCanceled(sessionId, evt.data?.discarded_steer_ids);
+      handleWsSteersCanceled(sessionId, evt.data?.discarded_steer_ids, evt.data?.stop_id || evt.data?.recall_id);
       break;
     case 'command_queued':
       handleWsCommandQueued(sessionId, evt.data);

@@ -141,6 +141,7 @@ type QueueCommand struct {
 type CancelSteer struct {
 	SessionID       string
 	DiscardedSteers *[]core.SteerItem
+	RecallID        string // echoed on SteersCanceled
 }
 
 // AppendToConversation adds a message to the conversation without running the agent.
@@ -159,6 +160,7 @@ type AbortAndRecall struct {
 	SessionID       string
 	RunGen          uint64
 	DiscardedSteers *[]core.SteerItem
+	StopID          string // echoed on SteersCanceled
 }
 
 // PromoteSubagent flips a running synchronous subagent job to async,

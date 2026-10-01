@@ -46,7 +46,7 @@ func registerRuntimeSubscriptions(sctx *SessionContext) {
 func registerRunControlHandlers(sctx *SessionContext) {
 	b := sctx.Bus
 
-	abortRun := func(expectedGen uint64, discardedOut *[]core.SteerItem) error {
+	abortRun := func(expectedGen uint64, discardedOut *[]core.SteerItem, stopID string) error {
 		sctx.abortMu.Lock()
 		defer sctx.abortMu.Unlock()
 		if expectedGen != 0 && sctx.RunGenAtomic.Load() != expectedGen {
@@ -72,14 +72,15 @@ func registerRunControlHandlers(sctx *SessionContext) {
 			SessionID:     sctx.SessionID,
 			AttachmentIDs: steerAttachmentIDs(discarded),
 			SteerIDs:      visibleSteerIDs(discarded),
+			StopID:        stopID,
 		})
 		return nil
 	}
 	b.OnCommand(func(AbortRun) error {
-		return abortRun(0, nil)
+		return abortRun(0, nil, "")
 	})
 	b.OnCommand(func(cmd AbortAndRecall) error {
-		return abortRun(cmd.RunGen, cmd.DiscardedSteers)
+		return abortRun(cmd.RunGen, cmd.DiscardedSteers, cmd.StopID)
 	})
 
 	b.OnCommand(func(cmd SteerAgent) error {
@@ -140,6 +141,7 @@ func registerCancelSteerHandler(sctx *SessionContext) {
 			SessionID:     sctx.SessionID,
 			AttachmentIDs: steerAttachmentIDs(discarded),
 			SteerIDs:      visibleSteerIDs(discarded),
+			RecallID:      cmd.RecallID,
 		})
 		return nil
 	})

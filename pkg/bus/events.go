@@ -234,6 +234,11 @@ type SteersCanceled struct {
 	SessionID     string
 	AttachmentIDs []string
 	SteerIDs      []string
+	// StopID and RecallID echo the client's correlation ID for the Stop or
+	// queue recall that discarded these steers, so only the client that asked
+	// puts their text back in its composer. Empty for every other cause.
+	StopID   string
+	RecallID string
 }
 
 // CommandQueued is published when a slash command is enqueued as a barrier in

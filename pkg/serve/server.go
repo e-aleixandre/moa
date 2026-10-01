@@ -1146,10 +1146,17 @@ func handleCancel(mgr *Manager) http.HandlerFunc {
 // only the steers the server atomically discarded, so a client can recall them
 // to its composer without resending a steer that already reached history. The
 // items travel with their text: a steer admitted after the client's queue
-// snapshot must come back too.
+// snapshot must come back too. An optional stop_id is echoed in the reply and
+// in the steers_canceled broadcast, so the client that stopped can tell its
+// own discards from anyone else's.
 func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		discarded, err := mgr.CancelWithDiscardedSteers(r.PathValue("id"))
+		op, err := readSteerOperation(w, r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		discarded, err := mgr.CancelWithDiscardedSteers(r.PathValue("id"), op.StopID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -1168,6 +1175,7 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"discarded_steer_ids": ids,
 				"discarded_steers":    recallableSteers(discarded),
+				"stop_id":             op.StopID,
 			})
 		}
 	}
@@ -1177,6 +1185,7 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 // for a session's agent. Clients that opt in receive the exact items removed,
 // so a recall never loses a steer that arrived after their queue snapshot.
 // The historical 204 remains the default for installed and third-party clients.
+// An optional recall_id is echoed like cancel-and-recall's stop_id.
 func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := mgr.Get(r.PathValue("id"))
@@ -1184,8 +1193,13 @@ func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		op, err := readSteerOperation(w, r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		var discarded []core.SteerItem
-		if err := sess.runtime.Bus.Execute(bus.CancelSteer{DiscardedSteers: &discarded}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.CancelSteer{DiscardedSteers: &discarded, RecallID: op.RecallID}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -1198,11 +1212,33 @@ func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"discarded_steer_ids": ids,
 				"discarded_steers":    steers,
+				"recall_id":           op.RecallID,
 			})
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// steerOperation is the optional body of a Stop or queue recall: the client's
+// correlation ID for it. Bodiless requests remain valid.
+type steerOperation struct {
+	StopID   string `json:"stop_id"`
+	RecallID string `json:"recall_id"`
+}
+
+const maxSteerOperationID = 128
+
+func readSteerOperation(w http.ResponseWriter, r *http.Request) (steerOperation, error) {
+	var op steerOperation
+	limitBody(w, r, 4<<10)
+	if err := json.NewDecoder(r.Body).Decode(&op); err != nil && !errors.Is(err, io.EOF) {
+		return op, fmt.Errorf("invalid body: %w", err)
+	}
+	if len(op.StopID) > maxSteerOperationID || len(op.RecallID) > maxSteerOperationID {
+		return op, fmt.Errorf("operation id too long")
+	}
+	return op, nil
 }
 
 // recallableSteers projects discarded steers to what a client may put back in

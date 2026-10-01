@@ -5,7 +5,7 @@ import { store, setState, updateSession } from '../store.js';
 import { markUnseen, acknowledgeVisibleLiveAttention } from './attention.js';
 import { parseSubagentNotification, skillForkLaunchRow } from './history.js';
 import { nextRunEpoch } from './init.js';
-import { restoreBroadcastDiscards } from '../steer-restore.js';
+import { endOperation, isOwnOperation, restoreDiscarded } from '../steer-restore.js';
 
 export function scheduleFlush() {
   if (wsState.flushScheduled) return;
@@ -390,14 +390,18 @@ function chronologicalSubagentOutcomes(outcomes) {
 
 // handleWsSteersCanceled clears the shared queue on every client when the
 // queued (not yet delivered) steers were dropped (e.g. dequeued for editing).
-export function handleWsSteersCanceled(id, discardedSteerIDs) {
+// `opId` is the stop_id or recall_id the server echoes: when it is one of this
+// client's, the chips may be the last copy of the text (the reply can come
+// later, or never), so they go back to the composer first.
+export function handleWsSteersCanceled(id, discardedSteerIDs, opId) {
   const sess = store.get().sessions[id];
   if (!sess || !sess.pendingSteers) return;
   if (Array.isArray(discardedSteerIDs)) {
     const discarded = new Set(discardedSteerIDs);
-    // For a Stop of this client these chips may be the last copy of the text:
-    // its reply can come later, or never.
-    restoreBroadcastDiscards(id, sess.pendingSteers.filter((steer) => discarded.has(steer.id)));
+    if (isOwnOperation(opId)) {
+      restoreDiscarded(id, discardedSteerIDs, sess.pendingSteers);
+      endOperation(opId);
+    }
     const pendingSteers = sess.pendingSteers.filter((steer) => !discarded.has(steer.id));
     updateSession(id, { pendingSteers: pendingSteers.length > 0 ? pendingSteers : null });
     return;

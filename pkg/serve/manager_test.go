@@ -2165,7 +2165,7 @@ func TestCancelWithDiscardedSteers(t *testing.T) {
 	if err != nil || action != "steer" || steerID != "client-steer" {
 		t.Fatalf("queued send = %q, %q, %v", action, steerID, err)
 	}
-	discarded, err := mgr.CancelWithDiscardedSteers(sess.ID)
+	discarded, err := mgr.CancelWithDiscardedSteers(sess.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2212,7 +2212,7 @@ func TestCancelAndSendUseAgentOccupancyWhenBusIsIdle(t *testing.T) {
 	}
 
 	firstDone := runDirectly()
-	if _, err := mgr.CancelWithDiscardedSteers(sess.ID); err != nil {
+	if _, err := mgr.CancelWithDiscardedSteers(sess.ID, ""); err != nil {
 		t.Fatalf("cancel with occupied agent and idle bus = %v", err)
 	}
 	<-firstDone
@@ -2225,7 +2225,7 @@ func TestCancelAndSendUseAgentOccupancyWhenBusIsIdle(t *testing.T) {
 	if action != "steer" {
 		t.Fatalf("send action = %q, want steer", action)
 	}
-	if _, err := mgr.CancelWithDiscardedSteers(sess.ID); err != nil {
+	if _, err := mgr.CancelWithDiscardedSteers(sess.ID, ""); err != nil {
 		t.Fatalf("cleanup cancel = %v", err)
 	}
 	<-secondDone

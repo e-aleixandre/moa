@@ -530,7 +530,7 @@ func TestStopDuringManualCompactionSettlesIdle(t *testing.T) {
 	completeRequest(t, srv, rec, "", "")
 	n := waitNoticeState(t, mgr, rec.ID, tasks.NoticeSent)
 	pollUntil(t, 5*time.Second, "notice queued during compact", func() bool { return noticeQueued(sess, n) })
-	if _, err = mgr.CancelWithDiscardedSteers(sess.ID); err != nil {
+	if _, err = mgr.CancelWithDiscardedSteers(sess.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	pollUntil(t, 5*time.Second, "compact settled", func() bool {
