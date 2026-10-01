@@ -370,6 +370,15 @@ func TestQuickDigestIsNotDroppedByTheUserRunDurationGate(t *testing.T) {
 // once it is. The request goes away with the test.
 func openPermission(t *testing.T, sess *ManagedSession) {
 	t.Helper()
+	// A run the session still has in flight ends with a RunEnded that clears
+	// the pending permissions of its generation (ClearPending): let it land
+	// first, or it can swallow the request this helper is about to open.
+	qctx, qcancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer qcancel()
+	if !sess.runtime.WaitQuiescent(qctx) {
+		t.Fatal("session did not settle before opening a permission")
+	}
+	sess.runtime.Bus.Drain(5 * time.Second)
 	if err := sess.runtime.Bus.Execute(bus.SetPermissionMode{Mode: "ask"}); err != nil {
 		t.Fatal(err)
 	}
