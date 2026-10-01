@@ -972,6 +972,23 @@ previous one with the same `tag`; urgent and ordinary ones alert again when they
 replace one (`renotify`). Safari on iOS ignores both options, so there the
 replacement and the sound are the OS's.
 
+### Native app
+
+The iOS app gets the same notifications through a relay that holds the APNs
+key ([`relay/`](../relay/README.md)). The content is end-to-end encrypted with a
+key the iPhone generated: the relay sees an opaque handle, a fixed-size sealed
+envelope, an opaque grouping id and the time, never the title, the session,
+the project or the kind. Only the server the iPhone paired with can send to it.
+
+The app registers itself with `POST /api/push/native`, removes itself with
+`DELETE /api/push/native` and reads `GET /api/push/native/status`; the three
+accept only the native `Authorization: Moa-Device` header, not the WebView
+cookie. The registration (`push_native.json` in the config dir, mode 0600)
+holds the device's push secret and disappears when the device is revoked or
+expires. The server only sends to the relay set in
+[`push_relay_url`](./configuration.md) and refuses a registration made against
+another one. Byte-level contract: [`relay/PROTOCOL.md`](../relay/PROTOCOL.md).
+
 ## REST endpoints
 
 Beyond the per-session WebSocket, Serve exposes a few global read/write endpoints:

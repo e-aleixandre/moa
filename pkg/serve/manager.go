@@ -780,7 +780,8 @@ type Manager struct {
 	usagePoller                 *usage.MultiPoller // nil when plan usage tracking is unavailable
 	pushStore                   *push.Store        // nil when Web Push is unavailable
 	pushDispatcher              *push.Dispatcher   // nil when Web Push is unavailable
-	pushPolicy                  *push.Policy       // decides what reaches pushDispatcher; nil with it
+	pushPolicy                  *push.Policy       // decides what reaches the transports; nil without any
+	pushNative                  *push.NativeSender // nil when native push is unavailable
 	// wake-on-event: the external event inbox and the file backing it. events is
 	// nil when that file could not be opened, which disables the feature instead
 	// of the server.
@@ -913,6 +914,7 @@ type ManagerConfig struct {
 	UsagePoller     *usage.MultiPoller // optional; enables GET /api/usage
 	PushStore       *push.Store        // optional; enables Web Push
 	PushDispatcher  *push.Dispatcher   // optional; enables Web Push
+	PushNative      *push.NativeSender // optional; enables native push through the relay
 	DefaultModel    core.Model
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig
@@ -1069,8 +1071,18 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		conversationKey:             conversationKey,
 		version:                     release.Result{Current: cfg.ReleaseInfo.DisplayVersion()},
 	}
+	// One policy for every transport: the PWA and the native app get the same
+	// notifications.
+	var senders push.Senders
 	if cfg.PushDispatcher != nil {
-		m.pushPolicy = push.NewPolicy(cfg.PushDispatcher, push.PolicyConfig{
+		senders = append(senders, cfg.PushDispatcher)
+	}
+	if cfg.PushNative != nil {
+		m.pushNative = cfg.PushNative
+		senders = append(senders, cfg.PushNative)
+	}
+	if len(senders) > 0 {
+		m.pushPolicy = push.NewPolicy(senders, push.PolicyConfig{
 			Summaries: push.ParseSummaries(cfg.MoaCfg.PushSummaries),
 		})
 	}

@@ -15,6 +15,7 @@ const (
 	routeOwnerAdmin
 	routePairingClaim
 	routeDeviceSession
+	routeNativeDevice
 )
 
 // routeAuthorizationMiddleware is kept separate from authentication so route
@@ -45,6 +46,13 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 				http.Error(w, "paired device authentication required", http.StatusForbidden)
 				return
 			}
+		case routeNativeDevice:
+			// Only native code holds the credential header. A WebView session
+			// cookie must not be able to swap the push keys (an XSS could).
+			if !authenticated || identity.Kind != "device" || !identity.Header {
+				http.Error(w, "native device authentication required", http.StatusForbidden)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -62,6 +70,8 @@ func serveRouteAccess(r *http.Request) routeAccess {
 		return routeDeviceSession
 	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/device/revoke":
 		return routeDeviceSession
+	case r.URL.Path == "/api/push/native" || r.URL.Path == "/api/push/native/status":
+		return routeNativeDevice
 	case r.URL.Path == "/api/pulse/pairings" && r.Method == http.MethodPost:
 		return routeOwnerAdmin
 	case r.URL.Path == "/api/pulse/devices" && r.Method == http.MethodGet:

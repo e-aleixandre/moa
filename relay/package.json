@@ -1,0 +1,12 @@
+{
+  "name": "moa-push-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "4.145.0"
+  }
+}

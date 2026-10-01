@@ -78,6 +78,7 @@ switched off for a project — is kept separately, in
 | `auto_verify` | bool | `false` | Run verification checks automatically after changes |
 | `brave_api_key` | string | | Enables the `web_search` tool |
 | `push_summaries` | string | `"passive"` | How push notifications announce an owner digesting a report and wake-on-event deliveries. `passive` = no sound, one per project (per source for events) that replaces the previous one. `active` = as loud as a finished run. `off` = never. Questions and permissions are not affected: they are always urgent |
+| `push_relay_url` | string | `"https://push.letmoa.run"` | Origin of the native push relay. Change it only if you build the iOS app with your own APNs key and run your own relay (`relay/`). HTTPS origin only (plain HTTP is accepted for a loopback relay under test). Read from the global config only |
 | `cache_ttl` | string | `"1h"` | Interactive prompt-cache TTL. Only `"5m"` changes behavior; any other value falls back to the 1h default. On Anthropic it also sets when the web UI warns that the cache has expired and offers [Start fresh](./serve.md#prompt-cache-expiry-and-start-fresh) |
 | `stt_language` | string | `"en"` | Speech-to-text language hint (ISO-639-1, e.g. `"es"`, `"en"`). Avoids mis-detection on short clips. Use `"auto"` to let the model detect |
 | `stt_model` | string | `"gpt-transcribe"` | Speech-to-text model. `"gpt-4o-mini-transcribe"` costs half as much per minute; `"whisper-1"` is the older, slower model it replaced |

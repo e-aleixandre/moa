@@ -87,6 +87,7 @@ func runServe(args []string) {
 	// An unresolvable config dir disables push instead of dropping key files
 	// into whatever directory serve happened to be started from.
 	pushStore, pushDispatcher := buildPush(core.ConfigDir())
+	pushNative := buildNativePush(core.ConfigDir(), moaCfg.PushRelayURL)
 
 	mgr := serve.NewManager(ctx, serve.ManagerConfig{
 		ProviderFactory: func(model core.Model) (core.Provider, error) {
@@ -100,6 +101,7 @@ func runServe(args []string) {
 		UsagePoller:            newAnthropicUsagePoller(authStore),
 		PushStore:              pushStore,
 		PushDispatcher:         pushDispatcher,
+		PushNative:             pushNative,
 		DefaultModel:           defaultModel,
 		WorkspaceRoot:          cwd,
 		MoaCfg:                 moaCfg,
@@ -231,6 +233,30 @@ func buildPush(cfgDir string) (*push.Store, *push.Dispatcher) {
 		return nil, nil
 	}
 	return store, push.NewDispatcher(store, vapid, pushSubscriber)
+}
+
+// buildNativePush opens the native push registrations and the sender to the
+// configured relay. On any error it logs and returns nil: serve runs without
+// native push, and Web Push is unaffected.
+func buildNativePush(cfgDir, relayURL string) *push.NativeSender {
+	if cfgDir == "" {
+		fmt.Fprintln(os.Stderr, "⚠️  Native push disabled: cannot resolve the moa config directory")
+		return nil
+	}
+	if relayURL == "" {
+		relayURL = push.DefaultRelayURL
+	}
+	relay, err := push.NormalizeRelayURL(relayURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  Native push disabled: push_relay_url: %v\n", err)
+		return nil
+	}
+	store, err := push.NewNativeStore(filepath.Join(cfgDir, "push_native.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  Native push disabled: %v\n", err)
+		return nil
+	}
+	return push.NewNativeSender(store, relay)
 }
 
 // errUsageTokenExpired signals the poller that an OAuth credential exists but

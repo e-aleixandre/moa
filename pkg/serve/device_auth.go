@@ -42,6 +42,9 @@ type authIdentity struct {
 	Kind      string
 	DeviceID  string
 	ExpiresAt time.Time
+	// Header: the device presented its credential in the Authorization
+	// header, which only native code holds; a WebView cookie does not set it.
+	Header bool
 }
 
 type authIdentityContextKey struct{}
@@ -731,6 +734,36 @@ func (s *deviceStore) withActiveDevice(id string, fn func() error) error {
 	return errInvalidDeviceCredential
 }
 
+// isActive reports whether a device is paired right now: known, not revoked,
+// not expired, with the store usable.
+func (s *deviceStore) isActive(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.unavailable {
+		return false
+	}
+	now := s.now().UTC()
+	for _, device := range s.state.Devices {
+		if device.ID == id {
+			return device.RevokedAt == nil && device.ExpiresAt.After(now)
+		}
+	}
+	return false
+}
+
+// addOnDeactivate chains fn to what runs when a device is revoked or expires.
+func (s *deviceStore) addOnDeactivate(fn func(string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prev := s.onDeactivate
+	s.onDeactivate = func(id string) {
+		if prev != nil {
+			prev(id)
+		}
+		fn(id)
+	}
+}
+
 func (s *deviceStore) registerWebSocketLease(identity authIdentity, closeFn func(string)) (*deviceLease, error) {
 	if identity.Kind != "device" {
 		return nil, nil
@@ -1004,6 +1037,7 @@ func authMiddleware(token string, secureCookie bool, devices *deviceStore, next 
 			}
 			identity, err := devices.authenticate(credential)
 			if err == nil {
+				identity.Header = true
 				next.ServeHTTP(w, withDeviceStore(withAuthIdentity(r, identity), devices))
 				return
 			}
@@ -1052,6 +1086,7 @@ func networkOwnerMiddleware(devices *deviceStore, next http.Handler) http.Handle
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+			identity.Header = true
 			next.ServeHTTP(w, withAuthIdentity(r, identity))
 			return
 		}

@@ -214,6 +214,9 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
+	mux.HandleFunc("POST /api/push/native", handlePushNativeRegister(manager))
+	mux.HandleFunc("DELETE /api/push/native", handlePushNativeDelete(manager))
+	mux.HandleFunc("GET /api/push/native/status", handlePushNativeStatus(manager))
 	// wake-on-event: the owner's inbox. Deciding where an event goes is the
 	// owner's call, so these sit on the normal browser auth, not the automation
 	// token — that token may write events and nothing else.
@@ -239,6 +242,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 			slog.Warn("device authentication disabled", "error", err)
 		}
 	}
+	manager.attachNativePush(devices)
 	// Device handlers receive the store selected above; the rest of Serve stays
 	// independent of device pairing.
 	mux.HandleFunc("POST /api/pulse/pairings", handlePulsePairing(devices))
@@ -290,7 +294,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 func pulseNoStoreMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session", "/api/voice/live/session", "/api/voice/live/ask", "/api/voice/live/close", "/api/voice/live/heartbeat":
+		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session", "/api/voice/live/session", "/api/voice/live/ask", "/api/voice/live/close", "/api/voice/live/heartbeat", "/api/push/native", "/api/push/native/status":
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)

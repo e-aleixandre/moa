@@ -101,6 +101,7 @@ type MoaConfig struct {
 	PersistentShell        *bool                `json:"persistent_shell,omitempty"`              // nil = true (enabled by default)
 	UpdateCheck            *bool                `json:"update_check,omitempty"`                  // nil = true (check stable releases at most every 6h)
 	PushSummaries          string               `json:"push_summaries,omitempty"`                // How owner digests and event notifications are announced: "passive" (default: no sound, one per project replacing the last), "active" or "off".
+	PushRelayURL           string               `json:"push_relay_url,omitempty"`                // Origin of the native push relay (default https://push.letmoa.run). Only for an app built with its own APNs key and relay. Global config only.
 	CacheTTL               string               `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "1h" (default) or "5m". Only "5m" changes behavior.
 	STTLanguage            string               `json:"stt_language,omitempty"`                  // Speech-to-text language as ISO-639-1 (e.g. "es", "en"). Empty = "en"; "auto" lets the model detect.
 	STTModel               string               `json:"stt_model,omitempty"`                     // Speech-to-text model id. Empty = "gpt-transcribe".
@@ -639,6 +640,9 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		// with none set the global choice must survive the merge.
 		CompactModel:  mergeScalar(base.CompactModel, override.CompactModel),
 		PushSummaries: mergeScalar(base.PushSummaries, override.PushSummaries),
+		// Where notification secrets are sent: a repository's project config
+		// must not be able to redirect them.
+		PushRelayURL: base.PushRelayURL,
 		// A pointer, so an unset project config (nil) leaves the global switch
 		// alone while an explicit false can still turn the trim back on for one
 		// project after disabling it globally.

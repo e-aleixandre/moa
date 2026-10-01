@@ -74,6 +74,25 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
 
 
+  relay:
+    name: Push relay
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            relay/package-lock.json
+
+      - name: Test
+        working-directory: relay
+        run: |
+          npm ci
+          npm test
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
