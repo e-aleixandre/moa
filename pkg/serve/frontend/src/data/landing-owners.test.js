@@ -55,9 +55,17 @@ test("a child's activity is credited to its owner, never landed on itself", () =
   expect(landingOrder(sessions, owners)).toEqual(['oa', 's1', 'ob']);
 });
 
-test('an owner whose only live work is a child is still a landing target', () => {
+test('a closed owner is never a landing target, even with a child at work', () => {
   const sessions = {
     oa: { id: 'oa', kind: 'owner', state: 'saved', updated: 5 },
+    c1: { id: 'c1', origin: 'owner', ownerId: 'own_a', state: 'running', updated: 90 },
+  };
+  expect(landingOrder(sessions, owners)).toEqual([]);
+});
+
+test('an open owner is still credited by its working child', () => {
+  const sessions = {
+    oa: { id: 'oa', kind: 'owner', state: 'idle', updated: 5 },
     c1: { id: 'c1', origin: 'owner', ownerId: 'own_a', state: 'running', updated: 90 },
   };
   expect(landingOrder(sessions, owners)).toEqual(['oa']);

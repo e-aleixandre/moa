@@ -42,13 +42,13 @@ export function ordinarySessions(sessions = []) {
 // the empty state as if it had restarted. The sessions an owner dispatched are
 // not landed on themselves: their activity is credited to their owner's
 // conversation, which is where the user reads them from. Children whose owner
-// is not in `owners` yet are skipped until the owners roster arrives. An owner
-// credited only by a live child may itself be saved; landing on it resumes it,
-// which the product owner chose over hiding live work behind the empty state.
+// is not in `owners` yet are skipped until the owners roster arrives. A closed
+// (saved) owner is never landed on, nor credited by its children: resuming it
+// would undo the user's Close.
 export function landingOrder(sessions = {}, owners = []) {
   const ownerSessionIds = new Map();
   for (const own of owners || []) {
-    if (own?.id && own.session_id && sessions[own.session_id]) ownerSessionIds.set(own.id, own.session_id);
+    if (own?.id && own.session_id && sessions[own.session_id] && sessions[own.session_id].state !== "saved") ownerSessionIds.set(own.id, own.session_id);
   }
   const recency = new Map();
   const credit = (id, at) => {
