@@ -338,7 +338,9 @@ async function confirm(request, env, deps) {
   if (!(await hmacVerify(key32(blob.k), 'moa-confirm-v1', enc.encode(body.c), p))) throw unauthorized();
   const expiresAt = now + HANDLE_TTL;
   const handle = await sealBlob(env, 'handle', { t: blob.t, e: blob.e, k: blob.k, x: expiresAt });
-  return reply({ handle, expires_at: expiresAt });
+  // The destination the challenge was issued for, so the app can check it is
+  // the registration it is waiting on and not an older one still in flight.
+  return reply({ handle, expires_at: expiresAt, token: blob.t, env: blob.e });
 }
 
 async function send(request, env, deps) {

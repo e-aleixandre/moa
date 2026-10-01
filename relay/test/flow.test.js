@@ -94,8 +94,11 @@ test('register → challenge push → confirm → handle that can send', async (
   const p = b64u(await hmac(K_SEND, 'moa-confirm-v1', enc.encode(r)));
   const conf = await handle(request('/v1/confirm', { body: JSON.stringify({ c: r, p }) }), env, deps);
   assert.equal(conf.status, 200);
-  const { handle: h, expires_at } = await json(conf);
+  const { handle: h, expires_at, token, env: destEnv } = await json(conf);
   assert.equal(expires_at, NOW + 90 * 86400);
+  // The app binds the confirmation to the registration it waits on with these.
+  assert.equal(token, TOKEN);
+  assert.equal(destEnv, 'sandbox');
   assert.equal(deps.calls.length, 1, 'confirm must not push');
 
   const sent = await handle((await signedSend({ h })).req(), env, deps);

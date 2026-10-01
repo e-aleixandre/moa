@@ -81,7 +81,12 @@ Only the relay that sealed a blob can open it.
    `POST /v1/confirm` with `{"c":<c>,"p":b64u(HMAC(K_send, "moa-confirm-v1" ‖ 0x00 ‖ ascii(c)))}`
 
 3. The relay opens `c`, checks its expiry, verifies `p` against the sealed
-   `K_send` and answers `200 {"handle":<h>,"expires_at":<unix>}`.
+   `K_send` and answers
+   `200 {"handle":<h>,"expires_at":<unix>,"token":<token>,"env":<env>}`:
+   the destination `c` was issued for. The app accepts the handle only if
+   they are the token and env of the registration it is waiting on; a
+   challenge from an earlier registration (another token, still unexpired)
+   is ignored.
 
 A third party who knows the token can register its own `K_send`, but the
 challenge reaches the real iPhone, which did not ask for it and never confirms.
