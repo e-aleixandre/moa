@@ -146,7 +146,10 @@ CREATE INDEX task_occurrences_session ON task_occurrences(resolved_session_id, s
   session_id TEXT PRIMARY KEY,
   marker_occurrence_id INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
-);`,
+);
+ALTER TABLE task_occurrences ADD COLUMN reserved_session_id TEXT;
+CREATE UNIQUE INDEX task_occurrences_reserved ON task_occurrences(reserved_session_id)
+  WHERE reserved_session_id IS NOT NULL;`,
 }
 
 // Repo is the shared task database. It opens lazily: a process that never

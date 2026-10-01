@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -95,11 +96,44 @@ func (s *FileStore) saveLocked(sess *Session) error {
 	return s.writeLocked(sess)
 }
 
+// SaveNew is a session's first save when its ID was chosen before it was
+// created: it never replaces a file already at the session's path, and
+// reports one with an error wrapping fs.ErrExist. Later saves use Save.
+func (s *FileStore) SaveNew(sess *Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess.Updated = nowFunc()
+	return s.publishLocked(sess, false)
+}
+
+// Exists reports whether anything occupies the session's path, without
+// reading it: a damaged file, a directory or a dangling link is there too.
+// An error is neither answer.
+func (s *FileStore) Exists(id string) (bool, error) {
+	if err := ValidateID(id); err != nil {
+		return false, err
+	}
+	if _, err := os.Lstat(s.path(id)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("session %s: %w", id, err)
+	}
+	return true, nil
+}
+
 // writeLocked validates and atomically writes sess to disk WITHOUT touching
 // Updated. Callers that want normal save semantics (bump Updated) should use
 // saveLocked; callers that need to persist a change without reordering
 // session lists (e.g. SetArchived) call writeLocked directly.
 func (s *FileStore) writeLocked(sess *Session) error {
+	return s.publishLocked(sess, true)
+}
+
+// publishLocked writes sess to a synced temporary file and then moves it
+// to its path in one step: a rename, or with replace false a link, which
+// fails if the path is taken.
+func (s *FileStore) publishLocked(sess *Session, replace bool) error {
 	if err := ValidateID(sess.ID); err != nil {
 		return err
 	}
@@ -135,7 +169,11 @@ func (s *FileStore) writeLocked(sess *Session) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("session: close temp: %w", err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if !replace {
+		if err := os.Link(tmpName, path); err != nil {
+			return fmt.Errorf("session: publish %s: %w", sess.ID, err)
+		}
+	} else if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("session: rename error: %w", err)
 	}
 	// A power loss after rename can otherwise lose the directory entry even
@@ -518,6 +556,63 @@ func (s *FileStore) Delete(id string) error {
 // path returns the filesystem path for a session ID.
 func (s *FileStore) path(id string) string {
 	return filepath.Join(s.dir, id+".json")
+}
+
+// NewID returns a fresh session ID for a caller that records it before the
+// session exists. Unlike newID it has no fallback: it fails instead.
+func NewID() (string, error) {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("session: generate ID: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// OpenFileStoreReadOnly returns the store of cwd under baseDir as
+// NewFileStore would, without creating its directory.
+func OpenFileStoreReadOnly(baseDir, cwd string) (*FileStore, error) {
+	if baseDir == "" {
+		var err error
+		if baseDir, err = defaultBaseDir(); err != nil {
+			return nil, err
+		}
+	}
+	if cwd == "" {
+		return &FileStore{dir: baseDir}, nil
+	}
+	return &FileStore{dir: filepath.Join(baseDir, scopeKey(cwd))}, nil
+}
+
+// ExistsByID reports whether a session file named id is in any store under
+// baseDir, without reading it. Unlike the finders, a directory that cannot
+// be read is an error, never absence.
+func ExistsByID(baseDir, id string) (bool, error) {
+	if err := ValidateID(id); err != nil {
+		return false, err
+	}
+	root, err := OpenFileStoreReadOnly(baseDir, "")
+	if err != nil {
+		return false, err
+	}
+	entries, err := os.ReadDir(root.dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("session %s: list stores: %w", id, err)
+	}
+	stores := []*FileStore{root}
+	for _, e := range entries {
+		if e.IsDir() {
+			stores = append(stores, &FileStore{dir: filepath.Join(root.dir, e.Name())})
+		}
+	}
+	for _, s := range stores {
+		if ok, err := s.Exists(id); ok || err != nil {
+			return ok, err
+		}
+	}
+	return false, nil
 }
 
 // newID generates a unique session ID.

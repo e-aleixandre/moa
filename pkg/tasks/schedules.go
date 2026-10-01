@@ -70,25 +70,25 @@ func saveSchedule(ctx context.Context, tx *sql.Tx, s scheduleRow) error {
 
 const occCols = `id, schedule_task_id, due_at, definition_revision, spec_json, trigger, observed_at, state, reason, note,
 	confirmed_at, resolved_session_id, child_task_id, notice_id, admitted_at, completed_at, missed_count,
-	created_at, updated_at, revision`
+	created_at, updated_at, revision, reserved_session_id`
 
 func scanOccurrence(sc interface{ Scan(...any) error }) (Occurrence, error) {
 	var (
 		o                                    Occurrence
 		spec                                 string
 		confirmed, child, admitted, complete sql.NullInt64
-		session, notice                      sql.NullString
+		session, notice, reserved            sql.NullString
 	)
 	if err := sc.Scan(&o.ID, &o.ScheduleTaskID, &o.DueAt, &o.DefinitionRevision, &spec, &o.Trigger, &o.ObservedAt,
 		&o.State, &o.Reason, &o.Note, &confirmed, &session, &child, &notice, &admitted, &complete, &o.MissedCount,
-		&o.CreatedAt, &o.UpdatedAt, &o.Revision); err != nil {
+		&o.CreatedAt, &o.UpdatedAt, &o.Revision, &reserved); err != nil {
 		return Occurrence{}, err
 	}
 	if err := json.Unmarshal([]byte(spec), &o.Spec); err != nil {
 		return Occurrence{}, fmt.Errorf("run #%d spec: %w", o.ID, err)
 	}
 	o.ConfirmedAt, o.ChildTaskID, o.AdmittedAt, o.CompletedAt = confirmed.Int64, child.Int64, admitted.Int64, complete.Int64
-	o.SessionID, o.NoticeID = session.String, notice.String
+	o.SessionID, o.NoticeID, o.ReservedSessionID = session.String, notice.String, reserved.String
 	return o, nil
 }
 
@@ -1259,6 +1259,37 @@ func (r *Repo) RegateOnRestart(ctx context.Context) (int, error) {
 		return n > 0, nil
 	})
 	return n, err
+}
+
+// ReserveSession records the ID a ready run for a new session creates its
+// session with, before the session exists: candidate the first time, the
+// recorded one ever after, whatever happens to the run. Invisible to
+// readers: it does not change the revision.
+func (r *Repo) ReserveSession(ctx context.Context, id int64, candidate string) (string, error) {
+	var out string
+	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
+		o, err := getOccurrence(ctx, tx, id)
+		if err != nil {
+			return false, err
+		}
+		if o.ReservedSessionID != "" {
+			out = o.ReservedSessionID
+			return false, nil
+		}
+		if o.State != OccReady || o.Spec.Target.Kind != TargetNew {
+			return false, &OccurrenceConflictError{Current: o}
+		}
+		if candidate == "" {
+			return false, invalid("a reservation needs a session ID")
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE task_occurrences SET reserved_session_id = ? WHERE id = ? AND reserved_session_id IS NULL",
+			candidate, id); err != nil {
+			return false, err
+		}
+		out = candidate
+		return false, nil
+	})
+	return out, err
 }
 
 // MarkDeliveryUncertain settles a scheduled assignment that was reserved

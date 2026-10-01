@@ -48,6 +48,10 @@ type CreateOpts struct {
 	// not part of the public JSON body: they are implicitly trusted, so only
 	// internal callers that already carry operator authority may set them.
 	extraMCPServers map[string]core.MCPServer
+	// sessionID is the ID the session is created with, chosen and recorded
+	// by the caller before (the scheduler's reservation). Not part of the
+	// public JSON body. The first save never replaces a file already there.
+	sessionID string
 }
 
 const firstTurnMCPWaitTimeout = 16 * time.Second
@@ -96,12 +100,40 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 		titleSource = session.TitleSourceManual
 	}
 
+	// A chosen ID is held in m.resuming until the session is exposed, so no
+	// Resume or Delete acts on its file in between.
+	exposed := false
+	if opts.sessionID != "" {
+		if err := session.ValidateID(opts.sessionID); err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		_, live := m.sessions[opts.sessionID]
+		_, resuming := m.resuming[opts.sessionID]
+		if live || resuming {
+			m.mu.Unlock()
+			return nil, ErrBusy
+		}
+		m.resuming[opts.sessionID] = struct{}{}
+		m.mu.Unlock()
+		defer func() {
+			if !exposed {
+				m.mu.Lock()
+				delete(m.resuming, opts.sessionID)
+				m.mu.Unlock()
+			}
+		}()
+	}
+
 	// Resolve ID + persistence first.
 	store, err := session.NewFileStore(m.sessionBaseDir, cwd)
 	if err != nil {
 		return nil, fmt.Errorf("create session store: %w", err)
 	}
 	persisted := store.Create()
+	if opts.sessionID != "" {
+		persisted.ID = opts.sessionID
+	}
 	persisted.Title = opts.Title
 	persisted.TitleSource = titleSource
 	persisted.SetOrigin(opts.Origin)
@@ -146,7 +178,11 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	thinking, _ := bus.QueryTyped[bus.GetThinkingLevel, string](sess.runtime.Bus, bus.GetThinkingLevel{})
 	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](sess.runtime.Bus, bus.GetPermissionMode{})
 	persisted.SetRuntimeMetadata(bootstrap.FullModelSpec(model), sess.CWD, permMode, thinking)
-	if err := store.Save(persisted); err != nil {
+	save := store.Save
+	if opts.sessionID != "" {
+		save = store.SaveNew
+	}
+	if err := save(persisted); err != nil {
 		if sess.infra.mcpMgr != nil {
 			sess.closeMCP()
 		} else if sess.infra.sessionCancel != nil {
@@ -164,6 +200,8 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	m.mu.Lock()
 	m.initializeAttentionRuntimeLocked(sess)
 	m.sessions[sess.ID] = sess
+	delete(m.resuming, opts.sessionID)
+	exposed = true
 	m.mu.Unlock()
 	return sess, nil
 }

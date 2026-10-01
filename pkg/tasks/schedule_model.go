@@ -163,8 +163,12 @@ type Occurrence struct {
 
 	DefinitionRevision int64          `json:"-"`
 	Spec               OccurrenceSpec `json:"-"`
-	CreatedAt          int64          `json:"-"`
-	UpdatedAt          int64          `json:"-"`
+	// ReservedSessionID is the session a run for a new session creates, set
+	// before it exists and kept for good. SessionID is where the run is
+	// delivered now, which a reroute may change.
+	ReservedSessionID string `json:"-"`
+	CreatedAt         int64  `json:"-"`
+	UpdatedAt         int64  `json:"-"`
 }
 
 // RunFailure is the newest unresolved failed run of a template.
