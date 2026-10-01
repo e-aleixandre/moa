@@ -65,8 +65,15 @@ func TestFindByMetadata(t *testing.T) {
 	if _, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7"); err == nil || !strings.Contains(err.Error(), "broken.json") {
 		t.Fatalf("unreadable candidate ignored: %v", err)
 	}
-	// An unrelated unreadable file does not block the search.
-	if err := os.WriteFile(filepath.Join(storeDir, "broken.json"), []byte(`{"id":`), 0o600); err != nil {
+	// A file cut before its header ended may have lost the key: incomplete.
+	if err := os.WriteFile(filepath.Join(storeDir, "broken.json"), []byte(`{"id":"zz"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7"); err == nil || !strings.Contains(err.Error(), "broken.json") {
+		t.Fatalf("truncated header ignored: %v", err)
+	}
+	// An unrelated unreadable file whose header is whole does not block the search.
+	if err := os.WriteFile(filepath.Join(storeDir, "broken.json"), []byte(`{"id":zz,"entries":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := FindByMetadata(base, MetaScheduledOccurrenceID, "7"); err != nil || len(got) != 1 {

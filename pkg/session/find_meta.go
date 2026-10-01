@@ -15,8 +15,10 @@ import (
 // It is meant for callers that must not create a second copy of something a
 // session already stands for, so an incomplete answer is an error rather than
 // a shorter list: a directory that cannot be read, or a session file that
-// cannot be decoded yet mentions key, makes it fail. A damaged file that does
-// not mention key cannot be the one looked for and is skipped, as List does.
+// cannot be decoded yet mentions key, makes it fail. A damaged file whose
+// header reached the disk whole (its bytes go on to the transcript) and does
+// not mention key cannot be the one looked for and is skipped, as List does;
+// one cut short before that may have lost the key, so it fails too.
 func FindByMetadata(baseDir, key, value string) ([]Summary, error) {
 	if baseDir == "" {
 		var err error
@@ -57,6 +59,8 @@ func FindByMetadata(baseDir, key, value string) ([]Summary, error) {
 					errs = append(errs, fmt.Errorf("%s: %w", path, rerr))
 				case rerr == nil && bytes.Contains(raw, []byte(`"`+key+`"`)):
 					errs = append(errs, fmt.Errorf("%s: unreadable session mentions %s", path, key))
+				case rerr == nil && !reachesHistory(raw):
+					errs = append(errs, fmt.Errorf("%s: incomplete session header", path))
 				}
 				continue
 			}
@@ -66,4 +70,15 @@ func FindByMetadata(baseDir, key, value string) ([]Summary, error) {
 		}
 	}
 	return out, errors.Join(errs...)
+}
+
+// reachesHistory reports whether raw goes on past the header to a
+// conversation history key, so a key missing from it is truly absent.
+func reachesHistory(raw []byte) bool {
+	for k := range heavySessionFields {
+		if bytes.Contains(raw, []byte(`"`+k+`"`)) {
+			return true
+		}
+	}
+	return false
 }

@@ -431,6 +431,7 @@ func decodeSummaryPrefix(r io.Reader) (Summary, bool) {
 
 	var sum Summary
 	sawID := false
+	atHistory := false
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
@@ -443,6 +444,7 @@ func decodeSummaryPrefix(r io.Reader) (Summary, bool) {
 		if heavySessionFields[key] {
 			// Everything we need comes before the conversation history —
 			// stop here without touching it.
+			atHistory = true
 			break
 		}
 		switch key {
@@ -479,6 +481,13 @@ func decodeSummaryPrefix(r io.Reader) (Summary, bool) {
 			if err := dec.Decode(&discard); err != nil {
 				return Summary{}, false
 			}
+		}
+	}
+	// More also reports false at EOF: a header cut short is unreadable, not a
+	// session without the fields that never reached the disk.
+	if !atHistory {
+		if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+			return Summary{}, false
 		}
 	}
 

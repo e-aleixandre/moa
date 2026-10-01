@@ -981,3 +981,61 @@ func TestFileStore_ConcurrentSave(t *testing.T) {
 		t.Errorf("expected 10 sessions, got %d", len(list))
 	}
 }
+
+// A header is only trusted once it reaches the transcript boundary or the
+// object's close: a file cut before that is unreadable, not a session
+// without metadata.
+func TestDecodeSummaryPrefixRejectsIncompleteHeader(t *testing.T) {
+	cases := map[string]string{
+		"after id":        `{"id":"abc","`,
+		"after id value":  `{"id":"abc"`,
+		"after id comma":  `{"id":"abc",`,
+		"mid metadata":    `{"id":"abc","metadata":{"cwd":"/x"`,
+		"before boundary": `{"id":"abc","metadata":{"cwd":"/x"},`,
+	}
+	for name, in := range cases {
+		if sum, ok := decodeSummaryPrefix(strings.NewReader(in)); ok {
+			t.Errorf("%s: accepted %+v", name, sum)
+		}
+	}
+	complete := map[string]string{
+		"transcript boundary": `{"id":"abc","metadata":{"cwd":"/x"},"entries":[{"broken`,
+		"closed object":       `{"id":"abc","metadata":{"cwd":"/x"}}`,
+	}
+	for name, in := range complete {
+		if sum, ok := decodeSummaryPrefix(strings.NewReader(in)); !ok || sum.ID != "abc" || sum.Metadata["cwd"] != "/x" {
+			t.Errorf("%s: rejected a complete header: %+v %v", name, sum, ok)
+		}
+	}
+}
+
+// Callers keep treating such a file as unreadable: List skips it, the
+// header lookup refuses it, and ScanCWDs counts it as unreadable.
+func TestTruncatedHeaderIsUnreadableForEveryCaller(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "proj")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	id := "0123456789abcdef01234567"
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(`{"id":"`+id+`"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	list, err := (&FileStore{dir: dir}).List()
+	if err != nil || len(list) != 0 {
+		t.Errorf("List = %+v, %v; want the truncated file skipped", list, err)
+	}
+	if _, err := FindSessionStoreReadOnly(base, id); err == nil || errors.Is(err, ErrNotFound) {
+		t.Errorf("FindSessionStoreReadOnly = %v; want an unreadable-header error", err)
+	}
+	if _, err := FindSummaryReadOnly(base, id); err == nil || errors.Is(err, ErrNotFound) {
+		t.Errorf("FindSummaryReadOnly = %v; want an unreadable-header error", err)
+	}
+	scan, _ := ScanCWDs(base)
+	if scan.Unreadable != 1 || scan.NoCWD != 0 {
+		t.Errorf("ScanCWDs = %+v; want it unreadable", scan)
+	}
+	if _, err := FindByMetadata(base, MetaCWD, "/x"); err == nil {
+		t.Error("FindByMetadata skipped a header that may have lost the key")
+	}
+}
