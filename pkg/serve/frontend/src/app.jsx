@@ -23,7 +23,7 @@ import { afterPendingInits, getVersion, reconnectAll, syncConnections } from "./
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
 import { refreshPushState } from "./data/push-client.js";
-import { installOpenSessionNavigation } from "./data/push-navigation.js";
+import { installOpenSessionNavigation, installNativeNavigation } from "./data/push-navigation.js";
 import { installShareNavigation, openShare, dismissShare } from "./data/share.js";
 import { installNativeShareNavigation } from "./data/native-share.js";
 import { shareIdFromLocation } from "./data/share-target.js";
@@ -62,6 +62,9 @@ function useBootstrap() {
   // Warm notification taps use the same openSession behavior as a cold
   // ?session= deep link, waiting for the authoritative initial session list.
   useEffect(() => installOpenSessionNavigation(), []);
+  // The iOS app opens a tapped notification's session in this page when it is
+  // already loaded, instead of reloading it (which would lose a draft).
+  useEffect(() => installNativeNavigation(), []);
 
   // Something shared into moa from another app arrives twice by design: the
   // service worker messages a live window, and its 303 redirect navigates to

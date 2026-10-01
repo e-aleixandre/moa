@@ -83,3 +83,63 @@ export function installOpenSessionNavigation({
     unsubscribe();
   };
 }
+
+// openSessionInPlace opens a session in the page that is already loaded, so a
+// notification tap in the native app does not reload it (and lose a draft).
+// It waits for the authoritative first session list, refreshes a stale one
+// once, and resolves false when the session cannot be opened: the caller then
+// falls back to loading the ?session= deep link.
+export function openSessionInPlace(sessionId, {
+  selectSession = openSession,
+  refreshSessions = loadSessions,
+  timeoutMs = 10000,
+} = {}) {
+  if (!isPushSessionID(sessionId)) return Promise.resolve(false);
+  const select = () => {
+    try {
+      return !!selectSession(sessionId);
+    } catch (_) {
+      return false;
+    }
+  };
+  const loaded = new Promise((resolve) => {
+    if (store.get().sessionsLoaded) return resolve(true);
+    let unsubscribe = () => {};
+    const timer = setTimeout(() => { unsubscribe(); resolve(false); }, timeoutMs);
+    unsubscribe = store.subscribe(() => {
+      if (!store.get().sessionsLoaded) return;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(true);
+    });
+  });
+  return loaded.then(async (ready) => {
+    if (!ready) return false;
+    if (select()) return true;
+    try {
+      await refreshSessions();
+    } catch (_) {
+      return false;
+    }
+    return select();
+  });
+}
+
+// installNativeNavigation exposes the in-place navigation to the iOS container
+// as window.MoaNavigation. Additive: an older container never calls it, and a
+// container that finds it missing loads the deep link as before.
+export function installNativeNavigation(target = globalThis) {
+  if (!target) return () => {};
+  const api = Object.freeze({
+    version: 1,
+    openSession: (sessionId) => openSessionInPlace(sessionId),
+    openInbox: () => {
+      openInbox();
+      return true;
+    },
+  });
+  target.MoaNavigation = api;
+  return () => {
+    if (target.MoaNavigation === api) delete target.MoaNavigation;
+  };
+}
