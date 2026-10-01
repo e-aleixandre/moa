@@ -200,14 +200,22 @@ self.addEventListener('push', (event) => {
     data = {};
   }
   const title = data.title || 'moa';
-  event.waitUntil(
-    self.registration.showNotification(title, {
-      body: data.body || '',
-      tag: data.tag || undefined, // coalesce same-session notifications
-      icon: '/icon-192.png',
-      data: { session_id: data.session_id || '', inbox: !!data.inbox },
-    })
-  );
+  // The server's policy sets the level. Passive = no sound and replaces the
+  // previous notification of its tag without alerting again; urgent and active
+  // alert again when they replace one. `silent` and `renotify` are ignored by
+  // Safari on iOS (MDN compat data), where the OS decides the sound.
+  const passive = data.level === 'passive';
+  const options = {
+    body: data.body || '',
+    icon: '/icon-192.png',
+    silent: passive,
+    data: { session_id: data.session_id || '', inbox: !!data.inbox },
+  };
+  if (data.tag) {
+    options.tag = data.tag; // replaces the previous notification of the same group
+    options.renotify = !passive; // renotify without a tag throws
+  }
+  event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', (event) => {
