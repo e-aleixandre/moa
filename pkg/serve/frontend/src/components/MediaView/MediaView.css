@@ -1,0 +1,11 @@
+.mv-stage { display: flex; flex: 1; align-items: center; justify-content: center; min-height: 0; background: #000; }
+.mv-video { display: block; width: 100%; max-width: 100%; max-height: 100%; background: #000; }
+.mv-audio-stage { flex-direction: column; gap: 20px; padding: 24px 16px; background: var(--zl-canvas, var(--base, #101018)); }
+.mv-audio-name { max-width: 100%; overflow: hidden; color: var(--zl-t2, var(--text, #ccc)); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.mv-audio { width: min(520px, 100%); }
+.mv-pdf-wrap { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.mv-pdf { flex: 1; min-height: 0; padding: 12px 12px max(12px, var(--shell-bottom, 0px)); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; background: #3a3b40; }
+.mv-pdf-page { margin: 0 auto 12px; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .4); }
+.mv-pdf-page canvas { display: block; }
+.mv-pdf-count { position: absolute; bottom: max(14px, var(--shell-bottom, 0px)); left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; background: rgba(16, 16, 24, .82); color: #e6e6ee; font-size: 13px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.mv-status { display: flex; flex: 1; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--zl-t3, var(--subtext0, #999)); text-align: center; }

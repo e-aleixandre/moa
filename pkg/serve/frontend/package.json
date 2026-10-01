@@ -12,6 +12,7 @@
     "highlight.js": "^11.11.1",
     "lucide-preact": "^0.577.0",
     "marked": "^18.0.6",
+    "pdfjs-dist": "6.3.289",
     "preact": "^10.25.0",
     "qrcode": "^1.5.4"
   },

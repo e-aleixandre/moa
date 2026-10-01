@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'preact/hooks';
 import { Download, Loader2, Maximize2, Minimize2 } from 'lucide-preact';
+import { MediaView } from '../MediaView/MediaView.jsx';
 import { Sheet } from '../Sheet/Sheet.jsx';
 import { renderMarkdown } from '../../data/util/markdown.js';
 import { downloadFile } from '../../data/util/file-download.js';
 import { readCapped, MAX_PREVIEW_SIZE, MAX_HIGHLIGHT_SIZE } from '../../data/util/file-preview.js';
 import { buildHTMLSrcdoc, HTML_PREVIEW_SANDBOX, HTML_PREVIEW_VIEWPORT } from '../../data/util/html-preview.js';
-import { previewKind, looksBinary } from '../../data/util/file-card.js';
+import { previewKind, looksBinary, mediaKind } from '../../data/util/file-card.js';
 import { usePinchZoom } from '../../hooks/usePinchZoom.js';
 import './FileViewer.css';
 
@@ -33,6 +34,10 @@ export function FileViewer({ open = true, name, mime, url, size, onClose }) {
   useEffect(() => {
     let cancelled = false;
     let imageURL;
+    if (mediaKind(name, mime)) {
+      setState({ kind: 'media' });
+      return undefined;
+    }
     if (size > MAX_PREVIEW_SIZE) {
       setState({ kind: 'too-large' });
       return undefined;
@@ -112,6 +117,7 @@ export function FileViewer({ open = true, name, mime, url, size, onClose }) {
       </div>
       <div class="file-viewer-body">
         {state.kind === 'loading' && <div class="file-viewer-status"><Loader2 class="spin" /> Loading preview…</div>}
+        {state.kind === 'media' && <MediaView kind={mediaKind(name, mime)} name={name} url={url} />}
         {state.kind === 'image' && (
           <div class={`file-viewer-image-wrap${zoomed ? ' is-zoomed' : ''}`} ref={containerRef}>
             <img src={state.url} alt={name} ref={contentRef} draggable={false} />

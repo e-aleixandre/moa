@@ -7,10 +7,13 @@ import { looksBinary } from '../../data/util/file-card.js';
 import { usePinchZoom } from '../../hooks/usePinchZoom.js';
 import { artifactFailure, artifactKind, artifactRevision } from '../../data/artifacts-model.js';
 import { ShareButton } from './ArtifactRow.jsx';
+import { MediaView } from '../MediaView/MediaView.jsx';
 
 // ARTIFACT_ESCAPE — the message an HTML artifact may post to ask the reader to
 // close, mirroring the LivePreview inspector's bridge. Only a message coming
 // from THIS iframe's contentWindow is honoured (see ArtifactsDrawer).
+const MEDIA_KINDS = new Set(['video', 'audio', 'pdf']);
+
 export const ARTIFACT_ESCAPE = 'moa-artifact-escape';
 export const ARTIFACT_SWIPE = 'moa-artifact-swipe';
 
@@ -32,6 +35,12 @@ export function ArtifactContent({ artifact, onEscapeFrame }) {
   useEffect(() => {
     let cancelled = false;
     let imageURL;
+    // Players read the URL themselves (streamed with Range); only the text
+    // and image readers need the bytes up front.
+    if (MEDIA_KINDS.has(artifactKind(artifact))) {
+      setState({ kind: 'media' });
+      return undefined;
+    }
     setState({ kind: 'loading' });
     fetch(artifact.url, { cache: 'no-store' }).then(async (response) => {
       if (!response.ok) {
@@ -77,6 +86,9 @@ export function ArtifactContent({ artifact, onEscapeFrame }) {
 
   if (state.kind === 'loading') {
     return <div class="af-loading" role="status"><Loader2 class="spin" size={16} /> Opening…</div>;
+  }
+  if (state.kind === 'media') {
+    return <MediaView kind={artifactKind(artifact)} name={artifact.name} url={artifact.url} />;
   }
   if (state.kind === 'image') {
     return (

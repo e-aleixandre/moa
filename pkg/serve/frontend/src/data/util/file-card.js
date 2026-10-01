@@ -23,10 +23,29 @@ export function parseFileCardData(result) {
   return data;
 }
 
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.m4v', '.mov', '.webm']);
+const AUDIO_EXTENSIONS = new Set(['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.oga', '.opus', '.flac']);
+
+// mediaKind says which in-app player a file opens in — 'video', 'audio' or
+// 'pdf' — or null for everything else. The mime wins; the extension covers a
+// generic or missing one.
+export function mediaKind(name, mime) {
+  const mediaType = (mime || '').split(';', 1)[0].trim().toLowerCase();
+  const extension = (name || '').toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+  if (mediaType.startsWith('video/')) return 'video';
+  if (mediaType.startsWith('audio/')) return 'audio';
+  if (mediaType === 'application/pdf') return 'pdf';
+  if (mediaType && mediaType !== 'application/octet-stream') return null;
+  if (VIDEO_EXTENSIONS.has(extension)) return 'video';
+  if (AUDIO_EXTENSIONS.has(extension)) return 'audio';
+  if (extension === '.pdf') return 'pdf';
+  return null;
+}
+
 export function isPreviewable(name, mime) {
   const mediaType = (mime || '').split(';', 1)[0].trim().toLowerCase();
   const lowerName = (name || '').toLowerCase();
-  return mediaType.startsWith('image/') || mediaType.startsWith('text/') || mediaType.includes('markdown') ||
+  return mediaKind(name, mime) !== null || mediaType.startsWith('image/') || mediaType.startsWith('text/') || mediaType.includes('markdown') ||
     mediaType === 'text/html' || lowerName.endsWith('.md') || lowerName.endsWith('.markdown') ||
     lowerName.endsWith('.html') || lowerName.endsWith('.htm');
 }
@@ -59,11 +78,13 @@ export function humanSize(n) {
   return `${value.toFixed(1)} ${units[i]}`;
 }
 
-// previewKind decides which FileViewer renderer applies (image / html /
-// markdown / plain text), based on mime first and file extension as fallback.
+// previewKind decides which FileViewer renderer applies (image / video / audio /
+// pdf / html / markdown / plain text), based on mime first and file extension as fallback.
 export function previewKind(name, mime) {
   const mediaType = (mime || '').split(';', 1)[0].trim().toLowerCase();
   const extension = (name || '').toLowerCase().match(/\.[^.]+$/)?.[0];
+  const media = mediaKind(name, mime);
+  if (media) return media;
   if (mediaType.startsWith('image/')) return 'image';
   if (mediaType === 'text/html' || extension === '.html' || extension === '.htm') return 'html';
   if (mediaType.includes('markdown') || extension === '.md' || extension === '.markdown') return 'markdown';

@@ -193,7 +193,12 @@ function publishBuild(outputFiles) {
 }
 
 const config = {
-  entryPoints: ["src/app.jsx"],
+  // pdf.js runs its parsing in a worker, which is its own file next to the
+  // lazy chunk that starts it (see components/MediaView).
+  entryPoints: [
+    "src/app.jsx",
+    { in: "node_modules/pdfjs-dist/build/pdf.worker.min.mjs", out: "pdf-worker" },
+  ],
   bundle: true,
   splitting: true,
   outdir,

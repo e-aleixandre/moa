@@ -529,3 +529,33 @@ func TestConversationMessagesProjectsAttachmentOnlyMessage(t *testing.T) {
 		t.Fatalf("attachment-only projection = %#v", projection.messages)
 	}
 }
+
+// TestGetAttachmentServesRanges pins the 206 responses a video attachment
+// needs to stream in iOS Safari.
+func TestGetAttachmentServesRanges(t *testing.T) {
+	mgr := newTestManager(t, context.Background(), newMockProvider())
+	const sessionID = "0123456789abcdef0123456789abcdef"
+	data := []byte("0123456789abcdef")
+	descriptor, err := mgr.attachStore.PutRef(sessionID, data, attachment.PutMeta{
+		Name: "clip.mp4", Mime: "video/mp4", Kind: "document",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewServer(mgr))
+	defer server.Close()
+	req, _ := http.NewRequest(http.MethodGet, server.URL+"/api/sessions/"+sessionID+"/attachments/"+descriptor.ID, nil)
+	req.Header.Set("Range", "bytes=4-7")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusPartialContent || string(body) != "4567" {
+		t.Fatalf("Range = %d %q, want 206 4567", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Range"); got != "bytes 4-7/16" {
+		t.Fatalf("Content-Range = %q", got)
+	}
+}

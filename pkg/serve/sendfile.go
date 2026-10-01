@@ -186,6 +186,9 @@ func artifactText(params map[string]any, key string) (string, error) {
 // falling back to sniffing at most the first 512 bytes of the ALREADY VALIDATED
 // descriptor. The path is never reopened: what is sniffed is what is served.
 func detectMimeFromFile(f *os.File, name string) string {
+	if t, ok := mediaMIMEs[strings.ToLower(filepath.Ext(name))]; ok {
+		return t
+	}
 	if t := mime.TypeByExtension(filepath.Ext(name)); t != "" {
 		return t
 	}
@@ -193,6 +196,17 @@ func detectMimeFromFile(f *os.File, name string) string {
 		return http.DetectContentType(head)
 	}
 	return "application/octet-stream"
+}
+
+// mediaMIMEs pins the types the in-app viewer plays. Go's built-in table has
+// no audio or video and the system one is absent on minimal hosts; with
+// nosniff set, a wrong or generic type makes Safari refuse to play the file.
+var mediaMIMEs = map[string]string{
+	".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime",
+	".webm": "video/webm", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
+	".aac": "audio/aac", ".wav": "audio/wav", ".ogg": "audio/ogg",
+	".oga": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac",
+	".pdf": "application/pdf",
 }
 
 // artifactHead reads at most the first 512 bytes of the validated descriptor

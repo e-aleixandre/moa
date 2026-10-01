@@ -1,7 +1,7 @@
 // file-card.test.js — run with `bun test`
 import { expect, test } from 'bun:test';
 import {
-  parseFileCardData, isPreviewable, isHTMLPreviewable, iconKindFor, previewKind, looksBinary,
+  parseFileCardData, isPreviewable, isHTMLPreviewable, iconKindFor, previewKind, looksBinary, mediaKind,
 } from './file-card.js';
 
 // ── parseFileCardData ────────────────────────────────────────────────────────
@@ -97,4 +97,30 @@ test('looksBinary detects NUL bytes and heavy replacement-character density', ()
   expect(looksBinary(heavy)).toBe(true);
   const light = 'a'.repeat(2000) + '\uFFFD';
   expect(looksBinary(light)).toBe(false);
+});
+
+// ── mediaKind ────────────────────────────────────────────────────────────────
+
+test('mediaKind picks the in-app player from the mime, then the extension', () => {
+  expect(mediaKind('a.bin', 'video/mp4')).toBe('video');
+  expect(mediaKind('a.bin', 'audio/mpeg; charset=x')).toBe('audio');
+  expect(mediaKind('a.bin', 'application/pdf')).toBe('pdf');
+  expect(mediaKind('clip.MOV', 'application/octet-stream')).toBe('video');
+  expect(mediaKind('song.m4a', '')).toBe('audio');
+  expect(mediaKind('Report.PDF', undefined)).toBe('pdf');
+});
+
+test('mediaKind leaves every other type alone', () => {
+  expect(mediaKind('notes.txt', 'text/plain')).toBeNull();
+  expect(mediaKind('x.png', 'image/png')).toBeNull();
+  // A declared non-media type is not overridden by a misleading extension.
+  expect(mediaKind('clip.mp4', 'text/html')).toBeNull();
+  expect(mediaKind('archive.zip', 'application/zip')).toBeNull();
+});
+
+test('media files are previewable and keep their own preview kind', () => {
+  expect(isPreviewable('a.mp4', 'video/mp4')).toBe(true);
+  expect(previewKind('a.pdf', 'application/pdf')).toBe('pdf');
+  expect(previewKind('a.mp3', 'audio/mpeg')).toBe('audio');
+  expect(previewKind('a.png', 'image/png')).toBe('image');
 });

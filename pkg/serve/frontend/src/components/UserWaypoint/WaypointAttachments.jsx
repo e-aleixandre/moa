@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { ChevronRight, ChevronDown, Code, File as FileIcon, FileText, Image as ImageIcon, Paperclip } from "lucide-preact";
-import { humanSize } from "../../data/util/file-card.js";
+import { humanSize, mediaKind } from "../../data/util/file-card.js";
+import { FileViewer } from "../FileViewer/FileViewer.jsx";
 
 // Only these image types are rendered inline; anything else falls back to a
 // plain row with a file icon. Defense in depth: the backend already validates
@@ -105,7 +106,7 @@ function rowBody({ attachment, label, imageSrc, onThumbnailError }) {
 //
 // Pure on purpose (the broken-thumbnail state lives in LiveAttachmentRow
 // below): display rules stay coverable without a browser DOM.
-export function AttachmentRow({ attachment, sessionId, onOpenImage, thumbnailFailed = false, onThumbnailError }) {
+export function AttachmentRow({ attachment, sessionId, onOpenImage, onOpenMedia, thumbnailFailed = false, onThumbnailError }) {
   const isImage = attachment.type === "image";
   const label = attachmentLabel(attachment, isImage ? "Image" : "File");
   const imageSrc = thumbnailFailed ? null : isImage ? attachmentImageSrc(attachment, sessionId) : null;
@@ -127,6 +128,16 @@ export function AttachmentRow({ attachment, sessionId, onOpenImage, thumbnailFai
   }
 
   const downloadURL = !isImage ? attachmentDownloadURL(attachment, sessionId) : null;
+  // Video, audio and PDF play inside moa; the share sheet a plain download
+  // opens on iOS is no way to watch them.
+  if (downloadURL && onOpenMedia && mediaKind(attachment.filename, attachment.mime_type)) {
+    return (
+      <button type="button" class="skirt-row" onClick={onOpenMedia} aria-label={`Open ${label}`} title={`Open ${label}`}>
+        {body}
+        <ChevronRight class="skirt-chev" aria-hidden="true" />
+      </button>
+    );
+  }
   if (downloadURL) {
     return (
       <a class="skirt-row" href={downloadURL} download title={`Download ${label}`}>
@@ -148,12 +159,30 @@ export function AttachmentRow({ attachment, sessionId, onOpenImage, thumbnailFai
 // chip row rather than leaving a broken image behind.
 function LiveAttachmentRow(props) {
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  // Mounted from the first open on and kept, so the sheet can animate out.
+  const [viewerMounted, setViewerMounted] = useState(false);
+  const { attachment, sessionId } = props;
+  const mediaURL = attachmentDownloadURL(attachment, sessionId);
   return (
-    <AttachmentRow
-      {...props}
-      thumbnailFailed={thumbnailFailed}
-      onThumbnailError={() => setThumbnailFailed(true)}
-    />
+    <>
+      <AttachmentRow
+        {...props}
+        onOpenMedia={() => { setViewerMounted(true); setViewerOpen(true); }}
+        thumbnailFailed={thumbnailFailed}
+        onThumbnailError={() => setThumbnailFailed(true)}
+      />
+      {viewerMounted && mediaURL && mediaKind(attachment.filename, attachment.mime_type) && (
+        <FileViewer
+          open={viewerOpen}
+          name={attachmentLabel(attachment, "File")}
+          mime={attachment.mime_type}
+          url={mediaURL}
+          size={attachmentBytes(attachment)}
+          onClose={() => setViewerOpen(false)}
+        />
+      )}
+    </>
   );
 }
 

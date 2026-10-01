@@ -716,3 +716,40 @@ func TestDownloadFile_DoesNotShadowFilesListing(t *testing.T) {
 		t.Fatalf("expected 200 from files listing, got %d", resp.StatusCode)
 	}
 }
+
+// TestDownloadFile_MediaTypesAndRange pins what iOS Safari needs to play a
+// shared file in the viewer: a concrete audio/video/PDF type (the response is
+// nosniff) and 206 ranges, since it refuses to stream video without them.
+func TestDownloadFile_MediaTypesAndRange(t *testing.T) {
+	srv, mgr, cancel := newTestServer(t)
+	defer cancel()
+	tmp := t.TempDir()
+	sess := newSendFileTestSession(t, mgr, tmp)
+	for name, want := range map[string]string{
+		"clip.mp4": "video/mp4", "clip.MOV": "video/quicktime", "song.mp3": "audio/mpeg",
+		"note.m4a": "audio/mp4", "doc.pdf": "application/pdf",
+	} {
+		filePath := filepath.Join(tmp, name)
+		if err := os.WriteFile(filePath, []byte("0123456789abcdef"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		data := lastLineJSON(t, resultText(execSendFile(t, sendFileTool(t, sess), map[string]any{"path": filePath})))
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+data["url"].(string), nil)
+		req.Header.Set("Range", "bytes=2-5")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close() //nolint:errcheck
+		if got := resp.Header.Get("Content-Type"); got != want {
+			t.Errorf("%s: Content-Type = %q, want %q", name, got, want)
+		}
+		if resp.StatusCode != http.StatusPartialContent || string(body) != "2345" {
+			t.Errorf("%s: Range = %d %q, want 206 2345", name, resp.StatusCode, body)
+		}
+		if resp.Header.Get("Accept-Ranges") != "bytes" {
+			t.Errorf("%s: missing Accept-Ranges", name)
+		}
+	}
+}

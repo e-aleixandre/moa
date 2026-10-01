@@ -132,7 +132,7 @@ export function ArtifactsDrawer() {
         dismiss();
         return;
       }
-      const editable = event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]');
+      const editable = event.target instanceof HTMLElement && event.target.closest('input, textarea, select, video, audio, [contenteditable="true"]');
       if (slice.view === 'reader' && panel.current?.contains(event.target) && !editable && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && isTopLayer(ownId()) && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
         // Reader content has no editable fields. Keeping arrows on the drawer
         // means comparison works from the keyboard without stealing movement
@@ -230,7 +230,8 @@ export function ArtifactsDrawer() {
   const filtered = filterArtifacts(items, query);
   const back = () => (fromList ? backToArtifactsList() : closeArtifacts());
   const onPointerDown = (event) => {
-    if (event.pointerType !== 'touch' || event.target.closest('.af-image-wrap.is-zoomed')) return;
+    // A drag on a player's scrubber or volume is the player's, not navigation.
+    if (event.pointerType !== 'touch' || event.target.closest('.af-image-wrap.is-zoomed, .mv-stage, .mv-pdf')) return;
     activeTouchPointers.current.add(event.pointerId);
     // A pinch belongs to the image zoomer, never to collection navigation.
     if (activeTouchPointers.current.size !== 1) {
@@ -243,7 +244,7 @@ export function ArtifactsDrawer() {
     const start = swipeStart.current;
     activeTouchPointers.current.delete(event.pointerId);
     swipeStart.current = null;
-    if (!start || start.id !== event.pointerId || event.pointerType !== 'touch' || event.target.closest('.af-image-wrap.is-zoomed')) return;
+    if (!start || start.id !== event.pointerId || event.pointerType !== 'touch' || event.target.closest('.af-image-wrap.is-zoomed, .mv-stage, .mv-pdf')) return;
     const direction = swipeDirection(start, { x: event.clientX, y: event.clientY });
     if (direction !== null) moveArtifact(direction);
   };
