@@ -124,8 +124,9 @@ type SpecSubtask struct {
 	Title string `json:"title"`
 }
 
-// OccurrenceSpec is the immutable snapshot of a template taken when its slot
-// is consumed. Later edits of the template never reach it.
+// OccurrenceSpec is the snapshot of a template taken when its slot is
+// consumed. Later edits of the template never reach it; only the owner's
+// reroute changes it, replacing its target with the chosen session.
 type OccurrenceSpec struct {
 	V                  int           `json:"v"`
 	Title              string        `json:"title"`
@@ -165,7 +166,7 @@ type Occurrence struct {
 	Spec               OccurrenceSpec `json:"-"`
 	// ReservedSessionID is the session a run for a new session creates, set
 	// before it exists and kept for good. SessionID is where the run is
-	// delivered now, which a reroute may change.
+	// delivered now; a reroute changes it and the snapshot's target.
 	ReservedSessionID string `json:"-"`
 	CreatedAt         int64  `json:"-"`
 	UpdatedAt         int64  `json:"-"`

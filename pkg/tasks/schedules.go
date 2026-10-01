@@ -1037,6 +1037,13 @@ func (r *Repo) RerouteOccurrence(ctx context.Context, id, revision int64, dest D
 				return false, &OccurrenceConflictError{Current: o}
 			}
 		}
+		// The owner chose this session: it is the run's target from now on,
+		// so a gate that withdraws the assignment sends Run back here, not
+		// to the original target (nor a session reserved for it).
+		o.Spec.Target = Target{Kind: TargetSession, ID: dest.SessionID}
+		if _, err := tx.ExecContext(ctx, "UPDATE task_occurrences SET spec_json = ? WHERE id = ?", mustJSON(o.Spec), o.ID); err != nil {
+			return false, err
+		}
 		if err := r.deliverOccurrence(ctx, tx, &o, dest); err != nil {
 			return false, err
 		}
@@ -1341,13 +1348,15 @@ func (r *Repo) MarkDeliveryUncertain(ctx context.Context, noticeID string) (bool
 // boundToSession is the SQL condition of a task_occurrences row whose
 // session is the one named by the SQL expression id: the session it is
 // delivered to now or, while it has none, the existing session its snapshot
-// targets or the one reserved for it. A run rerouted elsewhere no longer
-// belongs to its reserved session.
+// targets or, for a new session, the one reserved for it. A reroute makes its
+// session the snapshot's target, so a rerouted run no longer belongs to its
+// reserved session.
 func boundToSession(id string) string {
 	return `(task_occurrences.resolved_session_id = ` + id + `
-		OR (COALESCE(task_occurrences.resolved_session_id, '') = '' AND (task_occurrences.reserved_session_id = ` + id + `
-			OR (json_extract(task_occurrences.spec_json, '$.target.kind') = 'session'
-				AND json_extract(task_occurrences.spec_json, '$.target.id') = ` + id + `))))`
+		OR (COALESCE(task_occurrences.resolved_session_id, '') = '' AND CASE json_extract(task_occurrences.spec_json, '$.target.kind')
+			WHEN 'session' THEN json_extract(task_occurrences.spec_json, '$.target.id') = ` + id + `
+			WHEN 'new' THEN task_occurrences.reserved_session_id = ` + id + `
+			ELSE 0 END))`
 }
 
 // SettleSessionDeleted settles every unfinished run bound to a deleted
