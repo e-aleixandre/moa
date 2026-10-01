@@ -1340,11 +1340,14 @@ func (r *Repo) MarkDeliveryUncertain(ctx context.Context, noticeID string) (bool
 
 // boundToSession is the SQL condition of a task_occurrences row whose
 // session is the one named by the SQL expression id: the session it is
-// delivered to now or, while it has none, the one reserved for it. A run
-// rerouted elsewhere no longer belongs to its reserved session.
+// delivered to now or, while it has none, the existing session its snapshot
+// targets or the one reserved for it. A run rerouted elsewhere no longer
+// belongs to its reserved session.
 func boundToSession(id string) string {
 	return `(task_occurrences.resolved_session_id = ` + id + `
-		OR (COALESCE(task_occurrences.resolved_session_id, '') = '' AND task_occurrences.reserved_session_id = ` + id + `))`
+		OR (COALESCE(task_occurrences.resolved_session_id, '') = '' AND (task_occurrences.reserved_session_id = ` + id + `
+			OR (json_extract(task_occurrences.spec_json, '$.target.kind') = 'session'
+				AND json_extract(task_occurrences.spec_json, '$.target.id') = ` + id + `))))`
 }
 
 // SettleSessionDeleted settles every unfinished run bound to a deleted
@@ -1358,8 +1361,8 @@ func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string) (int,
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		n = 0
 		now := r.now().UnixMilli()
-		os, err := queryOccurrences(ctx, tx, boundToSession("?")+` AND state IN ('ready','assigned','late') ORDER BY id`,
-			sessionID, sessionID)
+		os, err := queryOccurrences(ctx, tx, boundToSession("?1")+` AND state IN ('ready','assigned','late') ORDER BY id`,
+			sessionID)
 		if err != nil {
 			return false, err
 		}
