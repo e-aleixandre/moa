@@ -163,7 +163,8 @@ func TestNativeSenderReactsToRelayAnswers(t *testing.T) {
 		relay.status, relay.reply = c.status, c.reply
 		s.Notify(context.Background(), Notification{Title: "t", Kind: KindDone, Level: LevelActive})
 		r, _ := s.LastResult("dev1")
-		if r.Result != c.result {
+		// A dropped registration has no status: the app sees it unregistered.
+		if c.kept && r.Result != c.result || !c.kept && r.Result != "" {
 			t.Errorf("%d %s: result %+v, want %s", c.status, c.reply, r, c.result)
 		}
 		if _, ok := s.Store().Get("dev1"); ok != c.kept {

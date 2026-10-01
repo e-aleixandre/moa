@@ -35,10 +35,12 @@ func (m *Manager) attachNativePush(devices *deviceStore) {
 		return
 	}
 	native := m.pushNative
-	devices.addOnDeactivate(func(id string) {
-		if err := native.Forget(id); err != nil {
+	devices.addOnDeactivate(func(id string) error {
+		err := native.Forget(id)
+		if err != nil {
 			slog.Warn("push native: drop registration of inactive device", "device", id, "error", err)
 		}
+		return err
 	})
 	native.SetActive(devices.isActive)
 	for _, r := range native.Store().All() {

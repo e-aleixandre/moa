@@ -22,6 +22,10 @@ const COLLAPSE_RE = /^[A-Za-z0-9_-]{22}$/;
 const KID_RE = /^[A-Za-z0-9_-]{11}$/;
 const CIPHER_RE = /^[A-Za-z0-9_-]{2768}$/;
 const ENVS = new Set(['sandbox', 'production']);
+
+// RegExp.test stringifies its argument, so ["x"] would pass for "x": the
+// schema is closed on types too.
+const matches = (re, v) => typeof v === 'string' && re.test(v);
 const APNS_HOSTS = { sandbox: 'api.sandbox.push.apple.com', production: 'api.push.apple.com' };
 
 class HttpError extends Error {
@@ -197,7 +201,7 @@ export async function openBlob(env, kind, sealed) {
   } catch {
     throw unauthorized();
   }
-  if (!isObject(p) || Object.keys(p).length !== 4 || !TOKEN_RE.test(p.t) || !ENVS.has(p.e)
+  if (!isObject(p) || Object.keys(p).length !== 4 || !matches(TOKEN_RE, p.t) || !ENVS.has(p.e)
     || !key32(p.k) || !Number.isSafeInteger(p.x)) throw unauthorized();
   return p;
 }
@@ -315,7 +319,7 @@ async function pushAPNs(env, deps, now, dest, payload, expiration, collapse) {
 
 async function register(request, env, deps) {
   const body = parseObject(await readBody(request, SMALL_MAX), ['token', 'env', 'send_key']);
-  if (!TOKEN_RE.test(body.token) || !ENVS.has(body.env) || !key32(body.send_key)) throw badRequest();
+  if (!matches(TOKEN_RE, body.token) || !ENVS.has(body.env) || !key32(body.send_key)) throw badRequest();
   await rateLimit(env.REGISTER_LIMITER, body.token, body.env);
   const now = deps.now();
   const c = await sealBlob(env, 'challenge', { t: body.token, e: body.env, k: body.send_key, x: now + CHALLENGE_TTL });
@@ -343,10 +347,10 @@ async function send(request, env, deps) {
   const sig = key32(request.headers.get('x-moa-sig') ?? '');
   const e = body.e;
   if (typeof body.h !== 'string' || !Number.isSafeInteger(body.t)
-    || (Object.hasOwn(body, 'c') && !COLLAPSE_RE.test(body.c))
+    || (Object.hasOwn(body, 'c') && !matches(COLLAPSE_RE, body.c))
     || !isObject(e) || !sig) throw badRequest();
   checkKeys(e, ['v', 'k', 'c']);
-  if (e.v !== 1 || !KID_RE.test(e.k) || !CIPHER_RE.test(e.c)) throw badRequest();
+  if (e.v !== 1 || !matches(KID_RE, e.k) || !matches(CIPHER_RE, e.c)) throw badRequest();
 
   const dest = await openBlob(env, 'handle', body.h);
   const now = deps.now();

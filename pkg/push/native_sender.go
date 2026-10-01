@@ -78,6 +78,11 @@ func NewNativeStore(path string) (*NativeStore, error) {
 	case err != nil:
 		return nil, fmt.Errorf("read native push store %s: %w", path, err)
 	}
+	// It holds secrets: a copy restored with looser permissions is fixed
+	// before anything is read from it.
+	if err := os.Chmod(path, 0o600); err != nil {
+		return nil, fmt.Errorf("secure native push store %s: %w", path, err)
+	}
 	var regs []NativeRegistration
 	if err := json.Unmarshal(data, &regs); err != nil {
 		return nil, fmt.Errorf("parse native push store %s: %w", path, err)
@@ -178,19 +183,33 @@ type NativeResult struct {
 	At     time.Time `json:"at"`
 	Result string    `json:"result"` // ok, handle_expired, unregistered, rejected, failed
 	Reason string    `json:"reason,omitempty"`
+	handle string    // the registration it is about; a renewal makes it stale
 }
 
 // NativeSender delivers notifications to the paired iPhones through the
 // relay. It is a Sender, next to the Web Push Dispatcher.
+//
+// Sending and forgetting a device are ordered by mu: a send is admitted under
+// it (the device is active and this registration is still the current one)
+// and stays in flight until its HTTP call returns; Forget removes the
+// registration, cancels the device's sends in flight and waits for them. So
+// once Forget returns (a revoke, an expiry, a DELETE), no request for that
+// registration is running or can start.
 type NativeSender struct {
 	store    *NativeStore
 	relayURL string
 	client   *http.Client
 	now      func() time.Time
 
-	mu      sync.Mutex
-	active  func(deviceID string) bool
-	results map[string]NativeResult
+	mu       sync.Mutex
+	active   func(deviceID string) bool
+	results  map[string]NativeResult
+	inFlight map[string]map[*nativeFlight]struct{}
+}
+
+type nativeFlight struct {
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 // NewNativeSender sends through relayURL (already normalized) only: a
@@ -204,8 +223,9 @@ func NewNativeSender(store *NativeStore, relayURL string) *NativeSender {
 			// The relay is reached at its exact configured origin and nowhere else.
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
-		now:     time.Now,
-		results: map[string]NativeResult{},
+		now:      time.Now,
+		results:  map[string]NativeResult{},
+		inFlight: map[string]map[*nativeFlight]struct{}{},
 	}
 }
 
@@ -215,42 +235,82 @@ func (s *NativeSender) Store() *NativeStore { return s.store }
 // RelayURL is the configured relay origin.
 func (s *NativeSender) RelayURL() string { return s.relayURL }
 
-// SetActive installs the check, made right before every send, that a device
-// is still paired. Until it is set nothing is sent: a registration outlives
-// its device only if the device lifecycle is unknown.
+// SetActive installs the check, made when every send is admitted, that a
+// device is still paired. Until it is set nothing is sent: a registration
+// outlives its device only if the device lifecycle is unknown.
 func (s *NativeSender) SetActive(fn func(deviceID string) bool) {
 	s.mu.Lock()
 	s.active = fn
 	s.mu.Unlock()
 }
 
-// LastResult reports the last send to a device.
+// LastResult reports the last send to the device's current registration.
 func (s *NativeSender) LastResult(deviceID string) (NativeResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.results[deviceID]
-	return r, ok
+	if !ok {
+		return NativeResult{}, false
+	}
+	if cur, ok := s.store.Get(deviceID); !ok || cur.Handle != r.handle {
+		return NativeResult{}, false
+	}
+	return r, true
 }
 
-// Forget drops a device: its registration and its last result.
+// Forget drops a device: its registration and its last result. It cancels
+// the device's sends in flight and returns once none is running.
 func (s *NativeSender) Forget(deviceID string) error {
 	s.mu.Lock()
 	delete(s.results, deviceID)
+	err := s.store.Remove(deviceID)
+	var wait []chan struct{}
+	for f := range s.inFlight[deviceID] {
+		f.cancel()
+		wait = append(wait, f.done)
+	}
 	s.mu.Unlock()
-	return s.store.Remove(deviceID)
+	for _, done := range wait {
+		<-done
+	}
+	return err
 }
 
-func (s *NativeSender) isActive(deviceID string) bool {
+func (s *NativeSender) record(r NativeRegistration, result, reason string) {
 	s.mu.Lock()
-	active := s.active
+	s.results[r.DeviceID] = NativeResult{At: s.now(), Result: result, Reason: reason, handle: r.Handle}
 	s.mu.Unlock()
-	return active != nil && active(deviceID)
 }
 
-func (s *NativeSender) record(deviceID, result, reason string) {
+// admit starts a send of r if its device is active and r is still the
+// device's registration. The returned flight must be finished.
+func (s *NativeSender) admit(parent context.Context, r NativeRegistration) (context.Context, *nativeFlight, bool) {
 	s.mu.Lock()
-	s.results[deviceID] = NativeResult{At: s.now(), Result: result, Reason: reason}
+	defer s.mu.Unlock()
+	if s.active == nil || !s.active(r.DeviceID) {
+		return nil, nil, false
+	}
+	if cur, ok := s.store.Get(r.DeviceID); !ok || cur != r {
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithTimeout(parent, sendTimeout)
+	f := &nativeFlight{cancel: cancel, done: make(chan struct{})}
+	if s.inFlight[r.DeviceID] == nil {
+		s.inFlight[r.DeviceID] = map[*nativeFlight]struct{}{}
+	}
+	s.inFlight[r.DeviceID][f] = struct{}{}
+	return ctx, f, true
+}
+
+func (s *NativeSender) finish(deviceID string, f *nativeFlight) {
+	s.mu.Lock()
+	delete(s.inFlight[deviceID], f)
+	if len(s.inFlight[deviceID]) == 0 {
+		delete(s.inFlight, deviceID)
+	}
 	s.mu.Unlock()
+	f.cancel()
+	close(f.done)
 }
 
 // Notify sends n to every registered, still-paired device. Best-effort: a
@@ -260,12 +320,12 @@ func (s *NativeSender) Notify(ctx context.Context, n Notification) {
 		if ctx.Err() != nil {
 			return
 		}
-		if r.RelayURL != s.relayURL || !s.isActive(r.DeviceID) {
+		if r.RelayURL != s.relayURL {
 			continue
 		}
 		now := s.now()
 		if !now.Before(r.ExpiresAt) {
-			s.record(r.DeviceID, "handle_expired", "")
+			s.record(r, "handle_expired", "")
 			continue
 		}
 		s.send(ctx, r, n, now)
@@ -273,26 +333,29 @@ func (s *NativeSender) Notify(ctx context.Context, n Notification) {
 }
 
 func (s *NativeSender) send(parent context.Context, r NativeRegistration, n Notification, now time.Time) {
+	ctx, flight, ok := s.admit(parent, r)
+	if !ok {
+		return
+	}
+	defer s.finish(r.DeviceID, flight)
 	secret, err := b64u.DecodeString(r.Secret)
 	if err != nil {
-		s.record(r.DeviceID, "failed", "bad secret")
+		s.record(r, "failed", "bad secret")
 		return
 	}
 	keys, err := DeriveDeviceKeys(secret)
 	if err != nil {
-		s.record(r.DeviceID, "failed", "bad secret")
+		s.record(r, "failed", "bad secret")
 		return
 	}
 	body, sig, err := BuildSend(keys, r.Handle, n, now)
 	if err != nil {
-		s.record(r.DeviceID, "failed", "envelope")
+		s.record(r, "failed", "envelope")
 		return
 	}
-	ctx, cancel := context.WithTimeout(parent, sendTimeout)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.relayURL+"/v1/send", bytes.NewReader(body))
 	if err != nil {
-		s.record(r.DeviceID, "failed", "request")
+		s.record(r, "failed", "request")
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -302,7 +365,7 @@ func (s *NativeSender) send(parent context.Context, r NativeRegistration, n Noti
 		// The error text can carry the relay URL, never content; keep it out
 		// of the status anyway.
 		slog.Warn("push native: relay unreachable", "device", r.DeviceID)
-		s.record(r.DeviceID, "failed", "relay unreachable")
+		s.record(r, "failed", "relay unreachable")
 		return
 	}
 	defer resp.Body.Close() //nolint:errcheck
@@ -316,20 +379,20 @@ func (s *NativeSender) send(parent context.Context, r NativeRegistration, n Noti
 
 	switch {
 	case resp.StatusCode == http.StatusOK:
-		s.record(r.DeviceID, "ok", "")
+		s.record(r, "ok", "")
 	case resp.StatusCode == http.StatusGone:
 		// APNs no longer knows this token: the app registers again when it
 		// gets a new one.
 		if err := s.store.removeIf(r); err != nil {
 			slog.Warn("push native: drop unregistered device", "device", r.DeviceID, "error", err)
 		}
-		s.record(r.DeviceID, "unregistered", "")
+		s.record(r, "unregistered", "")
 	case resp.StatusCode == http.StatusUnauthorized && reply.Error == "handle_expired":
 		// The app renews its handle on its next foreground; the device stays.
-		s.record(r.DeviceID, "handle_expired", "")
+		s.record(r, "handle_expired", "")
 	default:
 		slog.Warn("push native: send rejected", "device", r.DeviceID, "status", resp.StatusCode, "error", cutUTF8(reply.Error, 32), "apns_status", reply.Status, "reason", reason)
-		s.record(r.DeviceID, "rejected", strings.TrimSpace(fmt.Sprintf("%d %s %s", resp.StatusCode, cutUTF8(reply.Error, 32), reason)))
+		s.record(r, "rejected", strings.TrimSpace(fmt.Sprintf("%d %s %s", resp.StatusCode, cutUTF8(reply.Error, 32), reason)))
 	}
 }
 

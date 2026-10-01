@@ -90,7 +90,7 @@ type deviceStore struct {
 	claimRates   map[string]deviceClaimBucket
 	leases       map[string]map[*deviceLease]struct{}
 	expiryTimers map[string]*time.Timer
-	onDeactivate func(string)
+	onDeactivate func(string) error // cleanup after a revoke or expiry; revoke reports its failure
 }
 
 type deviceClaimBucket struct {
@@ -221,6 +221,16 @@ func openDeviceStore(path string) (*deviceStore, error) {
 			return nil, err
 		}
 	}
+	// Expiry hooks (closing leases, dropping push registrations) must also
+	// fire for devices claimed before this process started.
+	now := store.now().UTC()
+	store.mu.Lock()
+	for _, device := range store.state.Devices {
+		if device.ExpiresAt.After(now) {
+			store.scheduleExpiryLocked(device)
+		}
+	}
+	store.mu.Unlock()
 	return store, nil
 }
 
@@ -495,7 +505,7 @@ func (s *deviceStore) authenticate(credential string) (authIdentity, error) {
 			onDeactivate := s.onDeactivate
 			s.mu.Unlock()
 			if onDeactivate != nil {
-				onDeactivate(deviceID)
+				_ = onDeactivate(deviceID) // logged by the hook; authentication fails anyway
 			}
 			for _, lease := range leases {
 				lease.shutdown("device credential expired")
@@ -645,11 +655,17 @@ func (s *deviceStore) revoke(id, actor string) error {
 		leases := s.detachDeviceLeasesLocked(id)
 		onDeactivate := s.onDeactivate
 		s.mu.Unlock()
+		var cleanupErr error
 		if onDeactivate != nil {
-			onDeactivate(id)
+			// The revocation is durable already; a failed cleanup is reported
+			// so the caller can retry it (revoke is idempotent).
+			cleanupErr = onDeactivate(id)
 		}
 		for _, lease := range leases {
 			lease.shutdown("device credential revoked")
+		}
+		if cleanupErr != nil {
+			return fmt.Errorf("device revoked, cleanup failed: %w", cleanupErr)
 		}
 		return nil
 	}
@@ -694,7 +710,7 @@ func (s *deviceStore) expireDevice(id string) {
 	onDeactivate := s.onDeactivate
 	s.mu.Unlock()
 	if onDeactivate != nil {
-		onDeactivate(id)
+		_ = onDeactivate(id) // logged by the hook
 	}
 	for _, lease := range leases {
 		lease.shutdown("device credential expired")
@@ -726,7 +742,7 @@ func (s *deviceStore) withActiveDevice(id string, fn func() error) error {
 	onDeactivate := s.onDeactivate
 	s.mu.Unlock()
 	if onDeactivate != nil {
-		onDeactivate(id)
+		_ = onDeactivate(id) // logged by the hook
 	}
 	for _, lease := range leases {
 		lease.shutdown("device credential inactive")
@@ -752,15 +768,16 @@ func (s *deviceStore) isActive(id string) bool {
 }
 
 // addOnDeactivate chains fn to what runs when a device is revoked or expires.
-func (s *deviceStore) addOnDeactivate(fn func(string)) {
+func (s *deviceStore) addOnDeactivate(fn func(string) error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	prev := s.onDeactivate
-	s.onDeactivate = func(id string) {
+	s.onDeactivate = func(id string) error {
+		var err error
 		if prev != nil {
-			prev(id)
+			err = prev(id)
 		}
-		fn(id)
+		return errors.Join(err, fn(id))
 	}
 }
 
