@@ -303,8 +303,10 @@ func TestPrepareCompact_DelayedRealCompactionRemainsDurable(t *testing.T) {
 	select {
 	case e := <-compacted:
 		t.Logf("real summary=%q original generation=%d, stamped RunGen=%d during preparation generation=%d", e.Payload.Summary, first.RunGen, e.RunGen, current)
-		if e.RunGen != current || e.Payload.Summary != "bridge reply 2" {
-			t.Fatal("fixture did not delay the real compaction into next generation")
+		// The bridge was held until the preparation generation existed, so
+		// the real compaction arrived late; it keeps its own generation.
+		if current <= first.RunGen || e.RunGen != first.RunGen || e.Payload.Summary != "bridge reply 2" {
+			t.Fatal("fixture did not delay the real compaction into next generation under its own generation")
 		}
 	default:
 		t.Fatal("real compaction event was not delivered")

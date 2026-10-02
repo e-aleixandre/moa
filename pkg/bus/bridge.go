@@ -834,6 +834,7 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 	ctx, cancel := context.WithCancel(sctx.SessionCtx)
 	sctx.runCancel = cancel
 	sctx.runGen++
+	ctx = context.WithValue(ctx, runGenKey{}, sctx.runGen)
 	sctx.RunGenAtomic.Store(sctx.runGen)
 	sctx.runStartedAnchor.Store(&runStartAnchor{gen: sctx.runGen, at: time.Now()})
 	// Admit the generation in the same critical section that mints it. The
@@ -1010,30 +1011,6 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	if e.Type == core.AgentEventSteer && sctx.SteerFilter != nil && !sctx.SteerFilter(e.Text) {
 		return
 	}
-	// SteersCanceled applies to this session's queue. It must not go through
-	// TranslateAgentEvent, which is also used to forward child-agent events.
-	if e.Type == core.AgentEventSteersCanceled {
-		sctx.Bus.Publish(SteersCanceled{SessionID: sctx.SessionID, AttachmentIDs: e.AttachmentIDs})
-		return
-	}
-	sid := sctx.SessionID
-	gen := sctx.RunGenAtomic.Load()
-	sctx.addRunEvent(gen, e)
-	// Keep the authoritative compacting flag in lockstep with the events we are
-	// about to publish. This runs serially in the bridge subscriber goroutine,
-	// and the Store happens before Bus.Publish, so a concurrent snapshot cut
-	// sees a value consistent with the streamed events. The run-end/error cases
-	// are a safety net: a run that dies without a CompactionEnd must not leave
-	// the spinner stuck.
-	switch e.Type {
-	case core.AgentEventCompactionStart:
-		sctx.setCompacting(true)
-	case core.AgentEventCompactionEnd, core.AgentEventEnd, core.AgentEventError:
-		sctx.setCompacting(false)
-	}
-
-	translated := TranslateAgentEvent(sid, gen, e, sctx.TaskStore)
-
 	// Maintain the authoritative in-flight state (streaming aggregate + live
 	// tool-call registry) in lockstep with the events we publish, so a reconnect
 	// snapshot during a run restores the whole partial reply and every tool row
@@ -1051,37 +1028,106 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	toolDelta, mutatesTools := liveToolDelta(e)
 	if mutatesStream || mutatesTools {
 		sctx.streamMu.Lock()
-		if mutatesStream {
-			switch delta.kind {
-			case streamKindStart:
-				sctx.setStreamMsgIDLocked(delta.msgID)
-			case streamKindText:
-				sctx.appendStreamTextLocked(delta.text)
-			case streamKindThinking:
-				sctx.appendStreamThinkingLocked(delta.text)
-			case streamKindReset:
-				sctx.resetStreamingLocked()
+		defer sctx.streamMu.Unlock()
+	}
+	sid := sctx.SessionID
+	gen := sctx.RunGenAtomic.Load()
+	if origin, ok := runGenOf(e.Origin); ok {
+		// The event belongs to the run that produced it. A consumer lagging
+		// past the bounded drain can see it after a newer run started; it
+		// must not take that run's identity or in-flight state. runMu orders
+		// the decision against newRunContext minting the next generation. It
+		// is taken after streamMu and held only over non-blocking work, so
+		// settling a run never waits for a snapshot or for this consumer.
+		sctx.runMu.Lock()
+		defer sctx.runMu.Unlock()
+		gen = origin
+		if origin != sctx.runGen {
+			if e.Type == core.AgentEventSteersCanceled {
+				sctx.Bus.Publish(SteersCanceled{SessionID: sid, AttachmentIDs: e.AttachmentIDs, SteerIDs: e.SteerIDs, CleanupOnly: true})
+				return
 			}
-		}
-		if mutatesTools {
-			switch toolDelta.kind {
-			case liveToolKindUpsert:
-				sctx.upsertLiveToolLocked(toolDelta.call)
-			case liveToolKindEnd:
-				sctx.endLiveToolLocked(toolDelta.call)
-			case liveToolKindReset:
-				sctx.resetLiveToolsLocked()
+			if outlivesRun(e) {
+				for _, ev := range TranslateAgentEvent(sid, gen, e, sctx.TaskStore) {
+					sctx.Bus.Publish(ev)
+				}
 			}
+			return
 		}
-		for _, ev := range translated {
-			sctx.Bus.Publish(ev)
-		}
-		sctx.streamMu.Unlock()
+	}
+	// SteersCanceled applies to this session's queue. It must not go through
+	// TranslateAgentEvent, which is also used to forward child-agent events.
+	if e.Type == core.AgentEventSteersCanceled {
+		sctx.Bus.Publish(SteersCanceled{SessionID: sid, AttachmentIDs: e.AttachmentIDs, SteerIDs: e.SteerIDs})
 		return
+	}
+	sctx.addRunEvent(gen, e)
+	// Keep the authoritative compacting flag in lockstep with the events we are
+	// about to publish. This runs serially in the bridge subscriber goroutine,
+	// and the Store happens before Bus.Publish, so a concurrent snapshot cut
+	// sees a value consistent with the streamed events. The run-end/error cases
+	// are a safety net: a run that dies without a CompactionEnd must not leave
+	// the spinner stuck.
+	switch e.Type {
+	case core.AgentEventCompactionStart:
+		sctx.setCompacting(true)
+	case core.AgentEventCompactionEnd, core.AgentEventEnd, core.AgentEventError:
+		sctx.setCompacting(false)
+	}
+
+	translated := TranslateAgentEvent(sid, gen, e, sctx.TaskStore)
+	if mutatesStream {
+		switch delta.kind {
+		case streamKindStart:
+			sctx.setStreamMsgIDLocked(delta.msgID)
+		case streamKindText:
+			sctx.appendStreamTextLocked(delta.text)
+		case streamKindThinking:
+			sctx.appendStreamThinkingLocked(delta.text)
+		case streamKindReset:
+			sctx.resetStreamingLocked()
+		}
+	}
+	if mutatesTools {
+		switch toolDelta.kind {
+		case liveToolKindUpsert:
+			sctx.upsertLiveToolLocked(toolDelta.call)
+		case liveToolKindEnd:
+			sctx.endLiveToolLocked(toolDelta.call)
+		case liveToolKindReset:
+			sctx.resetLiveToolsLocked()
+		}
 	}
 	for _, ev := range translated {
 		sctx.Bus.Publish(ev)
 	}
+}
+
+// outlivesRun reports a late event of a finished run that is still published,
+// under that run's generation and without touching the current run's state:
+// a compaction or trim the session tree records, or the announcement of a
+// message already in that run's history. Everything else is a view of a run
+// no longer in flight. A late SteersCanceled is handled apart: its cleanup
+// still runs, but it must not clear the current run's queue chips.
+func outlivesRun(e core.AgentEvent) bool {
+	switch e.Type {
+	case core.AgentEventCompactionEnd, core.AgentEventContextTrimmed,
+		core.AgentEventSteer, core.AgentEventUserMessage:
+		return true
+	}
+	return false
+}
+
+type runGenKey struct{}
+
+// runGenOf returns the bus generation of the run an event's origin context
+// descends from.
+func runGenOf(origin context.Context) (uint64, bool) {
+	if origin == nil {
+		return 0, false
+	}
+	gen, ok := origin.Value(runGenKey{}).(uint64)
+	return gen, ok
 }
 
 type streamDeltaKind int

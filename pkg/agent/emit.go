@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,11 @@ type Emitter struct {
 	subs   []*subscriber
 	logger *slog.Logger
 	mu     sync.RWMutex
+	// origin is the running invocation's context, stamped on events emitted
+	// without one; nil between runs. Only the Agent sets and clears it, while
+	// it holds the run slot (a.cancel), so two runs never share it. Callbacks
+	// that may outlive their run stamp their own captured context instead.
+	origin atomic.Pointer[context.Context]
 }
 
 type subscriber struct {
@@ -87,10 +93,21 @@ func isLossyAgentEvent(event core.AgentEvent) bool {
 	}
 }
 
+// setOrigin makes ctx the provenance of the events emitted from now on.
+func (e *Emitter) setOrigin(ctx context.Context) { e.origin.Store(&ctx) }
+
+// clearOrigin leaves the events emitted from now on without provenance.
+func (e *Emitter) clearOrigin() { e.origin.Store(nil) }
+
 // Emit sends an event to all active subscribers. Lossy delta events are
 // dropped when a subscriber's buffer is full; structural events block until
 // there is room (or the subscriber is torn down) so they are never lost.
 func (e *Emitter) Emit(event core.AgentEvent) {
+	if event.Origin == nil {
+		if origin := e.origin.Load(); origin != nil {
+			event.Origin = *origin
+		}
+	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	lossy := isLossyAgentEvent(event)

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/compaction"
@@ -160,6 +161,10 @@ type loopConfig struct {
 	// may also wake one when the batch has no other active tool calls.
 	// It returns the cleanup that removes the tool's cancellation hook.
 	registerSteerWait func(context.CancelCauseFunc, bool) func()
+	// userSteerPending reports a user message the next tool boundary will
+	// deliver. A batch whose calls have not all started yields to it. Nil
+	// when this loop does not own the steer queue.
+	userSteerPending func() bool
 	// steerMu makes cancellation and the post-tool delivery boundary atomic.
 	steerMu *sync.Mutex
 }
@@ -1253,6 +1258,7 @@ func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot,
 // calls, regardless of execution completion order.
 func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content) {
 	slots := make([]toolExecSlot, len(toolCalls))
+	batch := &toolBatch{}
 
 	// Phase 1: pre-flight (sequential). A rejected call never runs, so it is
 	// reported ended right away; its result is appended in order with the rest.
@@ -1270,6 +1276,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			break
 		}
 	}
+	batch.reportEligible = onlyWaits
 
 	// Phase 2: execute with conflict-aware scheduling.
 	//
@@ -1315,7 +1322,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				pending++
 				go func(idx int) {
 					defer func() { finished <- idx }()
-					slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, onlyWaits)
+					slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
 				}(i)
 				break
 			}
@@ -1333,7 +1340,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				if wShell != nil {
 					<-wShell
 				}
-				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, onlyWaits)
+				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
 			}(i, waitForPath, waitForShell)
 
 		case core.EffectWritePath:
@@ -1352,7 +1359,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				if wShell != nil {
 					<-wShell
 				}
-				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, onlyWaits)
+				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
 			}(i, waitForPath, waitForShell)
 
 		default: // EffectShell, EffectUnknown, EffectInteractive
@@ -1372,7 +1379,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				for _, w := range waits {
 					<-w
 				}
-				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, onlyWaits)
+				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
 			}(i, waits)
 			// Shell becomes the new barrier; reset path tracking.
 			lastShell = done
@@ -1422,14 +1429,55 @@ func appendPermissionFeedback(result core.Result, feedback string) core.Result {
 	return result
 }
 
+// toolBatch is what the calls of one executeTools share at their logical start.
+type toolBatch struct {
+	// reportEligible lets a report wake the batch's waits: set when every
+	// approved call is an interruptible wait.
+	reportEligible bool
+	// yielded is set, under steerMu, once a user steer withdrew an unstarted
+	// call. Every call that reaches its start afterwards is withdrawn too.
+	yielded bool
+}
+
+const (
+	toolCancelledBeforeStart = "Tool result unavailable: the run was cancelled before a result was recorded."
+	toolWithdrawnForSteer    = "Tool call not executed: a new user message arrived."
+)
+
+// lockSteers takes steerMu when the loop has one.
+func (cfg *loopConfig) lockSteers() func() {
+	if cfg.steerMu == nil {
+		return func() {}
+	}
+	cfg.steerMu.Lock()
+	return cfg.steerMu.Unlock
+}
+
+// admitToolStart decides a call's logical start, right before Execute. It
+// runs under steerMu, the lock Abort and steer admission hold: a confirmed
+// Stop or a deliverable user steer either precedes it and the call is not
+// executed, or follows it and finds the call started. It returns the reason
+// the call is not executed, or "" when it may start.
+func admitToolStart(runCtx context.Context, cfg *loopConfig, batch *toolBatch) string {
+	defer cfg.lockSteers()()
+	if runCtx.Err() != nil {
+		return toolCancelledBeforeStart
+	}
+	if batch.yielded || (cfg.userSteerPending != nil && cfg.userSteerPending()) {
+		batch.yielded = true
+		return toolWithdrawnForSteer
+	}
+	return ""
+}
+
 // runTool calls a tool's Execute function and streams partial results.
 // No lifecycle events — the caller controls event ordering.
 // Panics in Execute are recovered and returned as error results.
 func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (result core.Result, isError bool) {
-	return runToolInBatch(ctx, cfg, tc, false)
+	return runToolInBatch(ctx, cfg, tc, &toolBatch{})
 }
 
-func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, reportEligible bool) (result core.Result, isError bool) {
+func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, batch *toolBatch) (result core.Result, isError bool) {
 	t, ok := cfg.tools.Get(tc.ToolName)
 	if !ok {
 		return core.ErrorResult(fmt.Sprintf("unknown tool: %s", tc.ToolName)), true
@@ -1446,27 +1494,44 @@ func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, repor
 		}
 	}()
 
+	// The run's own context is this invocation's identity: a wait gets a
+	// derived one that a steer may cancel without stopping the run.
+	runCtx := ctx
+	// A tool may keep onUpdate past its return or its run. Its updates are
+	// published only while this invocation is open and its run not stopped,
+	// checked under steerMu so a Stop cannot interleave with the publication.
+	// The update is lossy, so Emit never blocks while steerMu is held. closed
+	// is atomic for a loop without steerMu.
+	var closed atomic.Bool
 	onUpdate := func(partial core.Result) {
+		defer cfg.lockSteers()()
+		if closed.Load() || runCtx.Err() != nil {
+			return
+		}
 		cfg.emitter.Emit(core.AgentEvent{
 			Type:       core.AgentEventToolExecUpdate,
 			ToolCallID: tc.ToolCallID,
 			ToolName:   tc.ToolName,
 			Result:     &partial,
+			Origin:     runCtx,
 		})
 	}
-
-	// A Stop can land after the stream was accepted: during pre-flight or while
-	// an earlier call in the batch holds the shell/path barrier. A tool of a
-	// stopped run must not start at all, since many tools ignore ctx.
-	if ctx.Err() != nil {
-		return core.ErrorResult("Tool result unavailable: the run was cancelled before a result was recorded."), true
-	}
+	defer func() {
+		defer cfg.lockSteers()()
+		closed.Store(true)
+	}()
 
 	ctx = core.WithToolCallID(ctx, tc.ToolCallID)
 	if steerInterruptibleWaitTools[tc.ToolName] && cfg.registerSteerWait != nil {
 		var cancel context.CancelCauseFunc
 		ctx, cancel = context.WithCancelCause(ctx)
-		defer cfg.registerSteerWait(cancel, reportEligible)()
+		defer cfg.registerSteerWait(cancel, batch.reportEligible)()
+	}
+	// A Stop can land after the stream was accepted: during pre-flight, while
+	// an earlier call holds the shell/path barrier, or during the preparation
+	// above. Many tools ignore ctx, so a call not yet started must not start.
+	if reason := admitToolStart(runCtx, cfg, batch); reason != "" {
+		return core.ErrorResult(reason), true
 	}
 	result, err := t.Execute(ctx, tc.Arguments, onUpdate)
 	if err != nil {

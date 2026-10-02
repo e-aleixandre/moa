@@ -267,6 +267,22 @@ func (q *steerQueue) len() int {
 	return len(q.items)
 }
 
+// hasDeliverableUserSteer reports whether a user message is queued ahead of
+// the first barrier: one the run will deliver at its next tool boundary.
+func (q *steerQueue) hasDeliverableUserSteer() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, item := range q.items {
+		if item.IsBarrier() {
+			return false
+		}
+		if !item.Internal {
+			return true
+		}
+	}
+	return false
+}
+
 func (q *steerQueue) hasWaitInterruptingSteer() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -1800,6 +1816,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		ctx, a.cancel = context.WithCancel(ctx)
 	}
 	cancel := a.cancel
+	a.emitter.setOrigin(ctx)
 	// Model settings can change while the run is in flight, so they are read
 	// here under the lock; the loop re-reads them at each request boundary.
 	initial := a.requestSettingsLocked()
@@ -1810,6 +1827,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		// steerMu -> mu order matches Abort and the delivery paths below.
 		a.steerMu.Lock()
 		a.mu.Lock()
+		a.emitter.clearOrigin()
 		a.cancel = nil
 		// A model change the run ended before using has not reached the
 		// history yet.
@@ -1949,6 +1967,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		drainSteers:       a.steers.drainUntilBarrier,
 		settleSteers:      a.steers.settle,
 		registerSteerWait: a.registerSteerWait,
+		userSteerPending:  a.steers.hasDeliverableUserSteer,
 		steerMu:           &a.steerMu,
 	}
 
@@ -2025,9 +2044,16 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		// clients as a bare steers_canceled that clears every chip, ahead of
 		// the Stop's own correlated discard that needs those chips' text.
 		if len(discarded) > 0 {
+			steerIDs := make([]string, 0, len(discarded))
+			for _, item := range discarded {
+				if !item.Internal {
+					steerIDs = append(steerIDs, item.ID)
+				}
+			}
 			emitLifecycle(cfg, core.AgentEvent{
 				Type:          core.AgentEventSteersCanceled,
 				AttachmentIDs: steerAttachmentIDs(discarded),
+				SteerIDs:      steerIDs,
 			})
 		}
 	}

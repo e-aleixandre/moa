@@ -321,6 +321,9 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.CommandDequeued:
 		return Event{Type: "command_dequeued", Data: CommandDequeuedData{ID: e.ID, Raw: e.Raw, Executed: e.Executed, Err: e.Err}}, true
 	case bus.SteersCanceled:
+		if e.CleanupOnly {
+			return Event{}, false
+		}
 		data := map[string]any{"discarded_steer_ids": e.SteerIDs}
 		if e.StopID != "" {
 			data["stop_id"] = e.StopID

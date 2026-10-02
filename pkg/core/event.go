@@ -1,5 +1,7 @@
 package core
 
+import "context"
+
 // AgentEvent is emitted by the agent loop for UI/extension consumption.
 type AgentEvent struct {
 	Type string
@@ -11,6 +13,7 @@ type AgentEvent struct {
 	SteerID        string             // steer
 	MsgID          string             // steer, user_message (MsgID of the user message, for client dedup)
 	AttachmentIDs  []string           // steers_canceled
+	SteerIDs       []string           // steers_canceled: IDs of the discarded user steers
 	ToolCallID     string             // tool_execution_*
 	ToolName       string             // tool_execution_*
 	Args           map[string]any     // tool_execution_start
@@ -31,6 +34,11 @@ type AgentEvent struct {
 	// request. The session's model can change while a run is in flight, so its
 	// current pricing is not necessarily this response's.
 	Pricing *Pricing // message_end
+	// Origin is the context of the agent invocation that produced the event,
+	// stamped at emission; nil outside a run. A consumer that lags behind can
+	// tell an event of a finished run from one of the run now in flight.
+	// Internal plumbing, never serialized.
+	Origin context.Context `json:"-"`
 }
 
 // Agent event type constants.
