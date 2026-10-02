@@ -6,7 +6,7 @@ import {
   money,
 } from "../../data/util/usage-pills.js";
 import { copyToClipboard, fmtTokens } from "../../data/util/format.js";
-import { cacheAdvice, cacheUsage } from "../../data/cache-usage.js";
+import { cacheAdvice, cacheMissCause, cacheUsage } from "../../data/cache-usage.js";
 import { configureSession } from "../../data/session-actions.js";
 import { addToast } from "../../data/notifications.js";
 
@@ -122,6 +122,32 @@ function contextNote(session, pct) {
 // "12 turns without a cache read" says both that it is wrong and how long it
 // has been wrong, which a lit dot cannot. The note under it instructs the next
 // action instead of explaining prompt caching.
+// CacheMissRows — what the misses cost, and why the latest one happened.
+//
+// The ratio says how much was read; this says what the turns that did not read
+// paid for it. The total is the re-cache cost over a read, so it is money that
+// a warm cache would have kept. A miss with no known cause says so: the line
+// only names a cause the transcript demonstrates. An unpriced model has no
+// cost, and the line leaves it out rather than print $0.
+function CacheMissRows({ u }) {
+  const last = u.lastMiss;
+  const detail = last
+    ? [cacheMissCause(last), `${fmtTokens(last.tokens)} re-cached`, last.costUSD > 0 ? fmtCost(last.costUSD) : ""]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
+  return (
+    <div class="zl-kv-row is-cache-misses">
+      <span class="zl-kv-k">Cache misses</span>
+      <span class="zl-kv-v zl-data">
+        {u.misses}
+        {u.missCostUSD > 0 && <span class="zl-kv-dim"> · {fmtCost(u.missCostUSD)}</span>}
+      </span>
+      {detail && <span class="zl-kv-note is-prose">Last: {detail}</span>}
+    </div>
+  );
+}
+
 function CacheRows({ session }) {
   const u = cacheUsage(session);
 
@@ -155,6 +181,7 @@ function CacheRows({ session }) {
         </span>
         {u.alert && <span class="zl-kv-note is-prose">{cacheAdvice(session)}</span>}
       </div>
+      {u.misses > 0 && <CacheMissRows u={u} />}
     </>
   );
 }

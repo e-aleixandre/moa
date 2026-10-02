@@ -12,7 +12,10 @@ import {
   cacheAdvice,
   cacheAlertLabel,
   cacheRatioPercent,
+  cacheMissCause,
   cacheUsage,
+  fmtGap,
+  parseCacheUsage,
   cacheVerdict,
 } from "./cache-usage.js";
 
@@ -102,5 +105,44 @@ describe("no reading yet", () => {
     };
     expect(cacheUsage(contradictory).alert).toBe(false);
     expect(cacheAlertLabel(contradictory)).toBe("");
+  });
+});
+
+describe("cache misses", () => {
+  const wire = {
+    available: true, ratio: 0.9, read: 100, written: 10, streak: 0, alert: false,
+    misses: 2, miss_cost_usd: 1.5,
+    last_miss: { cause: "expired", gap_seconds: 4320, tokens: 183000, cost_usd: 0.94, at_ms: 1000, provider: "anthropic", model: "x" },
+  };
+
+  it("reads the wire shape into the session field", () => {
+    const u = cacheUsage({ cacheUsage: parseCacheUsage(wire) });
+    expect(u.misses).toBe(2);
+    expect(u.missCostUSD).toBe(1.5);
+    expect(u.lastMiss).toEqual({ cause: "expired", gapSeconds: 4320, tokens: 183000, costUSD: 0.94, atMs: 1000 });
+  });
+
+  it("has no miss in a summary from a server that does not send them", () => {
+    const u = cacheUsage({ cacheUsage: parseCacheUsage({ available: true, ratio: 1 }) });
+    expect(u.misses).toBe(0);
+    expect(u.lastMiss).toBeNull();
+    expect(cacheMissCause(u.lastMiss)).toBe("");
+  });
+
+  it("says the idle time for an expiry and the plain cause for the rest", () => {
+    expect(cacheMissCause({ cause: "expired", gapSeconds: 4320 })).toBe("idle 1h 12m");
+    expect(cacheMissCause({ cause: "compaction" })).toBe("after compaction");
+    expect(cacheMissCause({ cause: "model_changed" })).toBe("model changed");
+    expect(cacheMissCause({ cause: "context_cut" })).toBe("context cut");
+    expect(cacheMissCause({ cause: "unknown" })).toBe("no known cause");
+    expect(cacheMissCause({ cause: "something-new" })).toBe("no known cause");
+  });
+
+  it("writes gaps the way a person says them", () => {
+    expect(fmtGap(42)).toBe("42s");
+    expect(fmtGap(301)).toBe("5m");
+    expect(fmtGap(3600)).toBe("1h");
+    expect(fmtGap(4320)).toBe("1h 12m");
+    expect(fmtGap(90000)).toBe("1d 1h");
   });
 });

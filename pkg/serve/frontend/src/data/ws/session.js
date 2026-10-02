@@ -5,6 +5,7 @@ import { store, setState, updateSession, visibleSessionIds } from '../store.js';
 import { resetOlderHistory } from '../history-paging.js';
 import { normalizeHistory } from './history.js';
 import { placeFreshMarker } from '../start-fresh.js';
+import { parseCacheUsage } from '../cache-usage.js';
 import { nextRunEpoch } from './init.js';
 import { markUnseen, acknowledgeVisibleLiveAttention, flashSession } from './attention.js';
 
@@ -140,14 +141,7 @@ export function handleWsSessionCost(id, data) {
 export function handleWsCacheUsage(id, data) {
   if (!data) return;
   updateSession(id, {
-    cacheUsage: {
-      available: !!data.available,
-      ratio: Number(data.ratio) || 0,
-      read: Number(data.read) || 0,
-      written: Number(data.written) || 0,
-      streak: Number(data.streak) || 0,
-      alert: !!data.alert,
-    },
+    cacheUsage: parseCacheUsage(data),
   });
 }
 

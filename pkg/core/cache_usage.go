@@ -9,6 +9,13 @@ type CacheUsageSummary struct {
 	Written   int
 	Streak    int
 	Alert     bool
+
+	// Misses counts turns whose cache read fell short of what the previous
+	// turn had cached; MissCostUSD is what re-caching those tokens cost over
+	// reading them. LastMiss is the most recent one, nil when there is none.
+	Misses      int
+	MissCostUSD float64
+	LastMiss    *CacheMiss
 }
 
 // SummarizeCacheUsage returns cache usage aggregated from valid assistant
@@ -28,6 +35,7 @@ func SummarizeCacheUsage(messages []AgentMessage) CacheUsageSummary {
 type CacheUsageAccumulator struct {
 	summary     CacheUsageSummary
 	denominator int
+	miss        cacheMissTracker
 }
 
 // Add folds one message, in transcript order, into the summary.
@@ -42,6 +50,11 @@ func (a *CacheUsageAccumulator) Add(message *AgentMessage) {
 	}
 
 	a.summary.Available = true
+	if m := a.miss.observe(message); m != nil {
+		a.summary.Misses++
+		a.summary.MissCostUSD += m.CostUSD
+		a.summary.LastMiss = m
+	}
 	a.summary.Read += usage.CacheRead
 	a.summary.Written += usage.CacheWrite
 	a.denominator += turnTokens

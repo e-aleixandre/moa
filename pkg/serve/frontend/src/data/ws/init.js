@@ -10,6 +10,7 @@ import { store, updateSession, visibleSessionIds } from '../store.js';
 import { seedOlderHistory } from '../history-paging.js';
 import { refreshArtifactsAfterReconnect } from '../artifacts.js';
 import { settleFreshMarkers } from '../start-fresh.js';
+import { parseCacheUsage } from '../cache-usage.js';
 
 export function mergeSteers(snapshot, local) {
   // Snapshot steers are authoritative and already accepted by the server, so
@@ -136,14 +137,7 @@ export function handleWsInit(id, data) {
     // The cache summary is authoritative in every init snapshot: it is measured
     // server-side over the whole history, so a reload or a reconnect restores
     // the real streak instead of starting the count again from this socket.
-    cacheUsage: {
-      available: !!data.cache_usage?.available,
-      ratio: Number(data.cache_usage?.ratio) || 0,
-      read: Number(data.cache_usage?.read) || 0,
-      written: Number(data.cache_usage?.written) || 0,
-      streak: Number(data.cache_usage?.streak) || 0,
-      alert: !!data.cache_usage?.alert,
-    },
+    cacheUsage: parseCacheUsage(data.cache_usage),
     // Logical per-run traffic is authoritative in every init snapshot, so a
     // reconnect replaces stale local totals even when the run is already idle.
     runTokensUp: data.run_tokens_up || 0,

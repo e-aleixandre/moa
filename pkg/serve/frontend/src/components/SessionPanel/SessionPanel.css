@@ -464,6 +464,8 @@
    and changes nothing when it does. */
 .zl-kv-row.is-cache-tokens .zl-kv-k { flex: none; }
 .zl-kv-row.is-cache-tokens .zl-kv-v { flex: 1; min-width: 0; text-align: right; }
+.zl-kv-row.is-cache-misses .zl-kv-k { flex: none; }
+.zl-kv-row.is-cache-misses .zl-kv-v { flex: 1; min-width: 0; text-align: right; }
 
 .zl-data {
   font-family: var(--mono);

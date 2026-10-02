@@ -290,17 +290,45 @@ type CacheUsageData struct {
 	Written   int     `json:"written"`
 	Streak    int     `json:"streak"`
 	Alert     bool    `json:"alert"`
+	// Misses is how many turns read much less cache than the previous one had
+	// left; MissCostUSD what re-caching them cost over a read. LastMiss is the
+	// latest, absent when the session has had none.
+	Misses      int            `json:"misses"`
+	MissCostUSD float64        `json:"miss_cost_usd"`
+	LastMiss    *CacheMissData `json:"last_miss,omitempty"`
+}
+
+// CacheMissData is one cache miss on the wire. Cause is one of the
+// core.CacheMiss* values; "unknown" means the transcript explains nothing.
+type CacheMissData struct {
+	Cause      string  `json:"cause"`
+	GapSeconds int64   `json:"gap_seconds"`
+	Tokens     int     `json:"tokens"`
+	CostUSD    float64 `json:"cost_usd"`
+	AtMs       int64   `json:"at_ms"`
+	Provider   string  `json:"provider"`
+	Model      string  `json:"model"`
 }
 
 // cacheUsageData projects the core summary onto the wire shape.
 func cacheUsageData(s core.CacheUsageSummary) CacheUsageData {
+	var last *CacheMissData
+	if m := s.LastMiss; m != nil {
+		last = &CacheMissData{
+			Cause: m.Cause, GapSeconds: m.GapSeconds, Tokens: m.Tokens, CostUSD: m.CostUSD,
+			AtMs: m.At * 1000, Provider: m.Provider, Model: m.Model,
+		}
+	}
 	return CacheUsageData{
-		Available: s.Available,
-		Ratio:     s.Ratio,
-		Read:      s.Read,
-		Written:   s.Written,
-		Streak:    s.Streak,
-		Alert:     s.Alert,
+		Misses:      s.Misses,
+		MissCostUSD: s.MissCostUSD,
+		LastMiss:    last,
+		Available:   s.Available,
+		Ratio:       s.Ratio,
+		Read:        s.Read,
+		Written:     s.Written,
+		Streak:      s.Streak,
+		Alert:       s.Alert,
 	}
 }
 
