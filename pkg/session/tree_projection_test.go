@@ -179,7 +179,7 @@ func TestProjectionMatchesLegacyOnLargeSession(t *testing.T) {
 	// Cache aggregate: streamed over the tree == summarised over the projection.
 	var acc core.CacheUsageAccumulator
 	tree.VisitDisplayMessages(acc.Add)
-	if g, w := acc.Summary(), core.SummarizeCacheUsage(want); g != w {
+	if g, w := acc.Summary(), core.SummarizeCacheUsage(want); !reflect.DeepEqual(g, w) {
 		t.Fatalf("cache usage = %+v, want %+v", g, w)
 	}
 
