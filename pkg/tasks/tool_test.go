@@ -267,3 +267,52 @@ func findByTitle(list []Record, title string) Record {
 	}
 	return Record{}
 }
+
+func TestToolUpdateEmptyValuesMeanUnchanged(t *testing.T) {
+	r := newRepo(t)
+	sc := scopeFor(r, "A", "p")
+	run(t, sc, map[string]any{"action": "create", "title": "dep"})
+	run(t, sc, map[string]any{"action": "create", "title": "main", "description": "keep me",
+		"depends_on": []any{float64(1)}, "subtasks": []any{"sub one"}})
+
+	// A strict-schema model sends every field, empty when it has nothing to say.
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(`{"action":"update","id":2,"status":"in_progress","description":"","title":"","depends_on":[],"subtasks":[]}`), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if out, isErr := run(t, sc, payload); isErr || out != "Updated task #2: main" {
+		t.Fatalf("update: %q err=%v", out, isErr)
+	}
+	out, _ := run(t, sc, map[string]any{"action": "get", "id": float64(2)})
+	for _, want := range []string{"Description: keep me", "Depends on: #1", "sub one"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("empty values wiped the task, lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestToolUpdateNonEmptyValuesStillChange(t *testing.T) {
+	r := newRepo(t)
+	sc := scopeFor(r, "A", "p")
+	run(t, sc, map[string]any{"action": "create", "title": "dep"})
+	run(t, sc, map[string]any{"action": "create", "title": "dep2"})
+	run(t, sc, map[string]any{"action": "create", "title": "main", "description": "old",
+		"depends_on": []any{float64(1)}, "subtasks": []any{"old sub"}})
+
+	out, isErr := run(t, sc, map[string]any{"action": "update", "id": float64(3), "title": "renamed", "description": "new",
+		"depends_on": []any{float64(2)}, "subtasks": []any{"new sub"}})
+	if isErr || out != "Updated task #3: renamed" {
+		t.Fatalf("update: %q err=%v", out, isErr)
+	}
+	out, _ = run(t, sc, map[string]any{"action": "get", "id": float64(3)})
+	for _, want := range []string{"Description: new", "Depends on: #2", "new sub"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("lacks %q:\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{"old sub", "#1"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("still has %q:\n%s", bad, out)
+		}
+	}
+}

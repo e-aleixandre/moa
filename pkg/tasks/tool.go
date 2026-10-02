@@ -38,11 +38,11 @@ func NewTool(scope *Scope) core.Tool {
 				},
 				"title": {
 					"type": "string",
-					"description": "Task title (required for create/ask, optional for update)"
+					"description": "Task title (required for create/ask, optional for update; empty or omitted = unchanged)"
 				},
 				"description": {
 					"type": "string",
-					"description": "Task description (optional)"
+					"description": "Task description (optional; empty or omitted on update = unchanged)"
 				},
 				"when": {
 					"type": ["string", "null"],
@@ -61,7 +61,7 @@ func NewTool(scope *Scope) core.Tool {
 				"depends_on": {
 					"type": "array",
 					"items": { "type": "integer" },
-					"description": "IDs of tasks this waits for (optional for create/update; replaces the ones you can see)"
+					"description": "IDs of tasks this waits for (optional for create/update; replaces the ones you can see; empty or omitted on update = unchanged)"
 				},
 				"subtasks": {
 					"type": "array",
@@ -73,7 +73,7 @@ func NewTool(scope *Scope) core.Tool {
 						},
 						"required": ["title"]
 					},
-					"description": "One level of subtasks (optional for create/ask/update; replaces the list)"
+					"description": "One level of subtasks (optional for create/ask/update; replaces the list; empty or omitted on update = unchanged)"
 				}
 			},
 			"required": ["action"]
@@ -233,19 +233,21 @@ func toolUpdate(ctx context.Context, repo *Repo, actor Actor, params map[string]
 	if v, ok := params["title"].(string); ok && v != "" {
 		p.Title = &v
 	}
-	if v, ok := params["description"].(string); ok {
+	if v, ok := params["description"].(string); ok && v != "" {
 		p.Description = &v
 	}
 	if v, ok := params["status"].(string); ok && v != "" {
 		p.Status = &v
 	}
-	if deps, ok := intList(params["depends_on"]); ok {
+	if deps, ok := intList(params["depends_on"]); ok && len(deps) > 0 {
 		p.DependsOn = &deps
 	}
 	if subs, err := parseSubtasks(params["subtasks"]); err != nil {
 		return core.Result{}, err
 	} else {
-		p.Subtasks = subs
+		if subs != nil && len(*subs) > 0 {
+			p.Subtasks = subs
+		}
 	}
 	t, err := repo.AgentUpdate(ctx, actor, id, p)
 	if err != nil {
