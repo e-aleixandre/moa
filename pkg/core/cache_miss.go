@@ -83,8 +83,10 @@ func (t *cacheMissTracker) observe(m *AgentMessage) *CacheMiss {
 	}
 
 	lost := prev.ctx - u.CacheRead
-	if lost > ctx {
-		lost = ctx
+	// A shrunk context cannot have re-cached more than it holds beyond what it
+	// read: tokens that were read were hits.
+	if fresh := ctx - u.CacheRead; lost > fresh {
+		lost = fresh
 	}
 	miss := &CacheMiss{Tokens: lost, At: m.Timestamp, Provider: m.Provider, Model: m.Model}
 	if m.Timestamp > 0 && prev.at > 0 && m.Timestamp >= prev.at {

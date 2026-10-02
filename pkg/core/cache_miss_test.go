@@ -145,3 +145,25 @@ func TestModernOpenAICache(t *testing.T) {
 		}
 	}
 }
+
+// Real case (session 08b7ce43, entries 5d3a856a -> 6902bc31): after a
+// compaction the context shrank to 158,704 tokens, of which 23,040 were still
+// read from cache. Only the 135,664 tokens that were not read were re-cached.
+func TestCacheMiss_ShrunkContextCountsOnlyTokensNotRead(t *testing.T) {
+	got := SummarizeCacheUsage([]AgentMessage{
+		missTurn("openai", "gpt-6-sol", 1000, 300_000, 0, 0, 0, map[string]any{"compaction_epoch": 0}),
+		missTurn("openai", "gpt-6-sol", 1010, 135_664, 23_040, 0, 0, map[string]any{"compaction_epoch": 1}),
+	})
+	m := got.LastMiss
+	if m == nil || m.Cause != CacheMissCompaction {
+		t.Fatalf("want a compaction miss, got %+v", m)
+	}
+	if m.Tokens != 135_664 {
+		t.Fatalf("tokens = %d, want 135664", m.Tokens)
+	}
+	// Input billed at 2.0 instead of read at 0.2 per million (catalog gpt-6-sol).
+	want := 135_664 * (2.0 - 0.2) / 1e6
+	if math.Abs(m.CostUSD-want) > 1e-9 {
+		t.Fatalf("cost = %v, want %v", m.CostUSD, want)
+	}
+}
