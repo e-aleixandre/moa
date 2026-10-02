@@ -161,10 +161,11 @@ type loopConfig struct {
 	// may also wake one when the batch has no other active tool calls.
 	// It returns the cleanup that removes the tool's cancellation hook.
 	registerSteerWait func(context.CancelCauseFunc, bool) func()
-	// userSteerPending reports a user message the next tool boundary will
-	// deliver. A batch whose calls have not all started yields to it. Nil
-	// when this loop does not own the steer queue.
-	userSteerPending func() bool
+	// claimSteers takes the queued prefix a tool batch's next logical start
+	// yields to (see withdrawsPendingTools), or nil when none withdraws. The
+	// batch owns the claimed items and the loop delivers them after the
+	// batch joins. Nil when this loop does not own the steer queue.
+	claimSteers func() []core.SteerItem
 	// steerMu makes cancellation and the post-tool delivery boundary atomic.
 	steerMu *sync.Mutex
 }
@@ -884,10 +885,16 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 
 		// Execute tool calls concurrently.
-		executeTools(ctx, cfg, toolCalls)
+		claimed := executeTools(ctx, cfg, toolCalls)
 		if cfg.steerMu != nil {
 			cfg.steerMu.Lock()
 		}
+		// The claimed prefix is committed before the cancellation check: its
+		// items left the live queue, so neither recall nor the unwind can still
+		// restore or discard them, and the tool results above are already in
+		// history for it to follow.
+		deliverSteers(cfg, claimed)
+
 		// A stopped run must not deliver its queued steers in the narrow gap after
 		// a cancelled tool returns. The abort cleanup owns discarding them, while
 		// the frontend restores them to the composer for an explicit resend.
@@ -900,34 +907,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 		// Inject steering messages between steps.
 		if cfg.drainSteers != nil {
-			if steered := cfg.drainSteers(); len(steered) > 0 {
-				for _, item := range steered {
-					um := core.WrapMessage(steerMessage(item))
-					um.Custom = item.Custom
-					um.EnsureMsgID()
-					cfg.appendState(um)
-					// Carry the message's MsgID so serve can publish it on the
-					// Steered event; clients dedup the user message by MsgID
-					// (the reconnect snapshot may already contain it). Message
-					// carries the injected blocks so a steer with attachments
-					// renders live with its images, exactly like the prompt
-					// announced by AgentEventUserMessage.
-					//
-					// The blocks are cloned for the event: um is already in the
-					// agent's history, and subscribers receive events
-					// asynchronously — one that mutates a block (or its
-					// Arguments map) would otherwise corrupt the history the
-					// next provider request replays.
-					announced := um
-					announced.Content = core.CloneContent(um.Content)
-					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: um.MsgID, Text: item.Text, Message: announced})
-				}
-				// The drained steers are now in history; settle their inflight
-				// native-content bytes (paired with drainSteers).
-				if cfg.settleSteers != nil {
-					cfg.settleSteers(steered)
-				}
-			}
+			deliverSteers(cfg, cfg.drainSteers())
 		}
 		if cfg.steerMu != nil {
 			cfg.steerMu.Unlock()
@@ -949,6 +929,38 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 	// agent_end emitted by defer
 	return nil
+}
+
+// deliverSteers appends steer messages to the history, announces each one and
+// settles their in-flight native bytes. Call it under steerMu.
+func deliverSteers(cfg *loopConfig, steered []core.SteerItem) {
+	if len(steered) == 0 {
+		return
+	}
+	for _, item := range steered {
+		um := core.WrapMessage(steerMessage(item))
+		um.Custom = item.Custom
+		um.EnsureMsgID()
+		cfg.appendState(um)
+		// Carry the message's MsgID so serve can publish it on the Steered
+		// event; clients dedup the user message by MsgID (the reconnect
+		// snapshot may already contain it). Message carries the injected blocks
+		// so a steer with attachments renders live with its images, exactly
+		// like the prompt announced by AgentEventUserMessage.
+		//
+		// The blocks are cloned for the event: um is already in the agent's
+		// history, and subscribers receive events asynchronously — one that
+		// mutates a block (or its Arguments map) would otherwise corrupt the
+		// history the next provider request replays.
+		announced := um
+		announced.Content = core.CloneContent(um.Content)
+		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventSteer, SteerID: item.ID, MsgID: um.MsgID, Text: item.Text, Message: announced})
+	}
+	// The items are now in history; settle their in-flight native-content
+	// bytes (paired with the drain or claim that took them from the queue).
+	if cfg.settleSteers != nil {
+		cfg.settleSteers(steered)
+	}
 }
 
 // consumeStream reads events from the provider channel, builds the assistant message,
@@ -1256,7 +1268,11 @@ func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot,
 // (e.g. a subagent_wait) is reported finished when it finishes, not when the
 // batch does. Result messages are still appended in the same order as tool
 // calls, regardless of execution completion order.
-func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content) {
+//
+// It returns the steer items the batch claimed when it withdrew unstarted
+// calls. The caller owns them: they are no longer in the live queue and must
+// reach history, even when the run was stopped meanwhile.
+func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content) []core.SteerItem {
 	slots := make([]toolExecSlot, len(toolCalls))
 	batch := &toolBatch{}
 
@@ -1407,6 +1423,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		rejected := !slots[i].approved && slots[i].rejectKind == rejectKindPermission
 		cfg.appendState(toolResultMessage(slots[i].tc, slots[i].result, slots[i].isError, rejected))
 	}
+	return batch.steers
 }
 
 func appendPermissionFeedback(result core.Result, feedback string) core.Result {
@@ -1434,9 +1451,10 @@ type toolBatch struct {
 	// reportEligible lets a report wake the batch's waits: set when every
 	// approved call is an interruptible wait.
 	reportEligible bool
-	// yielded is set, under steerMu, once a user steer withdrew an unstarted
-	// call. Every call that reaches its start afterwards is withdrawn too.
-	yielded bool
+	// steers is the prefix claimed, under steerMu, by the call that first
+	// withdrew. Every call that reaches its start while it is non-empty is
+	// withdrawn too, and executeTools returns it for delivery.
+	steers []core.SteerItem
 }
 
 const (
@@ -1463,9 +1481,14 @@ func admitToolStart(runCtx context.Context, cfg *loopConfig, batch *toolBatch) s
 	if runCtx.Err() != nil {
 		return toolCancelledBeforeStart
 	}
-	if batch.yielded || (cfg.userSteerPending != nil && cfg.userSteerPending()) {
-		batch.yielded = true
+	if len(batch.steers) > 0 {
 		return toolWithdrawnForSteer
+	}
+	if cfg.claimSteers != nil {
+		if claimed := cfg.claimSteers(); len(claimed) > 0 {
+			batch.steers = claimed
+			return toolWithdrawnForSteer
+		}
 	}
 	return ""
 }

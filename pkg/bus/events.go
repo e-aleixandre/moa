@@ -239,11 +239,6 @@ type SteersCanceled struct {
 	// puts their text back in its composer. Empty for every other cause.
 	StopID   string
 	RecallID string
-	// CleanupOnly marks the discard of a run that had already ended when it
-	// was bridged. Its IDs are still released server-side, but clients are not
-	// told: their chips now belong to a newer run, possibly under the same ID.
-	// In-memory only, never sent.
-	CleanupOnly bool
 }
 
 // CommandQueued is published when a slash command is enqueued as a barrier in

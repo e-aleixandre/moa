@@ -1032,33 +1032,16 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	}
 	sid := sctx.SessionID
 	gen := sctx.RunGenAtomic.Load()
+	// An event keeps the generation of the run that produced it. It is still
+	// published in emission order: this is the one ordered agent subscriber,
+	// so a late event of an ended run precedes every event of the next run.
 	if origin, ok := runGenOf(e.Origin); ok {
-		// The event belongs to the run that produced it. A consumer lagging
-		// past the bounded drain can see it after a newer run started; it
-		// must not take that run's identity or in-flight state. runMu orders
-		// the decision against newRunContext minting the next generation. It
-		// is taken after streamMu and held only over non-blocking work, so
-		// settling a run never waits for a snapshot or for this consumer.
-		sctx.runMu.Lock()
-		defer sctx.runMu.Unlock()
 		gen = origin
-		if origin != sctx.runGen {
-			if e.Type == core.AgentEventSteersCanceled {
-				sctx.Bus.Publish(SteersCanceled{SessionID: sid, AttachmentIDs: e.AttachmentIDs, SteerIDs: e.SteerIDs, CleanupOnly: true})
-				return
-			}
-			if outlivesRun(e) {
-				for _, ev := range TranslateAgentEvent(sid, gen, e, sctx.TaskStore) {
-					sctx.Bus.Publish(ev)
-				}
-			}
-			return
-		}
 	}
 	// SteersCanceled applies to this session's queue. It must not go through
 	// TranslateAgentEvent, which is also used to forward child-agent events.
 	if e.Type == core.AgentEventSteersCanceled {
-		sctx.Bus.Publish(SteersCanceled{SessionID: sid, AttachmentIDs: e.AttachmentIDs, SteerIDs: e.SteerIDs})
+		sctx.Bus.Publish(SteersCanceled{SessionID: sid, AttachmentIDs: e.AttachmentIDs, SteerIDs: discardedIDsNotLive(sctx, e.SteerIDs)})
 		return
 	}
 	sctx.addRunEvent(gen, e)
@@ -1103,19 +1086,25 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	}
 }
 
-// outlivesRun reports a late event of a finished run that is still published,
-// under that run's generation and without touching the current run's state:
-// a compaction or trim the session tree records, or the announcement of a
-// message already in that run's history. Everything else is a view of a run
-// no longer in flight. A late SteersCanceled is handled apart: its cleanup
-// still runs, but it must not clear the current run's queue chips.
-func outlivesRun(e core.AgentEvent) bool {
-	switch e.Type {
-	case core.AgentEventCompactionEnd, core.AgentEventContextTrimmed,
-		core.AgentEventSteer, core.AgentEventUserMessage:
-		return true
+// discardedIDsNotLive drops from a discard's concrete IDs those that are queued
+// again right now. A late unwind of an ended run may name an ID a client has
+// reused for a message of the current queue; announcing it would clear that
+// live chip. The result is always a non-nil slice, so an empty one clears
+// nothing instead of reading as a wildcard.
+func discardedIDsNotLive(sctx *SessionContext, ids []string) []string {
+	live := make(map[string]struct{})
+	if sctx.Agent != nil {
+		for _, it := range sctx.Agent.PendingSteers() {
+			live[it.ID] = struct{}{}
+		}
 	}
-	return false
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := live[id]; !ok {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 type runGenKey struct{}

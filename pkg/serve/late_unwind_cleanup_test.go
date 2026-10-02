@@ -151,13 +151,19 @@ func TestLateUnwindDiscardReleasesItsAttachment(t *testing.T) {
 	})
 }
 
-// The same late discard must not reach clients: it would clear G2's chips,
-// including the one that reuses the discarded ID.
+// The same late discard still reaches clients, but with concrete IDs only: it
+// must not clear G2's chips, including the one that reuses the discarded ID.
 func TestLateUnwindDiscardDoesNotClearNextRunChips(t *testing.T) {
 	f := runLateUnwind(t)
 	for _, e := range f.canceled {
-		if ev, ok := wsEventFromBus(e); ok {
-			t.Errorf("late G1 discard forwarded to clients: %+v", ev)
+		ev, ok := wsEventFromBus(e)
+		if !ok {
+			t.Errorf("late G1 discard hidden from clients: %+v", e)
+			continue
+		}
+		data, _ := ev.Data.(map[string]any)
+		if ids, ok := data["discarded_steer_ids"].([]string); !ok || ids == nil || len(ids) != 0 {
+			t.Errorf("late G1 discard names live chips or is not an explicit empty list: %+v", data)
 		}
 	}
 }

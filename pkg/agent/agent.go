@@ -267,20 +267,43 @@ func (q *steerQueue) len() int {
 	return len(q.items)
 }
 
-// hasDeliverableUserSteer reports whether a user message is queued ahead of
-// the first barrier: one the run will deliver at its next tool boundary.
-func (q *steerQueue) hasDeliverableUserSteer() bool {
+// withdrawsPendingTools reports whether a queued item is an instruction that
+// withdraws tool calls not yet started: a message from the user, or from a
+// parent or owner to this agent. It is an allowlist on the producer's source
+// (absent, empty or "owner"); automatic items (events, schedules, reports,
+// unknown or malformed sources) never withdraw and are delivered after the batch.
+func withdrawsPendingTools(it core.SteerItem) bool {
+	if it.Internal || it.IsBarrier() {
+		return false
+	}
+	value, present := it.Custom["source"]
+	if !present {
+		return true
+	}
+	source, ok := value.(string)
+	return ok && (source == "" || source == "owner")
+}
+
+// claimWithdrawingPrefix takes, atomically, the whole FIFO prefix before the
+// first barrier when it holds an item that withdraws tools, and returns nil
+// otherwise. The claimed items leave the live queue (so they can no longer be
+// recalled) and count as in-flight bytes until the caller settles them once
+// they are in history.
+func (q *steerQueue) claimWithdrawingPrefix() []core.SteerItem {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for _, item := range q.items {
-		if item.IsBarrier() {
-			return false
-		}
-		if !item.Internal {
-			return true
-		}
+	cut, withdraws := 0, false
+	for cut < len(q.items) && !q.items[cut].IsBarrier() {
+		withdraws = withdraws || withdrawsPendingTools(q.items[cut])
+		cut++
 	}
-	return false
+	if !withdraws {
+		return nil
+	}
+	items := q.items[:cut]
+	q.items = append([]core.SteerItem{}, q.items[cut:]...)
+	q.inflightNativeDocBytes += batchNativeDocBytes(items)
+	return items
 }
 
 func (q *steerQueue) hasWaitInterruptingSteer() bool {
@@ -1649,7 +1672,12 @@ func (a *Agent) registerSteerWait(cancel context.CancelCauseFunc, reportEligible
 // Used when the user pulls queued steers back into the input to edit them, so
 // the agent doesn't also deliver the originals (double-delivery). Safe to call
 // while running; already-delivered steers cannot be recalled.
+//
+// It takes steerMu, the lock a tool batch holds to claim its withdrawing
+// prefix, so a recall either wins before the claim or finds those items gone.
 func (a *Agent) CancelSteer() []core.SteerItem {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
 	return a.steers.clear()
 }
 
@@ -1967,7 +1995,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		drainSteers:       a.steers.drainUntilBarrier,
 		settleSteers:      a.steers.settle,
 		registerSteerWait: a.registerSteerWait,
-		userSteerPending:  a.steers.hasDeliverableUserSteer,
+		claimSteers:       a.steers.claimWithdrawingPrefix,
 		steerMu:           &a.steerMu,
 	}
 

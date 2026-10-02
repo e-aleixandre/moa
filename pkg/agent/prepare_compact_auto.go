@@ -69,7 +69,7 @@ func runAutoPrepare(ctx context.Context, cfg *loopConfig, slot *sessioncheckpoin
 	sub.drainSteers = nil
 	sub.settleSteers = nil
 	sub.registerSteerWait = nil
-	sub.userSteerPending = nil
+	sub.claimSteers = nil
 	// A private emitter with no subscribers: the preparation turn is internal
 	// and must not stream into the user's conversation, but the loop emits
 	// unconditionally, so it needs somewhere to emit to.
