@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -214,6 +215,34 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		SetCompactionCommit(func(context.Context, core.CompactionCommit) error)
 	}); ok {
 		c.SetCompactionCommit(rt.commitCompaction)
+		// Background compaction needs the commit: its result is adopted
+		// only once durable. Its jobs live as long as the runtime.
+		if bg, ok := cfg.Agent.(backgroundCompactor); ok {
+			sctx.bgLifetime, sctx.bgLifetimeCancel = context.WithCancel(context.Background())
+			bg.SetBackgroundCompaction(sctx.bgLifetime, sctx.rootIdleForCompaction)
+			// A summary that finished while a run was active is adopted once
+			// the session is idle again, without a new turn.
+			b.Subscribe(func(e StateChanged) {
+				if e.State == string(StateIdle) || e.State == string(StateError) {
+					bg.TryApplyBackgroundCompaction()
+				}
+			})
+		}
+	}
+
+	// A goal run's cap follows the goal's live remaining budget, so spend
+	// charged to its activation after the run started (a late summary)
+	// narrows it. Scoped to the activation captured when the run launched.
+	if c, ok := cfg.Agent.(interface {
+		SetBudgetCap(func(context.Context) (float64, bool))
+	}); ok {
+		c.SetBudgetCap(func(ctx context.Context) (float64, bool) {
+			act, _ := ctx.Value(goalActivationKey{}).(uint64)
+			if act == 0 || sctx.Goal == nil {
+				return 0, false
+			}
+			return sctx.Goal.RemainingForActivation(act)
+		})
 	}
 
 	// Start approval bridges.
@@ -237,6 +266,14 @@ func (r *SessionRuntime) Close() {
 		r.sctx.cancelRun()
 		// Abort running agent to prevent dangling goroutines.
 		r.sctx.Agent.Abort()
+		// A background summary not yet accepted is discarded; an accepted cut
+		// is saved and adopted on both sides before teardown.
+		if r.sctx.bgLifetimeCancel != nil {
+			r.sctx.bgLifetimeCancel()
+			if bg, ok := r.sctx.Agent.(backgroundCompactor); ok {
+				bg.WaitCompactionCut()
+			}
+		}
 		// Stop approval bridges (auto-denies pending permissions).
 		if r.sctx.Approvals != nil {
 			r.sctx.Approvals.Stop()
@@ -316,6 +353,11 @@ func (r *SessionRuntime) commitCompaction(ctx context.Context, c core.Compaction
 	// durable. There is no deadline: a slow syncer is waited for, and only a
 	// Stop (or the runtime closing) gives up, failing the compaction.
 	if err := sctx.trimsRecorded.waitFor(ctx, c.Trims); err != nil {
+		// A background cut not yet accepted is merely obsolete: nothing was
+		// staged and storage is not in doubt.
+		if c.Accept != nil {
+			return fmt.Errorf("%w: earlier context trims not recorded: %v", core.ErrCompactionObsolete, err)
+		}
 		sctx.unreconciled.Store(true)
 		return fmt.Errorf("compaction commit: earlier context trims not recorded: %w", err)
 	}
@@ -323,18 +365,35 @@ func (r *SessionRuntime) commitCompaction(ctx context.Context, c core.Compaction
 	tp, _ := r.persister.(TreePersister)
 	r.persisterMu.Unlock()
 
+	// The cut gate is released here, not by the syncer: a genuine failure
+	// must be recorded before a waiting admission can look at it.
+	var release func()
+	if accept := c.Accept; accept != nil {
+		c.Accept = func() (func(), func(), error) {
+			adopt, rel, err := accept()
+			if err != nil {
+				return nil, nil, err
+			}
+			release = rel
+			return adopt, func() {}, nil
+		}
+	}
+
 	sctx.persistMu.Lock()
 	defer sctx.persistMu.Unlock()
-	meta := collectMetadata(sctx)
 	err := sctx.treeSyncer.commitCompaction(c, func(entries []session.Entry, leafID string) error {
 		if tp == nil {
 			return nil
 		}
-		return tp.SnapshotTree(entries, leafID, meta)
+		// Collected after the cut was accepted: it reads the agent.
+		return tp.SnapshotTree(entries, leafID, collectMetadata(sctx))
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, core.ErrCompactionObsolete) {
 		sctx.unreconciled.Store(true)
 		slog.Error("compaction could not be saved", "error", err)
+	}
+	if release != nil {
+		release()
 	}
 	return err
 }
@@ -440,7 +499,7 @@ func (r *SessionRuntime) BackgroundWork() int {
 // close admitted in that gap would tear the runtime down with the outcome
 // still unseen — the very loss this whole path exists to prevent.
 func (r *SessionRuntime) DoIfQuiescent(fn func()) bool {
-	if r.sctx.hasBackgroundWork() || r.sctx.runInFlight() {
+	if r.sctx.quiescenceBlocked() || r.sctx.runInFlight() {
 		return false
 	}
 	return r.State.DoIfIdle(fn)
@@ -456,7 +515,7 @@ func (r *SessionRuntime) DoIfQuiescent(fn func()) bool {
 func (r *SessionRuntime) AdmitCloseIfQuiescent(fn func()) bool {
 	admitted := false
 	r.State.DoIfIdle(func() {
-		if r.sctx.Agent.QueueLen() != 0 || r.sctx.hasBackgroundWork() || r.sctx.runInFlight() {
+		if r.sctx.Agent.QueueLen() != 0 || r.sctx.quiescenceBlocked() || r.sctx.runInFlight() {
 			return
 		}
 		r.sctx.runAdmissionClosed.Store(true)
@@ -494,7 +553,7 @@ func (r *SessionRuntime) WaitQuiescent(ctx context.Context) bool {
 
 	quiescent := func() bool {
 		state := r.State.Current()
-		return state != StateRunning && state != StatePermission && !r.sctx.hasBackgroundWork()
+		return state != StateRunning && state != StatePermission && !r.sctx.quiescenceBlocked()
 	}
 
 	for {
@@ -607,4 +666,27 @@ func restoreTrimWatermark(agent AgentController, tree *session.Tree) error {
 		return fmt.Errorf("bus: restore trim watermark: %w", err)
 	}
 	return nil
+}
+
+// backgroundCompactor is the optional agent capability for background
+// compaction (agent.Agent implements it).
+type backgroundCompactor interface {
+	SetBackgroundCompaction(lifetime context.Context, rootIdle func() bool)
+	TryApplyBackgroundCompaction()
+	WaitCompactionCut()
+}
+
+// rootIdleForCompaction reports whether an idle background compaction may
+// take its cut: no run is reserved and the runtime is not closing. It is
+// called under the agent's cut gate, so it reads only atomics: a
+// State.DoIfIdle callback may be waiting on that gate while holding State.
+func (sctx *SessionContext) rootIdleForCompaction() bool {
+	if sctx.runAdmissionClosed.Load() || (sctx.bgLifetime != nil && sctx.bgLifetime.Err() != nil) {
+		return false
+	}
+	if sctx.State == nil {
+		return true
+	}
+	s := sctx.State.CurrentAtomic()
+	return s == StateIdle || s == StateError
 }

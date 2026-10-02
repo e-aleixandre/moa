@@ -257,3 +257,36 @@ test('Stop is available for pending permission approvals and questions, not for 
   const stalePerm = { state: 'idle', pendingPerm: { id: 'p1' } };
   expect(canStopForeground(stalePerm, liveBarModel(stalePerm, [], 13000)?.sentence)).toBe(false);
 });
+
+// ── Background summary ────────────────────────────────────────────────────
+
+const summarizing = { jobId: 1, revision: 1, active: true, waiting: false };
+
+test('a summary beside normal work is a secondary line; the primary keeps the agent\'s own work', () => {
+  const session = { state: 'running', runStartedAtMs: 1000, backgroundCompaction: summarizing };
+  const model = liveBarModel(session, [], 5000);
+  expect(model.sentence).toMatchObject({ kind: 'foreground', phase: 'working' });
+  expect(model.secondary).toBe('Summarizing context…');
+});
+
+test('a hard wait takes the primary line and is not repeated as a secondary', () => {
+  const session = { state: 'running', runStartedAtMs: 1000, backgroundCompaction: { ...summarizing, waiting: true } };
+  const model = liveBarModel(session, [], 5000);
+  expect(model.sentence).toMatchObject({ kind: 'foreground', text: 'Waiting for context…', phase: 'context_wait' });
+  expect(model.secondary).toBe(null);
+  expect(canStopForeground(session, model.sentence)).toBe(true);
+});
+
+test('idle with a summary shows it alone and can be stopped, without a run', () => {
+  const session = { state: 'idle', backgroundCompaction: summarizing };
+  const model = liveBarModel(session, [], 5000);
+  expect(model.sentence).toMatchObject({ kind: 'summary', text: 'Summarizing context…', elapsed: '' });
+  expect(model.secondary).toBe(null);
+  expect(canStopForeground(session, model.sentence)).toBe(true);
+  expect(foregroundLine(session, 5000)).toBe(null);
+});
+
+test('an inactive summary changes nothing', () => {
+  const session = { state: 'idle', backgroundCompaction: { ...summarizing, active: false } };
+  expect(liveBarModel(session, [], 5000)).toBe(null);
+});

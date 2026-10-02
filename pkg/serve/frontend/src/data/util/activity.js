@@ -260,6 +260,10 @@ export function formatElapsed(elapsedMs) {
 export function activityPhase(session) {
   if (!session) return null;
   if (session.compacting) return 'compacting';
+  // The agent is parked on a background summary it cannot continue without. A
+  // summary the agent is working beside is NOT this phase: it is only the
+  // secondary line (see backgroundSummarizing).
+  if (session.backgroundCompaction?.active && session.backgroundCompaction?.waiting) return 'context_wait';
   if (session.autoVerifying) return 'verifying';
   // Blocked on the user — reclaims attention. A permission prompt flips the
   // session state to 'permission'; ask_user keeps the run 'running' but sets
@@ -269,6 +273,14 @@ export function activityPhase(session) {
   if (session.state !== 'running') return null;
   if (session.thinkingText) return 'thinking';
   return 'working';
+}
+
+// backgroundSummarizing is true while a background summary runs and the agent
+// is NOT blocked on it. It is deliberately independent of the run state: the
+// summary outlives a run, and an idle session still shows it.
+export function backgroundSummarizing(session) {
+  const bg = session?.backgroundCompaction;
+  return !!bg?.active && !bg.waiting;
 }
 
 // activityLabel builds the human text for the indicator given a coarse phase. In
@@ -282,6 +294,8 @@ export function activityLabel(phase, session = null) {
   switch (phase) {
     case 'compacting':
       return 'Compacting context';
+    case 'context_wait':
+      return 'Waiting for context';
     case 'verifying':
       return verifyLabel(session);
     case 'waiting':
@@ -300,7 +314,7 @@ export function activityLabel(phase, session = null) {
 // withEllipsis). 'waiting' is deliberately absent: the run is parked on a human,
 // so "Waiting for you…" would claim a progress that does not exist — the same
 // reason the now-line drops the shimmer and the elapsed timer while waiting.
-const IN_PROGRESS_PHASES = new Set(['working', 'thinking', 'compacting', 'verifying']);
+const IN_PROGRESS_PHASES = new Set(['working', 'thinking', 'compacting', 'context_wait', 'verifying']);
 
 // withEllipsis is the PRESENTATION step that turns a bare phrase into the
 // in-progress reading the product wants ("Untangling…", "Searching the code…").

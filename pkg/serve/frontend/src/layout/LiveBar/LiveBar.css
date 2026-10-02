@@ -213,6 +213,31 @@
   background: var(--zl-yellow);
   box-shadow: 0 0 0 3px rgba(249, 226, 175, 0.22);
 }
+/* Secondary line: a background summary beside the agent's own work. Quieter
+   than the sentence above it (t4, meta size, a still hollow dot), never
+   a second primary. */
+.zl-live-dot.is-context_wait {
+  background: var(--blue);
+  box-shadow: 0 0 0 3px rgba(137, 180, 250, 0.18);
+  animation: zl-breathe var(--breath-running) ease-in-out infinite;
+}
+.zl-live-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 0 4px 0 8px;
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+}
+.zl-live-dot.is-summary {
+  width: 5px;
+  height: 5px;
+  margin: 0 1px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--zl-t4);
+}
+.zl-live-sub-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zl-live-now.is-waiting { color: var(--zl-t2); }
 @keyframes zl-breathe { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .zl-live-dot { animation: none; } }

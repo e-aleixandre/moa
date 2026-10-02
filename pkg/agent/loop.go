@@ -92,12 +92,21 @@ func (cfg *loopConfig) appendState(msgs ...core.AgentMessage) {
 
 // loopConfig holds all dependencies for the agent loop.
 type loopConfig struct {
-	provider core.Provider
-	tools    *core.Registry
-	hooks    Hooks
-	emitter  *Emitter
-	state    *AgentState
-	stateMu  *sync.Mutex // guards writes to *state (shared with Agent.mu)
+	// background moves automatic compaction off the request path (see
+	// background_compaction.go). The loop's agent owns the job; false keeps
+	// the foreground compaction (preparation runs, embedders without a
+	// background lifetime).
+	background bool
+	agent      *Agent
+	// bgJustApplied is set by the boundary that adopted a background
+	// compaction, so the next boundary sends instead of compacting again.
+	bgJustApplied bool
+	provider      core.Provider
+	tools         *core.Registry
+	hooks         Hooks
+	emitter       *Emitter
+	state         *AgentState
+	stateMu       *sync.Mutex // guards writes to *state (shared with Agent.mu)
 	// pendingTrimPrediction is the context size a just-applied trim predicted,
 	// held until the next response reports what the provider actually counted.
 	// Per-run and not persisted: it exists to be logged once and dropped.
@@ -121,7 +130,9 @@ type loopConfig struct {
 	maxTurns            int
 	maxToolCallsPerTurn int
 	maxBudget           float64
-	runCost             float64 // accumulated USD cost this run
+	// budgetCap narrows maxBudget with a live cap (Agent.SetBudgetCap).
+	budgetCap func(context.Context) (float64, bool)
+	runCost   float64 // accumulated USD cost this run
 
 	// Custom conversion (nil = default)
 	convertToLLM func([]core.AgentMessage) []core.Message
@@ -214,6 +225,45 @@ func contextExceeds(cfg *loopConfig, s requestSettings, toolSpecs []core.ToolSpe
 	}
 	estimate := core.EstimateContextTokens(cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
 	return core.ShouldCompact(estimate.Tokens, c.EffectiveWindow(s.model.MaxInput), *c)
+}
+
+// hardCapacity is the most context s's model accepts: its window minus the
+// reserve, 0 when s does not compact at all.
+func hardCapacity(s requestSettings) int {
+	c := s.compaction
+	if c == nil || !c.Enabled || s.model.MaxInput <= 0 {
+		return 0
+	}
+	return s.model.MaxInput - c.ReserveTokens
+}
+
+// requestOverHard judges the request about to leave against the model window
+// minus the reserve: the provider-anchored estimate of the conversation, plus
+// whatever the request carries beyond it (hooks, materialization, a repair's
+// partial and hint), plus system prompt and tools.
+func requestOverHard(cfg *loopConfig, c *core.CompactionSettings, reqMessages []core.Message, toolSpecs []core.ToolSpec) (over bool, tokens, hard int) {
+	if c == nil || !c.Enabled || cfg.model.MaxInput <= 0 {
+		return false, 0, 0
+	}
+	hard = cfg.model.MaxInput - c.ReserveTokens
+	cfg.stateMu.Lock()
+	state := cfg.state.Messages
+	epoch := cfg.state.CompactionEpoch
+	est := core.EstimateContextTokens(state, cfg.systemPrompt, toolSpecs, epoch)
+	stateRaw := 0
+	for _, m := range state {
+		stateRaw += core.EstimateTokens(m.Message)
+	}
+	cfg.stateMu.Unlock()
+	reqRaw := 0
+	for _, m := range reqMessages {
+		reqRaw += core.EstimateTokens(m)
+	}
+	tokens = est.Tokens
+	if reqRaw > stateRaw {
+		tokens += reqRaw - stateRaw
+	}
+	return tokens > hard, tokens, hard
 }
 
 // compactionWindow is the window the compaction check judges s against, 0 when
@@ -332,10 +382,15 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			return loopErr
 		}
 
+		// A background summary this invocation started is charged to its
+		// budget once, at its next boundary.
+		if cfg.background {
+			cfg.runCost += cfg.agent.takeBackgroundDebits(cfg)
+		}
 		// Budget pre-check: catches overage added by compaction in the previous iteration
 		// before we make another provider call.
-		if cfg.maxBudget > 0 && cfg.runCost > cfg.maxBudget {
-			loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+		if limit, over := cfg.overBudget(ctx); over {
+			loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
 			return loopErr
 		}
 
@@ -356,12 +411,13 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// provider, model and thinking level that started it, with that model's
 		// own thinking intact. A change waits for the next ordinary request.
 		var compactionSettings *core.CompactionSettings
-		checkedWindow := 0
+		checkedWindow, checkedHard := 0, 0
 		if cfg.settings != nil && !justPaused {
 			settings := cfg.settings()
 			cfg.applySettings(settings)
 			compactionSettings = settings.compaction
 			checkedWindow = compactionWindow(settings)
+			checkedHard = hardCapacity(settings)
 		}
 		// The model whose window the check below judges the context against.
 		checkedFor := cfg.model
@@ -398,7 +454,19 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				}
 			}
 
-			if core.ShouldCompact(estimate.Tokens, window, *compactionSettings) {
+			foreground := !cfg.background
+			if cfg.background {
+				again, fallback, err := cfg.agent.backgroundBoundary(ctx, cfg, estimate.Tokens, window, compactionSettings, &preparedEpoch)
+				if err != nil {
+					loopErr = err
+					return loopErr
+				}
+				if again {
+					continue
+				}
+				foreground = fallback
+			}
+			if foreground && core.ShouldCompact(estimate.Tokens, window, *compactionSettings) {
 				// Trim before summarizing. Eliding an old tool result costs
 				// nothing but a re-run if the model wants it back, while a
 				// summary is irreversible — so the cheap, reversible edit gets
@@ -520,10 +588,21 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				}
 			}
 		}
+		// A continuation is never compacted or rewritten. If it no longer fits
+		// the window minus the reserve, stop instead of sending it oversized.
+		if justPaused && cfg.background && cfg.settings != nil {
+			if c := cfg.settings().compaction; c != nil && c.Enabled && cfg.model.MaxInput > 0 {
+				estimate := core.EstimateContextTokens(cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
+				if estimate.Tokens > cfg.model.MaxInput-c.ReserveTokens {
+					loopErr = fmt.Errorf("%w: a continuation cannot be compacted", ErrContextCapacity)
+					return loopErr
+				}
+			}
+		}
 		// Compaction itself is a provider call and may have consumed the
 		// remaining budget. Check again before issuing the normal turn request.
-		if cfg.maxBudget > 0 && cfg.runCost > cfg.maxBudget {
-			loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+		if limit, over := cfg.overBudget(ctx); over {
+			loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
 			return loopErr
 		}
 
@@ -576,6 +655,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		var streamErr error
 		emptyRetry := false
 		recheckContext := false
+		requestCompaction := compactionSettings
 		for attempt := 0; ; attempt++ {
 			// Last read before the request leaves: hooks, materialization and
 			// repair backoff all take time a change can land in.
@@ -598,12 +678,15 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				// the check the model and window are the checked ones, even if
 				// compaction failed.
 				window := compactionWindow(next)
-				shrunk := window > 0 && (checkedWindow == 0 || window < checkedWindow)
+				hard := hardCapacity(next)
+				shrunk := (window > 0 && (checkedWindow == 0 || window < checkedWindow)) ||
+					(hard > 0 && (checkedHard == 0 || hard < checkedHard))
 				if (!sameModel(next.model, checkedFor) || shrunk) && contextExceeds(cfg, next, toolSpecs) {
 					recheckContext = true
 					break
 				}
 				cfg.applySettings(next)
+				requestCompaction = next.compaction
 			}
 			reqMessages := baseMessages
 			if repairPartial != nil {
@@ -613,6 +696,27 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// these messages were prepared, or a restored session whose append-
 			// only tree keeps it. Only the request drops it; history keeps it.
 			reqMessages = withoutForeignThinking(reqMessages, cfg.model)
+			// Whatever got this request here (an unstable-source fallback, a
+			// compaction that found no cut, a transport repair appending the
+			// partial and a hint), it never leaves over the model window minus
+			// the reserve.
+			if cfg.background {
+				if requestCompaction == nil && cfg.settings != nil {
+					requestCompaction = cfg.settings().compaction
+				}
+				if over, est, hard := requestOverHard(cfg, requestCompaction, reqMessages, toolSpecs); over {
+					capErr := fmt.Errorf("%w: the next request is %d tokens, over %d", ErrContextCapacity, est, hard)
+					if repairPartial != nil {
+						// Keep the streamed partial through the stream-failure
+						// path, stamped with the model that wrote it.
+						assistantMsg = nil
+						streamErr = fmt.Errorf("%w (not retried: %w)", streamErr, capErr)
+						break
+					}
+					loopErr = capErr
+					return loopErr
+				}
+			}
 			req := core.Request{
 				Model:    cfg.model,
 				System:   cfg.systemPrompt,
@@ -757,9 +861,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// from their signed reasoning state without injecting fake user text.
 			toolCalls := extractToolCalls(assistantMsg)
 			addRunCost(cfg, assistantMsg.Usage)
-			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
-				if cfg.runCost > cfg.maxBudget {
-					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+			if assistantMsg.Usage != nil {
+				if limit, over := cfg.overBudget(ctx); over {
+					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
 					inTurn = false
 					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 					return loopErr
@@ -886,9 +990,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// Accumulate cost and check budget even on the final message so
 			// callers know when a run blew through the limit.
 			addRunCost(cfg, assistantMsg.Usage)
-			if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
-				if cfg.runCost > cfg.maxBudget {
-					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+			if assistantMsg.Usage != nil {
+				if limit, over := cfg.overBudget(ctx); over {
+					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
 					inTurn = false
 					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 					return loopErr
@@ -931,9 +1035,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Budget check — after tool execution so conversation state has matching
 		// tool_result messages for every tool_call (no dangling calls).
 		addRunCost(cfg, assistantMsg.Usage)
-		if cfg.maxBudget > 0 && assistantMsg.Usage != nil {
-			if cfg.runCost > cfg.maxBudget {
-				loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: cfg.maxBudget}
+		if assistantMsg.Usage != nil {
+			if limit, over := cfg.overBudget(ctx); over {
+				loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
 				return loopErr
 			}
 		}
@@ -1753,4 +1857,16 @@ func humanizeTokens(n int) string {
 		return fmt.Sprintf("%dk", n/1000)
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+// overBudget reports whether the run's cost exceeds its limit: MaxBudget,
+// narrowed by the live cap when one applies.
+func (cfg *loopConfig) overBudget(ctx context.Context) (float64, bool) {
+	limit, ok := cfg.maxBudget, cfg.maxBudget > 0
+	if cfg.budgetCap != nil {
+		if c, capped := cfg.budgetCap(ctx); capped && (!ok || c < limit) {
+			limit, ok = c, true
+		}
+	}
+	return limit, ok && cfg.runCost > limit
 }

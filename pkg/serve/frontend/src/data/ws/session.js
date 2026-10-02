@@ -7,6 +7,7 @@ import { normalizeHistory } from './history.js';
 import { placeFreshMarker } from '../start-fresh.js';
 import { parseCacheUsage } from '../cache-usage.js';
 import { nextRunEpoch } from './init.js';
+import { normalizeBackgroundCompaction } from './shared.js';
 import { markUnseen, acknowledgeVisibleLiveAttention, flashSession } from './attention.js';
 
 export function handleWsStateChange(id, data, seq = 0) {
@@ -389,6 +390,25 @@ export function handleWsCompactionStart(id) {
 }
 
 export function handleWsCompactionEnd(id, data) {
-  updateSession(id, { compacting: false });
+  // A background completion says nothing about the foreground flag: a manual
+  // compaction or a newer job may be running now. Its own state event ends the
+  // background indicator.
+  if (data?.background !== true) updateSession(id, { compacting: false });
+  // A failed background job has no other event: the generic error path would
+  // also clear the foreground flags, so it only surfaces the failure.
+  if (data?.background === true && data.error) {
+    addSessionToast(store.get().sessions[id], { sessionId: id, title: 'Compaction failed', detail: data.error, type: 'error' });
+  }
   appendCompactionMarker(id, data?.marker);
+}
+
+// Revisions grow monotonically within a runtime, so an event that is not newer
+// than what is held is a late or duplicate one. A snapshot resets this
+// wholesale (init.js), which is what covers a server restart.
+export function handleWsBackgroundCompactionState(id, data) {
+  const next = normalizeBackgroundCompaction(data);
+  if (!next) return;
+  const current = store.get().sessions[id]?.backgroundCompaction;
+  if (current && next.revision <= current.revision) return;
+  updateSession(id, { backgroundCompaction: next });
 }

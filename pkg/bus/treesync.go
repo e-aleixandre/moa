@@ -115,6 +115,33 @@ func (ts *TreeSyncer) ResetAndClear() error {
 	return nil
 }
 
+// BranchAndLoad moves the tree to entryID and loads that branch into the
+// agent as one history mutation under the syncer's lock. A compaction save
+// holds the same lock, so a branch can never move the tree under it.
+func (ts *TreeSyncer) BranchAndLoad(entryID string) ([]core.AgentMessage, error) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return branchAndLoad(ts.tree, ts.sctx.Agent, entryID)
+}
+
+func branchAndLoad(tree *session.Tree, ag AgentController, entryID string) ([]core.AgentMessage, error) {
+	if err := tree.Branch(entryID); err != nil {
+		return nil, err
+	}
+	// Rehydrate agent state from the new branch context
+	msgs, epoch := tree.BuildContext()
+	if err := ag.LoadState(msgs, epoch); err != nil {
+		return nil, fmt.Errorf("branch: load state: %w", err)
+	}
+	// Branching before a trim restores the full outputs, so the watermark
+	// has to come from the NEW branch: keeping the old one would leave the
+	// agent believing it had already elided messages that are whole again.
+	if err := restoreTrimWatermark(ag, tree); err != nil {
+		return nil, err
+	}
+	return msgs, nil
+}
+
 // DisplayMessages returns the full display history: the messages already synced
 // to the tree PLUS any agent messages appended since the last sync (the
 // in-flight turn). The tree only gains a turn's messages after RunEnded, so
@@ -339,6 +366,11 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 	if e.Payload.SummaryMsgID != "" {
 		ts.synced[e.Payload.SummaryMsgID] = struct{}{}
 	}
+	// A background boundary was committed before its completion event. If a
+	// clear or branch has since removed it, it must not be resurrected.
+	if e.Background {
+		return
+	}
 	if e.Marker != nil {
 		if existing, ok := ts.tree.Entry(e.Marker.MsgID); ok && existing.Type == session.EntryCompaction {
 			return
@@ -395,6 +427,18 @@ func (ts *TreeSyncer) commitCompaction(c core.CompactionCommit, persist func([]s
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
+	// A producer with a cut transaction validates its source here, ordered
+	// with every other save, and nothing is staged if it is obsolete.
+	var adopt func()
+	if c.Accept != nil {
+		var release func()
+		var err error
+		if adopt, release, err = c.Accept(); err != nil {
+			return err
+		}
+		defer release()
+	}
+
 	staged, rev := ts.tree.Stage()
 	synced := make(map[string]struct{}, len(ts.synced)+len(c.Originals)+1)
 	for id := range ts.synced {
@@ -438,6 +482,10 @@ func (ts *TreeSyncer) commitCompaction(c core.CompactionCommit, persist func([]s
 		return fmt.Errorf("session tree changed during the compaction commit")
 	}
 	ts.synced = synced
+	// The agent adopts under ts.mu, so no tree reader sees one side moved.
+	if adopt != nil {
+		adopt()
+	}
 	return nil
 }
 

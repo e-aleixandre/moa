@@ -172,6 +172,32 @@ type CompactionEnded struct {
 	Marker            *core.AgentMessage
 	Err               error
 	CostIncludedInRun bool // true when this payload's usage is already included in RunEnded.Cost
+	// Background marks the completion of a background compaction (JobID).
+	// Its boundary was committed before this event, its usage was settled by
+	// CompactionUsage, and it never clears the foreground compacting flag.
+	Background bool
+	JobID      uint64
+}
+
+// BackgroundCompactionChanged is published at each transition of the
+// session's background compaction. Session-level: it survives run ends and is
+// never filtered by run generation.
+type BackgroundCompactionChanged struct {
+	SessionID string
+	State     core.BackgroundCompactionState
+}
+
+// CompactionUsage is the known usage of one background summary call, at the
+// rates of the model that wrote it. Published once per call, whether or not
+// its result was adopted.
+type CompactionUsage struct {
+	SessionID string
+	JobID     uint64
+	Usage     core.Usage
+	Pricing   *core.Pricing
+	// GoalActivation is the goal activation the job was started under, 0 when
+	// none was active.
+	GoalActivation uint64
 }
 
 // ContextTrimmed is published when old tool results were elided from the

@@ -178,6 +178,15 @@ func (m *Manager) CancelWithDiscardedSteers(sessionID, stopID string) ([]core.St
 
 	state := sess.runtime.State.Current()
 	if state != bus.StateRunning && state != bus.StatePermission && !sess.runtime.Context().Agent.IsRunning() {
+		// Stop on an idle session that is still summarizing in the background
+		// discards that summary; no run is started or reported.
+		cancelled := false
+		if err := sess.runtime.Bus.Execute(bus.CancelBackgroundCompaction{Cancelled: &cancelled}); err != nil {
+			return nil, err
+		}
+		if cancelled {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("session is not running")
 	}
 

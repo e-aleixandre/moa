@@ -1,5 +1,7 @@
 package core
 
+import "errors"
+
 // CompactionSettings controls automatic context compaction.
 type CompactionSettings struct {
 	Enabled       bool `json:"enabled"`
@@ -108,6 +110,32 @@ type CompactionCommit struct {
 	// events carry the untrimmed originals, so the owner records them before
 	// staging Originals, which hold the placeholders.
 	Trims uint64
+	// Accept, when set, is the producer's cut transaction: the owner calls it
+	// before staging, under the locks that order this save with every other
+	// one. It validates that the source is still current and returns adopt,
+	// which the owner calls once the save succeeded and the tree adopted the
+	// boundary, and release, which the owner calls when the commit is settled
+	// (after recording a storage failure). An error from Accept means nothing
+	// was saved; ErrCompactionObsolete is not a storage failure. Nil keeps the
+	// original contract: the producer adopts after the commit returns.
+	Accept func() (adopt func(), release func(), err error)
+}
+
+// ErrCompactionObsolete reports a background compaction whose source changed
+// or was invalidated before its cut was accepted. Nothing was saved, and it is
+// not a storage failure.
+var ErrCompactionObsolete = errors.New("compaction source is no longer current")
+
+// BackgroundCompactionState is the session-level state of the automatic
+// compaction computed off the run's critical path. Revision increases at each
+// transition, so a late update can never replace a newer one.
+type BackgroundCompactionState struct {
+	JobID    uint64 `json:"job_id"`
+	Revision uint64 `json:"revision"`
+	Active   bool   `json:"active"`
+	// Waiting is true while the run waits for the summary because its next
+	// request would exceed the model window minus the reserve.
+	Waiting bool `json:"waiting"`
 }
 
 // CompactionNotSavedError reports a compaction whose summary was produced (and

@@ -172,6 +172,11 @@ type SessionContext struct {
 	// snapshot boundary cut (subscribe → LastSeq → query) always observes a
 	// value consistent with the events streamed after the cut.
 	compacting atomic.Bool
+	// bgCompaction is the latest background compaction state (by revision).
+	bgCompaction atomic.Pointer[core.BackgroundCompactionState]
+	// bgLifetime bounds background compactions; cancelled by Close.
+	bgLifetime       context.Context
+	bgLifetimeCancel context.CancelFunc
 
 	// streamMu guards the authoritative in-flight state below: the streaming
 	// aggregate AND the live tool-call registry. The agent appends an assistant
@@ -421,6 +426,9 @@ type runStats struct {
 	finalText string
 	hadEdits  bool
 	costUSD   float64
+	// settled is set once RunEnded's figures were taken: later spend of this
+	// run can no longer ride on RunEnded.
+	settled bool
 }
 
 func (sctx *SessionContext) beginAutoVerify() {
@@ -470,6 +478,23 @@ func (sctx *SessionContext) trackBackgroundEvent(event any) {
 	}
 }
 
+// backgroundCompactionPending reports a background summary that can still
+// save and adopt (running, held at hard or accepted). Read from the Agent, not
+// from the event mirror, which lags the real state. Deliberately not part of
+// hasBackgroundWork: a user prompt is not refused because of it.
+func (sctx *SessionContext) backgroundCompactionPending() bool {
+	bg, ok := sctx.Agent.(interface {
+		BackgroundCompaction() core.BackgroundCompactionState
+	})
+	return ok && bg.BackgroundCompaction().Active
+}
+
+// quiescenceBlocked is the outstanding work an autonomous completion or a
+// teardown must wait for.
+func (sctx *SessionContext) quiescenceBlocked() bool {
+	return sctx.hasBackgroundWork() || sctx.backgroundCompactionPending()
+}
+
 func (sctx *SessionContext) hasBackgroundWork() bool {
 	sctx.quiescenceMu.Lock()
 	defer sctx.quiescenceMu.Unlock()
@@ -484,7 +509,11 @@ func (sctx *SessionContext) hasBackgroundWork() bool {
 func (sctx *SessionContext) BackgroundWork() int {
 	sctx.quiescenceMu.Lock()
 	defer sctx.quiescenceMu.Unlock()
-	return sctx.autoVerifyRunning + sctx.goalVerifyRunning + len(sctx.activeSubagents) + len(sctx.activeBashJobs)
+	n := sctx.autoVerifyRunning + sctx.goalVerifyRunning + len(sctx.activeSubagents) + len(sctx.activeBashJobs)
+	if sctx.backgroundCompactionPending() {
+		n++
+	}
+	return n
 }
 
 // setPendingRunOrigin records the provenance of the run that is about to be
@@ -586,6 +615,28 @@ func (sctx *SessionContext) Compacting() bool {
 // events.
 func (sctx *SessionContext) setCompacting(v bool) {
 	sctx.compacting.Store(v)
+}
+
+// BackgroundCompaction returns the latest background compaction state.
+func (sctx *SessionContext) BackgroundCompaction() core.BackgroundCompactionState {
+	if s := sctx.bgCompaction.Load(); s != nil {
+		return *s
+	}
+	return core.BackgroundCompactionState{}
+}
+
+// setBackgroundCompaction records s unless a newer revision is already
+// recorded. Reports whether s was recorded.
+func (sctx *SessionContext) setBackgroundCompaction(s core.BackgroundCompactionState) bool {
+	for {
+		cur := sctx.bgCompaction.Load()
+		if cur != nil && cur.Revision >= s.Revision {
+			return false
+		}
+		if sctx.bgCompaction.CompareAndSwap(cur, &s) {
+			return true
+		}
+	}
 }
 
 // StreamingAggregate returns the in-flight partial assistant text/thinking and
@@ -850,6 +901,11 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 	sctx.runCancel = cancel
 	sctx.runGen++
 	ctx = context.WithValue(ctx, runGenKey{}, sctx.runGen)
+	if sctx.Goal != nil {
+		if act := sctx.Goal.Activation(); act != 0 {
+			ctx = context.WithValue(ctx, goalActivationKey{}, act)
+		}
+	}
 	sctx.RunGenAtomic.Store(sctx.runGen)
 	sctx.runStartedAnchor.Store(&runStartAnchor{gen: sctx.runGen, at: time.Now()})
 	// Admit the generation in the same critical section that mints it. The
@@ -957,7 +1013,22 @@ func (sctx *SessionContext) snapshotRunStats(gen uint64) runStats {
 	if sctx.runStats.gen != gen {
 		return runStats{}
 	}
+	sctx.runStats.settled = true
 	return sctx.runStats
+}
+
+// addRunBackgroundCost charges a background summary to the run that started
+// it while that run's RunEnded is still to be published, so it is charged
+// exactly once with the run. Reports false when the run has settled (or
+// another run replaced it): the caller charges the session directly.
+func (sctx *SessionContext) addRunBackgroundCost(gen uint64, usd float64) bool {
+	sctx.runStatsMu.Lock()
+	defer sctx.runStatsMu.Unlock()
+	if gen == 0 || sctx.runStats.gen != gen || sctx.runStats.settled {
+		return false
+	}
+	sctx.runStats.costUSD += usd
+	return true
 }
 
 // cancelRun cancels the current run context if any. Safe to call multiple times.
@@ -1053,6 +1124,43 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	if origin, ok := runGenOf(e.Origin); ok {
 		gen = origin
 	}
+	// Background compaction is session-level: it bypasses run generation,
+	// run statistics and the foreground compacting flag.
+	switch e.Type {
+	case core.AgentEventBackgroundCompaction:
+		if e.BackgroundCompaction != nil && sctx.setBackgroundCompaction(*e.BackgroundCompaction) {
+			sctx.Bus.Publish(BackgroundCompactionChanged{SessionID: sid, State: *e.BackgroundCompaction})
+		}
+		return
+	case core.AgentEventCompactionUsage:
+		if e.Usage != nil {
+			var act uint64
+			if e.Origin != nil {
+				act, _ = e.Origin.Value(goalActivationKey{}).(uint64)
+			}
+			// Charged once: with its own run while that run is unsettled,
+			// otherwise directly to the session (and the goal activation).
+			if e.Pricing != nil {
+				if gen, ok := runGenOf(e.Origin); ok && sctx.addRunBackgroundCost(gen, e.Pricing.Cost(*e.Usage)) {
+					return
+				}
+			}
+			sctx.Bus.Publish(CompactionUsage{SessionID: sid, JobID: e.BackgroundJobID, Usage: *e.Usage, Pricing: e.Pricing, GoalActivation: act})
+		}
+		return
+	case core.AgentEventCompactionEnd:
+		if e.BackgroundJobID != 0 {
+			var marker *core.AgentMessage
+			if e.Error == nil {
+				marker = NewCompactionMarker(e.Compaction)
+			}
+			// RunGen names the run that adopted it at a boundary, 0 at idle.
+			gen, _ := runGenOf(e.Origin)
+			sctx.Bus.Publish(CompactionEnded{SessionID: sid, RunGen: gen, Payload: e.Compaction, Marker: marker, Err: e.Error,
+				CostIncludedInRun: true, Background: true, JobID: e.BackgroundJobID})
+			return
+		}
+	}
 	// SteersCanceled applies to this session's queue. It must not go through
 	// TranslateAgentEvent, which is also used to forward child-agent events.
 	if e.Type == core.AgentEventSteersCanceled {
@@ -1123,6 +1231,11 @@ func discardedIDsNotLive(sctx *SessionContext, ids []string) []string {
 }
 
 type runGenKey struct{}
+
+// goalActivationKey carries, on a run context, the goal activation the run
+// was launched under, so spend settled after the run ended is charged to that
+// activation and never to a replacement.
+type goalActivationKey struct{}
 
 // runGenOf returns the bus generation of the run an event's origin context
 // descends from.

@@ -1,6 +1,6 @@
 // WebSocket init snapshot handling.
 
-import { wsState } from './shared.js';
+import { wsState, normalizeBackgroundCompaction } from './shared.js';
 import { appendNormalizedHistoryDelta, extractToolNote, normalizeHistory } from './history.js';
 import { attentionNamespaceFromInit, attentionNamespaceTransition } from './attention.js';
 import { chronologicalSubagentOutcomes, upsertTerminalSubagentOutcome } from './subagents.js';
@@ -129,6 +129,9 @@ export function handleWsInit(id, data) {
     // finished while this pane had no WS, the stale local spinner is cleared;
     // if one is still running, it is restored.
     compacting: !!data.compacting,
+    // Authoritative too, including its absence: a restarted server or an older
+    // one must not leave a cached background indicator behind.
+    backgroundCompaction: normalizeBackgroundCompaction(data.background_compaction),
     // The auto-verify may have ended while this client had no socket, so the
     // snapshot must replace the stale local indicator with server truth.
     autoVerifying: !!data.auto_verifying,

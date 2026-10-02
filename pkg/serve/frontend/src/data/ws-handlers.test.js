@@ -2,7 +2,7 @@
 import { test, expect, beforeEach } from 'bun:test';
 import { store, setState } from './store.js';
 import { projectStream, liveTrayAgents } from './stream-model.js';
-import { handleWsInit, handleWsSubagentStart, handleWsSubagentTitle, handleWsSubagentEvent, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsMessageEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd, handleWsConfigChange } from './ws-handlers.js';
+import { handleWsInit, handleWsSubagentStart, handleWsSubagentTitle, handleWsSubagentEvent, handleWsSubagentEnd, upsertTerminalSubagentOutcome, normalizeConversationProjection, normalizeHistory, appendNormalizedHistoryDelta, handleWsGoalChange, handleWsGoalVerify, handleWsBashComplete, handleWsBashJobStart, handleWsBashJobEnd, handleWsSteer, handleWsSteersCanceled, handleWsRunEnd, handleWsMessageEnd, handleWsCommand, handleWsCommandQueued, handleWsCommandDequeued, handleWsRunTokens, handleWsUserMessage, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd, handleWsStateChange, handleWsAskUser, handleWsPermissionRequest, handleWsAskResolved, handleWsPermissionResolved, handleWsCompactionEnd, handleWsBackgroundCompactionState, handleWsConfigChange } from './ws-handlers.js';
 import { liveVerb } from './util/activity.js';
 import { bashJobView } from './bash-job-view-model.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
@@ -1242,6 +1242,47 @@ test('a compaction end without marker remains safe until init supplies the durab
   expect(projectStream(store.get().sessions.s1).filter(block => block.kind === 'compaction')).toHaveLength(1);
 });
 
+const bgState = (job_id, revision, active, waiting = false) => ({ job_id, revision, active, waiting });
+
+test('background compaction state applies only newer revisions', () => {
+  seedSession('s1');
+  handleWsBackgroundCompactionState('s1', bgState(2, 5, true));
+  handleWsBackgroundCompactionState('s1', bgState(1, 4, false));
+  expect(store.get().sessions.s1.backgroundCompaction).toEqual({ jobId: 2, revision: 5, active: true, waiting: false });
+  handleWsBackgroundCompactionState('s1', bgState(2, 6, false));
+  expect(store.get().sessions.s1.backgroundCompaction.active).toBe(false);
+});
+
+test('a snapshot replaces the background state, and its absence clears a cached one', () => {
+  seedSession('s1');
+  handleWsBackgroundCompactionState('s1', bgState(2, 9, true, true));
+  handleWsInit('s1', { messages: [], subagents: [], background_compaction: bgState(1, 1, true) });
+  expect(store.get().sessions.s1.backgroundCompaction).toEqual({ jobId: 1, revision: 1, active: true, waiting: false });
+  handleWsInit('s1', { messages: [], subagents: [] });
+  expect(store.get().sessions.s1.backgroundCompaction).toBe(null);
+});
+
+test('a background compaction end keeps the foreground flag but still adds its marker', () => {
+  seedSession('s1');
+  const raw = {
+    role: 'session_event', msg_id: 'compact-entry', content: [{ type: 'text', text: '✂ Context compacted' }],
+    custom: { type: 'compaction_marker', summary: 'Keep the plan.', tokens_before: 24000 },
+  };
+  setState({ sessions: { s1: { ...store.get().sessions.s1, compacting: true } } });
+  handleWsCompactionEnd('s1', { background: true, marker: raw });
+  expect(store.get().sessions.s1.compacting).toBe(true);
+  expect(store.get().sessions.s1.messages).toEqual(normalizeHistory([raw]));
+  handleWsCompactionEnd('s1', {});
+  expect(store.get().sessions.s1.compacting).toBe(false);
+});
+
+test('a run end keeps the background summary indicator', () => {
+  seedSession('s1');
+  handleWsBackgroundCompactionState('s1', bgState(1, 1, true));
+  handleWsRunEnd('s1', {}, 0);
+  expect(store.get().sessions.s1.backgroundCompaction.active).toBe(true);
+});
+
 // Bug #7 parity: a fresh goal activation shows a live "start" line (matching the
 // persisted marker rendered on reopen); a re-announcement must not duplicate it.
 test('handleWsGoalChange adds a live start line once on fresh activation', async () => {
@@ -1319,6 +1360,32 @@ test('handleWsStateChange names a failed compaction in its toast', async () => {
   const t = toasts[toasts.length - 1];
   expect(t.title).toBe('Compaction failed');
   expect(t.detail).toBe('summarizer unavailable');
+});
+
+// A background summary that fails ends with compaction_end{background,error}
+// and no separate error event, so this is the only place the owner can learn
+// of it. It must not touch the manual compaction flag or the background state.
+test('a failed background compaction toasts for its own session and changes no state', async () => {
+  const bg = { jobId: 3, revision: 7, active: true, waiting: false };
+  setState({
+    sessions: { s1: { id: 's1', state: 'idle', compacting: true, backgroundCompaction: bg, messages: [], subagents: {} } },
+    isMobile: true,
+    activeSession: 's1',
+  });
+  const before = getToasts().length;
+
+  handleWsCompactionEnd('s1', { background: true, error: 'storage unavailable', marker: null });
+
+  const toasts = getToasts();
+  expect(toasts.length).toBe(before + 1);
+  const t = toasts[toasts.length - 1];
+  expect(t.title).toBe('Compaction failed');
+  expect(t.detail).toBe('storage unavailable');
+  expect(t.sessionId).toBe('s1');
+  const sess = store.get().sessions.s1;
+  expect(sess.compacting).toBe(true);
+  expect(sess.backgroundCompaction).toEqual(bg);
+  expect(sess.messages).toEqual([]);
 });
 
 // Without a compaction in flight the generic run wording is unchanged.

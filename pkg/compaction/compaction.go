@@ -530,20 +530,22 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 		}
 	}
 
-	if strings.TrimSpace(result) == "" {
-		return "", nil, fmt.Errorf("summarization produced empty output")
-	}
-
 	var usage *core.Usage
 	if finalMsg != nil {
 		usage = finalMsg.Usage
+	}
+	// The provider reported its usage even when the text is unusable: it was
+	// spent, so it travels with the error.
+	if strings.TrimSpace(result) == "" {
+		return "", usage, fmt.Errorf("summarization produced empty output")
 	}
 	return result, usage, nil
 }
 
 // Compact orchestrates context compaction. Returns nil Result if nothing
 // needs compacting. On LLM failure, returns the error with the original
-// messages unchanged (non-fatal). focus is an optional caller instruction
+// messages unchanged (non-fatal); a Result returned alongside an error holds
+// only the known Usage. focus is an optional caller instruction
 // (from `/compact <focus>`) telling the summarizer what to keep in the
 // foreground; empty for automatic compaction.
 func Compact(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, contextTokens, contextWindow int, settings core.CompactionSettings, focus string) (*Result, []core.AgentMessage, error) {
@@ -566,7 +568,13 @@ func Compact(ctx context.Context, provider core.Provider, model core.Model, opts
 
 	summary, usage, err := GenerateSummary(ctx, provider, model, opts, toSummarize, previousSummary, focus)
 	if err != nil {
-		return nil, msgs, fmt.Errorf("compaction: %w", err)
+		// A partial Result carries only the usage already spent; it is never a
+		// compaction to adopt, and the error stays non-nil.
+		var spent *Result
+		if usage != nil {
+			spent = &Result{Usage: usage}
+		}
+		return spent, msgs, fmt.Errorf("compaction: %w", err)
 	}
 
 	summary += formatFileOps(fileOps)

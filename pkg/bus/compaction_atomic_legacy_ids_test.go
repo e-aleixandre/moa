@@ -27,7 +27,13 @@ func TestCompactionAtomicMigratedLegacyMessageIDs(t *testing.T) {
 				for i := 0; i < 4; i++ {
 					role, text := "assistant", fmt.Sprintf("answer %d", i)
 					if i%2 == 0 {
-						role, text = "user", strings.Repeat(fmt.Sprintf("question %d ", i), 200)
+						// The first question alone exceeds the window; what is
+						// retained after the cut fits it.
+						n := 200
+						if i == 0 {
+							n = 800
+						}
+						role, text = "user", strings.Repeat(fmt.Sprintf("question %d ", i), n)
 					}
 					m := core.WrapMessage(core.Message{Role: role, Content: []core.Content{core.TextContent(text)}})
 					if populated {
@@ -56,7 +62,7 @@ func TestCompactionAtomicMigratedLegacyMessageIDs(t *testing.T) {
 						t.Fatal("migration did not preserve message identity")
 					}
 				}
-				ag, err := agent.New(agent.AgentConfig{Provider: &catomicSummaryProvider{}, Model: core.Model{ID: "review-legacy", MaxInput: 512}, Tools: core.NewRegistry(), Compaction: &core.CompactionSettings{Enabled: true, ReserveTokens: 10, KeepRecent: 10}, MaxRunDuration: 10 * time.Second})
+				ag, err := agent.New(agent.AgentConfig{Provider: &catomicSummaryProvider{}, Model: core.Model{ID: "review-legacy", MaxInput: 2048}, Tools: core.NewRegistry(), Compaction: &core.CompactionSettings{Enabled: true, ReserveTokens: 10, KeepRecent: 10}, MaxRunDuration: 10 * time.Second})
 				if err != nil {
 					t.Fatal(err)
 				}

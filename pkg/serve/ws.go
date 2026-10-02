@@ -414,8 +414,13 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.CompactionStarted:
 		return Event{Type: "compaction_start"}, true
+	case bus.BackgroundCompactionChanged:
+		return Event{Type: "background_compaction_state", Data: e.State}, true
 	case bus.CompactionEnded:
-		data := CompactionEndData{}
+		data := CompactionEndData{Background: e.Background}
+		if e.Background && e.Err != nil {
+			data.Error = e.Err.Error()
+		}
 		if e.Marker != nil {
 			marker, _ := sanitizeHistoryMessage(*e.Marker)
 			data.Marker = &marker
@@ -731,36 +736,38 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	cacheUsage, _ := bus.QueryTyped[bus.GetCacheUsage, core.CacheUsageSummary](b, bus.GetCacheUsage{})
 	runTokens, _ := bus.QueryTyped[bus.GetRunTokens, bus.RunTokens](b, bus.GetRunTokens{})
 	compacting, _ := bus.QueryTyped[bus.GetCompacting, bool](b, bus.GetCompacting{})
+	bgCompaction, _ := bus.QueryTyped[bus.GetBackgroundCompaction, core.BackgroundCompactionState](b, bus.GetBackgroundCompaction{})
 	autoVerifying, _ := bus.QueryTyped[bus.GetAutoVerifying, bool](b, bus.GetAutoVerifying{})
 	pendingSteers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](b, bus.GetPendingSteers{})
 
 	data := InitData{
-		ServerInstance:     sess.serverInstance,
-		AttentionNamespace: sess.attentionNamespace,
-		Messages:           msgs,
-		HistoryTruncated:   historyTruncated,
-		HistoryBefore:      historyBefore,
-		DeltaBase:          deltaBase,
-		State:              state,
-		ContextPercent:     ctxPct,
-		ContextWindow:      initModel.MaxInput,
-		CompactAt:          compactAt,
-		CompactAtMin:       compactAtMin,
-		PermissionMode:     permMode,
-		Fast:               initFast,
-		FastSupported:      core.SupportsFast(initModel.ID),
-		FastNote:           core.FastNote(initModel.ID),
-		Tasks:              taskList,
-		PathScope:          pathInfo.Scope,
-		CostUSD:            cost,
-		CacheUsage:         cacheUsageData(cacheUsage),
-		RunTokensUp:        runTokens.Up,
-		RunTokensDown:      runTokens.Down,
-		Compacting:         compacting,
-		AutoVerifying:      autoVerifying,
-		StreamingText:      truncateHistoryString(streaming.Text),
-		StreamingThinking:  truncateHistoryString(streaming.Thinking),
-		LiveTools:          liveToolInitData(liveTools),
+		ServerInstance:       sess.serverInstance,
+		AttentionNamespace:   sess.attentionNamespace,
+		Messages:             msgs,
+		HistoryTruncated:     historyTruncated,
+		HistoryBefore:        historyBefore,
+		DeltaBase:            deltaBase,
+		State:                state,
+		ContextPercent:       ctxPct,
+		ContextWindow:        initModel.MaxInput,
+		CompactAt:            compactAt,
+		CompactAtMin:         compactAtMin,
+		PermissionMode:       permMode,
+		Fast:                 initFast,
+		FastSupported:        core.SupportsFast(initModel.ID),
+		FastNote:             core.FastNote(initModel.ID),
+		Tasks:                taskList,
+		PathScope:            pathInfo.Scope,
+		CostUSD:              cost,
+		CacheUsage:           cacheUsageData(cacheUsage),
+		RunTokensUp:          runTokens.Up,
+		RunTokensDown:        runTokens.Down,
+		Compacting:           compacting,
+		BackgroundCompaction: bgCompaction,
+		AutoVerifying:        autoVerifying,
+		StreamingText:        truncateHistoryString(streaming.Text),
+		StreamingThinking:    truncateHistoryString(streaming.Thinking),
+		LiveTools:            liveToolInitData(liveTools),
 	}
 
 	// Read the run anchor from the runtime's synchronous state. The cache-clock

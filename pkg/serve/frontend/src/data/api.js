@@ -20,7 +20,7 @@ import {
   handleWsSessionCost, handleWsCacheUsage,
   handleWsRunTokens,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
-  handleWsCompactionStart, handleWsCompactionEnd, handleWsContextTrim,
+  handleWsCompactionStart, handleWsCompactionEnd, handleWsBackgroundCompactionState, handleWsContextTrim,
   attentionNamespaceFromInit, attentionNamespaceTransition, adoptAttentionNamespace,
 } from './ws-handlers.js';
 import { store, updateSession } from './store.js';
@@ -628,6 +628,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'compaction_end':
       handleWsCompactionEnd(sessionId, evt.data);
+      break;
+    case 'background_compaction_state':
+      handleWsBackgroundCompactionState(sessionId, evt.data);
       break;
     case 'context_trim':
       handleWsContextTrim(sessionId, evt.data);

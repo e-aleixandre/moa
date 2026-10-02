@@ -194,6 +194,7 @@ function normalizeSessionInfo(info, existing, visible) {
     verifyDir: existing ? existing.verifyDir : null,
     verifyManual: existing ? existing.verifyManual : false,
     compacting: existing ? existing.compacting : false,
+    backgroundCompaction: existing ? existing.backgroundCompaction : null,
     onOverage: existing ? existing.onOverage : false,
     // Per-request rate-limit percents remain as an old-server fallback;
     // current OpenAI usage comes from the provider-wide /api/usage snapshot.

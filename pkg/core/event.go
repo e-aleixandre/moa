@@ -33,7 +33,15 @@ type AgentEvent struct {
 	// Pricing is the rate card of the model that served a message_end's
 	// request. The session's model can change while a run is in flight, so its
 	// current pricing is not necessarily this response's.
-	Pricing *Pricing // message_end
+	Pricing *Pricing // message_end, compaction_usage
+	// BackgroundJobID identifies the background compaction a compaction_end,
+	// compaction_usage or background_compaction event belongs to. Zero for
+	// foreground (manual or preparation) compactions.
+	BackgroundJobID uint64
+	// BackgroundCompaction is the session-level state (background_compaction).
+	BackgroundCompaction *BackgroundCompactionState
+	// Usage is what a background summary call cost (compaction_usage).
+	Usage *Usage
 	// Origin is the context of the agent invocation that produced the event,
 	// stamped at emission; nil outside a run. A consumer that lags behind can
 	// tell an event of a finished run from one of the run now in flight.
@@ -70,6 +78,13 @@ const (
 	// placeholders in the model's context INSTEAD of compacting. No summarizer
 	// call, no information destroyed: the tree keeps the originals.
 	AgentEventContextTrimmed = "context_trimmed"
+	// AgentEventBackgroundCompaction reports a transition of the background
+	// compaction state. Session-level: never part of a run's accounting.
+	AgentEventBackgroundCompaction = "background_compaction"
+	// AgentEventCompactionUsage reports the known usage of one background
+	// summary call, once, whether or not its result is kept. Origin is the
+	// invocation that started the job.
+	AgentEventCompactionUsage = "compaction_usage"
 	// AgentEventFastUnavailable reports that a provider fell back from a
 	// rejected premium-speed request and disabled it for the session.
 	AgentEventFastUnavailable = "fast_unavailable"

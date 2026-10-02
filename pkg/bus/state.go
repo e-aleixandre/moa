@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 // ErrInvalidTransition is returned (wrapped) by StateMachine.Transition when the
@@ -33,8 +34,11 @@ var validTransitions = map[SessionState]map[SessionState]bool{
 // StateMachine manages session state with validated transitions.
 // Thread-safe. Publishes StateChanged events on every transition.
 type StateMachine struct {
-	mu        sync.Mutex
-	current   SessionState
+	mu      sync.Mutex
+	current SessionState
+	// mirror is current, written under mu, for readers that must not take
+	// mu (see SessionContext.rootIdleForCompaction).
+	mirror    atomic.Value
 	lastError string // most recent error message; cleared on non-error transition
 	bus       EventBus
 	sid       string
@@ -67,6 +71,7 @@ func (sm *StateMachine) TransitionWithError(to SessionState, errMsg string) erro
 		return fmt.Errorf("%w: %s → %s", ErrInvalidTransition, sm.current, to)
 	}
 	sm.current = to
+	sm.mirror.Store(to)
 	sm.lastError = errMsg
 	sm.bus.Publish(StateChanged{
 		SessionID: sm.sid,
@@ -97,6 +102,16 @@ func (sm *StateMachine) ForceState(s SessionState) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.current = s
+	sm.mirror.Store(s)
+}
+
+// CurrentAtomic is Current without the state lock: the state as of the last
+// completed transition.
+func (sm *StateMachine) CurrentAtomic() SessionState {
+	if s, ok := sm.mirror.Load().(SessionState); ok {
+		return s
+	}
+	return StateIdle
 }
 
 // DoIfIdle runs fn while holding the state lock, but only if the current state

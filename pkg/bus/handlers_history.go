@@ -488,6 +488,10 @@ func registerSessionQueryHandlers(sctx *SessionContext) {
 		return sctx.Compacting(), nil
 	})
 
+	b.OnQuery(func(q GetBackgroundCompaction) (core.BackgroundCompactionState, error) {
+		return sctx.BackgroundCompaction(), nil
+	})
+
 	b.OnQuery(func(q GetAutoVerifying) (bool, error) {
 		return sctx.AutoVerifying(), nil
 	})
@@ -558,18 +562,14 @@ func registerTreeHandlers(sctx *SessionContext) {
 				return fmt.Errorf("cannot branch while agent is busy (%s)", s)
 			}
 		}
-		if err := sctx.Tree.Branch(cmd.EntryID); err != nil {
-			return err
+		var msgs []core.AgentMessage
+		var err error
+		if sctx.treeSyncer != nil {
+			msgs, err = sctx.treeSyncer.BranchAndLoad(cmd.EntryID)
+		} else {
+			msgs, err = branchAndLoad(sctx.Tree, sctx.Agent, cmd.EntryID)
 		}
-		// Rehydrate agent state from the new branch context
-		msgs, epoch := sctx.Tree.BuildContext()
-		if err := sctx.Agent.LoadState(msgs, epoch); err != nil {
-			return fmt.Errorf("branch: load state: %w", err)
-		}
-		// Branching before a trim restores the full outputs, so the watermark
-		// has to come from the NEW branch: keeping the old one would leave the
-		// agent believing it had already elided messages that are whole again.
-		if err := restoreTrimWatermark(sctx.Agent, sctx.Tree); err != nil {
+		if err != nil {
 			return err
 		}
 		sctx.Bus.Publish(CommandExecuted{

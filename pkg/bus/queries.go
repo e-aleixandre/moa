@@ -112,6 +112,10 @@ type GetCompactionEpoch struct{ SessionID string }
 // Handler returns: bool
 type GetCompacting struct{ SessionID string }
 
+// GetBackgroundCompaction returns the latest background compaction state.
+// Handler returns: core.BackgroundCompactionState
+type GetBackgroundCompaction struct{ SessionID string }
+
 // GetAutoVerifying reports whether an auto-verify is currently in progress, so
 // a reconnect snapshot can restore (or clear) the auto-verify indicator.
 // Handler returns: bool

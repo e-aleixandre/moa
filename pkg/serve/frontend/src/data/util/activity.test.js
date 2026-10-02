@@ -258,3 +258,12 @@ test('an automatic post-edit verify keeps its label', () => {
   // No session at all (older callers) must not change behaviour.
   expect(activityLabel('verifying')).toBe('Running auto-verify');
 });
+
+test('a hard background-summary wait is its own in-progress phase; a working summary is not', () => {
+  const hard = { state: 'running', backgroundCompaction: { active: true, waiting: true } };
+  expect(activityPhase(hard)).toBe('context_wait');
+  expect(activityText(hard)).toBe('Waiting for context…');
+  expect(activityPhase({ ...hard, backgroundCompaction: { active: true, waiting: false } })).toBe('working');
+  expect(activityPhase({ state: 'idle', backgroundCompaction: { active: true, waiting: false } })).toBe(null);
+  expect(activityPhase({ ...hard, compacting: true })).toBe('compacting');
+});

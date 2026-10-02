@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Square } from "lucide-preact";
-import { activityPhase, activityText, formatElapsed } from "../../data/util/activity.js";
+import { activityPhase, activityText, backgroundSummarizing, formatElapsed } from "../../data/util/activity.js";
 import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
 import { LiveSentence } from "./LiveSentence.jsx";
 import { waitsOnYou } from "../../data/owners-model.js";
@@ -80,6 +80,8 @@ export function foregroundLine(session, nowMs) {
   return { text, waiting, elapsed, phase };
 }
 
+const SUMMARIZING_TEXT = "Summarizing context…";
+
 // liveBarModel decides the WHOLE bar: the foreground run owns its sentence.
 // With no foreground, the line names the ended turn; background work is only
 // ever represented by the tally and its panel. `tally.waiting` is what turns
@@ -89,9 +91,19 @@ export function liveBarModel(session, agents, nowMs) {
   const list = Array.isArray(agents) ? agents : [];
   const fg = foregroundLine(session, nowMs);
 
+  // A background summary is secondary: it never replaces what the agent is
+  // doing. The hard wait (context_wait) and a manual compaction already say it
+  // as the primary line, so no second row repeats it.
+  const summarizing = backgroundSummarizing(session);
+  const secondary = fg && summarizing && fg.phase !== "compacting" ? SUMMARIZING_TEXT : null;
+
   let sentence = null;
   if (fg) {
     sentence = { kind: "foreground", text: fg.text, waiting: fg.waiting, elapsed: fg.elapsed, phase: fg.phase };
+  } else if (summarizing) {
+    // Idle with a summary in flight: not a run (no timer, composer untouched),
+    // but it is live work the owner can stop.
+    sentence = { kind: "summary", text: SUMMARIZING_TEXT, waiting: false, elapsed: "", phase: "working" };
   } else if (list.length) {
     sentence = { kind: "ended", waiting: false, elapsed: "" };
   }
@@ -100,7 +112,7 @@ export function liveBarModel(session, agents, nowMs) {
   const tally = list.length
     ? { count: list.length, waiting: list.some((a) => a.kind === "session" && waitsOnYou(a.state)) }
     : null;
-  return { sentence, tally };
+  return { sentence, tally, secondary };
 }
 
 export function panelHasOverflow({ scrollHeight, clientHeight }) {
@@ -108,6 +120,7 @@ export function panelHasOverflow({ scrollHeight, clientHeight }) {
 }
 
 export function canStopForeground(session, sentence) {
+  if (sentence?.kind === "summary") return true;
   return sentence?.kind === "foreground"
     && (!sentence.waiting || session?.state === "permission");
 }
@@ -126,7 +139,7 @@ export function LiveBar({
   const list = Array.isArray(agents) ? agents : [];
   const panelRows = list.map((agent) => `${agent.kind}:${agent.id}`).join(",");
   const fgActive = activityPhase(session) !== null;
-  const alive = fgActive || list.length > 0;
+  const alive = fgActive || list.length > 0 || backgroundSummarizing(session);
 
   // Own clock, used only when the caller does not supply one (ConversationScreen
   // already runs a one-second tick). Hooks run unconditionally; the interval is
@@ -205,7 +218,7 @@ export function LiveBar({
     setExpanded((v) => !v);
   };
 
-  const { sentence, tally } = model;
+  const { sentence, tally, secondary } = model;
   const sessions = list.filter((a) => a.kind === "session");
   const subs = list.filter((a) => a.kind === "subagent");
   const bashes = list.filter((a) => a.kind === "bash");
@@ -229,7 +242,7 @@ export function LiveBar({
       )}
 
       <div class="zl-live-bar">
-        {sentence.kind === "foreground" ? (
+        {sentence.kind === "foreground" || sentence.kind === "summary" ? (
           <div class={`zl-live-now${waiting ? " is-waiting" : ""}`} role="status" aria-live="polite">
             <span class={`zl-live-dot is-${sentence.phase || "working"}`} aria-hidden="true" />
             {/* LiveSentence owns the shimmer and the cross-fade: it keeps the
@@ -271,14 +284,21 @@ export function LiveBar({
             type="button"
             class={`zl-live-stop${stopArmed ? " is-armed" : ""}`}
             onClick={stop}
-            aria-label={stopArmed ? "Confirm stop" : "Stop the run"}
-            title={stopArmed ? "Tap again to stop the run" : "Stop — ends the run (Esc in the composer)"}
+            aria-label={stopArmed ? "Confirm stop" : sentence.kind === "summary" ? "Stop summarizing" : "Stop the run"}
+            title={stopArmed ? "Tap again to stop" : sentence.kind === "summary" ? "Stop — cancels the summary" : "Stop — ends the run (Esc in the composer)"}
           >
             <Square size={11} fill="currentColor" aria-hidden="true" />
             <span>{stopArmed ? "sure?" : "Stop"}</span>
           </button>
         )}
       </div>
+
+      {secondary && (
+        <div class="zl-live-sub" role="status" aria-live="polite">
+          <span class="zl-live-dot is-summary" aria-hidden="true" />
+          <span class="zl-live-sub-txt">{secondary}</span>
+        </div>
+      )}
     </div>
   );
 }

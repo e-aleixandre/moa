@@ -435,6 +435,25 @@ type Agent struct {
 	// trimsEmitted counts the context trims this agent has emitted, for the
 	// commit's ordering (core.CompactionCommit.Trims).
 	trimsEmitted atomic.Uint64
+
+	// compactionCutMu is the cut gate: an accepted background compaction
+	// holds it from acceptance until its save settled, and every conversation
+	// mutator takes it (before mu) for its short mutation. Never held across
+	// a summary call, and getters never take it.
+	compactionCutMu sync.Mutex
+	// Background compaction (see background_compaction.go), guarded by mu.
+	bgJob      *backgroundCompactionJob
+	bgNextID   uint64
+	bgRev      uint64
+	bgLifetime context.Context
+	bgRootIdle func() bool
+	bgDebits   []backgroundDebit
+	// bgOwner is the invocation now executing, the only one a summary's cost
+	// can still be debited to. Cleared, with its debits, when it finishes.
+	bgOwner *loopConfig
+	// budgetCap is the owner's live cap for a run (SetBudgetCap), guarded by mu.
+	budgetCap func(context.Context) (float64, bool)
+	bgWG      sync.WaitGroup
 }
 
 // AgentConfig configures an Agent.
@@ -595,6 +614,7 @@ func New(cfg AgentConfig) (*Agent, error) {
 // by subscribers (up to DrainTimeout). Dropped events are not waited on.
 func (a *Agent) Run(ctx context.Context, prompt string) ([]core.AgentMessage, error) {
 	return a.execute(ctx, func() {
+		a.invalidateBackgroundCompactionLocked()
 		a.state = AgentState{
 			Messages: []core.AgentMessage{
 				core.WrapMessage(core.NewUserMessage(prompt)),
@@ -611,6 +631,7 @@ func (a *Agent) RunWithCustom(ctx context.Context, prompt string, custom map[str
 	return a.execute(ctx, func() {
 		msg := core.WrapMessage(core.NewUserMessage(prompt))
 		msg.Custom = custom
+		a.invalidateBackgroundCompactionLocked()
 		a.state = AgentState{
 			Messages: []core.AgentMessage{msg},
 			Model:    a.config.Model,
@@ -903,11 +924,15 @@ func (a *Agent) DrainUntilBarrier() []core.SteerItem {
 // behind the /clear and therefore belongs to the fresh conversation (reset
 // in-place). Callers that want to discard the queue call CancelSteer explicitly.
 func (a *Agent) Reset() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	var evt core.AgentEvent
+	var changed bool
+	defer func() { a.emitBG(evt, changed) }()
+	a.lockCut()
+	defer a.unlockCut()
 	if a.cancel != nil {
 		return fmt.Errorf("cannot reset while agent is running")
 	}
+	evt, changed = a.invalidateBackgroundCompactionLocked()
 	a.state = AgentState{}
 	return nil
 }
@@ -951,11 +976,15 @@ func (a *Agent) ReleaseNativeDocBytes(n int64) {
 // LoadMessages replaces the conversation history with the given messages.
 // Used to restore a previous session. Returns error if the agent is running.
 func (a *Agent) LoadMessages(msgs []core.AgentMessage) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	var evt core.AgentEvent
+	var changed bool
+	defer func() { a.emitBG(evt, changed) }()
+	a.lockCut()
+	defer a.unlockCut()
 	if a.cancel != nil {
 		return fmt.Errorf("cannot load messages while agent is running")
 	}
+	evt, changed = a.invalidateBackgroundCompactionLocked()
 	ensureMsgIDs(msgs)
 	a.state = AgentState{
 		Messages: msgs,
@@ -967,11 +996,15 @@ func (a *Agent) LoadMessages(msgs []core.AgentMessage) error {
 // LoadState replaces the full conversation state including compaction epoch.
 // Used to restore a previous session with compaction history.
 func (a *Agent) LoadState(msgs []core.AgentMessage, compactionEpoch int) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	var evt core.AgentEvent
+	var changed bool
+	defer func() { a.emitBG(evt, changed) }()
+	a.lockCut()
+	defer a.unlockCut()
 	if a.cancel != nil {
 		return fmt.Errorf("cannot load state while agent is running")
 	}
+	evt, changed = a.invalidateBackgroundCompactionLocked()
 	ensureMsgIDs(msgs)
 	a.state = AgentState{
 		Messages:        msgs,
@@ -998,8 +1031,8 @@ func (a *Agent) SetTrimWatermark(msgID string) error {
 // AppendMessage appends a non-LLM message to the current conversation state.
 // Used to persist timeline events before the next user turn.
 func (a *Agent) AppendMessage(msg core.AgentMessage) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.lockCut()
+	defer a.unlockCut()
 	if a.cancel != nil {
 		return fmt.Errorf("cannot append message while agent is running")
 	}
@@ -1025,8 +1058,11 @@ func (a *Agent) CompactionEpoch() int {
 // threshold, and the request already in flight keeps what it was sent with.
 // A nil provider keeps the current one. compactAt follows SetCompactAt.
 func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLevel string, compactAt int) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	var evt core.AgentEvent
+	var changed bool
+	defer func() { a.emitBG(evt, changed) }()
+	a.lockCut()
+	defer a.unlockCut()
 	if compactAt < 0 {
 		return fmt.Errorf("compaction threshold cannot be negative")
 	}
@@ -1035,6 +1071,7 @@ func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLe
 	if a.config.MaxBudget > 0 && model.Pricing == nil {
 		return fmt.Errorf("cannot switch to a model without pricing while MaxBudget is set")
 	}
+	evt, changed = a.invalidateOnModelChangeLocked(model)
 	if provider != nil {
 		a.config.Provider = provider
 	}
@@ -1060,11 +1097,15 @@ func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLe
 // SetModel changes the model and optionally the provider (nil keeps the
 // current one). Allowed while running; see Reconfigure.
 func (a *Agent) SetModel(provider core.Provider, model core.Model) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	var evt core.AgentEvent
+	var changed bool
+	defer func() { a.emitBG(evt, changed) }()
+	a.lockCut()
+	defer a.unlockCut()
 	if a.config.MaxBudget > 0 && model.Pricing == nil {
 		return fmt.Errorf("cannot switch to a model without pricing while MaxBudget is set")
 	}
+	evt, changed = a.invalidateOnModelChangeLocked(model)
 	if provider != nil {
 		a.config.Provider = provider
 	}
@@ -1453,8 +1494,11 @@ func (a *Agent) freshCutLocked() int {
 // It never calls a model: the point is to avoid paying a cache write for old
 // context when the prompt cache has already expired.
 func (a *Agent) StartFresh() (*core.FreshPayload, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	var evt core.AgentEvent
+	var changed bool
+	defer func() { a.emitBG(evt, changed) }()
+	a.lockCut()
+	defer a.unlockCut()
 	if a.cancel != nil {
 		return nil, fmt.Errorf("cannot start fresh while agent is running")
 	}
@@ -1473,6 +1517,7 @@ func (a *Agent) StartFresh() (*core.FreshPayload, error) {
 	for i := range kept {
 		kept[i].EnsureMsgID()
 	}
+	evt, changed = a.invalidateBackgroundCompactionLocked()
 	a.state.Messages = kept
 	// Same invalidation as a compaction or a trim: the anchored usage describes
 	// a request that no longer exists.
@@ -1492,11 +1537,15 @@ func (a *Agent) SnapshotConversation() ([]core.AgentMessage, int) {
 }
 
 func (a *Agent) RestoreConversation(messages []core.AgentMessage, epoch int) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	var evt core.AgentEvent
+	var changed bool
+	defer func() { a.emitBG(evt, changed) }()
+	a.lockCut()
+	defer a.unlockCut()
 	if a.cancel != nil {
 		return fmt.Errorf("cannot restore conversation while agent is running")
 	}
+	evt, changed = a.invalidateBackgroundCompactionLocked()
 	a.state.Messages = append([]core.AgentMessage(nil), messages...)
 	a.state.CompactionEpoch = epoch
 	return nil
@@ -1507,11 +1556,13 @@ func (a *Agent) RestoreConversation(messages []core.AgentMessage, epoch int) err
 // focus is an optional caller instruction (from `/compact <focus>`) forwarded
 // to the summarizer; empty for automatic compaction.
 func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus string) (*core.CompactionPayload, error) {
-	a.mu.Lock()
+	a.lockCut()
 	if a.cancel != nil {
-		a.mu.Unlock()
+		a.unlockCut()
 		return nil, fmt.Errorf("cannot compact while agent is running")
 	}
+	// A manual compaction supersedes a pending background one.
+	bgEvt, bgChanged := a.invalidateBackgroundCompactionLocked()
 
 	// The kept messages must keep the identities they have in the session
 	// tree, so none may get its MsgID only after the cut.
@@ -1533,7 +1584,8 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	// and serializes against other Compact() calls.
 	ctx, a.cancel = context.WithCancel(ctx)
 	cancel := a.cancel
-	a.mu.Unlock()
+	a.unlockCut()
+	a.emitBG(bgEvt, bgChanged)
 	defer func() {
 		cancel()
 		a.mu.Lock()
@@ -1761,8 +1813,11 @@ func (a *Agent) Abort() {
 	if a.cancel != nil {
 		a.cancel()
 	}
+	// Stop intent is immediate: a summary not yet accepted is discarded now.
+	evt, changed := a.invalidateBackgroundCompactionLocked()
 	a.mu.Unlock()
 	a.steerMu.Unlock()
+	a.emitBG(evt, changed)
 }
 
 // MarkerRunTimedOut is the synthetic assistant-message text inserted when a run
@@ -1855,15 +1910,32 @@ func (a *Agent) materializeContent() func(context.Context, []core.Message) ([]co
 	}
 }
 
-func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func(), tools *core.Registry, extraPrompt string, allowCheckpoint bool) ([]core.AgentMessage, error) {
+func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func(), tools *core.Registry, extraPrompt string, allowCheckpoint bool) (_ []core.AgentMessage, err error) {
+	// Admission waits only for an accepted background cut being saved, then
+	// appends normally: a send is never refused because a summary is landing.
+	a.compactionCutMu.Lock()
 	a.mu.Lock()
 	if a.cancel != nil {
 		a.mu.Unlock()
+		a.compactionCutMu.Unlock()
 		return nil, fmt.Errorf("agent is already running")
 	}
 
+	bgRev := a.bgRev
 	// Mutate state atomically with the running check
 	prepare()
+	// A preparation turn is a manual compaction: it supersedes a pending
+	// background one.
+	if allowCheckpoint {
+		a.invalidateBackgroundCompactionLocked()
+	}
+	var bgEvt core.AgentEvent
+	bgChanged := a.bgRev != bgRev
+	if bgChanged {
+		bgEvt = a.bgChangedLocked()
+	}
+	background := !allowCheckpoint && a.bgLifetime != nil
+	budgetCap := a.budgetCap
 
 	// Invariant: every message in state carries a stable MsgID before it can be
 	// synced to the tree. The Run/Send* entry points build user messages without
@@ -1891,6 +1963,28 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	initial := a.requestSettingsLocked()
 	commit := a.commitCompaction
 	a.mu.Unlock()
+	a.compactionCutMu.Unlock()
+	a.emitBG(bgEvt, bgChanged)
+	var cfg *loopConfig
+	// Registered first, so it runs after the running slot is released below.
+	defer func() {
+		if cfg != nil {
+			a.mu.Lock()
+			a.finishBackgroundOwnerLocked(cfg)
+			a.mu.Unlock()
+		}
+		if err != nil {
+			// Stop or an abnormal end discards a summary not yet accepted.
+			a.mu.Lock()
+			evt, ok := a.invalidateBackgroundCompactionLocked()
+			a.mu.Unlock()
+			a.emitBG(evt, ok)
+			return
+		}
+		// A summary that finished while this run was active is adopted now,
+		// at idle, without a new turn.
+		a.TryApplyBackgroundCompaction()
+	}()
 	defer func() {
 		cancel()
 		// Keep admission closed until clearing the running slot is visible. The
@@ -1967,7 +2061,10 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 			return nil
 		}
 	}
-	cfg := &loopConfig{
+	cfg = &loopConfig{
+		budgetCap:           budgetCap,
+		background:          background,
+		agent:               a,
 		provider:            initial.provider,
 		tools:               tools,
 		hooks:               a.hooks,
@@ -2050,7 +2147,9 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		steerMu:           &a.steerMu,
 	}
 
-	var err error
+	a.mu.Lock()
+	a.bgOwner = cfg
+	a.mu.Unlock()
 	for {
 		err = agentLoop(ctx, cfg)
 		if err != nil {
@@ -2173,6 +2272,9 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// the loop billed internally that never surfaces as an assistant message —
 	// so callers can charge the real spend rather than re-deriving it from msgs.
 	a.mu.Lock()
+	// A summary debit that arrived after the last boundary is still this
+	// invocation's spend; after this point nothing is owed to it.
+	cfg.runCost += a.finishBackgroundOwnerLocked(cfg)
 	a.lastRunCost = cfg.runCost
 	// Record the cause captured right after the loop (see `timedOut` above),
 	// not ctx.Err() here — by now cleanup/drain may have crossed our deadline.

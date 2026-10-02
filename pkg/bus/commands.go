@@ -159,6 +159,13 @@ type AppendToConversation struct {
 // AbortRun cancels a running agent.
 type AbortRun struct{ SessionID string }
 
+// CancelBackgroundCompaction discards an idle session's pending background
+// compaction (Stop with no run). Cancelled reports whether one was discarded.
+type CancelBackgroundCompaction struct {
+	SessionID string
+	Cancelled *bool
+}
+
 // AbortAndRecall cancels a running agent and returns the queued items it
 // atomically removed. Interactive clients use those IDs to restore only
 // messages that were truly not delivered.

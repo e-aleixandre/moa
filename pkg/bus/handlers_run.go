@@ -80,6 +80,14 @@ func registerRunControlHandlers(sctx *SessionContext) {
 	b.OnCommand(func(AbortRun) error {
 		return abortRun(0, nil, "")
 	})
+	b.OnCommand(func(cmd CancelBackgroundCompaction) error {
+		bg, ok := sctx.Agent.(interface{ CancelBackgroundCompaction() bool })
+		cancelled := ok && bg.CancelBackgroundCompaction()
+		if cmd.Cancelled != nil {
+			*cmd.Cancelled = cancelled
+		}
+		return nil
+	})
 	b.OnCommand(func(cmd AbortAndRecall) error {
 		return abortRun(cmd.RunGen, cmd.DiscardedSteers, cmd.StopID)
 	})
@@ -447,6 +455,24 @@ func registerRunReactors(sctx *SessionContext) {
 		total := sctx.addSessionCost(e.CostUSD)
 		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: e.CostUSD})
 	})
+	// A background summary is charged once, here, at the rates that wrote it:
+	// never through RunEnded (its run may have ended long before) nor through
+	// its completion event. The goal activation it was started under is
+	// charged too, never a replacement one.
+	b.Subscribe(func(e CompactionUsage) {
+		if e.Pricing == nil {
+			return
+		}
+		cost := e.Pricing.Cost(e.Usage)
+		if cost <= 0 {
+			return
+		}
+		total := sctx.addSessionCost(cost)
+		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: cost})
+		if sctx.Goal != nil && e.GoalActivation != 0 {
+			sctx.Goal.AddSpentForActivation(e.GoalActivation, cost)
+		}
+	})
 	b.Subscribe(func(e CompactionEnded) {
 		// Automatic compactions are bridged from the running agent and their
 		// usage is already folded into RunEnded.Cost.
@@ -573,6 +599,18 @@ func reserveRunSlot(sctx *SessionContext) error {
 	if sctx.State != nil {
 		if err := sctx.State.Transition(StateRunning); err != nil {
 			return fmt.Errorf("cannot send: %w", err)
+		}
+	}
+	// Now marked busy, no idle background cut can be accepted any more. One
+	// accepted before may still be saving: wait for it alone, then refuse if
+	// its save failed, before anything is launched or reported as accepted.
+	if bg, ok := sctx.Agent.(backgroundCompactor); ok {
+		bg.WaitCompactionCut()
+		if sctx.unreconciled.Load() {
+			if sctx.State != nil {
+				_ = sctx.State.Transition(StateIdle)
+			}
+			return ErrSessionNotSaved
 		}
 	}
 	// Close can win after the first admission check but before the transition

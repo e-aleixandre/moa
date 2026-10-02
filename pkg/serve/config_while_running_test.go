@@ -25,7 +25,9 @@ func TestConfigPatchWhileRunning_AppliesAtNextRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	million := &core.Usage{Input: 1_000_000}
+	// Large enough to price, small enough to fit either model: usage is also
+	// the context estimate, and a request over the model window is refused.
+	million := &core.Usage{Input: 100_000}
 	var reqMu sync.Mutex
 	var reqs []core.Request
 	record := func(msg core.Message) mockHandler {

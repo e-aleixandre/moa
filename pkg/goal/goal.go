@@ -67,6 +67,9 @@ type Goal struct {
 	iteration int
 	stalled   int
 	spent     float64
+	// activation identifies the current Enter, so spend settled late is
+	// charged only to the activation that incurred it.
+	activation uint64
 
 	// lastCommit is the repository's commit fingerprint seen at the previous
 	// iteration (the HEADs of every worktree, joined); the driver uses it to
@@ -156,6 +159,7 @@ func (g *Goal) Enter(opts Options) error {
 
 	g.mu.Lock()
 	g.active = true
+	g.activation++
 	g.opts = opts
 	g.iteration = 0
 	g.stalled = 0
@@ -213,6 +217,43 @@ func (g *Goal) AddSpent(cost float64) float64 {
 		g.spent += cost
 	}
 	return g.spent
+}
+
+// Activation returns the identity of the current activation, 0 when inactive.
+func (g *Goal) Activation() uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.active {
+		return 0
+	}
+	return g.activation
+}
+
+// AddSpentForActivation is AddSpent for a cost incurred under activation: it
+// charges nothing when a later Enter replaced that activation. The activation
+// may have ended; its total still records the spend.
+func (g *Goal) AddSpentForActivation(activation uint64, cost float64) (float64, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if activation == 0 || activation != g.activation {
+		return g.spent, false
+	}
+	if cost > 0 {
+		g.spent += cost
+	}
+	return g.spent, true
+}
+
+// RemainingForActivation is what is left of the total budget of activation,
+// as of now. ok=false when that activation is no longer the active one or has
+// no total budget.
+func (g *Goal) RemainingForActivation(activation uint64) (float64, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.active || activation == 0 || activation != g.activation || g.opts.TotalBudget <= 0 {
+		return 0, false
+	}
+	return g.opts.TotalBudget - g.spent, true
 }
 
 // Spent returns the cumulative USD spent across iterations.

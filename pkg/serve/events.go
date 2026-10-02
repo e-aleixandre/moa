@@ -46,15 +46,18 @@ type InitData struct {
 	GoalStalled        int                 `json:"goal_stalled,omitempty"`
 	GoalVerifying      bool                `json:"goal_verifying,omitempty"`
 	Compacting         bool                `json:"compacting,omitempty"`
-	AutoVerifying      bool                `json:"auto_verifying,omitempty"`
-	StreamingText      string              `json:"streaming_text,omitempty"`
-	StreamingThinking  string              `json:"streaming_thinking,omitempty"`
-	LiveTools          []LiveToolInitData  `json:"live_tools,omitempty"`
-	RunTokensUp        int                 `json:"run_tokens_up"`
-	RunTokensDown      int                 `json:"run_tokens_down"`
-	RunStartedAtMs     int64               `json:"run_started_at_ms,omitempty"`
-	PendingSteers      []PendingSteerData  `json:"pending_steers,omitempty"`
-	CostUSD            float64             `json:"cost_usd,omitempty"`
+	// BackgroundCompaction is the session's background compaction state; its
+	// live updates are background_compaction_state events with the same shape.
+	BackgroundCompaction core.BackgroundCompactionState `json:"background_compaction"`
+	AutoVerifying        bool                           `json:"auto_verifying,omitempty"`
+	StreamingText        string                         `json:"streaming_text,omitempty"`
+	StreamingThinking    string                         `json:"streaming_thinking,omitempty"`
+	LiveTools            []LiveToolInitData             `json:"live_tools,omitempty"`
+	RunTokensUp          int                            `json:"run_tokens_up"`
+	RunTokensDown        int                            `json:"run_tokens_down"`
+	RunStartedAtMs       int64                          `json:"run_started_at_ms,omitempty"`
+	PendingSteers        []PendingSteerData             `json:"pending_steers,omitempty"`
+	CostUSD              float64                        `json:"cost_usd,omitempty"`
 	// CacheUsage survives reload and reconnect: it is computed server-side over
 	// the WHOLE display history, which the bounded Messages above may not be.
 	CacheUsage CacheUsageData     `json:"cache_usage"`
@@ -440,6 +443,12 @@ type CommandData struct {
 // as the compaction entry.
 type CompactionEndData struct {
 	Marker *core.AgentMessage `json:"marker,omitempty"`
+	// Background marks a background compaction's completion: it draws the
+	// card but does not end a foreground compaction.
+	Background bool `json:"background,omitempty"`
+	// Error is set only for a background compaction whose summary could not
+	// be made durable; the conversation kept its previous context.
+	Error string `json:"error,omitempty"`
 }
 
 // ContextTrimmedData carries the durable display marker TreeSyncer records as
