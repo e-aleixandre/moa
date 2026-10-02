@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -65,6 +66,7 @@ func RegisterTreeSyncer(b EventBus, sctx *SessionContext) *TreeSyncer {
 			ts.handleCompaction(e)
 			b.Publish(TreeSynced{SessionID: sctx.SessionID})
 		case ContextTrimmed:
+			defer sctx.trimsRecorded.advance()
 			if e.Payload == nil {
 				return
 			}
@@ -300,13 +302,17 @@ func isHiddenInternalPrompt(msg core.AgentMessage) bool {
 // boundary's entry ID, and a branch can load a boundary the syncer never saw.
 // Caller holds ts.mu.
 func (ts *TreeSyncer) isSyncedLocked(msg core.AgentMessage, index int) bool {
-	if _, ok := ts.synced[messageSyncID(msg, index)]; ok {
+	return isSyncedIn(ts.tree, ts.synced, msg, index)
+}
+
+func isSyncedIn(tree *session.Tree, synced map[string]struct{}, msg core.AgentMessage, index int) bool {
+	if _, ok := synced[messageSyncID(msg, index)]; ok {
 		return true
 	}
 	if msg.MsgID == "" {
 		return false
 	}
-	_, ok := ts.tree.Entry(msg.MsgID)
+	_, ok := tree.Entry(msg.MsgID)
 	return ok
 }
 
@@ -321,33 +327,118 @@ func messageSyncID(msg core.AgentMessage, index int) string {
 // Pre-compaction messages are already in the tree from prior syncs.
 // After compaction, agent state is: [compaction_summary, kept_msg_1, kept_msg_2, ...]
 // We need to find which tree entry corresponds to kept_msg_1 (first non-summary).
+//
+// A compaction made durable by commitCompaction is already in the tree under
+// its marker's ID; its completion event must not record it a second time.
 func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-
-	firstKeptID := e.Payload.FirstKeptMsgID
-	marker := core.AgentMessage{}
-	if e.Marker != nil {
-		marker = session.DeepCopyMessage(*e.Marker)
-	}
-
-	ts.tree.Append(session.Entry{
-		Type:    session.EntryCompaction,
-		Message: marker,
-		Compaction: session.CompactionData{
-			Summary:          e.Payload.Summary,
-			FirstKeptEntryID: firstKeptID,
-			TokensBefore:     e.Payload.TokensBefore,
-			ReadFiles:        e.Payload.ReadFiles,
-			ModifiedFiles:    e.Payload.ModifiedFiles,
-		},
-	})
 
 	// The summary is represented by the compaction entry, not an ordinary
 	// message entry, but must not appear as an in-flight display tail.
 	if e.Payload.SummaryMsgID != "" {
 		ts.synced[e.Payload.SummaryMsgID] = struct{}{}
 	}
+	if e.Marker != nil {
+		if existing, ok := ts.tree.Entry(e.Marker.MsgID); ok && existing.Type == session.EntryCompaction {
+			return
+		}
+	}
+	ts.tree.Append(compactionEntry(e.Payload, e.Marker))
+}
+
+// compactionEntry is the durable boundary of a compaction: the payload's cut
+// and summary, displayed as marker (whose MsgID becomes the entry ID). It is
+// the one place a payload becomes CompactionData, for both the commit and the
+// event-driven path: an optional boundary field is added here (and to the
+// payload, CompactionData and DeepCopyEntry), without touching the commit,
+// its staging or recovery, which carry the whole entry.
+func compactionEntry(p *core.CompactionPayload, marker *core.AgentMessage) session.Entry {
+	m := core.AgentMessage{}
+	if marker != nil {
+		m = session.DeepCopyMessage(*marker)
+	}
+	return session.Entry{
+		Type:    session.EntryCompaction,
+		Message: m,
+		Compaction: session.CompactionData{
+			Summary:          p.Summary,
+			FirstKeptEntryID: p.FirstKeptMsgID,
+			TokensBefore:     p.TokensBefore,
+			ReadFiles:        p.ReadFiles,
+			ModifiedFiles:    p.ModifiedFiles,
+		},
+	}
+}
+
+// commitCompaction makes a compaction durable before the agent adopts it. It
+// stages, on a private copy of the tree, the originals the tree does not hold
+// yet (a run syncs only at its end, so the kept messages may exist nowhere
+// else) followed by the boundary, checks that the cut names a message on the
+// active path, and hands that one snapshot to persist. Only once persist
+// succeeds are the staged tree and its sync baseline adopted, in one step, so
+// no reader, save or fork ever sees the originals without the boundary or the
+// boundary without its cut. On any error nothing changes here.
+//
+// The caller holds the session's persistMu, which orders this save with every
+// other one.
+func (ts *TreeSyncer) commitCompaction(c core.CompactionCommit, persist func([]session.Entry, string) error) error {
+	p := c.Payload
+	if p == nil || p.BoundaryID == "" {
+		return fmt.Errorf("compaction commit without a boundary identity")
+	}
+	// Loading still tolerates an empty or dangling cut in old files (the
+	// recovery projection); a new boundary always names its first kept entry.
+	if p.FirstKeptMsgID == "" {
+		return fmt.Errorf("compaction commit without a cut")
+	}
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	staged, rev := ts.tree.Stage()
+	synced := make(map[string]struct{}, len(ts.synced)+len(c.Originals)+1)
+	for id := range ts.synced {
+		synced[id] = struct{}{}
+	}
+	appendOriginals(staged, synced, c.Originals)
+	// The payload names the retained message by MsgID. In a migrated legacy
+	// entry the tree ID can differ from it, and the boundary must carry the
+	// ID of the entry that actually holds the message. Only the active path
+	// is searched; an ID match wins, otherwise the alias must be unique.
+	keptEntryID, aliases := "", 0
+	for _, e := range staged.Path() {
+		if e.Type != session.EntryMessage {
+			continue
+		}
+		if e.ID == p.FirstKeptMsgID {
+			keptEntryID, aliases = e.ID, 1
+			break
+		}
+		if e.Message.MsgID == p.FirstKeptMsgID {
+			keptEntryID = e.ID
+			aliases++
+		}
+	}
+	if keptEntryID == "" || aliases != 1 {
+		return fmt.Errorf("compaction cut %s is not a message on the active branch", p.FirstKeptMsgID)
+	}
+	boundary := compactionEntry(p, NewCompactionMarker(p))
+	boundary.Compaction.FirstKeptEntryID = keptEntryID
+	if id := staged.Append(boundary); id != p.BoundaryID {
+		return fmt.Errorf("compaction boundary identity %s is already taken", p.BoundaryID)
+	}
+	if p.SummaryMsgID != "" {
+		synced[p.SummaryMsgID] = struct{}{}
+	}
+	entries, leaf := staged.Snapshot()
+	if err := persist(entries, leaf); err != nil {
+		return err
+	}
+	if !ts.tree.Adopt(staged, rev) {
+		return fmt.Errorf("session tree changed during the compaction commit")
+	}
+	ts.synced = synced
+	return nil
 }
 
 // handleTrim records a context trim in the tree.
@@ -364,7 +455,7 @@ func (ts *TreeSyncer) handleCompaction(e CompactionEnded) {
 // what actually happened while the model's context holds the elision.
 //
 // Crash guarantee, deliberately the weaker of the two available: the trim is
-// persisted asynchronously, like a compaction, so a crash between the trimmed
+// persisted asynchronously, unlike a compaction, so a crash between the trimmed
 // request and this append loses the marker. Reconstruction is therefore exact
 // only for a clean restart with the marker persisted; after a crash the session
 // reopens with the full context and the next threshold check simply trims
@@ -428,19 +519,61 @@ func (ts *TreeSyncer) handleFresh(e ContextFreshStarted) {
 // appendOriginalsLocked appends the messages of a pre-edit view that are not
 // in the tree yet. Caller holds ts.mu.
 func (ts *TreeSyncer) appendOriginalsLocked(originals []core.AgentMessage) {
+	appendOriginals(ts.tree, ts.synced, originals)
+}
+
+func appendOriginals(tree *session.Tree, synced map[string]struct{}, originals []core.AgentMessage) {
 	for i, msg := range originals {
 		id := messageSyncID(msg, i)
-		if ts.isSyncedLocked(msg, i) {
+		if isSyncedIn(tree, synced, msg, i) {
 			continue
 		}
 		if isHiddenInternalPrompt(msg) {
-			ts.synced[id] = struct{}{}
+			synced[id] = struct{}{}
 			continue
 		}
-		ts.tree.Append(session.Entry{
+		tree.Append(session.Entry{
 			Type:    session.EntryMessage,
 			Message: msg,
 		})
-		ts.synced[id] = struct{}{}
+		synced[id] = struct{}{}
+	}
+}
+
+// seqCounter is a monotonic count that can be waited on.
+type seqCounter struct {
+	mu      sync.Mutex
+	n       uint64
+	changed chan struct{} // closed and replaced on every advance
+}
+
+func (c *seqCounter) advance() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+	if c.changed != nil {
+		close(c.changed)
+		c.changed = nil
+	}
+}
+
+// waitFor blocks until the count reaches n or ctx is done.
+func (c *seqCounter) waitFor(ctx context.Context, n uint64) error {
+	for {
+		c.mu.Lock()
+		if c.n >= n {
+			c.mu.Unlock()
+			return nil
+		}
+		if c.changed == nil {
+			c.changed = make(chan struct{})
+		}
+		changed := c.changed
+		c.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }

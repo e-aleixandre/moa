@@ -82,6 +82,12 @@ func pumpOnce(sctx *SessionContext) {
 				return
 			}
 		}
+		// After a compaction that could not be saved, queued work waits for
+		// the user: it stays queued, inspectable and cancelable.
+		if sctx.unreconciled.Load() {
+			sctx.abortMu.Unlock()
+			return
+		}
 
 		// Abstain while goal mode is active: the goal driver owns the idle slot
 		// between iterations (it relaunches from its own RunEnded reactor). A

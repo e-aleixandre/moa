@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -207,6 +208,13 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		RegisterPersistenceReactor(b, sctx, cfg.Persister)
 		rt.persisterAttached.Store(true)
 	}
+	// Optional so controllers that do not compact (test doubles, embedders)
+	// need not implement it; they keep the event-driven recording.
+	if c, ok := cfg.Agent.(interface {
+		SetCompactionCommit(func(context.Context, core.CompactionCommit) error)
+	}); ok {
+		c.SetCompactionCommit(rt.commitCompaction)
+	}
 
 	// Start approval bridges.
 	if cfg.Gate != nil {
@@ -270,6 +278,8 @@ func (r *SessionRuntime) Flush() error {
 	if p == nil {
 		return nil
 	}
+	r.sctx.persistMu.Lock()
+	defer r.sctx.persistMu.Unlock()
 
 	// Fold the last/in-flight turn into the tree so the snapshot is complete.
 	// Idempotent: a no-op if the TreeSyncer already synced this turn.
@@ -285,6 +295,74 @@ func (r *SessionRuntime) Flush() error {
 	msgs := r.sctx.Agent.Messages()
 	epoch := r.sctx.Agent.CompactionEpoch()
 	return p.Snapshot(msgs, epoch, meta)
+}
+
+// commitCompaction is the agent's compaction commit (SetCompactionCommit): it
+// makes the compaction durable as one tree snapshot, ordered with every other
+// save, before the agent adopts it. With no tree persister the tree is still
+// staged and adopted the same way, in memory only.
+//
+// A failure leaves both the tree and the agent as they were and blocks
+// automatic work until a human attempt re-saves the session (see
+// reconcileStorage). Whether the failed write reached disk is unknown, and
+// does not matter: the previous and the new snapshot are each complete.
+func (r *SessionRuntime) commitCompaction(ctx context.Context, c core.CompactionCommit) error {
+	sctx := r.sctx
+	if sctx.treeSyncer == nil {
+		return nil
+	}
+	// The trims before this compaction carry the only copy of the outputs they
+	// elided; staging before they are recorded would make the placeholders
+	// durable. There is no deadline: a slow syncer is waited for, and only a
+	// Stop (or the runtime closing) gives up, failing the compaction.
+	if err := sctx.trimsRecorded.waitFor(ctx, c.Trims); err != nil {
+		sctx.unreconciled.Store(true)
+		return fmt.Errorf("compaction commit: earlier context trims not recorded: %w", err)
+	}
+	r.persisterMu.Lock()
+	tp, _ := r.persister.(TreePersister)
+	r.persisterMu.Unlock()
+
+	sctx.persistMu.Lock()
+	defer sctx.persistMu.Unlock()
+	meta := collectMetadata(sctx)
+	err := sctx.treeSyncer.commitCompaction(c, func(entries []session.Entry, leafID string) error {
+		if tp == nil {
+			return nil
+		}
+		return tp.SnapshotTree(entries, leafID, meta)
+	})
+	if err != nil {
+		sctx.unreconciled.Store(true)
+		slog.Error("compaction could not be saved", "error", err)
+	}
+	return err
+}
+
+// reconcileStorage is the recovery boundary after a compaction that could not
+// be saved: called on a human attempt, it saves the session's authoritative
+// state (the previous conversation, including whatever the failed run had not
+// synced) and only then lets work start again. A later save that happened to
+// succeed on its own does not count: recovery is the user's decision, so
+// queued or automatic work never resumes by itself.
+func reconcileStorage(sctx *SessionContext) error {
+	if !sctx.unreconciled.Load() {
+		return nil
+	}
+	// The failed run may still be unwinding; its admission fails anyway, and
+	// the session is reconciled by the next attempt once it has settled.
+	if sctx.State != nil {
+		if s := sctx.State.Current(); s != StateIdle && s != StateError {
+			return nil
+		}
+	}
+	if sctx.PersistNow != nil {
+		if err := sctx.PersistNow(); err != nil {
+			return fmt.Errorf("%w: %v", ErrSessionNotSaved, err)
+		}
+	}
+	sctx.unreconciled.Store(false)
+	return nil
 }
 
 // WaitSettled blocks until the session leaves the active states (running or

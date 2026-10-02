@@ -36,6 +36,9 @@ func registerGoalHandlers(sctx *SessionContext) {
 		if sctx.State != nil && sctx.State.Current() == StateRunning {
 			return fmt.Errorf("cannot start a goal while the agent is running")
 		}
+		if err := reconcileStorage(sctx); err != nil {
+			return err
+		}
 		workDir, err := resolveGoalWorkDir(sctx, cmd.WorkDir)
 		if err != nil {
 			return err

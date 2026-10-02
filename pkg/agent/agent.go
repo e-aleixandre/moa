@@ -8,6 +8,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/attachment"
@@ -427,6 +428,13 @@ type Agent struct {
 	// authoritative intent signal, same as interruptedMarkerText — so callers
 	// need not (unreliably) inspect the returned error's chain. Guarded by mu.
 	lastRunTimedOut bool
+
+	// commitCompaction makes a compaction durable before it is adopted (see
+	// SetCompactionCommit). Guarded by mu; nil = adopt without a commit.
+	commitCompaction func(context.Context, core.CompactionCommit) error
+	// trimsEmitted counts the context trims this agent has emitted, for the
+	// commit's ordering (core.CompactionCommit.Trims).
+	trimsEmitted atomic.Uint64
 }
 
 // AgentConfig configures an Agent.
@@ -1287,6 +1295,21 @@ func (a *Agent) SetPromptAfterCompaction(fn func() (string, bool)) {
 	a.config.PromptAfterCompaction = fn
 }
 
+// SetCompactionCommit installs the owner's durable commit for compactions. It
+// is called with the conversation being replaced and the result, outside the
+// agent's lock, before the agent adopts the compacted conversation; an error
+// leaves the previous conversation in place and fails the compaction. The
+// compactions of a /prepare-compact preparation run are discarded with their
+// conversation and are never committed. Applies from the next run.
+func (a *Agent) SetCompactionCommit(fn func(context.Context, core.CompactionCommit) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.commitCompaction = fn
+	// The owner counts the trims it records from here on; trims emitted
+	// before it was listening are not its to wait for.
+	a.trimsEmitted.Store(0)
+}
+
 // promptAfterCompactionHook wraps the configured hook so that its answer also
 // becomes the agent's stored prompt: the loop only holds a per-run copy, and a
 // later run must start from the refreshed one. Nil when there is no hook.
@@ -1490,6 +1513,9 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 		return nil, fmt.Errorf("cannot compact while agent is running")
 	}
 
+	// The kept messages must keep the identities they have in the session
+	// tree, so none may get its MsgID only after the cut.
+	ensureMsgIDs(a.state.Messages)
 	msgs := a.state.Messages
 	model := a.config.Model
 	provider := a.config.Provider
@@ -1497,6 +1523,7 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	settings := a.config.Compaction
 	epoch := a.state.CompactionEpoch
 	summarizer := a.config.CompactSummarizer
+	commit := a.commitCompaction
 
 	// Claim the running slot for the whole operation. The compaction LLM call
 	// below takes seconds and runs with the mutex released; without holding the
@@ -1572,29 +1599,43 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	for i := range compacted {
 		compacted[i].EnsureMsgID()
 	}
+	payload := compactionPayload(result, compacted, fallbackNotice, sumModel.Pricing)
+	if commit != nil {
+		originals := append([]core.AgentMessage(nil), msgs...)
+		if err := commit(ctx, core.CompactionCommit{Originals: originals, Payload: payload, Trims: a.trimsEmitted.Load()}); err != nil {
+			return nil, &core.CompactionNotSavedError{Payload: payload, Err: err}
+		}
+	}
 
 	a.mu.Lock()
 	a.state.Messages = compacted
 	a.state.CompactionEpoch++
 	a.mu.Unlock()
 
+	return payload, nil
+}
+
+// compactionPayload describes a compaction whose result is compacted. The
+// boundary identity is minted here, once, so every projection of this
+// compaction (the durable entry, the live marker) names the same row.
+func compactionPayload(result *compaction.Result, compacted []core.AgentMessage, notice string, pricing *core.Pricing) *core.CompactionPayload {
+	firstKept := ""
+	if len(compacted) > 1 {
+		firstKept = compacted[1].MsgID
+	}
 	return &core.CompactionPayload{
-		Summary:       result.Summary,
-		TokensBefore:  result.TokensBefore,
-		TokensAfter:   result.TokensAfter,
-		ReadFiles:     result.ReadFiles,
-		ModifiedFiles: result.ModifiedFiles,
-		SummaryMsgID:  compacted[0].MsgID,
-		FirstKeptMsgID: func() string {
-			if len(compacted) > 1 {
-				return compacted[1].MsgID
-			}
-			return ""
-		}(),
+		Summary:          result.Summary,
+		TokensBefore:     result.TokensBefore,
+		TokensAfter:      result.TokensAfter,
+		ReadFiles:        result.ReadFiles,
+		ModifiedFiles:    result.ModifiedFiles,
+		SummaryMsgID:     compacted[0].MsgID,
+		FirstKeptMsgID:   firstKept,
 		Usage:            result.Usage,
-		SummarizerNotice: fallbackNotice,
-		Pricing:          sumModel.Pricing,
-	}, nil
+		SummarizerNotice: notice,
+		Pricing:          pricing,
+		BoundaryID:       core.NewMsgID(),
+	}
 }
 
 // Steer queues a message for inter-step delivery. The agent sees it
@@ -1848,6 +1889,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// Model settings can change while the run is in flight, so they are read
 	// here under the lock; the loop re-reads them at each request boundary.
 	initial := a.requestSettingsLocked()
+	commit := a.commitCompaction
 	a.mu.Unlock()
 	defer func() {
 		cancel()
@@ -1945,6 +1987,15 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		materializeContent:  a.materializeContent(),
 		permissionCheck:     permissionCheck,
 		ephemeralCompaction: allowCheckpoint,
+		// A preparation run's conversation is restored away, so its
+		// compactions are never made durable.
+		commitCompaction: func() func(context.Context, core.CompactionCommit) error {
+			if allowCheckpoint {
+				return nil
+			}
+			return commit
+		}(),
+		trims: &a.trimsEmitted,
 		// A function, not a snapshot: model, thinking and the compaction
 		// settings can all change while the run is in flight (the settings are
 		// replaced copy-on-write), and each request must see them as of its own

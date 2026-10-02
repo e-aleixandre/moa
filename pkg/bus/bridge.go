@@ -210,6 +210,21 @@ type SessionContext struct {
 	// its own mutex because it also protects its sync baseline.
 	historyMu sync.RWMutex
 
+	// persistMu serializes every save of this session (the reactor, Flush and
+	// the compaction commit) together with the snapshot it writes, so a save
+	// can never write a state older than one already durable. Lock order:
+	// persistMu, then TreeSyncer.mu.
+	persistMu sync.Mutex
+	// unreconciled is set when a compaction could not be saved. Until a human
+	// attempt has re-saved the session's authoritative state, nothing may
+	// start a run on its own (queue pump, notifications, goal, auto-verify).
+	unreconciled atomic.Bool
+	// trimsRecorded counts the trims TreeSyncer has recorded. A compaction
+	// commit waits until it covers every trim the agent emitted before it: a
+	// trim's originals must be in the tree before the commit stages the
+	// trimmed conversation.
+	trimsRecorded seqCounter
+
 	// RunGenAtomic is the current run generation, readable without locks.
 	// Stamped on agent-lifecycle events by the bridge. Written by startRun
 	// (under runMu), read atomically by the bridge.
@@ -1389,7 +1404,12 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		return []any{CompactionStarted{SessionID: sid, RunGen: gen}}
 
 	case core.AgentEventCompactionEnd:
-		marker := NewCompactionMarker(e.Compaction)
+		// A compaction that was not kept has no row: its payload only carries
+		// the usage it cost.
+		var marker *core.AgentMessage
+		if e.Error == nil {
+			marker = NewCompactionMarker(e.Compaction)
+		}
 		return []any{CompactionEnded{
 			SessionID:         sid,
 			RunGen:            gen,

@@ -32,6 +32,12 @@ var ErrVerifyRunning = errors.New("verify already running")
 // queued.
 var ErrNotIdle = errors.New("session is not idle")
 
+// ErrSessionNotSaved is returned when a compaction could not be saved and the
+// session's state has not been saved again since. Nothing starts on its own
+// until then; a new attempt by the user saves it first and fails with this
+// error (wrapping the cause) while saving still fails.
+var ErrSessionNotSaved = errors.New("session could not be saved")
+
 // ErrSessionQuestion is returned by SteerAgent or SendPrompt with
 // RefuseQuestion set when the session is blocked on a permission prompt or an
 // ask_user question, so the caller does not queue behind the owner's answer.

@@ -26,6 +26,17 @@ func reloadPromptAfterCut(sctx *SessionContext) {
 	}
 }
 
+// unsavedCompaction is the payload of a compaction that was summarized but
+// could not be saved, so its completion event still charges the summary; nil
+// for any other failure.
+func unsavedCompaction(err error) *core.CompactionPayload {
+	var notSaved *core.CompactionNotSavedError
+	if errors.As(err, &notSaved) {
+		return notSaved.Payload
+	}
+	return nil
+}
+
 func registerHistoryHandlers(sctx *SessionContext) {
 	b := sctx.Bus
 	// Serializes the short start and terminal sections of manual compactions.
@@ -72,6 +83,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		// occupy the agent, or that Abort would cancel it.
 		sctx.abortMu.Lock()
 		defer sctx.abortMu.Unlock()
+		if err := reconcileStorage(sctx); err != nil {
+			return err
+		}
 		// A manual compact occupies the agent's run slot for seconds, so it
 		// must occupy the session too: transition to running so frontends
 		// switch the input to queue mode (steer) and Manager.Send/requireIdle
@@ -129,7 +143,7 @@ func registerHistoryHandlers(sctx *SessionContext) {
 				}
 				sctx.setCompacting(false)
 				if err != nil {
-					sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err})
+					sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err, Payload: unsavedCompaction(err)})
 				} else {
 					sctx.Bus.Publish(CompactionEnded{
 						SessionID: sctx.SessionID,
@@ -200,6 +214,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		// Claim and launch under abortMu, like SendPrompt (see CompactSession).
 		sctx.abortMu.Lock()
 		defer sctx.abortMu.Unlock()
+		if err := reconcileStorage(sctx); err != nil {
+			return err
+		}
 		if err := reserveRunSlot(sctx); err != nil {
 			return fmt.Errorf("cannot prepare compact: %w", err)
 		}
@@ -248,7 +265,7 @@ func registerHistoryHandlers(sctx *SessionContext) {
 			}
 			payload, err := compactWithCheckpoint(ctx, sctx, text)
 			if err != nil {
-				sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err})
+				sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err, Payload: unsavedCompaction(err)})
 				return nil, err
 			}
 			if payload == nil {
@@ -282,6 +299,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		// Claim and launch under abortMu, like SendPrompt (see CompactSession).
 		sctx.abortMu.Lock()
 		defer sctx.abortMu.Unlock()
+		if err := reconcileStorage(sctx); err != nil {
+			return err
+		}
 		if err := reserveRunSlot(sctx); err != nil {
 			return fmt.Errorf("cannot hand off: %w", err)
 		}

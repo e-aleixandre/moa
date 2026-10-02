@@ -25,6 +25,9 @@ type Tree struct {
 	entries []Entry        // append-only log (all entries from all branches)
 	index   map[string]int // entry ID → index in entries slice
 	leafID  string         // current branch tip
+	// rev counts mutations, so a staged copy can tell whether the tree it was
+	// taken from changed before it is adopted (see Stage).
+	rev uint64
 }
 
 // NewTree creates an empty tree.
@@ -132,9 +135,50 @@ func (t *Tree) Append(e Entry) string {
 	t.entries = append(t.entries, e)
 	t.index[e.ID] = len(t.entries) - 1
 	t.leafID = e.ID
+	t.rev++
 	t.mu.Unlock()
 
 	return e.ID
+}
+
+// Stage returns a private deep copy of the tree to build a change on, and the
+// revision it was taken at. Nothing done to the copy is visible here until
+// Adopt installs it whole.
+func (t *Tree) Stage() (*Tree, uint64) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	c := &Tree{
+		entries: make([]Entry, len(t.entries)),
+		index:   make(map[string]int, len(t.index)),
+		leafID:  t.leafID,
+	}
+	for i, e := range t.entries {
+		c.entries[i] = DeepCopyEntry(e)
+	}
+	for id, i := range t.index {
+		c.index[id] = i
+	}
+	return c, t.rev
+}
+
+// Adopt replaces this tree's contents with staged, a copy returned by Stage at
+// revision rev, in one step: readers see the tree either before or after the
+// whole change. It refuses (returns false) when the tree changed since the
+// copy was taken, since installing it would discard that change. The pointer
+// stays the same, so every holder of it sees the adopted state. staged must not
+// be used afterwards.
+func (t *Tree) Adopt(staged *Tree, rev uint64) bool {
+	staged.mu.RLock()
+	entries, index, leaf := staged.entries, staged.index, staged.leafID
+	staged.mu.RUnlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.rev != rev {
+		return false
+	}
+	t.entries, t.index, t.leafID = entries, index, leaf
+	t.rev++
+	return true
 }
 
 // Branch moves the leaf pointer to the given entry ID.
@@ -152,6 +196,7 @@ func (t *Tree) Branch(entryID string) error {
 		return err
 	}
 	t.leafID = entryID
+	t.rev++
 	return nil
 }
 
@@ -215,6 +260,7 @@ func (t *Tree) Clear() {
 	t.entries = nil
 	t.index = make(map[string]int)
 	t.leafID = ""
+	t.rev++
 	t.mu.Unlock()
 }
 

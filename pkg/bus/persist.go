@@ -3,7 +3,6 @@ package bus
 import (
 	"log/slog"
 	"strings"
-	"sync"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -74,16 +73,17 @@ func collectMetadata(sctx *SessionContext) map[string]any {
 }
 
 // RegisterPersistenceReactor subscribes to state-changing events and auto-saves.
-// Saves are serialized through a mutex to prevent concurrent Snapshot calls.
+// Saves are serialized through the session's persistMu, shared with Flush and
+// the compaction commit, and each snapshot is taken under it: a save never
+// writes a state older than one another path already made durable.
 // If the persister implements TreePersister and the session has a tree,
 // it saves tree entries instead of flat messages.
 func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersister) {
-	var mu sync.Mutex
 	tp, hasTree := p.(TreePersister)
 
 	save := func() {
-		mu.Lock()
-		defer mu.Unlock()
+		sctx.persistMu.Lock()
+		defer sctx.persistMu.Unlock()
 		meta := collectMetadata(sctx)
 
 		// Prefer tree-based persistence when available (even if empty, to clear v2 fields)

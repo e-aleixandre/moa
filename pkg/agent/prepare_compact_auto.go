@@ -74,6 +74,10 @@ func runAutoPrepare(ctx context.Context, cfg *loopConfig, slot *sessioncheckpoin
 	// and must not stream into the user's conversation, but the loop emits
 	// unconditionally, so it needs somewhere to emit to.
 	sub.emitter = NewEmitter(nil)
+	// Nothing on that emitter reaches the owner, so nothing here may count as
+	// a trim it must record, nor commit a compaction.
+	sub.trims = nil
+	sub.commitCompaction = nil
 
 	err = agentLoop(ctx, &sub)
 

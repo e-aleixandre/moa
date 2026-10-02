@@ -58,6 +58,9 @@ func tryTrim(cfg *loopConfig, settings *core.CompactionSettings, estimateBefore,
 	// the provider actually counted against this prediction.
 	cfg.pendingTrimPrediction = estimateBefore - plan.TokensRemoved
 
+	if cfg.trims != nil {
+		cfg.trims.Add(1)
+	}
 	emitLifecycle(cfg, core.AgentEvent{
 		Type: core.AgentEventContextTrimmed,
 		Trim: &core.TrimPayload{

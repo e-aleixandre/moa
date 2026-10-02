@@ -37,10 +37,14 @@ func NewCompactionMarker(payload *core.CompactionPayload) *core.AgentMessage {
 	if payload == nil {
 		return nil
 	}
+	id := payload.BoundaryID
+	if id == "" {
+		id = core.NewMsgID()
+	}
 	return &core.AgentMessage{
 		Message: core.Message{
 			Role:    "session_event",
-			MsgID:   core.NewMsgID(),
+			MsgID:   id,
 			Content: []core.Content{core.TextContent(fmt.Sprintf("✂ Context compacted (%dK tokens summarized)", payload.TokensBefore/1000))},
 		},
 		Custom: map[string]any{

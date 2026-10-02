@@ -91,7 +91,38 @@ type CompactionPayload struct {
 	// stamped by a later consumer may belong to a different run. This only
 	// routes persistence; it is not part of the saved or client-facing payload.
 	Ephemeral bool `json:"-"`
+	// BoundaryID is the identity of the durable compaction boundary, minted by
+	// the producer so the commit, the live marker and the saved entry are one
+	// row. Empty for producers that predate the commit (a new one is minted).
+	BoundaryID string `json:"-"`
 }
+
+// CompactionCommit is what a compaction hands its owner to make durable before
+// the agent adopts it: the conversation the summary replaces, exactly as it
+// stood (the originals the transcript must keep), and the result.
+type CompactionCommit struct {
+	Originals []AgentMessage
+	Payload   *CompactionPayload
+	// Trims is how many context trims the agent had emitted to its owner
+	// before this compaction, counted since the commit was installed. Their
+	// events carry the untrimmed originals, so the owner records them before
+	// staging Originals, which hold the placeholders.
+	Trims uint64
+}
+
+// CompactionNotSavedError reports a compaction whose summary was produced (and
+// paid for) but could not be made durable, so the agent kept its previous
+// conversation. Payload carries the usage to charge.
+type CompactionNotSavedError struct {
+	Payload *CompactionPayload
+	Err     error
+}
+
+func (e *CompactionNotSavedError) Error() string {
+	return "compaction could not be saved: " + e.Err.Error()
+}
+
+func (e *CompactionNotSavedError) Unwrap() error { return e.Err }
 
 // FreshPayload is the result of starting fresh: the conversation was cut at
 // the same point a compaction would keep from, and nothing replaced what came

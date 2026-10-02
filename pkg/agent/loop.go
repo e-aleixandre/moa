@@ -144,6 +144,13 @@ type loopConfig struct {
 	// conversation is discarded: its automatic compactions are flagged so the
 	// session does not record them.
 	ephemeralCompaction bool
+	// commitCompaction makes an automatic compaction durable before the loop
+	// adopts it (Agent.SetCompactionCommit). Nil for a preparation run and when
+	// the owner installed none.
+	commitCompaction func(context.Context, core.CompactionCommit) error
+	// trims counts the context trims this agent has emitted (shared across its
+	// runs), so a commit can tell its owner which ones precede it.
+	trims *atomic.Uint64
 	// compactStrategy is what the agent gets before an automatic compaction:
 	// core.CompactPlain, CompactNotify or CompactPrepare. Read per iteration so
 	// a settings change reaches a run already in flight.
@@ -441,6 +448,15 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					}
 				}
 
+				var originals []core.AgentMessage
+				if cfg.commitCompaction != nil {
+					// The commit records these as the originals the kept
+					// messages are cut from, so their identities must be final.
+					cfg.stateMu.Lock()
+					ensureMsgIDs(cfg.state.Messages)
+					cfg.stateMu.Unlock()
+					originals = append([]core.AgentMessage(nil), cfg.state.Messages...)
+				}
 				result, compacted, err := compaction.Compact(
 					ctx, sumProvider, sumModel, compactOpts,
 					cfg.state.Messages, estimate.Tokens, window, *compactionSettings, "",
@@ -463,6 +479,25 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					for i := range compacted {
 						compacted[i].EnsureMsgID()
 					}
+					payload := compactionPayload(result, compacted, fallbackNotice, sumModel.Pricing)
+					payload.Ephemeral = cfg.ephemeralCompaction
+					// Account for compaction LLM call cost, at the rates of
+					// the model that wrote the summary. It was paid whether
+					// or not the compaction is kept.
+					addRunCostAt(cfg, sumModel.Pricing, result.Usage)
+					if cfg.commitCompaction != nil {
+						if err := commitCompaction(cfg, ctx, originals, payload); err != nil {
+							// The summary is not adopted: the conversation stays
+							// as it is durably recorded, and the run stops so the
+							// owner sees the failure instead of the agent
+							// carrying on over state that may not survive.
+							emitLifecycle(cfg, core.AgentEvent{
+								Type: core.AgentEventCompactionEnd, Error: err, Compaction: payload,
+							})
+							loopErr = err
+							return loopErr
+						}
+					}
 					cfg.stateMu.Lock()
 					cfg.state.Messages = compacted
 					cfg.state.CompactionEpoch++
@@ -475,29 +510,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					if consumeCheckpoint != nil {
 						consumeCheckpoint()
 					}
-					// Account for compaction LLM call cost, at the rates of
-					// the model that wrote the summary.
-					addRunCostAt(cfg, sumModel.Pricing, result.Usage)
 					emitLifecycle(cfg, core.AgentEvent{
-						Type: core.AgentEventCompactionEnd,
-						Compaction: &core.CompactionPayload{
-							Summary:       result.Summary,
-							TokensBefore:  result.TokensBefore,
-							TokensAfter:   result.TokensAfter,
-							ReadFiles:     result.ReadFiles,
-							ModifiedFiles: result.ModifiedFiles,
-							SummaryMsgID:  compacted[0].MsgID,
-							FirstKeptMsgID: func() string {
-								if len(compacted) > 1 {
-									return compacted[1].MsgID
-								}
-								return ""
-							}(),
-							Usage:            result.Usage,
-							SummarizerNotice: fallbackNotice,
-							Pricing:          sumModel.Pricing,
-							Ephemeral:        cfg.ephemeralCompaction,
-						},
+						Type:       core.AgentEventCompactionEnd,
+						Compaction: payload,
 					})
 				} else {
 					// No cut point found — nothing to compact. Still close the lifecycle.
@@ -1626,6 +1641,14 @@ func addRunCostAt(cfg *loopConfig, pricing *core.Pricing, usage *core.Usage) {
 	if usage != nil && pricing != nil {
 		cfg.runCost += pricing.Cost(*usage)
 	}
+}
+
+// commitCompaction hands a compaction to the owner's commit.
+func commitCompaction(cfg *loopConfig, ctx context.Context, originals []core.AgentMessage, payload *core.CompactionPayload) error {
+	if err := cfg.commitCompaction(ctx, core.CompactionCommit{Originals: originals, Payload: payload, Trims: cfg.trims.Load()}); err != nil {
+		return &core.CompactionNotSavedError{Payload: payload, Err: err}
+	}
+	return nil
 }
 
 // filterDoomLoopCalls drops exempt status/wait tool calls from a turn's tool

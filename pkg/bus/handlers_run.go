@@ -168,6 +168,13 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		if cmd.RefuseQuestion && sctx.State != nil && sctx.State.Current() == StatePermission {
 			return ErrSessionQuestion
 		}
+		// A typed prompt is a human attempt: after a failed compaction save it
+		// is what may resume the session, once its state is saved again.
+		if cmd.Custom == nil {
+			if err := reconcileStorage(sctx); err != nil {
+				return err
+			}
+		}
 		// IdleOnly is decided here, under the same lock that converts prompts
 		// into steers and that the pump takes before starting a queued run: a
 		// caller checking idleness from outside could only observe a snapshot
@@ -295,6 +302,9 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 	b.OnCommand(func(cmd SendPromptWithContent) error {
 		sctx.abortMu.Lock()
 		defer sctx.abortMu.Unlock()
+		if err := reconcileStorage(sctx); err != nil {
+			return err
+		}
 		// Strict-order gate (INV-2): queue behind pending items instead of
 		// jumping ahead. Content sends are always user-initiated, so no source
 		// exemption applies.
@@ -554,6 +564,11 @@ func continuationOrigin(jobID string) RunOrigin {
 func reserveRunSlot(sctx *SessionContext) error {
 	if sctx.runAdmissionClosed.Load() {
 		return ErrSessionBusy
+	}
+	// Human attempts reconcile first (reconcileStorage); anything still
+	// arriving here while unreconciled is automatic and must wait for them.
+	if sctx.unreconciled.Load() {
+		return ErrSessionNotSaved
 	}
 	if sctx.State != nil {
 		if err := sctx.State.Transition(StateRunning); err != nil {
