@@ -19,7 +19,18 @@ const thisSession = "this session"
 // checkScheduleParams keeps scheduling to create: when and target are refused
 // on every other action, and a target other than this session is refused
 // everywhere. The agent cannot name a session, an owner or a project.
+//
+// Models with a strict schema send every parameter with its zero value, so an
+// empty when, and outside create an empty or own-session target, mean absent.
 func checkScheduleParams(action string, params map[string]any) error {
+	if w, ok := params["when"].(string); ok && w == "" {
+		delete(params, "when")
+	}
+	if t, ok := params["target"].(string); ok && action != "create" {
+		if t = strings.TrimSpace(t); t == "" || strings.EqualFold(t, thisSession) {
+			delete(params, "target")
+		}
+	}
 	if _, has := params["when"]; has && action != "create" {
 		return invalid("when is only for create: a scheduled task is created, not asked or edited")
 	}

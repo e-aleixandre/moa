@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -209,5 +210,96 @@ func TestScheduleAgentUnknownTimezone(t *testing.T) {
 	known := scopeFor(r, "K", "p").WithTZ("America/New_York")
 	if out, _ = run(t, known, map[string]any{"action": "create", "title": "k", "when": "in 20m"}); strings.Contains(out, "unknown") || !strings.Contains(out, "America/New_York") {
 		t.Fatalf("known zone: %q", out)
+	}
+}
+
+// Strict-schema models send every parameter with its zero value. Those must
+// read as absent, not trip the scheduling guards.
+func TestToolStrictSchemaZeroValues(t *testing.T) {
+	r := toolRepo(t)
+	sc := scopeFor(r, "A", "p")
+	if out, isErr := run(t, sc, map[string]any{"action": "create", "title": "work"}); isErr {
+		t.Fatalf("create: %s", out)
+	}
+	full := func(action string, over map[string]any) map[string]any {
+		p := map[string]any{"action": action, "depends_on": []any{}, "description": "", "id": float64(0),
+			"status": "pending", "subtasks": []any{}, "target": "this session", "title": "", "when": ""}
+		for k, v := range over {
+			p[k] = v
+		}
+		return p
+	}
+	if out, isErr := run(t, sc, full("list", nil)); isErr || !strings.Contains(out, "work") {
+		t.Errorf("list with zero values: err=%v %s", isErr, out)
+	}
+	if out, isErr := run(t, sc, full("get", map[string]any{"id": float64(1)})); isErr {
+		t.Errorf("get with zero values: %s", out)
+	}
+	if out, isErr := run(t, sc, full("create", map[string]any{"title": "plain"})); isErr {
+		t.Errorf("create with empty when: %s", out)
+	}
+	if n := len(templates(t, r)); n != 0 {
+		t.Errorf("empty when scheduled %d templates", n)
+	}
+}
+
+func TestToolScheduleGuardsSurviveZeroValueTolerance(t *testing.T) {
+	r := toolRepo(t)
+	sc := scopeFor(r, "A", "p")
+	for name, p := range map[string]map[string]any{
+		"when on list":     {"action": "list", "when": "in 5m"},
+		"other target":     {"action": "list", "target": "otra"},
+		"target on create": {"action": "create", "title": "x", "when": "in 5m", "target": "otra"},
+	} {
+		if out, isErr := run(t, sc, p); !isErr {
+			t.Errorf("%s accepted: %s", name, out)
+		}
+	}
+}
+
+// when and target are optional in the schema a strict-mode model sees: they
+// accept null and the description says to omit them.
+func TestToolSchemaWhenTargetOptional(t *testing.T) {
+	var schema struct {
+		Properties map[string]struct {
+			Type        any    `json:"type"`
+			Description string `json:"description"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(NewTool(scopeFor(toolRepo(t), "A", "p")).Parameters, &schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"when", "target"} {
+		prop, ok := schema.Properties[name]
+		if !ok {
+			t.Fatalf("no %s property", name)
+		}
+		types, _ := prop.Type.([]any)
+		if len(types) != 2 || types[1] != "null" {
+			t.Errorf("%s type = %v, want [string null]", name, prop.Type)
+		}
+		if !strings.Contains(prop.Description, "Omit it, or leave it empty or null, unless the user asks to schedule") {
+			t.Errorf("%s description = %q", name, prop.Description)
+		}
+		for _, r := range schema.Required {
+			if r == name {
+				t.Errorf("%s is required", name)
+			}
+		}
+	}
+}
+
+func TestToolNullWhenTargetAreAbsent(t *testing.T) {
+	r := toolRepo(t)
+	sc := scopeFor(r, "A", "p")
+	if out, isErr := run(t, sc, map[string]any{"action": "create", "title": "plain", "when": nil, "target": nil}); isErr {
+		t.Fatalf("create with nulls: %s", out)
+	}
+	if out, isErr := run(t, sc, map[string]any{"action": "list", "when": nil, "target": nil}); isErr {
+		t.Fatalf("list with nulls: %s", out)
+	}
+	if n := len(templates(t, r)); n != 0 {
+		t.Errorf("null when scheduled %d templates", n)
 	}
 }
