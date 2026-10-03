@@ -7,6 +7,7 @@ import WebKit
 final class MoaBridgeViewController: CAPBridgeViewController {
     private let shareInboxHandler = ShareInboxMessageHandler()
     private let deviceAuthHandler = DeviceAuthMessageHandler()
+    private let nativePushHandler = NativePushMessageHandler()
     private var serverRecovery: PairedServerRecoveryController?
 
     override func webView(with frame: CGRect, configuration: WKWebViewConfiguration) -> WKWebView {
@@ -20,8 +21,14 @@ final class MoaBridgeViewController: CAPBridgeViewController {
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: NativePushMessageHandler.javaScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         configuration.userContentController.add(shareInboxHandler, name: ShareInboxMessageHandler.name)
         configuration.userContentController.add(deviceAuthHandler, name: DeviceAuthMessageHandler.name)
+        configuration.userContentController.add(nativePushHandler, name: NativePushMessageHandler.name)
         return super.webView(with: frame, configuration: configuration)
     }
 
@@ -29,6 +36,8 @@ final class MoaBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(PairedServerNavigationPlugin())
         shareInboxHandler.webView = webView
         deviceAuthHandler.webView = webView
+        nativePushHandler.webView = webView
+        PushNavigator.shared.webView = webView
         if let webView, let capacitorDelegate = webView.navigationDelegate {
             let recovery = PairedServerRecoveryController(webView: webView, forwardingTo: capacitorDelegate)
             serverRecovery = recovery
@@ -125,6 +134,7 @@ private final class PairedServerRecoveryController: NSObject, WKNavigationDelega
         guard let url = webView.url else { return }
         if NativeServerBinding.matches(url) {
             stopRetrying()
+            Task { @MainActor in PushNavigator.shared.navigationFinished(at: url) }
         } else if let retryURL, !NativeServerBinding.matches(retryURL) {
             stopRetrying()
         }

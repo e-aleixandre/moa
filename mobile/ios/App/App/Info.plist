@@ -35,6 +35,12 @@
 	<true/>
 	<key>MoaAppGroup</key>
 	<string>$(MOA_APP_GROUP_IDENTIFIER)</string>
+	<key>MoaKeychainPrivateGroup</key>
+	<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>MoaKeychainPushGroup</key>
+	<string>$(AppIdentifierPrefix)$(MOA_PUSH_KEYCHAIN_GROUP)</string>
+	<key>MoaPushRelayURL</key>
+	<string>$(MOA_PUSH_RELAY_URL)</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan a moa pairing code.</string>
 	<key>NSMicrophoneUsageDescription</key>

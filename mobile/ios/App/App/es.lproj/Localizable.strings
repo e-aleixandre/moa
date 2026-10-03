@@ -1,0 +1,4 @@
+/* Push notifications. Resolved by the system for the relay's alert keys and by the Notification Service Extension. */
+"PUSH_FALLBACK_TITLE" = "moa";
+"PUSH_FALLBACK_BODY" = "Tienes novedades en moa";
+"PUSH_CHALLENGE_BODY" = "Abre moa para terminar de activar los avisos";

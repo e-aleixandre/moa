@@ -9,6 +9,8 @@
 
 import { api } from './api.js';
 import { addToast } from './notifications.js';
+import { shownSessionIds } from './presence.js';
+import { store } from './store.js';
 
 // Push state surfaced to the UI:
 //   'unsupported' — no SW / PushManager / Notification (e.g. iOS not installed)
@@ -30,6 +32,86 @@ export function subscribePushState(fn) {
 function setPushState(s) {
   pushState = s;
   listeners.forEach((fn) => fn(s));
+}
+
+// The paired iOS app injects window.MoaNativePush. When present it replaces
+// Web Push entirely: APNs through the relay, decrypted by the app's extension.
+function nativePush() {
+  const n = globalThis.window?.MoaNativePush;
+  return n && typeof n.enable === 'function' ? n : null;
+}
+
+const NATIVE_ERRORS = {
+  not_paired: 'This app is not paired with a server.',
+  denied: 'Notifications are blocked in iOS settings.',
+  relay_mismatch: 'The server uses a different push relay than this app.',
+  unavailable: 'The push relay is not reachable. Try again later.',
+  timeout: 'Activation timed out. Open the app and try again.',
+  rejected: 'The push relay rejected the registration.',
+  keychain: 'The notification key could not be updated. Try again.',
+  unsupported: 'Native notifications are not available on this device.',
+};
+
+function nativeStateFrom(status) {
+  if (status?.enabled) return 'subscribed';
+  return status?.permission === 'denied' ? 'denied' : 'default';
+}
+
+async function refreshNativeState(native) {
+  try {
+    setPushState(nativeStateFrom(await native.status()));
+  } catch (_) {
+    setPushState('default');
+  }
+}
+
+async function enableNative(native) {
+  setPushState('busy');
+  try {
+    setPushState(nativeStateFrom(await native.enable()));
+  } catch (e) {
+    if (e?.code !== 'cancelled') {
+      addToast({
+        title: 'Could not enable notifications',
+        detail: NATIVE_ERRORS[e?.code] || 'Try again.',
+        type: 'error',
+      });
+    }
+    await refreshNativeState(native);
+  }
+}
+
+async function disableNative(native) {
+  setPushState('busy');
+  try {
+    setPushState(nativeStateFrom(await native.disable()));
+  } catch (e) {
+    addToast({ title: 'Could not disable notifications', detail: NATIVE_ERRORS[e?.code] || 'Try again.', type: 'error' });
+    await refreshNativeState(native);
+  }
+}
+
+// Tells the app which conversation is on screen so it can skip the banner for
+// a notification about that very session. Safe by default: with no signal the
+// app shows everything.
+export function watchNativeVisibleSession({ getState = store.get, subscribe = store.subscribe, doc = globalThis.document } = {}) {
+  let last;
+  const sync = () => {
+    const native = nativePush();
+    if (!native || !doc) return;
+    const ids = doc.visibilityState === 'visible' ? shownSessionIds(getState()) : [];
+    const id = ids.length === 1 ? ids[0] : null;
+    if (id === last) return;
+    last = id;
+    native.setVisibleSession(id).catch(() => { last = undefined; });
+  };
+  const unsubscribe = subscribe(sync);
+  doc?.addEventListener('visibilitychange', sync);
+  sync();
+  return () => {
+    unsubscribe();
+    doc?.removeEventListener('visibilitychange', sync);
+  };
 }
 
 function supported() {
@@ -100,6 +182,8 @@ function subscriptionPayload(sub) {
 
 // refreshPushState reconciles the UI with the browser's actual state on load.
 export async function refreshPushState() {
+  const native = nativePush();
+  if (native) { await refreshNativeState(native); return; }
   if (!supported()) { setPushState('unsupported'); return; }
   if (Notification.permission === 'denied') { setPushState('denied'); return; }
   if (Notification.permission === 'default') { setPushState('default'); return; }
@@ -115,6 +199,8 @@ export async function refreshPushState() {
 // enablePush must run from a user gesture (iOS requires it for both the
 // permission prompt and pushManager.subscribe).
 export async function enablePush() {
+  const native = nativePush();
+  if (native) { await enableNative(native); return; }
   if (!supported()) return;
   setPushState('busy');
   try {
@@ -144,6 +230,8 @@ export async function enablePush() {
 }
 
 export async function disablePush() {
+  const native = nativePush();
+  if (native) { await disableNative(native); return; }
   setPushState('busy');
   try {
     const reg = await readyRegistration();
