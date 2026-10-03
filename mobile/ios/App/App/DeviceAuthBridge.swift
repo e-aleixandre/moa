@@ -237,6 +237,11 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
             credential: result.credential,
             expiresAt: expiresAt
         ))
+        // A new pairing never inherits the previous push secret (review C3).
+        // After the save: push work that read the old credential, or this new
+        // one under the old generation, is fenced by the generation change.
+        // A failed secret delete stays marked and blocks registering.
+        await MainActor.run { _ = NativePushRegistration.shared.forgetLocal() }
     }
 
     private func authorize(origin: URL) async throws {
@@ -257,6 +262,7 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AuthBridgeError.unavailable }
         if http.statusCode == 401 || http.statusCode == 403 {
+            await MainActor.run { _ = NativePushRegistration.shared.forgetLocal() }
             try credentialStore.delete()
             NativeServerBinding.clear()
             await clearSessionCookie(origin: origin)
@@ -291,6 +297,9 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
     }
 
     private func reset() async throws {
+        // Push keys and notifications go first and regardless of the
+        // credential delete below: unpairing must stop decryption offline.
+        let pushSecretRemoved = await MainActor.run { NativePushRegistration.shared.forgetLocal() }
         let storedOrigin = try? credentialStore.load()?.origin
         let deleteError: Error?
         do {
@@ -305,6 +314,8 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
             await clearSessionCookie(origin: url)
         }
         if let deleteError { throw deleteError }
+        // The push secret may still decrypt: report it, it is retried later.
+        if !pushSecretRemoved { throw AuthBridgeError.keychain }
     }
 
     func unpair() async {

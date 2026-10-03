@@ -22,7 +22,7 @@ import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
 import { afterPendingInits, getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
-import { refreshPushState } from "./data/push-client.js";
+import { refreshPushState, watchNativeVisibleSession } from "./data/push-client.js";
 import { installOpenSessionNavigation, installNativeNavigation } from "./data/push-navigation.js";
 import { installShareNavigation, openShare, dismissShare } from "./data/share.js";
 import { installNativeShareNavigation } from "./data/native-share.js";
@@ -171,7 +171,9 @@ function useBootstrap() {
     // Reconcile the browser's actual push state on load (/next relies on the
     // root /sw.js, no SW registration here). Guarded internally for unsupported.
     refreshPushState();
+    const stopNativeVisible = watchNativeVisibleSession();
     return () => {
+      stopNativeVisible();
       mounted = false;
       stopPolling();
       stopUsagePolling();
