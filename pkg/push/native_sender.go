@@ -21,7 +21,11 @@ import (
 // DefaultRelayURL is the relay the official app is built against. Whoever
 // builds their own app with their own APNs key runs their own relay and sets
 // push_relay_url to it.
-const DefaultRelayURL = "https://push.letmoa.run"
+//
+// Provisional: the relay runs on workers.dev until the letmoa.run zone is on
+// Cloudflare. Then this becomes https://push.letmoa.run again, together with
+// MOA_PUSH_RELAY_URL in the iOS project (the two must match byte for byte).
+const DefaultRelayURL = "https://moa-push-relay.ealeixandre.workers.dev"
 
 // NormalizeRelayURL accepts an origin and nothing else: HTTPS, no userinfo,
 // path, query or fragment. Plain HTTP is allowed only for a loopback host, so

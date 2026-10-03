@@ -144,5 +144,10 @@ APNs key, so if you build your own app you also run your own relay.
 5. Use the same URL in the app build (`MOA_PUSH_RELAY_URL`) and in your moa
    server's `push_relay_url`. The server refuses handles from any other relay
    URL.
+   Without a domain of your own, deploy to `workers.dev` instead: use a copy of
+   `wrangler.json` with `"workers_dev": true` (`wrangler deploy -c <copy>`). The
+   official relay is there for now (`moa-push-relay.ealeixandre.workers.dev`,
+   provisional until `push.letmoa.run` is on Cloudflare); the tests keep the
+   committed `wrangler.json` free of `workers_dev` and `routes`.
 6. After deploying, check in the dashboard that Workers Logs, Logpush and Tail
    Workers are off for the Worker.

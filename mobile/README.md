@@ -245,7 +245,7 @@ Two Keychain access groups keep that boundary:
 - `$(AppIdentifierPrefix)$(MOA_PUSH_KEYCHAIN_GROUP)` -- the push secret,
   shared by the app and `NotificationService`, never by `ShareExtension`.
 
-Build settings: `MOA_PUSH_RELAY_URL` (default `https://push.letmoa.run`, must
+Build settings: `MOA_PUSH_RELAY_URL` (default `https://moa-push-relay.ealeixandre.workers.dev`, provisional until `push.letmoa.run`; must
 equal the server's `push.relay_url`), `MOA_PUSH_KEYCHAIN_GROUP` and
 `MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER`. In Xcode, give the
 `NotificationService` target the same Team and the Keychain Sharing capability

@@ -532,7 +532,7 @@
 				MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.ShareExtension;
 				MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.NotificationService;
 				MOA_PUSH_KEYCHAIN_GROUP = com.ealeixandre.moa.push;
-				MOA_PUSH_RELAY_URL = "https://push.letmoa.run";
+				MOA_PUSH_RELAY_URL = "https://moa-push-relay.ealeixandre.workers.dev";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -594,7 +594,7 @@
 				MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.ShareExtension;
 				MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.NotificationService;
 				MOA_PUSH_KEYCHAIN_GROUP = com.ealeixandre.moa.push;
-				MOA_PUSH_RELAY_URL = "https://push.letmoa.run";
+				MOA_PUSH_RELAY_URL = "https://moa-push-relay.ealeixandre.workers.dev";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
