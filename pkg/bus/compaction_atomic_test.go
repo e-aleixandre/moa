@@ -739,8 +739,8 @@ type catomicMatrixReport struct {
 // the commit, reporting on fd 3 what it observed there:
 //   - before: the boundary save is about to start;
 //   - disk: the store accepted the boundary save, the runtime has not adopted;
-//   - adopted: the agent adopted the compaction, its completion event has not
-//     been emitted (the post-compaction prompt hook runs in that gap).
+//   - adopted: the agent adopted the compaction and reached the post-compaction
+//     prompt hook; background compaction has already emitted its completion event.
 func TestCompactionAtomicMatrixChild(t *testing.T) {
 	dir := os.Getenv(catomicMatrixDirEnv)
 	if dir == "" {
@@ -760,7 +760,7 @@ func TestCompactionAtomicMatrixChild(t *testing.T) {
 	var f *catomicFixture
 	f = newCatomicFixtureOpts(t, dir, catomicOpts{
 		before: func(entries []session.Entry) error {
-			if catomicHasCompaction(entries) {
+			if catomicHasCompaction(entries) && rep.Originals == nil {
 				rep.Originals = catomicMsgs(f.ag.Messages())
 				if point == "before" {
 					park()
