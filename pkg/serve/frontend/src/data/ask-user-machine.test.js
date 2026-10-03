@@ -170,4 +170,15 @@ describe('multiple-choice questions', () => {
     expect(parseMultiAnswer('a; b', ['a; b', 'c'])).toEqual({ picked: ['a; b'], free: '' });
     expect(parseMultiAnswer('(skipped)', ['A'])).toEqual({ picked: [], free: '(skipped)' });
   });
+
+  test('an option that starts with another option is not read as that option plus text', () => {
+    expect(parseMultiAnswer('a; b', ['a', 'a; b'])).toEqual({ picked: ['a; b'], free: '' });
+    expect(parseMultiAnswer('a; a; b', ['a', 'a; b'])).toEqual({ picked: ['a', 'a; b'], free: '' });
+    expect(parseMultiAnswer('a; b; why', ['a', 'a; b'])).toEqual({ picked: ['a; b'], free: 'why' });
+  });
+
+  test('free text containing the separator stays free text', () => {
+    expect(parseMultiAnswer('a; see; later', ['a', 'b'])).toEqual({ picked: ['a'], free: 'see; later' });
+    expect(parseMultiAnswer('x; y', ['a', 'b'])).toEqual({ picked: [], free: 'x; y' });
+  });
 });

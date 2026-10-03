@@ -123,17 +123,27 @@ export function finalAnswers(questions, answers, selections) {
 }
 
 // parseMultiAnswer is composeMultiAnswer backwards, for showing a finished
-// answer. Options are peeled off in option order (so one containing "; " still
-// matches); whatever is left is the free text.
+// answer. Picks come first in option order, then the free text, but the string
+// alone can be ambiguous (options "a" and "a; b"), so every reading is tried
+// and the one where options account for the most of the string wins; whatever
+// is left is the free text.
 export function parseMultiAnswer(answer, options) {
-  let rest = answer || '';
-  const picked = [];
-  for (const opt of options || []) {
-    if (rest === opt) { picked.push(opt); rest = ''; break; }
-    if (rest.startsWith(opt + MULTI_SEPARATOR)) {
-      picked.push(opt);
-      rest = rest.slice(opt.length + MULTI_SEPARATOR.length);
+  const opts = options || [];
+  const text = answer || '';
+  const walk = (rest, from) => {
+    let best = { picked: [], free: rest, used: 0 };
+    for (let i = from; i < opts.length; i++) {
+      const opt = opts[i];
+      let tail = null;
+      if (rest === opt) tail = '';
+      else if (rest.startsWith(opt + MULTI_SEPARATOR)) tail = rest.slice(opt.length + MULTI_SEPARATOR.length);
+      if (tail === null) continue;
+      const sub = walk(tail, i + 1);
+      const used = opt.length + sub.used;
+      if (used > best.used) best = { picked: [opt, ...sub.picked], free: sub.free, used };
     }
-  }
-  return { picked, free: rest };
+    return best;
+  };
+  const { picked, free } = walk(text, 0);
+  return { picked, free };
 }
