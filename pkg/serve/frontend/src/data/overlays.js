@@ -8,14 +8,26 @@
 // here (⌘K must still toggle the palette when it's the only thing open).
 
 const active = new Set();
+const listeners = new Set();
+
+function changed() {
+  for (const fn of listeners) fn();
+}
 
 export function registerOverlay(id) {
   active.add(id);
-  return () => active.delete(id);
+  changed();
+  return () => unregisterOverlay(id);
 }
 
 export function unregisterOverlay(id) {
-  active.delete(id);
+  if (active.delete(id)) changed();
+}
+
+// Lets a consumer that mirrors "is something on top?" react to changes.
+export function subscribeOverlays(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
 }
 
 export function hasBlockingOverlay() {

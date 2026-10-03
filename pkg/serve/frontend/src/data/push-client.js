@@ -9,7 +9,9 @@
 
 import { api } from './api.js';
 import { addToast } from './notifications.js';
-import { shownSessionIds } from './presence.js';
+import { isPresent, shownSessionIds } from './presence.js';
+import { hasBlockingOverlay, subscribeOverlays } from './overlays.js';
+import { sessionPanelView } from './session-panel.js';
 import { store } from './store.js';
 
 // Push state surfaced to the UI:
@@ -91,25 +93,41 @@ async function disableNative(native) {
   }
 }
 
+// What is drawn over the conversation without replacing it: the mobile session
+// panel and drawer, the full-screen preview and any registered overlay
+// (settings, popovers, timelines). Under any of them the conversation is not
+// being read.
+function conversationCovered(state, id) {
+  if (hasBlockingOverlay()) return true;
+  if (state.drawerOpen || state.sessions?.[id]?.previewOpen) return true;
+  return !!state.isMobile && sessionPanelView(state, id).open;
+}
+
 // Tells the app which conversation is on screen so it can skip the banner for
-// a notification about that very session. Safe by default: with no signal the
-// app shows everything.
+// a notification about that very session. Only a conversation whose history is
+// loaded and uncovered counts; in any other case it reports null and the app
+// shows everything.
 export function watchNativeVisibleSession({ getState = store.get, subscribe = store.subscribe, doc = globalThis.document } = {}) {
   let last;
   const sync = () => {
     const native = nativePush();
     if (!native || !doc) return;
-    const ids = doc.visibilityState === 'visible' ? shownSessionIds(getState()) : [];
-    const id = ids.length === 1 ? ids[0] : null;
+    const state = getState();
+    const shown = shownSessionIds(state);
+    const id = shown.length === 1 && isPresent(state, shown[0], doc) && !conversationCovered(state, shown[0])
+      ? shown[0]
+      : null;
     if (id === last) return;
     last = id;
     native.setVisibleSession(id).catch(() => { last = undefined; });
   };
   const unsubscribe = subscribe(sync);
+  const unsubscribeOverlays = subscribeOverlays(sync);
   doc?.addEventListener('visibilitychange', sync);
   sync();
   return () => {
     unsubscribe();
+    unsubscribeOverlays();
     doc?.removeEventListener('visibilitychange', sync);
   };
 }
