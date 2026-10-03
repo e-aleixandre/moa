@@ -230,6 +230,32 @@ is ready; do not create codes speculatively.
 There has not yet been a distributed iOS build, so no migration of an existing
 release is required.
 
+## Native notifications
+
+The app receives moa's notifications through APNs with end-to-end encrypted
+content; the wire contract is `relay/PROTOCOL.md`. A third target,
+`NotificationService`, decrypts each alert before iOS shows it. It shares
+`PushEnvelope.swift` with the app and reads only the push secret.
+
+Two Keychain access groups keep that boundary:
+
+- `$(AppIdentifierPrefix)com.ealeixandre.moa.app` -- the app's own group,
+  listed **first** in `App.entitlements` and named on every credential query.
+  Only the app has it.
+- `$(AppIdentifierPrefix)$(MOA_PUSH_KEYCHAIN_GROUP)` -- the push secret,
+  shared by the app and `NotificationService`, never by `ShareExtension`.
+
+Build settings: `MOA_PUSH_RELAY_URL` (default `https://push.letmoa.run`, must
+equal the server's `push.relay_url`), `MOA_PUSH_KEYCHAIN_GROUP` and
+`MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER`. In Xcode, give the
+`NotificationService` target the same Team and the Keychain Sharing capability
+with the push group; give `App` Push Notifications, Time Sensitive
+Notifications and Keychain Sharing with both groups, private one first.
+`PushEnvelopeTests` checks the Swift crypto against `relay/test/vectors.json`.
+
+Test Keychain isolation with a **new** pairing: an existing install keeps its
+credential where it was created, so it cannot reveal a regression.
+
 ## Why the iOS project is committed
 
 The Android project is disposable Capacitor output. The iOS project is not any
