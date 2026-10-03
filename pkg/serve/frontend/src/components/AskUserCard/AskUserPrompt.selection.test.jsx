@@ -112,3 +112,64 @@ test("an option still auto-advances and is restored after Back", () => {
   expect(card(tree).props.question).toBe("First?");
   expect(card(tree).props.currentAnswer).toBe("Yes");
 });
+
+const submitButton = (tree) => descendants(tree).find((node) => node.props?.class === "ask-user-prompt-submit");
+
+test("multiple: ticking toggles without advancing, and Submit sends picks plus free text as one answer", async () => {
+  reset();
+  const ask = session([
+    { question: "Which?", options: ["A", "B", "C", "D"], multiple: true },
+    { question: "Sure?", options: ["Yes", "No"] },
+  ]);
+  let tree = render(ask);
+  expect(card(tree).props.multiple).toBe(true);
+  expect(card(tree).props.selected).toEqual([]);
+
+  card(tree).props.onPick({ label: "C" });
+  tree = render(ask);
+  card(tree).props.onPick({ label: "A" });
+  tree = render(ask);
+  expect(card(tree).props.question).toBe("Which?"); // no auto-advance
+  expect(card(tree).props.selected).toEqual(["C", "A"]);
+
+  card(tree).props.onPick({ label: "C" }); // untick
+  tree = render(ask);
+  card(tree).props.onPick({ label: "C" });
+  tree = render(ask);
+  card(tree).props.onFreeChange("and more");
+  tree = render(ask);
+  expect(card(tree).props.freeValue).toBe("and more");
+
+  submitButton(tree).props.onClick(); // Continue → second question
+  tree = render(ask);
+  expect(card(tree).props.question).toBe("Sure?");
+  expect(card(tree).props.multiple).toBeFalsy();
+  card(tree).props.onPick({ label: "Yes" });
+  tree = render(ask);
+  submitButton(tree).props.onClick();
+  await Promise.resolve();
+  expect(resolved).toEqual([["session-1", "ask-1", ["A; C; and more", "Yes"]]]);
+});
+
+test("multiple: a question with nothing ticked and no text is still unanswered", () => {
+  reset();
+  const ask = session([{ question: "Which?", options: ["A", "B"], multiple: true }]);
+  let tree = render(ask);
+  submitButton(tree).props.onClick();
+  expect(resolved).toHaveLength(0);
+  card(tree).props.onPick({ label: "B" });
+  tree = render(ask);
+  submitButton(tree).props.onClick();
+  expect(resolved).toHaveLength(1);
+});
+
+test("multiple: free text alone is a valid answer", async () => {
+  reset();
+  const ask = session([{ question: "Which?", options: ["A", "B"], multiple: true }]);
+  let tree = render(ask);
+  card(tree).props.onFreeChange("neither");
+  tree = render(ask);
+  submitButton(tree).props.onClick();
+  await Promise.resolve();
+  expect(resolved).toEqual([["session-1", "ask-1", ["neither"]]]);
+});

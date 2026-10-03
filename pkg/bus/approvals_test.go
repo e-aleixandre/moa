@@ -639,3 +639,17 @@ func containsAny(value string, needles ...string) bool {
 	}
 	return false
 }
+
+func TestAskQuestion_Describe(t *testing.T) {
+	plain := AskQuestion{Text: "Which?", Options: []string{"a", "b"}}
+	if got := plain.Describe(); got != "Which?" {
+		t.Errorf("plain Describe = %q, want bare text", got)
+	}
+	multi := AskQuestion{Text: "Which?", Options: []string{"a", "b"}, Multiple: true}
+	got := multi.Describe()
+	for _, want := range []string{"Which?", "a / b", `"; "`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("multiple Describe = %q, missing %q", got, want)
+		}
+	}
+}

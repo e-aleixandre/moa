@@ -6,7 +6,7 @@ import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { useCanTranscribe } from "../../hooks/useCanTranscribe.js";
 import {
   initAnswers, setAnswer, firstUnanswered, allAnswered, skipAnswers, skipActivates,
-  appendDictation,
+  appendDictation, initSelections, toggleSelection, finalAnswers,
 } from "../../data/ask-user-machine.js";
 import "./AskUserPrompt.css";
 
@@ -24,7 +24,10 @@ export function AskUserPrompt({ session }) {
   const questions = ask?.questions || [];
 
   const [current, setCurrent] = useState(0);
+  // For a `multiple` question answers[i] is only its free text; the ticked
+  // options live in selections[i] and are composed on the way out.
   const [answers, setAnswers] = useState(() => initAnswers(questions));
+  const [selections, setSelections] = useState(() => initSelections(questions));
   const [submitting, setSubmitting] = useState(false);
   const [voiceError, setVoiceError] = useState(null);
   // Synchronous in-flight guard: `submitting` is reactive state, so two
@@ -45,6 +48,7 @@ export function AskUserPrompt({ session }) {
   useEffect(() => {
     setCurrent(0);
     setAnswers(initAnswers(questions));
+    setSelections(initSelections(questions));
     setSubmitting(false);
     setVoiceError(null);
     resolvingRef.current = false;
@@ -74,7 +78,10 @@ export function AskUserPrompt({ session }) {
   const insertDictation = useCallback((text) => {
     if (recordingAskRef.current !== askIdRef.current) return;
     const idx = currentRef.current;
-    const opts = questionsRef.current[idx]?.options || [];
+    // A multiple question's answer is free text only: dictation never has a
+    // picked option to replace.
+    const qd = questionsRef.current[idx];
+    const opts = qd?.multiple ? [] : (qd?.options || []);
     setAnswers((prev) => appendDictation(prev, idx, text, opts));
     // A successful transcription clears a previous failure: leaving "No
     // microphone found" under a working answer is just confusing.
@@ -138,14 +145,24 @@ export function AskUserPrompt({ session }) {
 
   const q = questions[current];
   const options = (q.options || []).map((label) => ({ label }));
+  const multiple = !!q.multiple;
+  const selected = selections[current] || [];
+  // What the user has answered so far, as it would be sent.
+  const composed = finalAnswers(questions, answers, selections);
   const currentAnswer = answers[current] || "";
   // The free-text field only echoes the current answer when it isn't one of
   // the option labels (an option is shown via the highlighted button instead).
-  const freeValue = (q.options || []).includes(currentAnswer) ? "" : currentAnswer;
+  const freeValue = !multiple && (q.options || []).includes(currentAnswer) ? "" : currentAnswer;
 
   const goTo = (idx) => setCurrent(Math.max(0, Math.min(questions.length - 1, idx)));
 
   const pick = (opt) => {
+    // Ticking is not an answer to move on from: the user confirms with
+    // Continue/Submit, so they can tick several.
+    if (multiple) {
+      setSelections((prev) => toggleSelection(prev, current, opt.label));
+      return;
+    }
     setAnswers((prev) => setAnswer(prev, current, opt.label));
     if (current < questions.length - 1) goTo(current + 1);
   };
@@ -175,7 +192,7 @@ export function AskUserPrompt({ session }) {
   };
 
   const handleSubmit = () => {
-    const trimmed = answers.map((a) => a.trim());
+    const trimmed = composed.map((a) => a.trim());
     const idx = firstUnanswered(trimmed);
     if (idx !== -1) {
       goTo(idx);
@@ -188,10 +205,10 @@ export function AskUserPrompt({ session }) {
     const armedPointerId = skipPointerDown.current;
     skipPointerDown.current = null;
     if (!skipActivates({ armedPointerId, pointerId: e?.pointerId, detail: e?.detail })) return;
-    resolve(skipAnswers(questions, answers));
+    resolve(skipAnswers(questions, composed));
   };
 
-  const canSubmit = allAnswered(answers);
+  const canSubmit = allAnswered(composed);
 
   const last = current === questions.length - 1;
   // Continue is the primary: on an earlier question it steps forward, on the
@@ -216,6 +233,8 @@ export function AskUserPrompt({ session }) {
         question={q.question}
         options={options}
         currentAnswer={currentAnswer}
+        multiple={multiple}
+        selected={selected}
         onPick={pick}
         onSubmitFree={submitFree}
         freeValue={freeValue}

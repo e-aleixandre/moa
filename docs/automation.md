@@ -376,7 +376,7 @@ under `pending.kind: "question"`.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `id` | yes | The pending request ID from `pending.id`, max 128 bytes |
-| `answers` | yes | One answer per question, in order; max 32 answers of 8 KiB each (`ask_user` refuses to create a prompt with more than 32 questions, so every prompt is answerable in one request) |
+| `answers` | yes | One answer per question, in order; max 32 answers of 8 KiB each (`ask_user` refuses to create a prompt with more than 32 questions, so every prompt is answerable in one request). For a question the callback marks `"multiple": true`, answer with the chosen options joined by `"; "` (then any free text); a single option is a valid answer |
 
 ```bash
 curl -sS http://127.0.0.1:8080/api/automation/sessions/$SESSION/ask-response \

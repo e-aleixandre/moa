@@ -378,7 +378,7 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 				id := fmt.Sprintf("ask_%d", am.idCounter.Add(1))
 				questions := make([]AskQuestion, len(p.Questions))
 				for i, q := range p.Questions {
-					questions[i] = AskQuestion{Text: q.Text, Options: q.Options}
+					questions[i] = AskQuestion{Text: q.Text, Options: q.Options, Multiple: q.Multiple}
 				}
 
 				am.mu.Lock()

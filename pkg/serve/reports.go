@@ -1029,6 +1029,9 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 				line := q.Text
 				if len(q.Options) > 0 {
 					line += " (" + strings.Join(q.Options, " / ") + ")"
+					if q.Multiple {
+						line += ` [several allowed: join with "; "]`
+					}
 				}
 				texts = append(texts, line)
 			}

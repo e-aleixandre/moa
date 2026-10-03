@@ -164,7 +164,7 @@ func deliverAutomationCallback(sess *ManagedSession, cb callbackTarget, status, 
 func askPending(e bus.AskUserRequested) *CallbackPending {
 	questions := make([]bus.AskQuestion, 0, len(e.Questions))
 	for _, q := range e.Questions {
-		trimmed := bus.AskQuestion{Text: truncateSummary(q.Text)}
+		trimmed := bus.AskQuestion{Text: truncateSummary(q.Text), Multiple: q.Multiple}
 		for _, opt := range q.Options {
 			trimmed.Options = append(trimmed.Options, truncateSummary(opt))
 		}

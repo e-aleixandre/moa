@@ -10,6 +10,7 @@
 package bus
 
 import (
+	"strings"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -762,6 +763,18 @@ type AskUserResolved struct {
 type AskQuestion struct {
 	Text    string   `json:"question"`
 	Options []string `json:"options,omitempty"`
+	// Multiple: several options may be chosen; the answer joins them with "; ".
+	Multiple bool `json:"multiple,omitempty"`
+}
+
+// Describe renders the question for a machine responder (an owner, a report).
+// A plain question stays its bare text; a multiple-choice one also lists the
+// options and says how to answer, since those callers answer with one string.
+func (q AskQuestion) Describe() string {
+	if !q.Multiple {
+		return q.Text
+	}
+	return q.Text + " [choose one or more of: " + strings.Join(q.Options, " / ") + `; answer with the chosen options joined by "; "]`
 }
 
 // ---------------------------------------------------------------------------
