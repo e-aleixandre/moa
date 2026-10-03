@@ -32,7 +32,15 @@ const (
 type Question struct {
 	Text    string   `json:"question"`
 	Options []string `json:"options,omitempty"`
+	// Multiple lets the user tick several options. The answer is still one
+	// string per question: the chosen options joined by MultiSeparator, then
+	// any free text, so every responder (UI, automation, owner) keeps the
+	// same []string contract.
+	Multiple bool `json:"multiple,omitempty"`
 }
+
+// MultiSeparator joins the options chosen in a multiple-choice question.
+const MultiSeparator = "; "
 
 // Prompt is the full batch sent from the agent to the UI.
 type Prompt struct {
@@ -77,6 +85,10 @@ func NewTool(b *Bridge) core.Tool {
 								"type": "array",
 								"items": { "type": "string" },
 								"description": "Optional predefined answer choices. The user can always write a custom answer instead."
+							},
+							"multiple": {
+								"type": "boolean",
+								"description": "Only with options: let the user tick several of them (default false). The answer comes back as the chosen options joined by '; ', followed by any free text the user adds."
 							}
 						},
 						"required": ["question"]
@@ -154,6 +166,9 @@ func parseQuestions(params map[string]any) ([]Question, error) {
 				}
 				q.Options = append(q.Options, s)
 			}
+		}
+		if multiple, ok := m["multiple"].(bool); ok && multiple && len(q.Options) > 0 {
+			q.Multiple = true
 		}
 		questions = append(questions, q)
 	}

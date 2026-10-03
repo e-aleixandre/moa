@@ -24,6 +24,9 @@ const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 // then every keystroke is reported up so a stateful container (AskUserPrompt)
 // can persist the answer per question and restore it when navigating back.
 //
+// `multiple` turns the options into toggles: `selected` lists the ticked
+// labels and the container keeps them apart from the free text.
+//
 // `voice` is the optional tap-to-talk wiring from useVoiceGesture (handlers +
 // recording/transcribing). Passing it puts the mic inside the free row — the
 // same tap-to-record control the composer uses; omitting it leaves a plain
@@ -32,6 +35,8 @@ export function AskUserCard({
   question,
   options = [],
   currentAnswer = "",
+  multiple = false,
+  selected = [],
   onPick,
   onSubmitFree,
   freeValue,
@@ -47,7 +52,9 @@ export function AskUserCard({
   const rootRef = useRef(null);
   const freeLetter = LETTERS[options.length] || "";
   // The free row is "chosen" when the answer is text that is not an option.
-  const freeChosen = !!free.trim() && !options.some((o) => o.label === currentAnswer);
+  // In a multiple question the field is extra text beside the ticks, so it is
+  // "chosen" whenever it has text.
+  const freeChosen = !!free.trim() && (multiple || !options.some((o) => o.label === currentAnswer));
 
   const submitFree = (event) => {
     event.preventDefault();
@@ -86,14 +93,15 @@ export function AskUserCard({
         <span class="who">moa asks</span>
       </div>
       <p class="ask-q">{question}</p>
+      {multiple && <p class="ask-hint">Pick one or more, then confirm.</p>}
       <div class="ask-opts">
         {options.map((opt, i) => {
-          const chosen = opt.label === currentAnswer;
+          const chosen = multiple ? selected.includes(opt.label) : opt.label === currentAnswer;
           return (
             <button
               key={opt.label ?? i}
               type="button"
-              class={`ask-opt${chosen ? " chosen" : ""}`}
+              class={`ask-opt${multiple ? " multi" : ""}${chosen ? " chosen" : ""}`}
               aria-pressed={chosen}
               aria-keyshortcuts={LETTERS[i]}
               onClick={() => onPick?.(opt, i)}

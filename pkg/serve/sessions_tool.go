@@ -107,7 +107,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 				"answers": {
 					"type": "array",
 					"items": {"type": "string"},
-					"description": "For answer: one answer per question asked, in order."
+					"description": "For answer: one answer per question asked, in order. For a multiple-choice question, join the chosen options with '; '."
 				}
 			},
 			"required": ["action"]
@@ -334,7 +334,7 @@ func (m *Manager) ownerPendingLine(id string) string {
 	case pending.Ask != nil:
 		questions := make([]string, 0, len(pending.Ask.Questions))
 		for _, q := range pending.Ask.Questions {
-			questions = append(questions, q.Text)
+			questions = append(questions, q.Describe())
 		}
 		return fmt.Sprintf("asking (ask_id %s): %s", pending.Ask.ID, strings.Join(questions, " | "))
 	case pending.Permission != nil:

@@ -275,3 +275,22 @@
   height: 44px;
 }
 .mconv .ask .ask-free { padding-right: 4px; }
+
+/* Multiple choice: the options become toggles. The check well turns into an
+   empty box at rest, so "tick several" reads before anything is tapped. */
+.ask .ask-hint {
+  margin: 4px 0 0;
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+}
+.ask .ask-opt.multi .ask-opt-check {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--zl-r-sm);
+  box-shadow: var(--zl-rim-2);
+}
+.ask .ask-opt.multi.chosen .ask-opt-check {
+  background: color-mix(in srgb, var(--zl-yellow) 18%, transparent);
+  box-shadow: 0 0 0 1px var(--zl-yellow);
+  color: var(--zl-yellow);
+}

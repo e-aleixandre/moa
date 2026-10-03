@@ -84,3 +84,56 @@ export function appendDictation(answers, idx, text, options = []) {
   const separator = /\s$/.test(existing) ? '' : ' ';
   return setAnswer(answers, idx, existing + separator + spoken);
 }
+
+// --- multiple-choice questions ---------------------------------------------
+//
+// A question with `multiple: true` keeps its ticked options in a separate
+// selection list; its entry in `answers` is only the free text. The wire
+// contract is unchanged — one string per question — so the string sent for a
+// multiple question is composed here: the picks in option order joined by
+// "; ", then the free text.
+
+export const MULTI_SEPARATOR = '; ';
+
+export function initSelections(questions) {
+  return (questions || []).map(() => []);
+}
+
+// toggleSelection adds `label` to question `idx`'s picks, or removes it.
+export function toggleSelection(selections, idx, label) {
+  const next = [...selections];
+  const cur = next[idx] || [];
+  next[idx] = cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label];
+  return next;
+}
+
+export function composeMultiAnswer(picked, options, free) {
+  const ordered = (options || []).filter((o) => (picked || []).includes(o));
+  const text = (free || '').trim();
+  return (text ? [...ordered, text] : ordered).join(MULTI_SEPARATOR);
+}
+
+// finalAnswers is what the user has answered so far, one string per question.
+export function finalAnswers(questions, answers, selections) {
+  return (questions || []).map((q, i) => (
+    q.multiple
+      ? composeMultiAnswer(selections[i], q.options, answers[i])
+      : (answers[i] || '')
+  ));
+}
+
+// parseMultiAnswer is composeMultiAnswer backwards, for showing a finished
+// answer. Options are peeled off in option order (so one containing "; " still
+// matches); whatever is left is the free text.
+export function parseMultiAnswer(answer, options) {
+  let rest = answer || '';
+  const picked = [];
+  for (const opt of options || []) {
+    if (rest === opt) { picked.push(opt); rest = ''; break; }
+    if (rest.startsWith(opt + MULTI_SEPARATOR)) {
+      picked.push(opt);
+      rest = rest.slice(opt.length + MULTI_SEPARATOR.length);
+    }
+  }
+  return { picked, free: rest };
+}

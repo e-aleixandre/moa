@@ -302,3 +302,32 @@ func TestFormatAnswers_ShortSlice(t *testing.T) {
 		t.Errorf("single-question empty answers = %q, want \"\"", got)
 	}
 }
+
+func TestAskUser_MultipleFlagReachesPromptAndAnswerPassesThrough(t *testing.T) {
+	bridge := NewBridge()
+	tool := NewTool(bridge)
+
+	go func() {
+		p := <-bridge.Prompts()
+		if !p.Questions[0].Multiple || p.Questions[1].Multiple || p.Questions[2].Multiple {
+			t.Errorf("Multiple flags = %v %v %v, want true false false",
+				p.Questions[0].Multiple, p.Questions[1].Multiple, p.Questions[2].Multiple)
+		}
+		p.Response <- []string{"A; C; because", "x", "y"}
+	}()
+
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"questions": []any{
+			map[string]any{"question": "Which?", "options": []any{"A", "B", "C", "D"}, "multiple": true},
+			map[string]any{"question": "One?", "options": []any{"x", "y"}},
+			// multiple without options is meaningless: ignored, not an error.
+			map[string]any{"question": "Free?", "multiple": true},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Content[0].Text; !strings.Contains(got, "A: A; C; because") {
+		t.Errorf("result = %q", got)
+	}
+}

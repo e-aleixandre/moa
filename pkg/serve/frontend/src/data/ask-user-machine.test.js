@@ -2,7 +2,8 @@
 import { test, expect, describe } from 'bun:test';
 import {
   initAnswers, setAnswer, firstUnanswered, allAnswered, skipAnswers, skipActivates,
-  appendDictation,
+  appendDictation, initSelections, toggleSelection, composeMultiAnswer, finalAnswers,
+  parseMultiAnswer,
 } from './ask-user-machine.js';
 
 const QUESTIONS = [
@@ -122,5 +123,51 @@ describe('appendDictation', () => {
 
   test('the transcript is trimmed before it is joined', () => {
     expect(appendDictation(['start'], 0, '  spoken  ')).toEqual(['start spoken']);
+  });
+});
+
+describe('multiple-choice questions', () => {
+  const MQ = [
+    { question: 'Which?', options: ['A', 'B', 'C', 'D'], multiple: true },
+    { question: 'One?', options: ['x', 'y'] },
+  ];
+
+  test('initSelections seeds an empty selection per question', () => {
+    expect(initSelections(MQ)).toEqual([[], []]);
+  });
+
+  test('toggleSelection adds and removes one label, leaving other questions alone', () => {
+    let sel = initSelections(MQ);
+    sel = toggleSelection(sel, 0, 'C');
+    sel = toggleSelection(sel, 0, 'A');
+    expect(sel).toEqual([['C', 'A'], []]);
+    sel = toggleSelection(sel, 0, 'C');
+    expect(sel).toEqual([['A'], []]);
+  });
+
+  test('composeMultiAnswer lists the picks in option order, then the free text', () => {
+    expect(composeMultiAnswer(['C', 'A'], ['A', 'B', 'C', 'D'], '  because  ')).toBe('A; C; because');
+    expect(composeMultiAnswer(['B'], ['A', 'B'], '')).toBe('B');
+    expect(composeMultiAnswer([], ['A', 'B'], 'only text')).toBe('only text');
+    expect(composeMultiAnswer([], ['A', 'B'], '  ')).toBe('');
+  });
+
+  test('finalAnswers composes multiple questions and leaves the others as typed', () => {
+    const answers = ['why', 'y'];
+    const sel = [['D', 'B'], []];
+    expect(finalAnswers(MQ, answers, sel)).toEqual(['B; D; why', 'y']);
+  });
+
+  test('skipAnswers on a multiple question keeps picks and skips only a truly blank one', () => {
+    const fin = finalAnswers(MQ, ['', ''], [['A'], []]);
+    expect(skipAnswers(MQ, fin)).toEqual(['A', '(skipped)']);
+  });
+
+  test('parseMultiAnswer splits the answer back into picks and free text', () => {
+    expect(parseMultiAnswer('A; C; because', ['A', 'B', 'C', 'D'])).toEqual({ picked: ['A', 'C'], free: 'because' });
+    expect(parseMultiAnswer('B', ['A', 'B'])).toEqual({ picked: ['B'], free: '' });
+    expect(parseMultiAnswer('just words', ['A', 'B'])).toEqual({ picked: [], free: 'just words' });
+    expect(parseMultiAnswer('a; b', ['a; b', 'c'])).toEqual({ picked: ['a; b'], free: '' });
+    expect(parseMultiAnswer('(skipped)', ['A'])).toEqual({ picked: [], free: '(skipped)' });
   });
 });

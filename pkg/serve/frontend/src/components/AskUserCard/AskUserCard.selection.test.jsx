@@ -67,3 +67,19 @@ test("free text does not leave a predefined option selected", () => {
   expect(options.map((option) => option.props.class)).toEqual(["ask-opt", "ask-opt"]);
   expect(options.map((option) => option.props["aria-pressed"])).toEqual([false, false]);
 });
+
+test("multiple: every ticked option is selected, a hint says so, and free text keeps picks", () => {
+  const tree = AskUserCard({
+    question: "Which?",
+    options: [{ label: "A" }, { label: "B" }, { label: "C" }],
+    multiple: true,
+    selected: ["A", "C"],
+    currentAnswer: "extra",
+    freeValue: "extra",
+  });
+  const nodes = descendants(tree);
+  const opts = nodes.filter((node) => node.type === "button" && node.props?.class?.startsWith("ask-opt"));
+  expect(opts.map((o) => o.props["aria-pressed"])).toEqual([true, false, true]);
+  expect(opts.map((o) => o.props.class)).toEqual(["ask-opt multi chosen", "ask-opt multi", "ask-opt multi chosen"]);
+  expect(nodes.some((n) => n.props?.class === "ask-hint")).toBe(true);
+});

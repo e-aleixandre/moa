@@ -45,3 +45,15 @@ test("AskUserDetail shows selected options, free answers, and skipped answers", 
   expect(textContent(custom)).toContain("Nova");
   expect(textContent(skipped)).toContain("Skipped");
 });
+
+test("AskUserDetail marks every chosen option of a multiple question and shows the extra text", () => {
+  const node = AskUserDetail({
+    questions: [{ question: "Which?", options: ["A", "B", "C"], multiple: true }],
+    result: "A; C; because",
+  });
+  const nodes = descendants(node);
+  const chosen = nodes.filter((child) => child.props?.class === "ask-detail-option chosen").map(textContent);
+  const custom = nodes.find((child) => child.props?.class === "ask-detail-answer custom");
+  expect(chosen).toEqual(["A", "C"]);
+  expect(textContent(custom)).toContain("because");
+});
