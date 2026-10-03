@@ -1556,6 +1556,21 @@ func (a *Agent) RestoreConversation(messages []core.AgentMessage, epoch int) err
 // focus is an optional caller instruction (from `/compact <focus>`) forwarded
 // to the summarizer; empty for automatic compaction.
 func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus string) (*core.CompactionPayload, error) {
+	return a.compactWithCheckpoint(ctx, checkpoint, focus, nil)
+}
+
+// CompactWithCheckpointGeneration is CompactWithCheckpoint for a checkpoint
+// read from the agent's session slot at generation gen: the boundary's own
+// snapshot acknowledges it, and the slot is cleared only if it still holds
+// that generation once the compaction is adopted.
+func (a *Agent) CompactWithCheckpointGeneration(ctx context.Context, checkpoint, focus string, gen uint64) (*core.CompactionPayload, error) {
+	return a.compactWithCheckpoint(ctx, checkpoint, focus, &gen)
+}
+
+func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus string, checkpointGen *uint64) (*core.CompactionPayload, error) {
+	if strings.TrimSpace(checkpoint) == "" {
+		checkpointGen = nil
+	}
 	a.lockCut()
 	if a.cancel != nil {
 		a.unlockCut()
@@ -1654,7 +1669,7 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	payload := compactionPayload(result, compacted, fallbackNotice, sumModel.Pricing)
 	if commit != nil {
 		originals := append([]core.AgentMessage(nil), msgs...)
-		if err := commit(ctx, core.CompactionCommit{Originals: originals, Payload: payload, Trims: a.trimsEmitted.Load()}); err != nil {
+		if err := commit(ctx, core.CompactionCommit{Originals: originals, Payload: payload, Trims: a.trimsEmitted.Load(), CheckpointGeneration: checkpointGen}); err != nil {
 			return nil, &core.CompactionNotSavedError{Payload: payload, Err: err}
 		}
 	}
@@ -1662,7 +1677,11 @@ func (a *Agent) CompactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	a.mu.Lock()
 	a.state.Messages = compacted
 	a.state.CompactionEpoch++
+	slot := a.config.SessionCheckpoint
 	a.mu.Unlock()
+	if checkpointGen != nil && slot != nil {
+		slot.ClearIfGeneration(*checkpointGen)
+	}
 
 	return payload, nil
 }
@@ -2106,7 +2125,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		// restoreConversation, so an auto-compaction inside it must not consume
 		// the slot: doing so would clear the checkpoint the real compaction is
 		// about to read.
-		readCheckpoint: func() func() (string, func()) {
+		readCheckpoint: func() func() (string, *uint64, func()) {
 			if allowCheckpoint {
 				return nil
 			}
@@ -2330,17 +2349,17 @@ func (a *Agent) requestSettingsLocked() requestSettings {
 // Returns nil when no slot is configured. The returned consume callback clears
 // the slot only if it still holds the generation that was read, so a checkpoint
 // written while compaction was in flight survives.
-func (a *Agent) checkpointReader() func() (string, func()) {
+func (a *Agent) checkpointReader() func() (string, *uint64, func()) {
 	slot := a.config.SessionCheckpoint
 	if slot == nil {
 		return nil
 	}
-	return func() (string, func()) {
+	return func() (string, *uint64, func()) {
 		text, gen := slot.Read()
 		if strings.TrimSpace(text) == "" {
-			return "", func() {}
+			return "", nil, func() {}
 		}
-		return text, func() { slot.ClearIfGeneration(gen) }
+		return text, &gen, func() { slot.ClearIfGeneration(gen) }
 	}
 }
 

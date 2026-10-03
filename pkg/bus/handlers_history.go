@@ -263,7 +263,7 @@ func registerHistoryHandlers(sctx *SessionContext) {
 			if sctx.SessionCheckpoint != nil {
 				text, gen = sctx.SessionCheckpoint.Read()
 			}
-			payload, err := compactWithCheckpoint(ctx, sctx, text)
+			payload, acknowledged, err := compactWithCheckpoint(ctx, sctx, text, gen)
 			if err != nil {
 				sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Err: err, Payload: unsavedCompaction(err)})
 				return nil, err
@@ -273,6 +273,13 @@ func registerHistoryHandlers(sctx *SessionContext) {
 				sctx.Bus.Publish(CommandExecuted{SessionID: sctx.SessionID, Command: "prepare-compact-noop", Messages: sctx.Agent.Messages()})
 				return sctx.Agent.Messages(), nil
 			}
+			if acknowledged && sctx.SessionCheckpoint != nil {
+				// The agent may consume its own slot; this one is the slot
+				// the boundary's snapshot acknowledged. No re-save or
+				// rollback: that could restore an acknowledged checkpoint or
+				// overwrite a newer one.
+				sctx.SessionCheckpoint.ClearIfGeneration(gen)
+			}
 			reloadPromptAfterCut(sctx)
 			sctx.Bus.Publish(CompactionEnded{SessionID: sctx.SessionID, Payload: payload, Marker: NewCompactionMarker(payload)})
 			sctx.Bus.Drain(2 * time.Second)
@@ -281,7 +288,7 @@ func registerHistoryHandlers(sctx *SessionContext) {
 					return nil, err
 				}
 			}
-			if sctx.SessionCheckpoint != nil {
+			if sctx.SessionCheckpoint != nil && !acknowledged {
 				if err := clearPersistedCheckpoint(sctx.SessionCheckpoint, text, gen, sctx.PersistNow); err != nil {
 					return nil, err
 				}

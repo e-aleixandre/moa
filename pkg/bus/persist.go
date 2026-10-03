@@ -6,6 +6,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 )
 
 // SessionPersister abstracts session persistence.
@@ -28,6 +29,15 @@ type TreePersister interface {
 // collectMetadata gathers all session metadata for persistence, in the
 // map[string]any format of session.Session.Metadata.
 func collectMetadata(sctx *SessionContext) map[string]any {
+	return collectMetadataAck(sctx, nil)
+}
+
+// collectMetadataAck is collectMetadata for the snapshot of a compaction
+// boundary whose summary embeds the checkpoint at generation ack: that
+// checkpoint is no longer pending in it, while a newer one is kept literally.
+// Text and generation come from one read, so a write in between cannot pair
+// a new text with the acknowledged generation.
+func collectMetadataAck(sctx *SessionContext, ack *uint64) map[string]any {
 	meta := make(map[string]any)
 	m := sctx.Agent.Model()
 	if m.Provider != "" {
@@ -58,8 +68,8 @@ func collectMetadata(sctx *SessionContext) map[string]any {
 		}
 	}
 	if sctx.SessionCheckpoint != nil {
-		for k, v := range sctx.SessionCheckpoint.SaveToMetadata() {
-			meta[k] = v
+		if text, gen := sctx.SessionCheckpoint.Read(); text != "" && (ack == nil || gen != *ack) {
+			meta[sessioncheckpoint.MetadataKey] = text
 		}
 	}
 	// Persist the workspace directory so the UI can offer it as a recent

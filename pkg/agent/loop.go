@@ -148,9 +148,10 @@ type loopConfig struct {
 	// disables compaction.
 	settings func() requestSettings
 	// readCheckpoint returns the ephemeral session checkpoint to append to an
-	// automatic compaction summary, and a callback to clear it once consumed.
-	// Nil when no checkpoint slot is wired.
-	readCheckpoint func() (string, func())
+	// automatic compaction summary, the generation the commit acknowledges
+	// (nil when there is nothing to append), and a callback to clear it once
+	// consumed. Nil when no checkpoint slot is wired.
+	readCheckpoint func() (string, *uint64, func())
 	// ephemeralCompaction is set for a /prepare-compact preparation run, whose
 	// conversation is discarded: its automatic compactions are flagged so the
 	// session does not record them.
@@ -539,10 +540,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					// path already appended it; without this, an automatic
 					// compaction dropped it on the floor.
 					var consumeCheckpoint func()
+					var checkpointGen *uint64
 					if cfg.readCheckpoint != nil {
-						text, consume := cfg.readCheckpoint()
+						text, gen, consume := cfg.readCheckpoint()
 						compaction.AppendCheckpoint(result, compacted, text)
-						consumeCheckpoint = consume
+						consumeCheckpoint, checkpointGen = consume, gen
 					}
 					for i := range compacted {
 						compacted[i].EnsureMsgID()
@@ -554,7 +556,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					// or not the compaction is kept.
 					addRunCostAt(cfg, sumModel.Pricing, result.Usage)
 					if cfg.commitCompaction != nil {
-						if err := commitCompaction(cfg, ctx, originals, payload); err != nil {
+						if err := commitCompaction(cfg, ctx, originals, payload, checkpointGen); err != nil {
 							// The summary is not adopted: the conversation stays
 							// as it is durably recorded, and the run stops so the
 							// owner sees the failure instead of the agent
@@ -1748,8 +1750,8 @@ func addRunCostAt(cfg *loopConfig, pricing *core.Pricing, usage *core.Usage) {
 }
 
 // commitCompaction hands a compaction to the owner's commit.
-func commitCompaction(cfg *loopConfig, ctx context.Context, originals []core.AgentMessage, payload *core.CompactionPayload) error {
-	if err := cfg.commitCompaction(ctx, core.CompactionCommit{Originals: originals, Payload: payload, Trims: cfg.trims.Load()}); err != nil {
+func commitCompaction(cfg *loopConfig, ctx context.Context, originals []core.AgentMessage, payload *core.CompactionPayload, checkpointGen *uint64) error {
+	if err := cfg.commitCompaction(ctx, core.CompactionCommit{Originals: originals, Payload: payload, Trims: cfg.trims.Load(), CheckpointGeneration: checkpointGen}); err != nil {
 		return &core.CompactionNotSavedError{Payload: payload, Err: err}
 	}
 	return nil

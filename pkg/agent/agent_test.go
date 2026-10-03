@@ -3364,7 +3364,7 @@ func TestCheckpointReader_NilDuringPrepareRun(t *testing.T) {
 	if reader == nil {
 		t.Fatal("normal runs must be able to consume the checkpoint")
 	}
-	text, consume := reader()
+	text, _, consume := reader()
 	if text != "state worth keeping" {
 		t.Fatalf("unexpected checkpoint text: %q", text)
 	}

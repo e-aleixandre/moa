@@ -15,6 +15,13 @@ type checkpointCompacter interface {
 	CompactWithCheckpoint(ctx context.Context, checkpoint, focus string) (*core.CompactionPayload, error)
 }
 
+// generationCheckpointCompacter acknowledges the checkpoint's slot generation
+// in the boundary's own snapshot and consumes it on adoption, so the caller
+// must not clear and re-save it afterwards.
+type generationCheckpointCompacter interface {
+	CompactWithCheckpointGeneration(ctx context.Context, checkpoint, focus string, gen uint64) (*core.CompactionPayload, error)
+}
+
 // prepareCompactSender is intentionally specific: callers cannot provide an
 // arbitrary tool to gain the checkpoint permission bypass.
 type prepareCompactSender interface {
@@ -32,19 +39,27 @@ func sendPrepareCompact(ctx context.Context, sctx *SessionContext, prompt string
 	return nil, fmt.Errorf("agent does not support internal prepare compact")
 }
 
-func compactWithCheckpoint(ctx context.Context, sctx *SessionContext, checkpoint string) (*core.CompactionPayload, error) {
+// compactWithCheckpoint reports acknowledged=true when the agent consumed the
+// checkpoint at gen together with the boundary.
+func compactWithCheckpoint(ctx context.Context, sctx *SessionContext, checkpoint string, gen uint64) (_ *core.CompactionPayload, acknowledged bool, _ error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if a, ok := sctx.Agent.(generationCheckpointCompacter); ok && strings.TrimSpace(checkpoint) != "" {
+		p, err := a.CompactWithCheckpointGeneration(ctx, checkpoint, "", gen)
+		return p, true, err
 	}
 	if a, ok := sctx.Agent.(checkpointCompacter); ok {
 		// Prepare-compact does not take a user focus; the preparation turn is
 		// its way of shaping what survives.
-		return a.CompactWithCheckpoint(ctx, checkpoint, "")
+		p, err := a.CompactWithCheckpoint(ctx, checkpoint, "")
+		return p, false, err
 	}
 	if strings.TrimSpace(checkpoint) != "" {
-		return nil, fmt.Errorf("agent does not support checkpoint-preserving compaction")
+		return nil, false, fmt.Errorf("agent does not support checkpoint-preserving compaction")
 	}
-	return sctx.Agent.Compact(ctx, "")
+	p, err := sctx.Agent.Compact(ctx, "")
+	return p, false, err
 }
 
 func clearPersistedCheckpoint(slot *sessioncheckpoint.Slot, text string, gen uint64, persist func() error) (err error) {

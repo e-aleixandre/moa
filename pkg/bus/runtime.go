@@ -386,7 +386,7 @@ func (r *SessionRuntime) commitCompaction(ctx context.Context, c core.Compaction
 			return nil
 		}
 		// Collected after the cut was accepted: it reads the agent.
-		return tp.SnapshotTree(entries, leafID, collectMetadata(sctx))
+		return tp.SnapshotTree(entries, leafID, collectMetadataAck(sctx, c.CheckpointGeneration))
 	})
 	if err != nil && !errors.Is(err, core.ErrCompactionObsolete) {
 		sctx.unreconciled.Store(true)

@@ -119,6 +119,12 @@ type CompactionCommit struct {
 	// was saved; ErrCompactionObsolete is not a storage failure. Nil keeps the
 	// original contract: the producer adopts after the commit returns.
 	Accept func() (adopt func(), release func(), err error)
+	// CheckpointGeneration is the generation of the session checkpoint the
+	// summary embeds; nil when it embeds none. The snapshot that makes the
+	// boundary durable records the slot as pending only if it has moved past
+	// that generation, so a crash before the next save cannot resurrect a
+	// checkpoint the summary already carries. Transient, never persisted.
+	CheckpointGeneration *uint64
 }
 
 // ErrCompactionObsolete reports a background compaction whose source changed

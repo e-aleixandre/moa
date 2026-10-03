@@ -56,6 +56,7 @@ type backgroundCompactionJob struct {
 	payload           *core.CompactionPayload
 	err               error
 	consumeCheckpoint func()
+	checkpointGen     *uint64 // acknowledged by the boundary's snapshot
 
 	applying bool // an applicator owns the result (under a.mu)
 	accepted bool // its cut was accepted: the save settles it (under a.mu)
@@ -262,9 +263,10 @@ func (a *Agent) startBackgroundCompaction(ctx context.Context, cfg *loopConfig, 
 	// The checkpoint is frozen now (text and generation); it is appended to
 	// this summary and consumed only if the summary is durably adopted.
 	var checkpoint string
+	var checkpointGen *uint64
 	var consume func()
 	if cfg.readCheckpoint != nil {
-		checkpoint, consume = cfg.readCheckpoint()
+		checkpoint, checkpointGen, consume = cfg.readCheckpoint()
 	}
 
 	a.mu.Lock()
@@ -285,11 +287,11 @@ func (a *Agent) startBackgroundCompaction(ctx context.Context, cfg *loopConfig, 
 	a.mu.Unlock()
 	a.emitter.Emit(evt)
 
-	go a.runBackgroundCompaction(job, sumProvider, sumModel, compactOpts, estimate, window, settings, fallbackNotice, checkpoint, consume)
+	go a.runBackgroundCompaction(job, sumProvider, sumModel, compactOpts, estimate, window, settings, fallbackNotice, checkpoint, checkpointGen, consume)
 	return job, false
 }
 
-func (a *Agent) runBackgroundCompaction(job *backgroundCompactionJob, provider core.Provider, model core.Model, opts core.StreamOptions, estimate, window int, settings core.CompactionSettings, notice, checkpoint string, consume func()) {
+func (a *Agent) runBackgroundCompaction(job *backgroundCompactionJob, provider core.Provider, model core.Model, opts core.StreamOptions, estimate, window int, settings core.CompactionSettings, notice, checkpoint string, checkpointGen *uint64, consume func()) {
 	defer a.bgWG.Done()
 	result, compacted, err := compaction.Compact(job.ctx, provider, model, opts, job.prefix, estimate, window, settings, "")
 	// Whatever the outcome, a provider-reported usage was spent. An outcome
@@ -322,6 +324,9 @@ func (a *Agent) runBackgroundCompaction(job *backgroundCompactionJob, provider c
 
 	a.mu.Lock()
 	job.err, job.result, job.compacted, job.payload, job.consumeCheckpoint = err, result, compacted, payload, consume
+	if result != nil {
+		job.checkpointGen = checkpointGen
+	}
 	// Debited only while its owning invocation still runs; once it ended,
 	// the session settles the cost through the usage event alone.
 	if usage != nil && model.Pricing != nil && a.bgOwner == job.owner {
@@ -470,7 +475,7 @@ func (a *Agent) applyBackgroundCompaction(ctx context.Context, job *backgroundCo
 
 		var err error
 		if commit != nil {
-			err = commit(ctx, core.CompactionCommit{Originals: originals, Payload: &payload, Trims: a.trimsEmitted.Load(), Accept: accept})
+			err = commit(ctx, core.CompactionCommit{Originals: originals, Payload: &payload, Trims: a.trimsEmitted.Load(), Accept: accept, CheckpointGeneration: job.checkpointGen})
 		} else {
 			var release func()
 			var doAdopt func()
@@ -583,74 +588,96 @@ func (a *Agent) backgroundBoundary(ctx context.Context, cfg *loopConfig, estimat
 		}
 	}
 
-	if job.isDone() {
-		a.mu.Lock()
-		current, failed, jobErr := a.bgJob == job, job.result == nil, job.err
-		a.mu.Unlock()
-		if !current {
-			// Invalidated or replaced: judge the context again.
-			return true, false, nil
+	// From here on the outcome of job belongs to this boundary: the worker
+	// may already have cleared its own failed job, which is not an
+	// invalidation, so the boundary never goes back to discover or start
+	// another summary of the same P because of it.
+	for {
+		if job.isDone() {
+			return a.backgroundOutcome(ctx, cfg, job, estimate, hard)
 		}
-		if failed {
-			a.settleUnusableBackgroundCompaction(job)
-			// Below hard the run carries on with its literal context, as a
-			// failed compaction always did; at hard it stops rather than
-			// knowingly send an oversized request.
-			if estimate > hard {
-				return false, false, fmt.Errorf("%w: %v", ErrContextCapacity, jobErr)
-			}
+		if estimate <= hard {
 			return false, false, nil
 		}
-		applied, err := a.applyBackgroundCompaction(ctx, job, cfg)
-		if err != nil {
-			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionEnd, Error: err, Compaction: job.payload, BackgroundJobID: job.id})
-			return false, false, err
-		}
-		if applied {
-			cfg.bgJustApplied = true
-			if cfg.promptAfterCompaction != nil {
-				if prompt, ok := cfg.promptAfterCompaction(); ok {
-					cfg.systemPrompt = prompt
-				}
+		// Hard: this request cannot leave before the summary is durable.
+		a.mu.Lock()
+		if a.bgJob != job {
+			a.mu.Unlock()
+			if job.isDone() {
+				continue
 			}
 			return true, false, nil
 		}
+		job.waiting = true
+		evt := a.bgChangedLocked()
+		a.mu.Unlock()
+		a.emitter.Emit(evt)
+		select {
+		case <-job.done:
+		case <-ctx.Done():
+		}
+		a.mu.Lock()
+		var clear core.AgentEvent
+		changed := false
+		if a.bgJob == job && job.waiting {
+			job.waiting = false
+			clear, changed = a.bgChangedLocked(), true
+		}
+		a.mu.Unlock()
+		a.emitBG(clear, changed)
 		if ctx.Err() != nil {
 			return false, false, ctx.Err()
 		}
-		return a.currentJobChanged(job) || estimate > hard, false, nil
 	}
+}
 
-	if estimate <= hard {
-		return false, false, nil
-	}
-	// Hard: this request cannot leave before the summary is durable.
-	a.mu.Lock()
-	if a.bgJob != job {
-		a.mu.Unlock()
-		return true, false, nil
-	}
-	job.waiting = true
-	evt := a.bgChangedLocked()
-	a.mu.Unlock()
-	a.emitter.Emit(evt)
-	select {
-	case <-job.done:
-	case <-ctx.Done():
-	}
-	a.mu.Lock()
-	var clear core.AgentEvent
-	changed := false
-	if a.bgJob == job && job.waiting {
-		job.waiting = false
-		clear, changed = a.bgChangedLocked(), true
-	}
-	a.mu.Unlock()
-	a.emitBG(clear, changed)
+// backgroundOutcome handles a finished job at the boundary that owns it.
+func (a *Agent) backgroundOutcome(ctx context.Context, cfg *loopConfig, job *backgroundCompactionJob, estimate, hard int) (again, fallback bool, err error) {
 	if ctx.Err() != nil {
 		return false, false, ctx.Err()
 	}
-	return true, false, nil
+	a.mu.Lock()
+	current, failed, jobErr := a.bgJob == job, job.result == nil, job.err
+	// Every invalidation cancels the job before clearing it; the worker's
+	// own cleanup of a failed summary never does.
+	invalidated := job.ctx.Err() != nil
+	// A model change after the worker cleared its own failed job finds no
+	// job to invalidate; the live model still decides this boundary.
+	modelChanged := !sameModel(a.config.Model, job.model) || a.config.Model.MaxInput != job.model.MaxInput
+	a.mu.Unlock()
+	if modelChanged || (!current && (!failed || invalidated)) {
+		// Invalidated or replaced: judge the context again.
+		return true, false, nil
+	}
+	if failed {
+		a.settleUnusableBackgroundCompaction(job)
+		// Below hard the run carries on with its literal context, as a
+		// failed compaction always did; at hard it stops rather than
+		// knowingly send an oversized request. Either way this boundary
+		// made its one attempt.
+		if estimate > hard {
+			return false, false, fmt.Errorf("%w: %v", ErrContextCapacity, jobErr)
+		}
+		return false, false, nil
+	}
+	applied, err := a.applyBackgroundCompaction(ctx, job, cfg)
+	if err != nil {
+		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventCompactionEnd, Error: err, Compaction: job.payload, BackgroundJobID: job.id})
+		return false, false, err
+	}
+	if applied {
+		cfg.bgJustApplied = true
+		if cfg.promptAfterCompaction != nil {
+			if prompt, ok := cfg.promptAfterCompaction(); ok {
+				cfg.systemPrompt = prompt
+			}
+		}
+		return true, false, nil
+	}
+	if ctx.Err() != nil {
+		return false, false, ctx.Err()
+	}
+	return a.currentJobChanged(job) || estimate > hard, false, nil
 }
 
 // currentJobChanged reports whether the pending job is no longer job, which

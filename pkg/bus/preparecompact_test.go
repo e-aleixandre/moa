@@ -168,7 +168,7 @@ func TestPrepareCompactSessionNoopAndUnsupportedCheckpoint(t *testing.T) {
 	}
 	plain := struct{ AgentController }{&fakeAgent{}}
 	unsupported := &SessionContext{Agent: plain}
-	if _, err := compactWithCheckpoint(context.Background(), unsupported, "must preserve"); err == nil {
+	if _, _, err := compactWithCheckpoint(context.Background(), unsupported, "must preserve", 0); err == nil {
 		t.Fatal("unsupported controller silently dropped checkpoint")
 	}
 	unsupported.SessionCheckpoint = sessioncheckpoint.New()
