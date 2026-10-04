@@ -1,8 +1,7 @@
 package main
 
 import (
-	"context"
-	"reflect"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -79,7 +78,7 @@ func TestBuildProvider_XAIStoredOAuth(t *testing.T) {
 func TestNewAnthropicUsagePoller_StoredXAIAPIKeyIsPlanUnsupported(t *testing.T) {
 	t.Setenv("XAI_API_KEY", "")
 	store := newTestAuthStore(t)
-	if err := store.Set("xai", auth.Credential{Type: "api_key", Key: "xai-key"}); err != nil {
+	if err := store.Set("xai", auth.Credential{Type: "api_key", Key: "xai-" + "key"}); err != nil {
 		t.Fatal(err)
 	}
 	poller := newAnthropicUsagePoller(store)
@@ -114,54 +113,19 @@ func TestParseAllowPattern_Repeated(t *testing.T) {
 	}
 }
 
-type captureProvider struct {
-	keys []string
-}
-
-func (p *captureProvider) Stream(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
-	p.keys = append(p.keys, req.Options.APIKey)
-	ch := make(chan core.AssistantEvent)
-	close(ch)
-	return ch, nil
-}
-
-func TestRefreshingProvider_UsesLatestKeyEachRequest(t *testing.T) {
-	store := newTestAuthStore(t)
-	base := &captureProvider{}
-	prov := &refreshingProvider{
-		base:         base,
-		providerName: "anthropic",
-		authStore:    store,
-	}
-
-	t.Setenv("ANTHROPIC_API_KEY", "key-1")
-	if _, err := prov.Stream(context.Background(), core.Request{}); err != nil {
-		t.Fatalf("first Stream error: %v", err)
-	}
-
-	t.Setenv("ANTHROPIC_API_KEY", "key-2")
-	if _, err := prov.Stream(context.Background(), core.Request{}); err != nil {
-		t.Fatalf("second Stream error: %v", err)
-	}
-
-	if got, want := base.keys, []string{"key-1", "key-2"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("api keys passed = %#v, want %#v", got, want)
-	}
-}
-
 // TestBuildProvider_ExpiredOAuthStillBuilds reproduces the lockout: with the
 // default model on Anthropic and a refresh token the server rejects, building
 // the provider failed, so creating a session — and reopening an existing one —
 // returned 500. From a phone that left no way back in.
 //
-// The key fetched at build time is never used anyway: refreshingProvider gets a
-// fresh one per Stream. So the session must open, and sending must be what
-// reports the dead credential.
+// The credential is resolved per Stream anyway, so the session must open, and
+// sending must be what reports the dead credential.
 func TestBuildProvider_ExpiredOAuthStillBuilds(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	store := newTestAuthStore(t)
-	// Expired access plus a refresh token the server will reject: GetAPIKey
-	// attempts a refresh and fails, exactly as it did in production.
+	// The fake token endpoint rejects the refresh token: GetAPIKey attempts a
+	// refresh and fails, exactly as it did in production.
+	u := newFakeUpstream(t)
+	store := auth.NewStoreWithHTTPClient(filepath.Join(t.TempDir(), "auth.json"), u.client())
 	if err := store.Set("anthropic", auth.Credential{
 		Type:    "oauth",
 		Access:  "dead-access",

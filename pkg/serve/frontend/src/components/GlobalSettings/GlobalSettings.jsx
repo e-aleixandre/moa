@@ -27,6 +27,9 @@ import {
 import {
   SETTINGS_PAGES, STRATEGY_OPTIONS, compactAtValue, providerHue, strategyValue, subagentValue,
 } from "./settings-rows.js";
+import { ProvidersPage } from "./ProvidersPage.jsx";
+import { providersValue } from "./providers-model.js";
+import { useProviderStatus } from "../../data/providers.js";
 import "./GlobalSettings.css";
 
 // GlobalSettings — the device-wide settings sheet.
@@ -102,13 +105,15 @@ function Switch({ on, onChange, label, disabled }) {
 // Row — a setting. The <em> is the catalogue's: one line of what this does,
 // under its name, in the quiet tone. `value` is the reading on the right;
 // `onOpen` makes the row a door and gives it the caret.
-function Row({ label, hint, value, loading, onOpen, children, pageLabel }) {
+function Row({ label, hint, value, loading, onOpen, children, pageLabel, attention = 0 }) {
   const body = (
     <>
       <span class="zl-set-l">{label}{hint && <em>{hint}</em>}</span>
       {children || (
         <span class={`zl-set-v${loading ? " is-loading" : ""}`}>
-          {loading ? "…" : value}
+          {/* A count of things that need the owner replaces the reading: the
+              row's accessible name still says it in words. */}
+          {loading ? "…" : attention > 0 ? <span class="zl-set-count zl-data" aria-hidden="true">{attention}</span> : value}
           {onOpen && <span class="zl-set-caret" aria-hidden="true">›</span>}
         </span>
       )}
@@ -795,13 +800,20 @@ function DevicesPage({ state, onClose }) {
 
 // ── The sheet ──────────────────────────────────────────────────────────────
 
-export function GlobalSettings({ soundEnabled, version = null, phone = false, open = true, onClose, initialPage = "root", inline = false }) {
+export function GlobalSettings({
+  soundEnabled, version = null, phone = false, open = true, onClose, initialPage = "root", inline = false,
+  // A request to open on Providers with one provider in focus (see
+  // data/providers.js openProviderSettings): { seq, provider, returnSessionId }.
+  providerFocus = null, onReturnToSession,
+}) {
   const [page, setPage] = useState(initialPage);
   const titleRef = useRef(null);
   // The dialog box itself: the Tab trap needs its bounds to know what is inside.
   const sheetRef = useRef(null);
   const sub = page !== "root";
-  useEffect(() => { setPage(initialPage); }, [initialPage]);
+  // `providerFocus.seq` re-pushes the page even when Settings was left on it.
+  useEffect(() => { setPage(initialPage); }, [initialPage, providerFocus?.seq]);
+  const providerStatus = useProviderStatus();
 
   const compactAt = useCompactAt();
   const strategy = useCompactStrategy();
@@ -917,6 +929,13 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
             {page === "compact-model" && <CompactModelPage state={compactModel} onDone={() => setPage("root")} />}
             {page === "subagent-models" && <SubagentModelsPage state={subagents} />}
             {page === "devices" && <DevicesPage state={devices} onClose={onClose} />}
+            {page === "providers" && (
+              <ProvidersPage
+                focusProvider={providerFocus?.provider || ""}
+                returnSessionId={providerFocus?.returnSessionId || ""}
+                onReturn={onReturnToSession ? (id) => { onClose?.(); onReturnToSession(id); } : undefined}
+              />
+            )}
           </div>
         ) : (
           <div class="zl-set-body">
@@ -982,6 +1001,14 @@ export function GlobalSettings({ soundEnabled, version = null, phone = false, op
                 installation rather than about the work. */}
             <div class="zl-set-sec">
               <span class="zl-set-k">Access</span>
+              <Row
+                label="Providers"
+                hint="Sign-ins and API keys for models."
+                value={providersValue(providerStatus)}
+                attention={providerStatus.attentionCount}
+                onOpen={() => setPage("providers")}
+                pageLabel={SETTINGS_PAGES.providers}
+              />
               <Row
                 label="Devices"
                 hint="Apps paired with this server."

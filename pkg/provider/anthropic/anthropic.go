@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,10 +37,26 @@ func New(apiKey string) *Anthropic {
 	}
 }
 
+// NewWithKind creates an Anthropic provider whose transport is chosen by the
+// credential's stored kind, never by the token's shape: a pasted API key that
+// looks like a subscription token still goes out as an API key.
+func NewWithKind(key string, oauth bool) *Anthropic {
+	a := New(key)
+	a.isOAuth = oauth
+	return a
+}
+
 // NewWithBaseURL creates an Anthropic provider with a custom base URL (for testing).
 func NewWithBaseURL(apiKey, baseURL string) *Anthropic {
 	a := New(apiKey)
 	a.baseURL = baseURL
+	return a
+}
+
+// WithHTTPClient replaces the HTTP client while keeping the pinned endpoint.
+// It is a server-side seam for tests that route the fixed origin locally.
+func (a *Anthropic) WithHTTPClient(c *http.Client) *Anthropic {
+	a.client = c
 	return a
 }
 
@@ -133,7 +150,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	// Non-retryable error status (400, 401, etc.) — returned as-is by retry.Do.
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close() //nolint:errcheck
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		errBody, errText := retry.ErrorBody(resp.Body)
 		// Fast mode is a paid upgrade, and an account without usage credits is
 		// refused it while its ordinary quota still works. Falling back keeps
 		// the turn alive at standard speed instead of failing the request the
@@ -147,7 +164,13 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 			}
 			return a.Stream(ctx, slowReq)
 		}
-		return nil, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(errBody))
+		// A rejected credential is reported by status only: the body of an
+		// auth failure can echo what was sent. There is no reactive refresh
+		// here: a rejected subscription token means signing in again.
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, &core.ProviderAuthError{Provider: "anthropic", Status: resp.StatusCode}
+		}
+		return nil, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, errText)
 	}
 
 	// Rate-limit state comes back in the response headers (available now, before
@@ -285,7 +308,7 @@ func (a *Anthropic) handleError(data string) *core.AssistantEvent {
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return &core.AssistantEvent{
 			Type:  core.ProviderEventError,
-			Error: fmt.Errorf("anthropic error (unparseable): %.200s", data),
+			Error: errors.New("anthropic error (unparseable)"),
 		}
 	}
 	return &core.AssistantEvent{
@@ -318,7 +341,7 @@ func (a *Anthropic) handleMessageStart(data string, state *streamState) *core.As
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return &core.AssistantEvent{
 			Type:  core.ProviderEventError,
-			Error: fmt.Errorf("parse message_start: %w (data: %.100s)", err, data),
+			Error: fmt.Errorf("parse message_start: %w", err),
 		}
 	}
 
@@ -366,7 +389,7 @@ func (a *Anthropic) handleContentBlockStart(data string, state *streamState) *co
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return &core.AssistantEvent{
 			Type:  core.ProviderEventError,
-			Error: fmt.Errorf("parse content_block_start: %w (data: %.100s)", err, data),
+			Error: fmt.Errorf("parse content_block_start: %w", err),
 		}
 	}
 
@@ -449,7 +472,7 @@ func (a *Anthropic) handleContentBlockDelta(data string, state *streamState) *co
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return &core.AssistantEvent{
 			Type:  core.ProviderEventError,
-			Error: fmt.Errorf("parse content_block_delta: %w (data: %.100s)", err, data),
+			Error: fmt.Errorf("parse content_block_delta: %w", err),
 		}
 	}
 
@@ -577,7 +600,7 @@ func (a *Anthropic) handleMessageDelta(data string, state *streamState) *core.As
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return &core.AssistantEvent{
 			Type:  core.ProviderEventError,
-			Error: fmt.Errorf("parse message_delta: %w (data: %.100s)", err, data),
+			Error: fmt.Errorf("parse message_delta: %w", err),
 		}
 	}
 

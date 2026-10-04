@@ -27,25 +27,29 @@ type InitData struct {
 	AttentionNamespace string              `json:"attention_namespace,omitempty"`
 	Messages           []core.AgentMessage `json:"messages"`
 	State              string              `json:"state"`
-	ContextPercent     int                 `json:"context_percent"`
-	ContextWindow      int                 `json:"context_window,omitempty"`
-	CompactAt          int                 `json:"compact_at,omitempty"`
-	CompactAtMin       int                 `json:"compact_at_min,omitempty"`
-	PermissionMode     string              `json:"permission_mode"`
-	Fast               bool                `json:"fast"`
-	FastSupported      bool                `json:"fast_supported"`
-	FastNote           string              `json:"fast_note,omitempty"`
-	PathScope          string              `json:"path_scope,omitempty"`
-	PendingPermission  *PermissionData     `json:"pending_permission,omitempty"`
-	PendingAsk         *AskData            `json:"pending_ask,omitempty"`
-	Tasks              any                 `json:"tasks,omitempty"`
-	GoalActive         bool                `json:"goal_active,omitempty"`
-	GoalObjective      string              `json:"goal_objective,omitempty"`
-	GoalWorkDir        string              `json:"goal_work_dir,omitempty"`
-	GoalIteration      int                 `json:"goal_iteration,omitempty"`
-	GoalStalled        int                 `json:"goal_stalled,omitempty"`
-	GoalVerifying      bool                `json:"goal_verifying,omitempty"`
-	Compacting         bool                `json:"compacting,omitempty"`
+	// Error and ErrorDetail restore the session's last error on reconnect,
+	// which the live state_change event that carried it does not.
+	Error             string                    `json:"error,omitempty"`
+	ErrorDetail       *core.ProviderErrorDetail `json:"error_detail,omitempty"`
+	ContextPercent    int                       `json:"context_percent"`
+	ContextWindow     int                       `json:"context_window,omitempty"`
+	CompactAt         int                       `json:"compact_at,omitempty"`
+	CompactAtMin      int                       `json:"compact_at_min,omitempty"`
+	PermissionMode    string                    `json:"permission_mode"`
+	Fast              bool                      `json:"fast"`
+	FastSupported     bool                      `json:"fast_supported"`
+	FastNote          string                    `json:"fast_note,omitempty"`
+	PathScope         string                    `json:"path_scope,omitempty"`
+	PendingPermission *PermissionData           `json:"pending_permission,omitempty"`
+	PendingAsk        *AskData                  `json:"pending_ask,omitempty"`
+	Tasks             any                       `json:"tasks,omitempty"`
+	GoalActive        bool                      `json:"goal_active,omitempty"`
+	GoalObjective     string                    `json:"goal_objective,omitempty"`
+	GoalWorkDir       string                    `json:"goal_work_dir,omitempty"`
+	GoalIteration     int                       `json:"goal_iteration,omitempty"`
+	GoalStalled       int                       `json:"goal_stalled,omitempty"`
+	GoalVerifying     bool                      `json:"goal_verifying,omitempty"`
+	Compacting        bool                      `json:"compacting,omitempty"`
 	// BackgroundCompaction is the session's background compaction state; its
 	// live updates are background_compaction_state events with the same shape.
 	BackgroundCompaction core.BackgroundCompactionState `json:"background_compaction"`
@@ -190,6 +194,8 @@ type AskData struct {
 type StateChangeData struct {
 	State string `json:"state"`
 	Error string `json:"error,omitempty"`
+	// ErrorDetail structures Error when it is a credential failure.
+	ErrorDetail *core.ProviderErrorDetail `json:"error_detail,omitempty"`
 }
 
 // DeltaData carries a streaming text delta.

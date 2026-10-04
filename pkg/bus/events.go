@@ -306,6 +306,8 @@ type StateChanged struct {
 	SessionID string
 	State     string
 	Error     string
+	// ErrorDetail is set when Error is a classified credential failure.
+	ErrorDetail *core.ProviderErrorDetail
 }
 
 // RunStarted is published when a new agent run begins (after state transition).

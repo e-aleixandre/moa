@@ -42,7 +42,7 @@ type XAI struct {
 	baseURL      string
 	endpoint     string
 	consumer     bool
-	refreshOAuth func(rejectedToken string) (string, error)
+	refreshOAuth func(ctx context.Context, rejectedToken string) (string, error)
 	client       *http.Client
 }
 
@@ -53,8 +53,15 @@ func New(apiKey string) *XAI {
 
 // NewOAuth creates an xAI consumer provider. Consumer OAuth is intentionally
 // pinned to the Grok CLI proxy; it must never fall back to api.x.ai.
-func NewOAuth(accessToken string, refresh func(rejectedToken string) (string, error)) *XAI {
+func NewOAuth(accessToken string, refresh func(ctx context.Context, rejectedToken string) (string, error)) *XAI {
 	return &XAI{apiKey: accessToken, baseURL: consumerBaseURL, endpoint: consumerEndpoint, consumer: true, refreshOAuth: refresh, client: &http.Client{Timeout: 10 * time.Minute}}
+}
+
+// WithHTTPClient replaces the HTTP client while keeping the pinned endpoint.
+// It is a server-side seam for tests that route the fixed origin locally.
+func (x *XAI) WithHTTPClient(c *http.Client) *XAI {
+	x.client = c
+	return x
 }
 
 // SupportsDocuments is false until xAI input_file support is verified. Images
@@ -123,9 +130,9 @@ func (x *XAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assista
 	// API-key credentials.
 	if resp.StatusCode == http.StatusUnauthorized && x.consumer && x.refreshOAuth != nil {
 		resp.Body.Close() //nolint:errcheck
-		fresh, refreshErr := x.refreshOAuth(apiKey)
+		fresh, refreshErr := x.refreshOAuth(ctx, apiKey)
 		if refreshErr != nil {
-			return nil, fmt.Errorf("xai: authentication failed")
+			return nil, core.ReactiveRefreshError("xai", refreshErr)
 		}
 		apiKey = fresh
 		resp, err = retry.Do(ctx, x.client, request(apiKey), policy, nil)
@@ -231,10 +238,8 @@ func classifyHTTP(status int, body []byte, headers http.Header) error {
 	// Never surface upstream bodies: they can include credentials, request IDs,
 	// or provider implementation details. Keep messages stable and actionable.
 	switch status {
-	case http.StatusUnauthorized:
-		return fmt.Errorf("xai: authentication failed")
-	case http.StatusForbidden:
-		return fmt.Errorf("xai: subscription entitlement denied")
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return &core.ProviderAuthError{Provider: "xai", Status: status}
 	case http.StatusNotFound:
 		return fmt.Errorf("xai: model or endpoint not found")
 	case http.StatusTooManyRequests:

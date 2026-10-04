@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	openaiClientID    = "app_EMoamEEZ73f0CkXaXp7hrann"
+	openaiClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
 	openaiAuthorizeURL = "https://auth.openai.com/oauth/authorize"
 	openaiTokenURL     = "https://auth.openai.com/oauth/token"
 	openaiRedirectURI  = "http://localhost:1455/auth/callback"
@@ -22,164 +22,154 @@ const (
 	openaiJWTClaimPath = "https://api.openai.com/auth"
 )
 
-// LoginOpenAI runs the OpenAI PKCE OAuth flow with a local callback server.
-// Returns credentials including the accountId extracted from the JWT.
-//
-// openURL is called to open the browser. promptCode is the fallback if the
-// local server doesn't receive the callback.
+// LoginOpenAI runs the OpenAI PKCE sign-in for the CLI. A loopback listener
+// on 127.0.0.1:1455 catches the browser redirect when moa runs on this
+// machine; otherwise, after 60 seconds (or if the port is busy), promptCode
+// returns the full callback URL the user copied from the browser.
 func LoginOpenAI(openURL func(string), promptCode func() (string, error)) (*OAuthCredentials, error) {
-	verifier, challenge, err := generatePKCE()
+	a, err := BeginOpenAI()
 	if err != nil {
-		return nil, fmt.Errorf("generating PKCE: %w", err)
+		return nil, err
 	}
-
-	state, err := randomState()
+	server, err := startCallbackServer(a)
 	if err != nil {
-		return nil, fmt.Errorf("generating state: %w", err)
-	}
-
-	params := url.Values{
-		"response_type":         {"code"},
-		"client_id":             {openaiClientID},
-		"redirect_uri":          {openaiRedirectURI},
-		"scope":                 {openaiScopes},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {state},
-		"id_token_add_organizations": {"true"},
-		"codex_cli_simplified_flow":  {"true"},
-		"originator":            {"moa"},
-	}
-	authURL := openaiAuthorizeURL + "?" + params.Encode()
-
-	// Start local callback server.
-	server, err := startCallbackServer(state)
-	if err != nil {
-		// Fall back to manual paste if server fails.
-		openURL(authURL)
-		return openaiManualFlow(promptCode, state, verifier)
+		openURL(a.AuthorizeURL())
+		return openaiPromptedCallback(a, promptCode)
 	}
 	defer server.Close()
-
-	openURL(authURL)
-
-	// Wait for browser callback (up to 60s).
-	code := server.WaitForCode(60 * time.Second)
-
-	if code == "" {
-		// Fallback: ask user to paste.
-		raw, err := promptCode()
-		if err != nil {
-			return nil, fmt.Errorf("reading auth code: %w", err)
-		}
-		code, returnedState := parseAuthInput(strings.TrimSpace(raw))
-		if returnedState != "" && returnedState != state {
-			return nil, fmt.Errorf("state mismatch")
-		}
-		if code == "" {
-			return nil, fmt.Errorf("empty authorization code")
-		}
+	openURL(a.AuthorizeURL())
+	if callback := server.WaitForCallback(60 * time.Second); callback != "" {
+		return CompleteOpenAI(context.Background(), a, callback)
 	}
-
-	return openaiExchangeToken(code, verifier)
+	return openaiPromptedCallback(a, promptCode)
 }
 
-func openaiManualFlow(promptCode func() (string, error), state, verifier string) (*OAuthCredentials, error) {
+func openaiPromptedCallback(a *CodeAttempt, promptCode func() (string, error)) (*OAuthCredentials, error) {
 	raw, err := promptCode()
 	if err != nil {
 		return nil, fmt.Errorf("reading auth code: %w", err)
 	}
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, fmt.Errorf("empty authorization code")
-	}
-	code, returnedState := parseAuthInput(raw)
-	if returnedState != "" && returnedState != state {
-		return nil, fmt.Errorf("state mismatch")
-	}
-	return openaiExchangeToken(code, verifier)
+	return CompleteOpenAI(context.Background(), a, raw)
 }
 
-func openaiExchangeToken(code, verifier string) (*OAuthCredentials, error) {
-	body := url.Values{
+// exchangeOpenAICode redeems an authorization code; client and endpoint are
+// empty in production (pinned). The account comes from the access JWT.
+func exchangeOpenAICode(ctx context.Context, client *http.Client, endpoint, code, verifier string) (*OAuthCredentials, error) {
+	if endpoint == "" {
+		endpoint = openaiTokenURL
+	}
+	resp, err := postForm(ctx, client, endpoint, url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {openaiClientID},
 		"code":          {code},
 		"code_verifier": {verifier},
 		"redirect_uri":  {openaiRedirectURI},
-	}
-
-	resp, err := oauthClient.PostForm(openaiTokenURL, body)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("token exchange: %w", err)
+		return nil, oauthTransportError("openai", "login")
 	}
 	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("token exchange failed (HTTP %d): %s", resp.StatusCode, string(errBody))
+	tok, err := decodeLoginToken("openai", resp)
+	if err != nil {
+		return nil, err
 	}
-
-	var tokenResp tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, fmt.Errorf("parsing token response: %w", err)
+	accountID := extractOpenAIAccountID(tok.AccessToken)
+	expires, ok := openaiExpiry(tok)
+	if accountID == "" || !ok {
+		return nil, providerProtocolError("openai", "login")
 	}
-
-	accountID := extractOpenAIAccountID(tokenResp.AccessToken)
-	if accountID == "" {
-		return nil, fmt.Errorf("failed to extract accountId from token")
-	}
-
 	return &OAuthCredentials{
-		Access:    tokenResp.AccessToken,
-		Refresh:   tokenResp.RefreshToken,
-		Expires:   time.Now().UnixMilli() + int64(tokenResp.ExpiresIn)*1000 - 5*60*1000,
+		Access:    tok.AccessToken,
+		Refresh:   tok.RefreshToken,
+		Expires:   expires,
 		AccountID: accountID,
 	}, nil
 }
 
 // RefreshOpenAIToken refreshes an expired OpenAI OAuth token.
 func RefreshOpenAIToken(refreshToken string) (*OAuthCredentials, error) {
+	return refreshOpenAIToken(context.Background(), nil, "", refreshToken)
+}
+
+// refreshOpenAIToken takes the client and token URL so same-package tests can
+// reach an httptest server; empty values pin production.
+func refreshOpenAIToken(ctx context.Context, client *http.Client, endpoint, refreshToken string) (*OAuthCredentials, error) {
+	if client == nil {
+		client = oauthClient
+	}
+	if endpoint == "" {
+		endpoint = openaiTokenURL
+	}
 	body := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 		"client_id":     {openaiClientID},
 	}
 
-	resp, err := oauthClient.PostForm(openaiTokenURL, body)
+	resp, err := postForm(ctx, client, endpoint, body)
 	if err != nil {
-		return nil, fmt.Errorf("refresh request: %w", err)
+		return nil, oauthTransportError("openai", "refresh")
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("refresh failed (HTTP %d): %s", resp.StatusCode, string(errBody))
+		return nil, oauthStatusError("openai", "refresh", resp.StatusCode, resp.Body)
 	}
 
 	var tokenResp tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, fmt.Errorf("parsing refresh response: %w", err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponse)).Decode(&tokenResp); err != nil {
+		return nil, providerProtocolError("openai", "refresh")
 	}
 
 	accountID := extractOpenAIAccountID(tokenResp.AccessToken)
 	if accountID == "" {
-		return nil, fmt.Errorf("failed to extract accountId from refreshed token")
+		return nil, providerProtocolError("openai", "refresh")
 	}
 
+	// Without any lifetime the token is stored as already due, so the next
+	// use renews it, as before.
+	expires, _ := openaiExpiry(tokenResp)
 	return &OAuthCredentials{
 		Access:    tokenResp.AccessToken,
 		Refresh:   tokenResp.RefreshToken,
-		Expires:   time.Now().UnixMilli() + int64(tokenResp.ExpiresIn)*1000 - 5*60*1000,
+		Expires:   expires,
 		AccountID: accountID,
 	}, nil
 }
 
+// openaiExpiry returns when tok's access token is due for renewal (unix ms,
+// five minutes early): from expires_in when sent, otherwise from the access
+// JWT's exp, as the official client does not require expires_in. ok is false
+// when neither yields a future lifetime.
+func openaiExpiry(tok tokenResponse) (int64, bool) {
+	const margin = 5 * time.Minute
+	now := time.Now()
+	if tok.ExpiresIn > 0 {
+		return now.Add(time.Duration(tok.ExpiresIn)*time.Second - margin).UnixMilli(), true
+	}
+	exp, _ := openaiJWTClaims(tok.AccessToken)["exp"].(float64)
+	if end := time.Unix(int64(exp), 0); exp > 0 && end.After(now) {
+		return end.Add(-margin).UnixMilli(), true
+	}
+	return now.Add(-margin).UnixMilli(), false
+}
+
 // extractOpenAIAccountID decodes the JWT and extracts the chatgpt_account_id.
 func extractOpenAIAccountID(token string) string {
+	auth, ok := openaiJWTClaims(token)[openaiJWTClaimPath].(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := auth["chatgpt_account_id"].(string)
+	return id
+}
+
+// openaiJWTClaims decodes an access JWT's payload without verifying it; nil
+// when it is not a JWT.
+func openaiJWTClaims(token string) map[string]any {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return ""
+		return nil
 	}
 	// JWT payload is base64url-encoded (may be missing padding).
 	payload := parts[1]
@@ -188,57 +178,38 @@ func extractOpenAIAccountID(token string) string {
 	}
 	decoded, err := base64.URLEncoding.DecodeString(payload)
 	if err != nil {
-		return ""
+		return nil
 	}
 	var claims map[string]any
 	if err := json.Unmarshal(decoded, &claims); err != nil {
-		return ""
+		return nil
 	}
-	auth, ok := claims[openaiJWTClaimPath].(map[string]any)
-	if !ok {
-		return ""
-	}
-	id, _ := auth["chatgpt_account_id"].(string)
-	return id
+	return claims
 }
 
 // --- Local callback server ---
 
 type callbackServer struct {
-	server *http.Server
-	codeCh chan string
+	server     *http.Server
+	callbackCh chan string
 }
 
-func startCallbackServer(expectedState string) (*callbackServer, error) {
+// startCallbackServer catches the browser redirect for a. The request is
+// rebuilt as the exact redirect URL and goes through the same strict parser
+// and state check as a pasted one, so the listener accepts nothing a paste
+// would not.
+func startCallbackServer(a *CodeAttempt) (*callbackServer, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:1455")
 	if err != nil {
 		return nil, fmt.Errorf("binding :1455: %w", err)
 	}
 
 	cs := &callbackServer{
-		codeCh: make(chan string, 1),
+		callbackCh: make(chan string, 1),
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/callback", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("state") != expectedState {
-			http.Error(w, "State mismatch", http.StatusBadRequest)
-			return
-		}
-		code := r.URL.Query().Get("code")
-		if code == "" {
-			http.Error(w, "Missing code", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `<!doctype html><html><body><p>Authentication successful. Return to your terminal.</p></body></html>`)
-
-		select {
-		case cs.codeCh <- code:
-		default:
-		}
-	})
+	mux.Handle("/auth/callback", callbackHandler(a, cs.callbackCh))
 
 	cs.server = &http.Server{Handler: mux}
 	go func() {
@@ -248,10 +219,33 @@ func startCallbackServer(expectedState string) (*callbackServer, error) {
 	return cs, nil
 }
 
-func (cs *callbackServer) WaitForCode(timeout time.Duration) string {
+// callbackHandler forwards the rebuilt redirect URL of a matching browser
+// callback (including a denial, which Complete reports) on ch.
+func callbackHandler(a *CodeAttempt, ch chan<- string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callback := "http://localhost:1455" + r.URL.RequestURI()
+		cb, err := parseCallback("openai", callback)
+		if err == nil {
+			err = a.match(cb)
+		}
+		if err != nil {
+			http.Error(w, "This sign-in link does not match. Return to your terminal.", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `<!doctype html><html><body><p>Return to your terminal.</p></body></html>`)
+		select {
+		case ch <- callback:
+		default:
+		}
+	})
+}
+
+func (cs *callbackServer) WaitForCallback(timeout time.Duration) string {
 	select {
-	case code := <-cs.codeCh:
-		return code
+	case callback := <-cs.callbackCh:
+		return callback
 	case <-time.After(timeout):
 		return ""
 	}

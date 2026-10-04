@@ -29,6 +29,7 @@ import { closeTasksView, openTasksView } from "../../../data/tasks-view.js";
 import { PinnedTaskLine } from "../../../components/Tasks/PinnedTaskLine.jsx";
 import { MobileTasksView } from "../../../components/Tasks/MobileTasksView.jsx";
 import { cacheAlertLabel } from "../../../data/cache-usage.js";
+import { consumeProviderSettings, subscribeProviderSettings } from "../../../data/providers.js";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
 import { MobileStream } from "./MobileStream.jsx";
@@ -474,6 +475,20 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
     settingsPendingRef.current = true;
     closeDrawer();
   };
+  // Settings → Providers on one provider, asked for by a session's error
+  // action. With the drawer up it is the same handoff as the gear: close it,
+  // then open Settings — never two sheets at once.
+  const [providerFocus, setProviderFocus] = useState(null);
+  useEffect(() => subscribeProviderSettings((request) => {
+    consumeProviderSettings(request.seq);
+    setProviderFocus(request);
+    if (store.get().drawerOpen) {
+      settingsPendingRef.current = true;
+      closeDrawer();
+    } else {
+      setSettingsOpen(true);
+    }
+  }), []);
   const onInboxFromDrawer = () => {
     inboxPendingRef.current = true;
     closeDrawer();
@@ -611,7 +626,10 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
       <GlobalSettings
         phone
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => { setSettingsOpen(false); setProviderFocus(null); }}
+        initialPage={providerFocus ? "providers" : "root"}
+        providerFocus={providerFocus}
+        onReturnToSession={(id) => openSession(id)}
         soundEnabled={chrome.soundEnabled}
         version={version}
       />

@@ -186,7 +186,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	switch e := event.(type) {
 	case bus.StateChanged:
 		return Event{Type: "state_change", Data: StateChangeData{
-			State: e.State, Error: e.Error,
+			State: e.State, Error: e.Error, ErrorDetail: e.ErrorDetail,
 		}}, true
 	case bus.TurnStarted:
 		return Event{Type: "turn_start"}, true
@@ -714,6 +714,8 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		}
 	}
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
+	stateErr, _ := bus.QueryTyped[bus.GetSessionError, string](b, bus.GetSessionError{})
+	stateErrDetail, _ := bus.QueryTyped[bus.GetSessionErrorDetail, *core.ProviderErrorDetail](b, bus.GetSessionErrorDetail{})
 	ctxPct, _ := bus.QueryTyped[bus.GetContextUsage, int](b, bus.GetContextUsage{})
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
 	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
@@ -748,6 +750,8 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		HistoryBefore:        historyBefore,
 		DeltaBase:            deltaBase,
 		State:                state,
+		Error:                stateErr,
+		ErrorDetail:          stateErrDetail,
 		ContextPercent:       ctxPct,
 		ContextWindow:        initModel.MaxInput,
 		CompactAt:            compactAt,

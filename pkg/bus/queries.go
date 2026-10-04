@@ -219,6 +219,10 @@ type PermissionInfo struct {
 	Rules         []string
 }
 
+// GetSessionErrorDetail returns the structured detail of the last error
+// (*core.ProviderErrorDetail), nil when it is not a credential failure.
+type GetSessionErrorDetail struct{ SessionID string }
+
 // GetSessionError returns the last error message from the state machine.
 // Handler returns: string
 type GetSessionError struct{ SessionID string }

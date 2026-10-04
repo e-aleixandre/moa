@@ -19,6 +19,7 @@ import { ownerState, splitOwners, worstOwnerState } from "../../data/owners-mode
 import { OwnerAvatarFor } from "../../components/Owners/OwnerAvatar.jsx";
 import { OwnerRow, SectionHead } from "../../components/Owners/OwnerRow.jsx";
 import { TasksGlyph } from "../../components/Tasks/TasksGlyph.jsx";
+import { attentionLabel, useProviderStatus } from "../../data/providers.js";
 import "./Sidebar.css";
 
 // Sidebar — the other sessions. Markup and CSS are the catalogue's
@@ -138,10 +139,16 @@ export function updateAvailable(version) {
 export function SidebarFoot({
   inboxVisible = false, inboxOpen = false, inboxCount = 0, onInbox,
   tasksCount = 0, tasksOpen = false, onTasks,
-  version = null, onSettings,
+  version = null, onSettings, providerAttention = 0,
 }) {
   const update = updateAvailable(version);
-  const gearLabel = update ? `Settings, update available: ${version.latest}` : "Settings";
+  // Two separate reasons to open Settings, each said in words: a provider
+  // that needs the owner (red) and a newer release (the yellow dot).
+  const reasons = [
+    providerAttention > 0 ? attentionLabel(providerAttention) : "",
+    update ? `update available: ${version.latest}` : "",
+  ].filter(Boolean);
+  const gearLabel = reasons.length ? `Settings, ${reasons.join(", ")}` : "Settings";
   return (
     <div class="zl-side-foot">
       {/* wake-on-event: the door appears once anything has ever arrived — a
@@ -178,13 +185,16 @@ export function SidebarFoot({
       <div class="zl-side-app">
         <button
           type="button"
-          class={`zl-gear${update ? " has-update" : ""}`}
+          class={`zl-gear${update ? " has-update" : ""}${providerAttention > 0 ? " has-attn" : ""}`}
           aria-label={gearLabel}
           title={gearLabel}
           onClick={onSettings}
         >
           <GearIcon />
           {update && <span class="tk-gear-dot" aria-hidden="true" />}
+          {providerAttention > 0 && (
+            <span class="zl-gear-attn zl-data" aria-hidden="true">{providerAttention > 9 ? "9+" : providerAttention}</span>
+          )}
         </button>
       </div>
     </div>
@@ -326,6 +336,7 @@ export function Sidebar({
   onNewOwner,
 }) {
   const phone = density === "phone";
+  const providerAttention = useProviderStatus().attentionCount;
   const groupByProject = mode === "project";
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllSaved, setShowAllSaved] = useState(false);
@@ -698,6 +709,7 @@ export function Sidebar({
         tasksOpen={tasksOpen}
         onTasks={onTasks}
         version={version}
+        providerAttention={providerAttention}
         onSettings={onSettings}
       />
     </aside>

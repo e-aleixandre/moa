@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -43,6 +44,7 @@ type XAIDeviceCode struct {
 	ExpiresIn               time.Duration
 	Interval                time.Duration
 	tokenEndpoint           string
+	endpoints               XAIEndpoints
 	issuedAt                time.Time
 	wait                    func(context.Context, time.Duration) error
 	now                     func() time.Time
@@ -140,15 +142,23 @@ func parseXAIURL(raw string, endpoints XAIEndpoints) (*url.URL, error) {
 	return u, nil
 }
 
+// xaiVerificationHosts are the only browser destinations a verification
+// link may point to. It is shown to the user and opened in a browser, never
+// used for token exchange; an unexpected host fails closed until reviewed.
+var xaiVerificationHosts = map[string]bool{"auth.x.ai": true, "accounts.x.ai": true, "x.ai": true}
+
 // parseXAIVerificationURL validates a browser destination separately from the
-// pinned OAuth protocol endpoints. Providers commonly return accounts.x.ai or
-// x.ai here; it is never used for token exchange.
+// pinned OAuth protocol endpoints: HTTPS on an exact allowlisted host (no
+// port, userinfo or fragment). Test configurations may add their own hosts.
 func parseXAIVerificationURL(raw string, endpoints XAIEndpoints) (*url.URL, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u == nil || u.User != nil || u.Fragment != "" || u.Hostname() == "" {
+	if err != nil || u == nil || u.Opaque != "" || u.User != nil || u.Fragment != "" || u.Hostname() == "" {
 		return nil, fmt.Errorf("unsafe xAI verification URL")
 	}
-	if u.Scheme == "https" {
+	if u.Scheme == "https" && u.Port() == "" && xaiVerificationHosts[u.Host] {
+		return u, nil
+	}
+	if (u.Scheme == "https" || (u.Scheme == "http" && endpoints.AllowHTTP)) && len(endpoints.AllowedHosts) > 0 && allowedXAIHost(u.Hostname(), endpoints) {
 		return u, nil
 	}
 	ip := net.ParseIP(u.Hostname())
@@ -242,11 +252,19 @@ func StartXAIDeviceFlow(ctx context.Context, client *http.Client, endpoints XAIE
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
-	return &XAIDeviceCode{DeviceCode: raw.DeviceCode, UserCode: raw.UserCode, VerificationURI: raw.VerificationURI, VerificationURIComplete: raw.VerificationURIComplete, ExpiresIn: time.Duration(raw.ExpiresIn) * time.Second, Interval: interval, tokenEndpoint: d.TokenEndpoint, issuedAt: xaiNow(endpoints)(), wait: xaiWait(endpoints), now: xaiNow(endpoints)}, nil
+	return &XAIDeviceCode{DeviceCode: raw.DeviceCode, UserCode: raw.UserCode, VerificationURI: raw.VerificationURI, VerificationURIComplete: raw.VerificationURIComplete, ExpiresIn: time.Duration(raw.ExpiresIn) * time.Second, Interval: interval, tokenEndpoint: d.TokenEndpoint, endpoints: endpoints, issuedAt: xaiNow(endpoints)(), wait: xaiWait(endpoints), now: xaiNow(endpoints)}, nil
 }
 
-// CompleteXAIDeviceFlow uses the endpoint and expiry captured at authorization;
-// it never rediscovers metadata or restarts the device-code lifetime.
+var (
+	errXAIDenied  = errors.New("device authorization denied")
+	errXAIExpired = errors.New("device authorization expired")
+)
+
+// CompleteXAIDeviceFlow uses the endpoint, endpoint configuration and expiry
+// captured at authorization; it never rediscovers metadata or restarts the
+// device-code lifetime. The deadline is measured on the configured clock and
+// re-checked after every wait, so an injected clock and the real one are
+// never mixed.
 func CompleteXAIDeviceFlow(ctx context.Context, client *http.Client, _ XAIEndpoints, device *XAIDeviceCode) (*OAuthCredentials, error) {
 	if device == nil || device.DeviceCode == "" || device.tokenEndpoint == "" {
 		return nil, fmt.Errorf("missing device authorization")
@@ -260,23 +278,27 @@ func CompleteXAIDeviceFlow(ctx context.Context, client *http.Client, _ XAIEndpoi
 		wait = xaiWait(XAIEndpoints{})
 	}
 	deadline := device.issuedAt.Add(device.ExpiresIn)
-	if !now().Before(deadline) {
-		return nil, fmt.Errorf("device authorization expired")
+	remaining := deadline.Sub(now())
+	if remaining <= 0 {
+		return nil, errXAIExpired
 	}
-	ctx, cancel := context.WithDeadline(ctx, deadline)
+	ctx, cancel := context.WithTimeout(ctx, remaining)
 	defer cancel()
 	interval := device.Interval
 	for {
 		if err := wait(ctx, interval); err != nil {
 			if ctx.Err() != nil {
 				if ctx.Err() == context.DeadlineExceeded {
-					return nil, fmt.Errorf("device authorization expired")
+					return nil, errXAIExpired
 				}
 				return nil, fmt.Errorf("device authorization canceled: %w", ctx.Err())
 			}
 			return nil, err
 		}
-		result, pending, slow, err := pollXAIToken(ctx, client, device.tokenEndpoint, device.DeviceCode)
+		if !now().Before(deadline) {
+			return nil, errXAIExpired
+		}
+		result, pending, slow, err := pollXAIToken(ctx, client, device.endpoints, device.tokenEndpoint, device.DeviceCode)
 		if err != nil {
 			return nil, err
 		}
@@ -291,14 +313,14 @@ func CompleteXAIDeviceFlow(ctx context.Context, client *http.Client, _ XAIEndpoi
 		}
 	}
 }
-func pollXAIToken(ctx context.Context, client *http.Client, endpoint, deviceCode string) (*OAuthCredentials, bool, bool, error) {
+func pollXAIToken(ctx context.Context, client *http.Client, endpoints XAIEndpoints, endpoint, deviceCode string) (*OAuthCredentials, bool, bool, error) {
 	body := url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:device_code"}, "device_code": {deviceCode}, "client_id": {xaiClientID}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body.Encode()))
 	if err != nil {
 		return nil, false, false, fmt.Errorf("building device token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := xaiHTTPClient(client, XAIEndpoints{}).Do(req)
+	resp, err := xaiHTTPClient(client, endpoints).Do(req)
 	if err != nil {
 		return nil, false, false, fmt.Errorf("device token request: %w", err)
 	}
@@ -317,9 +339,9 @@ func pollXAIToken(ctx context.Context, client *http.Client, endpoint, deviceCode
 	case "slow_down":
 		return nil, false, true, nil
 	case "access_denied":
-		return nil, false, false, fmt.Errorf("device authorization denied")
+		return nil, false, false, errXAIDenied
 	case "expired_token":
-		return nil, false, false, fmt.Errorf("device authorization expired")
+		return nil, false, false, errXAIExpired
 	default:
 		return nil, false, false, fmt.Errorf("device token request failed (HTTP %d)", resp.StatusCode)
 	}
@@ -350,7 +372,7 @@ func refreshXAIToken(ctx context.Context, client *http.Client, endpoints XAIEndp
 	}
 	d, err := discoverXAI(ctx, client, endpoints)
 	if err != nil {
-		return nil, err
+		return nil, classifyRefreshError("xai", err)
 	}
 	body := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}, "client_id": {xaiClientID}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.TokenEndpoint, strings.NewReader(body.Encode()))
@@ -360,17 +382,21 @@ func refreshXAIToken(ctx context.Context, client *http.Client, endpoints XAIEndp
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := xaiHTTPClient(client, endpoints).Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("refresh request: %w", err)
+		return nil, oauthTransportError("xai", "refresh")
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("refresh failed (HTTP %d)", resp.StatusCode)
+		return nil, oauthStatusError("xai", "refresh", resp.StatusCode, resp.Body)
 	}
 	var token xaiTokenResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponse)).Decode(&token); err != nil {
-		return nil, fmt.Errorf("parsing refresh response: %w", err)
+		return nil, providerProtocolError("xai", "refresh")
 	}
-	return xaiCredentials(token, refreshToken, false)
+	creds, err := xaiCredentials(token, refreshToken, false)
+	if err != nil {
+		return nil, providerProtocolError("xai", "refresh")
+	}
+	return creds, nil
 }
 func xaiCredentials(token xaiTokenResponse, previousRefresh string, requireRefresh bool) (*OAuthCredentials, error) {
 	if token.AccessToken == "" || token.ExpiresIn <= 0 || (requireRefresh && token.RefreshToken == "") {

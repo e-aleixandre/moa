@@ -660,3 +660,24 @@ a.zl-ver.is-update:focus-visible {
 /* A 36px row centres the 26px ⋯ instead of pinning it to the top. */
 .zl-side-body:not(.is-phone) .ofl-cslot .session-card-menu { top: 5px; }
 .zl-side-body.is-phone .ofl-cslot .session-card-menu { top: 0; }
+
+/* Providers that need the owner: a small red count at the gear's lower
+   corner, apart from the update's yellow dot at the upper one. */
+.zl-gear.has-attn { position: relative; }
+.zl-gear-attn {
+  position: absolute;
+  bottom: 5px;
+  right: 4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--zl-red);
+  box-shadow: 0 0 0 2px var(--zl-sheet);
+  color: var(--zl-canvas);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}

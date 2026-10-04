@@ -9,6 +9,8 @@ import { parseCacheUsage } from '../cache-usage.js';
 import { nextRunEpoch } from './init.js';
 import { normalizeBackgroundCompaction } from './shared.js';
 import { markUnseen, acknowledgeVisibleLiveAttention, flashSession } from './attention.js';
+import { normalizeErrorDetail, sameErrorDetail } from '../provider-error.js';
+import { claimProviderToast, loadProviderStatus } from '../providers.js';
 
 export function handleWsStateChange(id, data, seq = 0) {
   const state = store.get();
@@ -19,7 +21,15 @@ export function handleWsStateChange(id, data, seq = 0) {
   // plain error state. Read the flag BEFORE the patch clears it, so the toast
   // can name what actually failed instead of blaming "the run".
   const wasCompacting = prev?.compacting === true;
-  const patch = { state: data.state, error: data.error || null, runEpoch: nextRunEpoch(id) };
+  const detail = normalizeErrorDetail(data.error_detail);
+  const patch = {
+    state: data.state,
+    error: data.error || null,
+    errorDetail: detail && sameErrorDetail(prev?.errorDetail, detail) ? prev.errorDetail : detail,
+    runEpoch: nextRunEpoch(id),
+  };
+  // A credential failure may have changed what the badge should say.
+  if (detail) loadProviderStatus();
   // Anchor the activity-indicator elapsed counter when a run begins. Only on
   // the transition into a running state, and only if not already set (a reconnect
   // snapshot may have seeded the authoritative server timestamp).
@@ -53,11 +63,15 @@ export function handleWsStateChange(id, data, seq = 0) {
       // One toast per failure: a session on screen gets what failed and why;
       // one away from it gets its own title and the alert of a blocking event.
       const away = !visibleSessionIds(store.get()).includes(id) && sess;
+      const repeated = data.state === 'error' && !claimProviderToast(detail);
       if (data.state === 'error') {
         let kind = 'Run failed';
         if (/quota exceeded|usage limit/i.test(data.error || '')) kind = 'Usage limit reached';
         else if (wasCompacting) kind = 'Compaction failed';
-        if (away) {
+        if (repeated) {
+          // Already announced for this credential; the session's inline
+          // action and the badge still show it.
+        } else if (away) {
           triggerFailed(sess, data.error ? `${kind} — ${data.error}` : kind, store.get().soundEnabled);
         } else if (data.error) {
           addSessionToast(prev, { sessionId: id, title: kind, detail: data.error, type: 'error' });

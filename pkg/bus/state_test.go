@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 func TestStateMachine_ValidTransitions(t *testing.T) {
@@ -250,5 +252,38 @@ func TestStateMachine_DoIfIdle(t *testing.T) {
 	ran = false
 	if ok := sm.DoIfIdle(func() { ran = true }); !ok || !ran {
 		t.Fatalf("DoIfIdle should run fn in StateError (ok=%v ran=%v)", ok, ran)
+	}
+}
+
+// The structured credential detail lives and dies with the error text: a
+// non-error transition clears both, in the state and in the event.
+func TestStateMachine_ErrorDetailClearsWithError(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sm := NewStateMachine(b, "s1")
+	sm.ForceState(StateRunning)
+
+	got := make(chan StateChanged, 2)
+	b.Subscribe(func(e StateChanged) { got <- e })
+
+	detail := &core.ProviderErrorDetail{Provider: "openai", Class: core.CredentialReconnect, Action: "reconnect"}
+	if err := sm.TransitionWithErrorDetail(StateError, "openai sign-in expired", detail); err != nil {
+		t.Fatal(err)
+	}
+	if sm.LastErrorDetail() != detail {
+		t.Fatalf("LastErrorDetail = %v", sm.LastErrorDetail())
+	}
+	if err := sm.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	if sm.LastErrorDetail() != nil || sm.LastError() != "" {
+		t.Fatalf("after recovery: detail %v, error %q", sm.LastErrorDetail(), sm.LastError())
+	}
+	b.Drain(time.Second)
+	if e := <-got; e.ErrorDetail != detail {
+		t.Fatalf("error event detail = %v", e.ErrorDetail)
+	}
+	if e := <-got; e.ErrorDetail != nil {
+		t.Fatalf("recovery event detail = %v", e.ErrorDetail)
 	}
 }

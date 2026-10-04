@@ -18,6 +18,7 @@ import {
 import { Prose } from "../../components/AssistantDocument/AssistantDocument.jsx";
 import { TurnFoot } from "../../components/AssistantDocument/TurnFoot.jsx";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
+import { ProviderErrorAction } from "../../components/ProviderErrorAction/ProviderErrorAction.jsx";
 import { turnFinalResponse } from "../../data/stream-model.js";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { parsePreviewReference } from "../../data/util/preview-reference.js";
@@ -294,6 +295,7 @@ export function ConversationStream({
               <StreamBlock block={block} onOpenSubagent={onOpenSubagent} sessionId={session?.id} rewind={rewind} waypointAccent={waypointAccent} visibleDone={visibleDone} onExpandBlock={placeOpenedBlock} />
             </div>
           ))}
+          <ProviderErrorAction session={session} />
           {tail}
           <QueuedTail
             queue={session?.pendingSteers}

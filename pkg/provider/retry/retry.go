@@ -138,19 +138,23 @@ func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request
 		}
 
 		// Retryable status — drain body and retry.
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close() //nolint:errcheck
+		errBody, errText := ErrorBody(resp.Body)
 
 		// Caller veto: a status that is normally retryable but which the caller
 		// recognizes as terminal (e.g. a usage-limit 429) should be returned as
 		// a response, not retried. Restore the drained body so the caller can
-		// parse it.
+		// parse it; the unread rest stays behind it, so the caller's own
+		// bounded read still sees a long body as long.
 		if p.Retryable != nil && !p.Retryable(resp, errBody) {
-			resp.Body = io.NopCloser(bytes.NewReader(errBody))
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.MultiReader(bytes.NewReader(errBody), resp.Body), resp.Body}
 			return resp, nil
 		}
+		resp.Body.Close() //nolint:errcheck
 
-		lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(errBody))
+		lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, errText)
 
 		if attempt == p.MaxRetries {
 			break
@@ -189,4 +193,20 @@ func sleep(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
+}
+
+// MaxErrorBody bounds how much of an error response body is read.
+const MaxErrorBody = 4096
+
+// ErrorBody reads a bounded prefix of an error response body, for
+// classification, and returns the text that may be shown for it. A body that
+// was cut (longer than the bound, or a failed read) is not shown: the cut can
+// split a credential the upstream echoed, and redacting whole values
+// downstream would then miss its prefix.
+func ErrorBody(r io.Reader) (body []byte, text string) {
+	body, err := io.ReadAll(io.LimitReader(r, MaxErrorBody+1))
+	if err != nil || len(body) > MaxErrorBody {
+		return body, "(response body omitted)"
+	}
+	return body, string(body)
 }

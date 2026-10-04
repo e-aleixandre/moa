@@ -95,9 +95,11 @@ moa --login meta
 **Anthropic** (Claude Pro/Max) and **OpenAI** (ChatGPT Plus/Pro) use the same
 browser flow: moa opens the provider's authorization page (and prints the URL if
 the browser does not open), you sign in, and the provider hands back a callback
-URL. Paste that whole URL — or just the `code#state` fragment, or the bare code
-— at the `Paste callback URL, code#state, or code here:` prompt. On success the
-credential is written to `auth.json`.
+URL. For Anthropic, paste the `code#state` value shown on Anthropic's page (or
+the full callback URL). For OpenAI, moa catches the redirect itself when it runs
+on the same machine; otherwise paste the full address the browser opened,
+starting with `http://localhost:1455/auth/callback?`. A bare code without its
+state is refused. On success the credential is written to `auth.json`.
 
 `moa --login openai` first asks which method you want: `1` for the ChatGPT
 subscription OAuth flow above, `2` to paste a plain OpenAI API key instead (read

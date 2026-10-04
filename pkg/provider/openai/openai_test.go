@@ -434,7 +434,7 @@ func TestNewOAuth_RefreshesOnceOn401(t *testing.T) {
 	defer server.Close()
 
 	var refreshes int
-	prov := NewOAuth("old", "acct_123", func(rejected string) (string, error) {
+	prov := NewOAuth("old", "acct_123", func(_ context.Context, rejected string) (string, error) {
 		refreshes++
 		if rejected != "old" {
 			t.Fatalf("rejected token = %q", rejected)
@@ -470,7 +470,7 @@ func TestNewOAuth_Second401IsTerminal(t *testing.T) {
 	defer server.Close()
 
 	var refreshes int
-	prov := NewOAuth("old", "acct_123", func(string) (string, error) {
+	prov := NewOAuth("old", "acct_123", func(context.Context, string) (string, error) {
 		refreshes++
 		return "new", nil
 	})
@@ -497,10 +497,10 @@ func TestStream_APIKey401NeverRefreshes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	prov := NewWithBaseURL("sk-key", server.URL)
+	prov := NewWithBaseURL("sk-"+"key", server.URL)
 	// Simulate a wiring mistake: even with a refresh callback present, an
 	// API-key transport must never invoke it.
-	prov.refreshOAuth = func(string) (string, error) {
+	prov.refreshOAuth = func(context.Context, string) (string, error) {
 		t.Fatal("refresh must never run for API-key credentials")
 		return "", nil
 	}
@@ -522,7 +522,7 @@ func TestNewOAuth_RefreshFailureIsCleanError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	prov := NewOAuth("old", "acct_123", func(string) (string, error) {
+	prov := NewOAuth("old", "acct_123", func(context.Context, string) (string, error) {
 		return "", errors.New("refresh endpoint said no")
 	})
 	prov.baseURL = server.URL

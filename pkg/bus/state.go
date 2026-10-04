@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // ErrInvalidTransition is returned (wrapped) by StateMachine.Transition when the
@@ -40,8 +42,11 @@ type StateMachine struct {
 	// mu (see SessionContext.rootIdleForCompaction).
 	mirror    atomic.Value
 	lastError string // most recent error message; cleared on non-error transition
-	bus       EventBus
-	sid       string
+	// lastErrorDetail is the structured form of lastError when it is a
+	// credential failure; cleared with it.
+	lastErrorDetail *core.ProviderErrorDetail
+	bus             EventBus
+	sid             string
 }
 
 // NewStateMachine creates a new state machine starting in StateIdle.
@@ -65,6 +70,12 @@ func (sm *StateMachine) Transition(to SessionState) error {
 // TransitionWithError moves to a new state with an optional error message.
 // Returns error if the transition is invalid. Publishes StateChanged on success.
 func (sm *StateMachine) TransitionWithError(to SessionState, errMsg string) error {
+	return sm.TransitionWithErrorDetail(to, errMsg, nil)
+}
+
+// TransitionWithErrorDetail is TransitionWithError with the structured detail
+// of a credential failure, which clients use to offer the right action.
+func (sm *StateMachine) TransitionWithErrorDetail(to SessionState, errMsg string, detail *core.ProviderErrorDetail) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	if allowed := validTransitions[sm.current]; !allowed[to] {
@@ -73,10 +84,12 @@ func (sm *StateMachine) TransitionWithError(to SessionState, errMsg string) erro
 	sm.current = to
 	sm.mirror.Store(to)
 	sm.lastError = errMsg
+	sm.lastErrorDetail = detail
 	sm.bus.Publish(StateChanged{
-		SessionID: sm.sid,
-		State:     string(to),
-		Error:     errMsg,
+		SessionID:   sm.sid,
+		State:       string(to),
+		Error:       errMsg,
+		ErrorDetail: detail,
 	})
 	return nil
 }
@@ -87,6 +100,14 @@ func (sm *StateMachine) LastError() string {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	return sm.lastError
+}
+
+// LastErrorDetail returns the structured detail of the most recent error, or
+// nil when it was not a credential failure or was cleared.
+func (sm *StateMachine) LastErrorDetail() *core.ProviderErrorDetail {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	return sm.lastErrorDetail
 }
 
 // MustTransition panics on invalid transitions. Use in code paths where

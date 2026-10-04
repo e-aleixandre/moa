@@ -181,7 +181,90 @@ func TestXAIEnvironmentJWTIsAPIKey(t *testing.T) {
 	}
 }
 func TestRefreshOAuthTokenRejectsUnknownProvider(t *testing.T) {
-	if _, err := refreshOAuthToken("not-a-provider", "refresh"); err == nil || !strings.Contains(err.Error(), "unsupported OAuth provider") {
+	if _, err := (tokenEndpoints{}).refresh(context.Background(), "not-a-provider", "refresh"); err == nil || !strings.Contains(err.Error(), "unsupported OAuth provider") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// R06/R07: the browser verification link is limited to exact xAI hosts over
+// HTTPS before it is ever returned; never an arbitrary HTTPS host or *.x.ai.
+func TestXAIVerificationURL_ExactHostAllowlist(t *testing.T) {
+	for _, raw := range []string{"https://auth.x.ai/device", "https://accounts.x.ai/device?user_code=AB", "https://x.ai/device"} {
+		if _, err := parseXAIVerificationURL(raw, XAIEndpoints{}); err != nil {
+			t.Errorf("refused %s: %v", raw, err)
+		}
+	}
+	for _, raw := range []string{
+		"https://evil.example/device",
+		"https://x.ai.evil.example/device",
+		"https://sub.x.ai/device",
+		"https://accounts.x.ai:8443/device",
+		"https://user@accounts.x.ai/device",
+		"https://accounts.x.ai/device#frag",
+		"http://accounts.x.ai/device",
+		"javascript:alert(1)",
+		"https://127.0.0.1/device",
+	} {
+		if _, err := parseXAIVerificationURL(raw, XAIEndpoints{}); err == nil {
+			t.Errorf("accepted unsafe verification URL %q", raw)
+		}
+	}
+}
+
+func TestXAIStartDevice_RejectsForeignVerificationHost(t *testing.T) {
+	for _, field := range []string{"verification_uri", "verification_uri_complete"} {
+		t.Run(field, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/discovery":
+					_, _ = w.Write([]byte(discovery(r, serverURL(r)+"/token", serverURL(r)+"/device")))
+				case "/device":
+					uri, complete := "https://accounts.x.ai/device", "https://accounts.x.ai/device?c=1"
+					if field == "verification_uri" {
+						uri = "https://evil.example/device"
+					} else {
+						complete = "https://evil.example/device?c=1"
+					}
+					_, _ = fmt.Fprintf(w, `{"device_code":"device","user_code":"USER","verification_uri":%q,"verification_uri_complete":%q,"expires_in":60,"interval":1}`, uri, complete)
+				}
+			}))
+			defer server.Close()
+			_, err := StartXAIDeviceFlow(context.Background(), server.Client(), testXAIEndpoints(server))
+			if err == nil {
+				t.Fatal("accepted a verification link on a foreign host")
+			}
+			if strings.Contains(err.Error(), "evil.example") {
+				t.Fatalf("error echoes the host: %v", err)
+			}
+		})
+	}
+}
+
+// The device token poll must use the same endpoint configuration that
+// validated discovery, not the production defaults.
+func TestXAIDevicePoll_CarriesEndpointConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/discovery":
+			_, _ = w.Write([]byte(discovery(r, serverURL(r)+"/token", serverURL(r)+"/device")))
+		case "/device":
+			_, _ = w.Write([]byte(`{"device_code":"device","user_code":"USER","verification_uri":"https://accounts.x.ai/device","expires_in":60,"interval":1}`))
+		case "/token":
+			// Same-origin, allowlisted redirect: acceptable under the test
+			// configuration, refused under production defaults.
+			http.Redirect(w, r, "/token2", http.StatusTemporaryRedirect)
+		case "/token2":
+			_, _ = w.Write([]byte(`{"access_token":"access","refresh_token":"refresh","expires_in":3600}`))
+		}
+	}))
+	defer server.Close()
+	cfg := testXAIEndpoints(server)
+	device, err := StartXAIDeviceFlow(context.Background(), server.Client(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds, err := CompleteXAIDeviceFlow(context.Background(), server.Client(), cfg, device)
+	if err != nil || creds.Access != "access" {
+		t.Fatalf("got %+v, %v", creds, err)
 	}
 }

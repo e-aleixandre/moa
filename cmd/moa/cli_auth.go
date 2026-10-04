@@ -15,6 +15,7 @@ import (
 func handleLogin(ctx context.Context, providerName string, authStore *auth.Store) {
 	switch providerName {
 	case "anthropic":
+		gen := loginGeneration(authStore, "anthropic")
 		fmt.Println("Logging in to Anthropic (Claude Max)...")
 		creds, err := auth.LoginAnthropic(
 			func(url string) {
@@ -23,7 +24,7 @@ func handleLogin(ctx context.Context, providerName string, authStore *auth.Store
 				auth.OpenBrowser(url)
 			},
 			func() (string, error) {
-				fmt.Print("Paste callback URL, code#state, or code here: ")
+				fmt.Print("Paste the code#state value (or the callback URL) shown after approving: ")
 				var code string
 				_, err := fmt.Scanln(&code)
 				return code, err
@@ -33,15 +34,12 @@ func handleLogin(ctx context.Context, providerName string, authStore *auth.Store
 			fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 			os.Exit(1)
 		}
-		if err := authStore.Set("anthropic", auth.Credential{
+		saveLogin(authStore, "anthropic", gen, auth.Credential{
 			Type:    "oauth",
 			Access:  creds.Access,
 			Refresh: creds.Refresh,
 			Expires: creds.Expires,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-			os.Exit(1)
-		}
+		})
 		fmt.Println("✓ Login successful! Credentials saved.")
 
 	case "openai":
@@ -63,6 +61,7 @@ func handleLogin(ctx context.Context, providerName string, authStore *auth.Store
 }
 
 func handleMetaLogin(ctx context.Context, authStore *auth.Store) {
+	gen := loginGeneration(authStore, "meta")
 	fmt.Println("Logging in to Meta (Muse subscription)...")
 	creds, err := auth.LoginMeta(ctx, func(url string) {
 		if url != "" {
@@ -78,14 +77,12 @@ func handleMetaLogin(ctx context.Context, authStore *auth.Store) {
 	}
 	// Key holds the Model API key minted from the session: api.meta.ai does
 	// not accept the OAuth access token itself.
-	if err := authStore.Set("meta", auth.Credential{Type: "oauth", Access: creds.Access, Refresh: creds.Refresh, Expires: creds.Expires, Key: creds.APIKey}); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-		os.Exit(1)
-	}
+	saveLogin(authStore, "meta", gen, auth.Credential{Type: "oauth", Access: creds.Access, Refresh: creds.Refresh, Expires: creds.Expires, Key: creds.APIKey})
 	fmt.Println("✓ Meta OAuth login successful!")
 }
 
 func handleXAILogin(ctx context.Context, authStore *auth.Store) {
+	gen := loginGeneration(authStore, "xai")
 	fmt.Println("Logging in to xAI (SuperGrok/X subscription)...")
 	creds, err := auth.LoginXAI(ctx, func(url string) {
 		if url != "" {
@@ -99,14 +96,12 @@ func handleXAILogin(ctx context.Context, authStore *auth.Store) {
 		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 		os.Exit(1)
 	}
-	if err := authStore.Set("xai", auth.Credential{Type: "oauth", Access: creds.Access, Refresh: creds.Refresh, Expires: creds.Expires}); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-		os.Exit(1)
-	}
+	saveLogin(authStore, "xai", gen, auth.Credential{Type: "oauth", Access: creds.Access, Refresh: creds.Refresh, Expires: creds.Expires})
 	fmt.Println("✓ xAI OAuth login successful!")
 }
 
 func handleOpenAILogin(authStore *auth.Store) {
+	gen := loginGeneration(authStore, "openai")
 	fmt.Println("Choose auth method:")
 	fmt.Println("  1) ChatGPT Plus/Pro subscription (OAuth)")
 	fmt.Println("  2) API key")
@@ -128,7 +123,7 @@ func handleOpenAILogin(authStore *auth.Store) {
 				auth.OpenBrowser(url)
 			},
 			func() (string, error) {
-				fmt.Print("Paste callback URL, code#state, or code here: ")
+				fmt.Print("Paste the full address the browser opened (http://localhost:1455/auth/callback?...): ")
 				var code string
 				_, err := fmt.Scanln(&code)
 				return code, err
@@ -138,27 +133,21 @@ func handleOpenAILogin(authStore *auth.Store) {
 			fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
 			os.Exit(1)
 		}
-		if err := authStore.Set("openai", auth.Credential{
+		saveLogin(authStore, "openai", gen, auth.Credential{
 			Type:      "oauth",
 			Access:    creds.Access,
 			Refresh:   creds.Refresh,
 			Expires:   creds.Expires,
 			AccountID: creds.AccountID,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-			os.Exit(1)
-		}
+		})
 		fmt.Println("✓ OpenAI OAuth login successful!")
 
 	case "2":
 		key := readSecretInput("Enter your OpenAI API key: ")
-		if err := authStore.Set("openai", auth.Credential{
+		saveLogin(authStore, "openai", gen, auth.Credential{
 			Type: "api_key",
 			Key:  key,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
-			os.Exit(1)
-		}
+		})
 		fmt.Println("✓ OpenAI API key saved.")
 
 	default:
@@ -168,18 +157,35 @@ func handleOpenAILogin(authStore *auth.Store) {
 }
 
 func handleTranscribeKeySetup(authStore *auth.Store) {
+	gen := loginGeneration(authStore, "openai-transcribe")
 	fmt.Println("Store an OpenAI API key for Whisper speech-to-text and Pulse Realtime voice.")
 	fmt.Println("This is separate from the main OpenAI credential (OAuth/API key),")
 	fmt.Println("so the agent can stay on an OpenAI OAuth subscription.")
 	key := readSecretInput("Enter your OpenAI API key: ")
-	if err := authStore.Set("openai-transcribe", auth.Credential{
+	saveLogin(authStore, "openai-transcribe", gen, auth.Credential{
 		Type: "api_key",
 		Key:  key,
-	}); err != nil {
+	})
+	fmt.Println("✓ OpenAI auxiliary key saved. Voice input and Pulse Realtime are now available.")
+}
+
+// loginGeneration captures the stored generation before a login starts, so
+// the commit refuses to overwrite a login made elsewhere meanwhile. It also
+// fails before the browser step when the credential store is unusable.
+func loginGeneration(authStore *auth.Store, provider string) string {
+	gen, err := authStore.StoredGeneration(provider)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		os.Exit(1)
+	}
+	return gen
+}
+
+func saveLogin(authStore *auth.Store, provider, gen string, cred auth.Credential) {
+	if _, err := authStore.CommitLogin(provider, gen, cred); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to save credentials: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("✓ OpenAI auxiliary key saved. Voice input and Pulse Realtime are now available.")
 }
 
 // readSecretInput reads a line from stdin, hiding input if terminal.

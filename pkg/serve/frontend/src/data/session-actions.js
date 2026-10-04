@@ -15,6 +15,8 @@ import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artif
 import { closeSessionPanelForSession } from './session-panel.js';
 import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.js';
 import { deviceZone } from './schedule-model.js';
+import { normalizeErrorDetail, sameErrorDetail } from './provider-error.js';
+import { claimProviderToast, loadProviderStatus } from './providers.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -44,6 +46,11 @@ function cacheExpiresAtMs(iso) {
   if (!iso) return 0;
   const ms = Date.parse(iso);
   return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
+function rosterErrorDetail(raw, existing) {
+  const detail = normalizeErrorDetail(raw);
+  return detail && sameErrorDetail(existing?.errorDetail, detail) ? existing.errorDetail : detail;
 }
 
 function samePolledSession(existing, next) {
@@ -105,6 +112,10 @@ function normalizeSessionInfo(info, existing, visible) {
     // Server-decided: a cut would drop something (see SessionInfo.CanStartFresh).
     canStartFresh: !!info.can_start_fresh,
     error: wsOwns ? existing.error : (info.error || null),
+    // The structured form of `error` when it is a credential failure. Owned by
+    // the same source as `error`; an equal detail keeps its reference so an
+    // unchanged roster tick is still recognised as unchanged.
+    errorDetail: wsOwns ? (existing.errorDetail || null) : rosterErrorDetail(info.error_detail, existing),
     untrustedMcp: info.untrusted_mcp || false,
     // Who created the session: server-owned, omitted for ordinary user
     // sessions (see the Automation API's origin metadata). No WS event
@@ -294,7 +305,9 @@ export async function loadSessions() {
       if (prevSess && prevSess.state !== sess.state) {
         if (sess.state === 'permission' || sess.state === 'error') {
           if (!visible.has(id)) {
-            if (sess.state === 'error') triggerFailed(sess, sess.error, state.soundEnabled);
+            if (sess.state === 'error') {
+              if (claimProviderToast(sess.errorDetail)) triggerFailed(sess, sess.error, state.soundEnabled);
+            }
             else triggerAttention(sess, null, state.soundEnabled);
           }
         }
@@ -346,6 +359,9 @@ export function startPolling() {
     if (!pollTimer) return; // stopped (hidden) while it waited
     loadSessions();
     loadEvents();
+    // The providers badge rides the same tick: a credential that failed in a
+    // session nobody is watching still shows on the Settings gear.
+    loadProviderStatus();
     // An event or a report can wake a closed owner; the owners roster is the
     // only place the client learns it.
     import('./owners.js').then((m) => m.loadOwners()).catch(() => {});

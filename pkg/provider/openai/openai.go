@@ -42,7 +42,7 @@ type OpenAI struct {
 	// must only ever apply there: API-key credentials are not refreshable and
 	// a 401 on them is always terminal.
 	oauth        bool
-	refreshOAuth func(rejectedToken string) (string, error)
+	refreshOAuth func(ctx context.Context, rejectedToken string) (string, error)
 	client       *http.Client
 }
 
@@ -58,7 +58,7 @@ func New(apiKey string) *OpenAI {
 
 // NewOAuth creates an OpenAI provider using ChatGPT subscription OAuth.
 // Uses chatgpt.com/backend-api with the /codex/responses endpoint.
-func NewOAuth(accessToken, accountID string, refresh func(rejectedToken string) (string, error)) *OpenAI {
+func NewOAuth(accessToken, accountID string, refresh func(ctx context.Context, rejectedToken string) (string, error)) *OpenAI {
 	return &OpenAI{
 		apiKey:       accessToken,
 		baseURL:      codexBaseURL,
@@ -68,6 +68,13 @@ func NewOAuth(accessToken, accountID string, refresh func(rejectedToken string) 
 		refreshOAuth: refresh,
 		client:       &http.Client{Timeout: 10 * time.Minute},
 	}
+}
+
+// WithHTTPClient replaces the HTTP client while keeping the pinned endpoint.
+// It is a server-side seam for tests that route the fixed origin locally.
+func (o *OpenAI) WithHTTPClient(c *http.Client) *OpenAI {
+	o.client = c
+	return o
 }
 
 // NewWithBaseURL creates an OpenAI provider with a custom base URL (for testing).
@@ -200,31 +207,32 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	// path — they cannot be refreshed and their 401s mean something else.
 	if resp.StatusCode == http.StatusUnauthorized && o.oauth && o.refreshOAuth != nil {
 		resp.Body.Close() //nolint:errcheck
-		fresh, refreshErr := o.refreshOAuth(apiKey)
+		fresh, refreshErr := o.refreshOAuth(ctx, apiKey)
 		if refreshErr != nil {
-			return nil, fmt.Errorf("openai: authentication failed (run --login openai to re-authenticate)")
+			return nil, core.ReactiveRefreshError("openai", refreshErr)
 		}
 		apiKey = fresh
 		resp, err = retry.Do(ctx, o.client, request(apiKey), policy, nil)
 		if err != nil {
 			return nil, fmt.Errorf("openai: %w", err)
 		}
-		if resp.StatusCode == http.StatusUnauthorized {
-			resp.Body.Close() //nolint:errcheck
-			return nil, fmt.Errorf("openai: authentication failed (run --login openai to re-authenticate)")
-		}
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close() //nolint:errcheck
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		// A rejected credential is reported by status only: the body of an
+		// auth failure can echo what was sent.
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, &core.ProviderAuthError{Provider: "openai", Status: resp.StatusCode}
+		}
+		errBody, errText := retry.ErrorBody(resp.Body)
 		// Usage-limit exhaustion is a distinct, actionable condition (not a
 		// generic error and not a user interruption): surface it typed so the
 		// UI can show "limit reached, resets in X".
 		if resp.StatusCode == http.StatusTooManyRequests && isUsageLimitBody(errBody) {
 			return nil, quotaErrorFrom(resp, errBody)
 		}
-		return nil, fmt.Errorf("openai: HTTP %d: %s", resp.StatusCode, string(errBody))
+		return nil, fmt.Errorf("openai: HTTP %d: %s", resp.StatusCode, errText)
 	}
 
 	ch := make(chan core.AssistantEvent, 64)

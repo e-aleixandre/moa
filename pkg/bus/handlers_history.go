@@ -136,7 +136,7 @@ func registerHistoryHandlers(sctx *SessionContext) {
 					// Stop cancels the compaction through Agent.Abort: that is
 					// the owner's choice, not a failure, so it settles idle.
 					if err != nil && !errors.Is(err, context.Canceled) {
-						_ = sctx.State.TransitionWithError(StateError, err.Error())
+						_ = sctx.State.TransitionWithErrorDetail(StateError, err.Error(), core.CredentialErrorDetail(err))
 					} else {
 						_ = sctx.State.Transition(StateIdle)
 					}

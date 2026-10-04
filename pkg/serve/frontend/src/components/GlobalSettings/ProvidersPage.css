@@ -1,0 +1,149 @@
+/* Providers — Settings → Providers. Rows in the sheet's own grammar (mark,
+   name, one line of state), with the sign-in or key flow opening INSIDE the
+   row rather than over the sheet. Same markup at 390px and on the desktop. */
+
+.zl-prov-list { display: flex; flex-direction: column; }
+
+.zl-prov {
+  padding: var(--space-3) var(--space-2);
+  border-radius: var(--zl-r-md);
+  transition: background var(--motion-hover) ease, box-shadow var(--motion-hover) ease;
+}
+.zl-prov + .zl-prov { border-top: 1px solid var(--zl-line); border-top-left-radius: 0; border-top-right-radius: 0; }
+.zl-prov.is-open { background: var(--zl-raised); box-shadow: 0 0 0 1px var(--zl-line); border-radius: var(--zl-r-md); }
+.zl-prov.is-open + .zl-prov { border-top-color: transparent; }
+/* Arrived from a session's error action: the row it is about is marked. */
+.zl-prov.is-focus { box-shadow: 0 0 0 1px var(--zl-accent-line); border-radius: var(--zl-r-md); }
+
+.zl-prov-head { display: flex; align-items: center; gap: 12px; min-height: 40px; }
+.zl-prov-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.zl-prov-n {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--zl-t1);
+  font-weight: var(--weight-medium);
+}
+.zl-prov-attn {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--zl-red);
+}
+.zl-prov-d { color: var(--zl-t3); font-size: var(--zl-fs-meta); line-height: 1.4; overflow-wrap: anywhere; }
+.zl-prov-d.is-ok { color: var(--zl-green); }
+.zl-prov-d.is-warn { color: var(--zl-yellow); }
+.zl-prov-d.is-bad { color: var(--zl-red); }
+.zl-prov-kind { color: var(--zl-t4); }
+
+.zl-prov-msg { margin: var(--space-2) 0 0 38px; font-size: var(--zl-fs-meta); line-height: 1.45; color: var(--zl-t3); }
+.zl-prov-msg.is-ok { color: var(--zl-green); }
+.zl-prov-msg.is-bad { color: var(--zl-red); }
+.zl-prov-flow .zl-prov-msg { margin-left: 0; }
+
+.zl-prov-acts { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0 0 38px; }
+.zl-prov-flow .zl-prov-acts { margin-left: 0; margin-top: var(--space-3); }
+
+.zl-prov-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font-family: var(--font);
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+  transition: background var(--motion-hover) ease, color var(--motion-hover) ease;
+}
+.zl-prov-btn.is-primary {
+  background: var(--zl-accent-med);
+  box-shadow: 0 0 0 1px var(--zl-accent-line);
+  color: var(--zl-accent);
+  font-weight: var(--weight-medium);
+}
+.zl-prov-btn[disabled] { cursor: default; opacity: .55; }
+.zl-prov-btn:focus-visible, .zl-prov-link:focus-visible {
+  outline: 2px solid var(--zl-accent);
+  outline-offset: 2px;
+}
+@media (hover: hover) {
+  .zl-prov-btn:not([disabled]):hover { background: var(--zl-hi); color: var(--zl-t1); }
+  .zl-prov-btn.is-primary:not([disabled]):hover { background: color-mix(in srgb, var(--zl-accent) 30%, transparent); color: var(--zl-accent); }
+}
+
+.zl-prov-flow { margin: var(--space-3) 0 0 38px; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.zl-prov-step { margin: 0; color: var(--zl-t2); line-height: 1.5; overflow-wrap: anywhere; }
+.zl-prov-step.is-warn { color: var(--zl-yellow); }
+.zl-prov-deadline { color: var(--zl-t4); }
+.zl-prov-label { color: var(--zl-t3); font-size: var(--zl-fs-meta); }
+
+/* The confirmation before a replacement: what it changes, said once. */
+.zl-prov-confirm {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--zl-r-sm);
+  background: color-mix(in srgb, var(--zl-yellow) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-yellow) 28%, transparent);
+  color: var(--zl-t2);
+  line-height: 1.45;
+}
+.zl-prov-confirm p { margin: 0; }
+.zl-prov-confirm .zl-prov-billing { margin-top: var(--space-1); color: var(--zl-yellow); font-weight: var(--weight-medium); }
+
+/* The fields. Field already holds --text-input (16px, the iOS zoom floor);
+   these only re-tone it to the sheet's recess. */
+.zl-prov .zl-prov-field { background: var(--zl-canvas); border-color: var(--zl-line); }
+.zl-prov .zl-prov-field.is-area { align-items: stretch; padding: var(--space-2) var(--space-3); }
+.zl-prov .zl-prov-field.is-area .field-input {
+  min-height: 72px;
+  resize: vertical;
+  font-family: var(--mono);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.zl-prov-link {
+  align-self: flex-start;
+  color: var(--zl-accent);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+.zl-prov-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+.zl-prov-code { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.zl-prov-code-v {
+  font-family: var(--mono);
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  color: var(--zl-t1);
+  user-select: all;
+}
+
+/* The count on the Providers row: discreet, a number, in the red the gear's
+   indicator uses. The words are in the row's accessible name. */
+.zl-set-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--zl-red) 18%, transparent);
+  color: var(--zl-red);
+  font-size: var(--zl-fs-meta);
+  font-weight: var(--weight-semibold);
+}
+
+.zl-set.is-phone .zl-prov-btn { min-height: var(--control-lg); }
+.zl-set.is-phone .zl-prov-flow,
+.zl-set.is-phone .zl-prov-acts,
+.zl-set.is-phone .zl-prov-msg { margin-left: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .zl-prov, .zl-prov-btn { transition: none; }
+}

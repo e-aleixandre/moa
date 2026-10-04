@@ -75,3 +75,14 @@ test("About without an update shows the version and no update row", () => {
   expect(texts(tree)).not.toContain("Update available");
   expect(elements(tree).some((n) => n.type === "a")).toBe(false);
 });
+
+test("providers that need the owner get their own mark and words, apart from the update dot", () => {
+  const g = gear(SidebarFoot({ onSettings() {}, version: withUpdate, providerAttention: 1 }));
+  expect(g.props["aria-label"]).toBe("Settings, 1 provider needs attention, update available: v0.44.0");
+  expect(elements(g).some((n) => cls(n).includes("tk-gear-dot"))).toBe(true);
+  const attn = elements(g).find((n) => cls(n).includes("zl-gear-attn"));
+  expect(attn.props.children).toBe(1);
+  const quiet = gear(SidebarFoot({ onSettings() {}, version: noUpdate, providerAttention: 0 }));
+  expect(quiet.props["aria-label"]).toBe("Settings");
+  expect(elements(quiet).some((n) => cls(n).includes("zl-gear-attn"))).toBe(false);
+});

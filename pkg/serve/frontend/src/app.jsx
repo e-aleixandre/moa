@@ -16,6 +16,7 @@ import {
 } from "./data/session-actions.js";
 import { loadEvents, openInbox } from "./data/events.js"; // wake-on-event
 import { loadOwners } from "./data/owners.js";
+import { loadProviderStatus } from "./data/providers.js";
 import { startTasksSync, resumeTasksSync } from "./data/tasks.js";
 import { TasksScreen } from "./components/Tasks/TasksScreen.jsx";
 import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
@@ -162,6 +163,8 @@ function useBootstrap() {
     // changes when the server does.
     loadModelCatalog();
     loadEvents(); // wake-on-event: paint the inbox on first load, not one tick later
+    // The Settings gear's provider badge, before the first poll tick.
+    loadProviderStatus();
     // Tasks: the sidebar's count and every open task view read one slice,
     // kept fresh by /api/tasks/ws (an invalidation; each one re-reads).
     startTasksSync();
@@ -196,6 +199,7 @@ function useBootstrap() {
           if (document.visibilityState !== "visible") return;
           loadSessions();
           loadEvents(); // wake-on-event: an event may have arrived while away
+          loadProviderStatus();
           resumeTasksSync();
           loadOwners();
           // Also restarts the usage timer, and refreshes immediately so the

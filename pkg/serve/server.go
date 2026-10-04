@@ -22,6 +22,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/e-aleixandre/moa/pkg/attachment"
+	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/bootstrap"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -47,6 +48,8 @@ type serverOptions struct {
 	realtimeKey     RealtimeAPIKeyFunc
 	realtimeHTTP    *http.Client
 	preview         *PreviewController
+	providerStore   *auth.Store
+	providerLogins  *auth.ProviderLoginManager
 }
 
 // RealtimeAPIKeyFunc returns only a normal OpenAI API key. ok must be false
@@ -262,7 +265,11 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/pulse/realtime/client-secret", handleRealtimeClientSecret(devices, o.realtimeKey, o.realtimeHTTP))
 	mux.HandleFunc("GET /api/pulse/guardian/ws", handleGuardianWebSocket(manager, devices))
 
-	handler := routeAuthorizationMiddleware(csrfMiddleware(bodyTimeoutMiddleware(mux)))
+	providers := &providerCredentials{store: o.providerStore, logins: o.providerLogins, secureCookie: o.secureCookie}
+	if providers.store == nil || providers.logins == nil {
+		providers.store, providers.logins = nil, nil
+	}
+	handler := routeAuthorizationMiddleware(csrfMiddleware(bodyTimeoutMiddleware(providersRouter(providers, mux))))
 	// Token auth (when configured) sits under the Host check but above route
 	// authorization and CSRF, so it also guards the WebSocket, push, and static
 	// routes via the cookie.
@@ -293,7 +300,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	handler = hookMiddleware(bodyTimeoutMiddleware(hookRoutes), handler)
 	// Host validation is the outermost middleware so it protects every route,
 	// including the WebSocket upgrade, against DNS rebinding.
-	return pulseNoStoreMiddleware(hostMiddleware(o.allowedHosts, handler))
+	return providersHeadersMiddleware(pulseNoStoreMiddleware(hostMiddleware(o.allowedHosts, handler)))
 }
 
 // pulseNoStoreMiddleware covers responses that may carry short-lived Pulse

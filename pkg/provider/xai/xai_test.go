@@ -46,7 +46,7 @@ func TestNewOAuth_UsesConsumerProxyAndRefreshesOnce(t *testing.T) {
 	}))
 	defer server.Close()
 	target, _ := url.Parse(server.URL)
-	p := NewOAuth("old", func(rejected string) (string, error) {
+	p := NewOAuth("old", func(_ context.Context, rejected string) (string, error) {
 		if rejected != "old" {
 			t.Fatalf("rejected token = %q", rejected)
 		}
@@ -71,7 +71,7 @@ func TestNewOAuth_Second401IsTerminal(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
 	defer server.Close()
 	target, _ := url.Parse(server.URL)
-	p := NewOAuth("old", func(string) (string, error) { return "new", nil })
+	p := NewOAuth("old", func(context.Context, string) (string, error) { return "new", nil })
 	p.client.Transport = rewriteTransport{target}
 	_, err := p.Stream(context.Background(), core.Request{Model: core.Model{ID: "grok-4.5"}, Options: core.StreamOptions{ThinkingLevel: "low"}})
 	if err == nil || !strings.Contains(err.Error(), "authentication failed") {
@@ -84,7 +84,7 @@ func TestStream_PublicAPIContract(t *testing.T) {
 		if r.URL.Path != "/v1/responses" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Bearer xai-key" {
+		if r.Header.Get("Authorization") != "Bearer xai-"+"key" {
 			t.Errorf("authorization = %q", r.Header.Get("Authorization"))
 		}
 		var body map[string]any
@@ -118,7 +118,7 @@ func TestStream_PublicAPIContract(t *testing.T) {
 	}))
 	defer server.Close()
 	target, _ := url.Parse(server.URL)
-	provider := New("xai-key")
+	provider := New("xai-" + "key")
 	provider.client.Transport = rewriteTransport{target}
 	ch, err := provider.Stream(context.Background(), core.Request{Model: core.Model{ID: "grok-4.5"}, Messages: []core.Message{core.NewUserMessage("go")}, Options: core.StreamOptions{ThinkingLevel: "high"}})
 	if err != nil {

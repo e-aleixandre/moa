@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -138,5 +139,22 @@ func TestStreamRepairDoesNotRetryToolCalls(t *testing.T) {
 	}
 	if provider.calls != 1 {
 		t.Fatalf("Stream calls = %d, want 1 (no repair after a tool call)", provider.calls)
+	}
+}
+
+// A credential failure is never repaired by replaying the turn, whatever text
+// the wrappers around it carry: the rule is the type, not the string.
+func TestIsRetryableStreamError_CredentialClassesNeverRepair(t *testing.T) {
+	for _, class := range []string{
+		core.CredentialMissing, core.CredentialReconnect, core.CredentialKeyRejected,
+		core.CredentialTemporary, core.CredentialProviderUnavailable, core.CredentialChanged,
+		core.CredentialStoreUnavailable, core.CredentialPersistenceFailed, core.CredentialSaveConflict,
+		core.CredentialQuota, core.CredentialPermissions,
+	} {
+		pe := core.NewProviderCredentialError("openai", core.CredentialSourceStore, "inference", class)
+		err := fmt.Errorf("stream: connection reset while reading: %w", pe)
+		if isRetryableStreamError(err) {
+			t.Errorf("class %s is repairable through a wrapper", class)
+		}
 	}
 }

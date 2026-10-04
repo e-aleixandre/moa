@@ -80,6 +80,14 @@ func serveRouteAccess(r *http.Request) routeAccess {
 		return routeOwnerAdmin
 	case isPulseDeviceRevokeRoute(r.URL.Path) && r.Method == http.MethodPost:
 		return routeOwnerAdmin
+	case isProvidersPath(r.URL.Path):
+		// Classified by path, whatever the method, so an unknown path or
+		// method never falls through to the device-accessible default. Only
+		// the sanitized status is readable by a paired device.
+		if r.Method == http.MethodGet && r.URL.Path == providersPath+"/status" {
+			return routeOwnerSurface
+		}
+		return routeOwnerAdmin
 	default:
 		return routeOwnerSurface
 	}

@@ -1,0 +1,29 @@
+/* ProviderErrorAction — the run ended on a provider credential. A quiet
+   bordered line at the transcript's end, with the one thing to do. */
+.provider-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0 var(--space-5);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--yellow) 35%, transparent);
+  background: color-mix(in srgb, var(--yellow) 7%, transparent);
+  color: var(--text);
+  font-size: var(--text-base);
+  line-height: 1.45;
+}
+.provider-error.is-info {
+  border-color: color-mix(in srgb, var(--blue) 35%, transparent);
+  background: color-mix(in srgb, var(--blue) 7%, transparent);
+}
+.provider-error-icon { flex: none; color: var(--yellow); }
+.provider-error.is-info .provider-error-icon { color: var(--blue); }
+.provider-error-text { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+.provider-error-act { flex: none; }
+
+/* Touch: every control in the card is a full-size target. */
+@media (pointer: coarse), (max-width: 768px) {
+  .provider-error .button { min-height: var(--control-touch); }
+}

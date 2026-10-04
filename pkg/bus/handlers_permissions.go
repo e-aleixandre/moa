@@ -127,6 +127,12 @@ func registerPermissionQueryHandlers(sctx *SessionContext) {
 		}
 		return sctx.State.LastError(), nil
 	})
+	b.OnQuery(func(q GetSessionErrorDetail) (*core.ProviderErrorDetail, error) {
+		if sctx.State == nil {
+			return nil, nil
+		}
+		return sctx.State.LastErrorDetail(), nil
+	})
 
 	b.OnQuery(func(q GetPendingApproval) (PendingApprovalInfo, error) {
 		if sctx.Approvals == nil {

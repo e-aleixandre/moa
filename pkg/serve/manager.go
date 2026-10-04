@@ -342,14 +342,16 @@ type SessionInfo struct {
 	// the last time something was sent TO the session, so an old conversation
 	// asking a question right now would look like it had been blocked for
 	// hours.
-	PendingSince       time.Time `json:"pending_since,omitzero"`
-	PendingID          string    `json:"pending_id,omitempty"`
-	Error              string    `json:"error,omitempty"`
-	Unseen             bool      `json:"unseen"`
-	UnseenSeq          uint64    `json:"unseen_seq,omitempty"`
-	ServerInstance     string    `json:"server_instance"`
-	AttentionNamespace string    `json:"attention_namespace,omitempty"`
-	UntrustedMCP       bool      `json:"untrusted_mcp,omitempty"`
+	PendingSince time.Time `json:"pending_since,omitzero"`
+	PendingID    string    `json:"pending_id,omitempty"`
+	Error        string    `json:"error,omitempty"`
+	// ErrorDetail structures Error when it is a credential failure.
+	ErrorDetail        *core.ProviderErrorDetail `json:"error_detail,omitempty"`
+	Unseen             bool                      `json:"unseen"`
+	UnseenSeq          uint64                    `json:"unseen_seq,omitempty"`
+	ServerInstance     string                    `json:"server_instance"`
+	AttentionNamespace string                    `json:"attention_namespace,omitempty"`
+	UntrustedMCP       bool                      `json:"untrusted_mcp,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
 	// exist and turn red when one has failed or exited. The full per-server
@@ -481,6 +483,7 @@ func (s *ManagedSession) info() SessionInfo {
 	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](b, bus.GetPermissionMode{})
 	state, _ := bus.QueryTyped[bus.GetSessionState, string](b, bus.GetSessionState{})
 	stateErr, _ := bus.QueryTyped[bus.GetSessionError, string](b, bus.GetSessionError{})
+	stateErrDetail, _ := bus.QueryTyped[bus.GetSessionErrorDetail, *core.ProviderErrorDetail](b, bus.GetSessionErrorDetail{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
 	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
@@ -514,6 +517,7 @@ func (s *ManagedSession) info() SessionInfo {
 		Kind:           s.Kind,
 		ownerDetached:  s.ownerDetached.Load(),
 		Error:          stateErr,
+		ErrorDetail:    stateErrDetail,
 		UntrustedMCP:   s.infra.UntrustedMCP,
 		MCP:            mcpSummary,
 		ContextPercent: ctxPct,

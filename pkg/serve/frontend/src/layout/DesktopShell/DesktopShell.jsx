@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { Sidebar } from "../Sidebar/Sidebar.jsx";
 import { DesktopDossier } from "./DesktopDossier.jsx";
 import { GlobalSettings } from "../../components/index.js";
@@ -14,6 +14,7 @@ import { selectDesktopChrome } from "../Sidebar/sessions.js";
 import { tasksSlice } from "../../data/tasks.js";
 import { attentionCount } from "../../data/schedule-model.js";
 import { toggleTasksView } from "../../data/tasks-view.js";
+import { consumeProviderSettings, subscribeProviderSettings } from "../../data/providers.js";
 import "./DesktopShell.css";
 
 // DesktopShell — the desktop chrome, in THREE ZONES: the other sessions on the
@@ -33,6 +34,14 @@ export function DesktopShell({ version, children }) {
   const tasksOpen = useStore((s) => s.view === "tasks");
   const tasksCount = useStore((s) => attentionCount(tasksSlice(s)));
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
+  // A session's provider error asks for Settings → Providers on one provider
+  // (data/providers.js). The request carries IDs only.
+  const [providerFocus, setProviderFocus] = useState(null);
+  useEffect(() => subscribeProviderSettings((request) => {
+    consumeProviderSettings(request.seq);
+    setProviderFocus(request);
+    setGlobalSettingsOpen(true);
+  }), []);
   // New owner is a centred modal here, not a page of the sidebar: the column
   // is where you look for your work, and a form that takes it over hides the
   // list it was launched from.
@@ -95,7 +104,10 @@ export function DesktopShell({ version, children }) {
           shell. See components/GlobalSettings. */}
       <GlobalSettings
         open={globalSettingsOpen}
-        onClose={() => setGlobalSettingsOpen(false)}
+        onClose={() => { setGlobalSettingsOpen(false); setProviderFocus(null); }}
+        initialPage={providerFocus ? "providers" : "root"}
+        providerFocus={providerFocus}
+        onReturnToSession={(id) => openSession(id)}
         soundEnabled={chrome.soundEnabled}
         version={version}
       />

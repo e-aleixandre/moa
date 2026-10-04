@@ -11,6 +11,12 @@ import { seedOlderHistory } from '../history-paging.js';
 import { refreshArtifactsAfterReconnect } from '../artifacts.js';
 import { settleFreshMarkers } from '../start-fresh.js';
 import { parseCacheUsage } from '../cache-usage.js';
+import { normalizeErrorDetail, sameErrorDetail } from '../provider-error.js';
+
+function initErrorDetail(raw, previous) {
+  const detail = normalizeErrorDetail(raw);
+  return detail && sameErrorDetail(previous, detail) ? previous : detail;
+}
 
 export function mergeSteers(snapshot, local) {
   // Snapshot steers are authoritative and already accepted by the server, so
@@ -101,6 +107,10 @@ export function handleWsInit(id, data) {
     messages,
     historyTruncated: !!data.history_truncated,
     state: data.state || 'idle',
+    // The live state_change that carried the error is not replayed on a
+    // reconnect, so the snapshot restores it — text and structured detail.
+    error: data.error || null,
+    errorDetail: initErrorDetail(data.error_detail, prev.errorDetail),
     contextPercent: data.context_percent ?? -1,
     contextWindow: data.context_window || 0,
     compactAt: data.compact_at || 0,

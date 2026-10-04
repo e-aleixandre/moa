@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -39,84 +40,55 @@ type OAuthCredentials struct {
 	APIKey string `json:"api_key,omitempty"`
 }
 
-// LoginAnthropic runs the Anthropic OAuth PKCE flow (device code style):
-// 1. Generate PKCE verifier + challenge
-// 2. Open browser to Anthropic authorize URL
-// 3. User approves and sees a code on Anthropic's callback page
-// 4. User pastes the code back into the CLI
-// 5. Exchange code for tokens
-//
-// promptCode is called to get the authorization code from the user.
-// It receives the auth URL (for display) and should return the pasted code string.
+// LoginAnthropic runs the Anthropic OAuth PKCE sign-in for the CLI: it opens
+// the authorize URL, then promptCode returns what the user pasted from
+// Anthropic's page (code#state or the callback URL; state is required).
 func LoginAnthropic(openURL func(string), promptCode func() (string, error)) (*OAuthCredentials, error) {
-	verifier, challenge, err := generatePKCE()
+	a, err := BeginAnthropic()
 	if err != nil {
-		return nil, fmt.Errorf("generating PKCE: %w", err)
+		return nil, err
 	}
-
-	// Anthropic manual OAuth flow expects state coupled to PKCE verifier.
-	state := verifier
-
-	// Build authorize URL
-	params := url.Values{
-		"code":                  {"true"},
-		"client_id":             {clientID},
-		"response_type":         {"code"},
-		"redirect_uri":          {redirectURI},
-		"scope":                 {scopes},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {state},
-	}
-	authURL := authorizeURL + "?" + params.Encode()
-
-	// Open browser
-	openURL(authURL)
-
-	// Wait for user to paste the authorization code or callback URL
+	openURL(a.AuthorizeURL())
 	raw, err := promptCode()
 	if err != nil {
 		return nil, fmt.Errorf("reading auth code: %w", err)
 	}
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, fmt.Errorf("empty authorization code")
-	}
-
-	// Parse input: supports callback URL (?code=...&state=...) or code#state
-	code, returnedState := parseAuthInput(raw)
-
-	// Validate state when provided.
-	if returnedState != "" && returnedState != state {
-		return nil, fmt.Errorf("authorization failed: state mismatch — paste the full callback URL or code#state value and retry")
-	}
-
-	// Exchange token using our original state (trusted local value)
-	return exchangeToken(code, state, verifier)
+	return CompleteAnthropic(context.Background(), a, raw)
 }
 
 // RefreshAnthropicToken refreshes an expired OAuth token.
 func RefreshAnthropicToken(refreshToken string) (*OAuthCredentials, error) {
+	return refreshAnthropicToken(context.Background(), nil, "", refreshToken)
+}
+
+// refreshAnthropicToken takes the client and token URL so same-package tests
+// can reach an httptest server; empty values pin production.
+func refreshAnthropicToken(ctx context.Context, client *http.Client, endpoint, refreshToken string) (*OAuthCredentials, error) {
+	if client == nil {
+		client = oauthClient
+	}
+	if endpoint == "" {
+		endpoint = tokenURL
+	}
 	body := url.Values{
 		"grant_type":    {"refresh_token"},
 		"client_id":     {clientID},
 		"refresh_token": {refreshToken},
 	}
 
-	resp, err := oauthClient.PostForm(tokenURL, body)
+	resp, err := postForm(ctx, client, endpoint, body)
 	if err != nil {
-		return nil, fmt.Errorf("refresh request: %w", err)
+		return nil, oauthTransportError("anthropic", "refresh")
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("refresh failed (HTTP %d): %s", resp.StatusCode, string(errBody))
+		return nil, oauthStatusError("anthropic", "refresh", resp.StatusCode, resp.Body)
 	}
 
 	var tokenResp tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, fmt.Errorf("parsing refresh response: %w", err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponse)).Decode(&tokenResp); err != nil || tokenResp.AccessToken == "" {
+		return nil, providerProtocolError("anthropic", "refresh")
 	}
 
 	return &OAuthCredentials{
@@ -128,93 +100,77 @@ func RefreshAnthropicToken(refreshToken string) (*OAuthCredentials, error) {
 
 // --- internal ---
 
+func postForm(ctx context.Context, client *http.Client, endpoint string, body url.Values) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return tokenClient(client).Do(req)
+}
+
 type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
 }
 
-func exchangeToken(code, state, verifier string) (*OAuthCredentials, error) {
-	payload := map[string]string{
+// exchangeAnthropicCode redeems an authorization code. The JSON body carries
+// the attempt's state and verifier as separate fields, as the official CLI
+// does; client and endpoint are empty in production (pinned).
+func exchangeAnthropicCode(ctx context.Context, client *http.Client, endpoint, code, state, verifier string) (*OAuthCredentials, error) {
+	if endpoint == "" {
+		endpoint = tokenURL
+	}
+	body, err := json.Marshal(map[string]string{
 		"grant_type":    "authorization_code",
 		"client_id":     clientID,
 		"code":          code,
 		"state":         state,
 		"redirect_uri":  redirectURI,
 		"code_verifier": verifier,
-	}
-	body, err := json.Marshal(payload)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("marshaling token request: %w", err)
+		return nil, providerProtocolError("anthropic", "login")
 	}
-
-	req, err := http.NewRequest("POST", tokenURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("building token request: %w", err)
+		return nil, providerProtocolError("anthropic", "login")
 	}
 	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := oauthClient.Do(req)
+	resp, err := tokenClient(client).Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("token exchange request: %w", err)
+		return nil, oauthTransportError("anthropic", "login")
 	}
 	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("token exchange failed (HTTP %d): %s", resp.StatusCode, string(errBody))
+	tok, err := decodeLoginToken("anthropic", resp)
+	if err != nil {
+		return nil, err
 	}
-
-	var tokenResp tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, fmt.Errorf("parsing token response: %w", err)
+	if tok.ExpiresIn <= 0 {
+		return nil, providerProtocolError("anthropic", "login")
 	}
-
 	return &OAuthCredentials{
-		Access:  tokenResp.AccessToken,
-		Refresh: tokenResp.RefreshToken,
-		Expires: time.Now().UnixMilli() + int64(tokenResp.ExpiresIn)*1000 - 5*60*1000,
+		Access:  tok.AccessToken,
+		Refresh: tok.RefreshToken,
+		Expires: time.Now().UnixMilli() + int64(tok.ExpiresIn)*1000 - 5*60*1000,
 	}, nil
 }
 
-// parseAuthInput extracts code and state from user input.
-// Supports:
-//  1. Full callback URL: https://...?code=ABC&state=XYZ
-//  2. code#state format: ABC#XYZ
-//  3. Callback URL with fragment: https://...#ABC#XYZ
-//  4. Callback URL fragment query: https://...#code=ABC&state=XYZ
-//
-// Returns empty state if format is unrecognized.
-func parseAuthInput(raw string) (code, state string) {
-	// Try URL format first
-	if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
-		q := u.Query()
-		if c := q.Get("code"); c != "" {
-			return c, q.Get("state")
-		}
-
-		// Some callbacks encode payload in fragment
-		if u.Fragment != "" {
-			// #code#state
-			if parts := strings.SplitN(u.Fragment, "#", 2); len(parts) == 2 && parts[0] != "" {
-				return parts[0], parts[1]
-			}
-			// #code=...&state=...
-			if fq, err := url.ParseQuery(u.Fragment); err == nil {
-				if c := fq.Get("code"); c != "" {
-					return c, fq.Get("state")
-				}
-			}
-		}
+// decodeLoginToken reads a bounded code-exchange response. A sign-in must
+// yield an access token and a refresh token; anything else is a protocol
+// error rather than a credential that cannot be renewed. Where the lifetime
+// comes from is provider-specific, so each exchange checks it.
+func decodeLoginToken(provider string, resp *http.Response) (tokenResponse, error) {
+	if resp.StatusCode != http.StatusOK {
+		return tokenResponse{}, oauthStatusError(provider, "login", resp.StatusCode, resp.Body)
 	}
-
-	// Try code#state format
-	if parts := strings.SplitN(raw, "#", 2); len(parts) == 2 {
-		return parts[0], parts[1]
+	var tok tokenResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponse)).Decode(&tok); err != nil ||
+		tok.AccessToken == "" || tok.RefreshToken == "" {
+		return tokenResponse{}, providerProtocolError(provider, "login")
 	}
-
-	// Unrecognized format — return empty state
-	return raw, ""
+	return tok, nil
 }
 
 // generatePKCE creates a PKCE verifier and S256 challenge.
@@ -227,15 +183,6 @@ func generatePKCE() (verifier, challenge string, err error) {
 	h := sha256.Sum256([]byte(verifier))
 	challenge = base64.RawURLEncoding.EncodeToString(h[:])
 	return verifier, challenge, nil
-}
-
-// randomState generates a random OAuth state token.
-func randomState() (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // OpenBrowser opens a URL in the default browser.

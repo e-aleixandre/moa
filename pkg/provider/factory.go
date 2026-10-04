@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/provider/anthropic"
@@ -18,7 +20,10 @@ type Config struct {
 	AuthKind  AuthKind
 	// RefreshOAuth is called only by consumer transports after a rejected OAuth
 	// access token. API-key transports never invoke it.
-	RefreshOAuth func(rejectedToken string) (string, error)
+	RefreshOAuth func(ctx context.Context, rejectedToken string) (string, error)
+	// HTTPClient, when set, carries the requests to the provider's fixed
+	// endpoint. Server-side Go seam for tests; never user configuration.
+	HTTPClient *http.Client
 }
 
 type AuthKind string
@@ -36,9 +41,27 @@ const (
 //
 // Returns error for unsupported or empty provider names.
 func New(model core.Model, cfg Config) (core.Provider, error) {
+	p, err := newProvider(model, cfg)
+	if err != nil || cfg.HTTPClient == nil {
+		return p, err
+	}
+	switch c := p.(type) {
+	case *anthropic.Anthropic:
+		c.WithHTTPClient(cfg.HTTPClient)
+	case *openai.OpenAI:
+		c.WithHTTPClient(cfg.HTTPClient)
+	case *xai.XAI:
+		c.WithHTTPClient(cfg.HTTPClient)
+	case *meta.Meta:
+		c.WithHTTPClient(cfg.HTTPClient)
+	}
+	return p, nil
+}
+
+func newProvider(model core.Model, cfg Config) (core.Provider, error) {
 	switch model.Provider {
 	case "anthropic":
-		return anthropic.New(cfg.APIKey), nil
+		return anthropic.NewWithKind(cfg.APIKey, cfg.IsOAuth), nil
 	case "openai":
 		if cfg.IsOAuth {
 			return openai.NewOAuth(cfg.APIKey, cfg.AccountID, cfg.RefreshOAuth), nil

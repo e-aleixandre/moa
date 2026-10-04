@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/provider/retry"
 )
 
 const transcribeEndpoint = "/v1/audio/transcriptions"
@@ -81,8 +82,8 @@ func (o *OpenAI) Transcribe(ctx context.Context, audio io.Reader, filename strin
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("openai transcribe: HTTP %d: %s", resp.StatusCode, string(body))
+		_, text := retry.ErrorBody(resp.Body)
+		return "", fmt.Errorf("openai transcribe: HTTP %d: %s", resp.StatusCode, text)
 	}
 
 	var result struct {

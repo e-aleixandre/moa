@@ -308,25 +308,23 @@ func refreshMetaToken(ctx context.Context, client *http.Client, endpoints metaEn
 		"client_id":     {metaClientID},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("refresh request: %w", err)
+		return nil, oauthTransportError("meta", "refresh")
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		return nil, oauthStatusError("meta", "refresh", resp.StatusCode, resp.Body)
 	}
 	var token struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
 	}
-	decodeErr := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponse)).Decode(&token)
-	status := resp.StatusCode
-	resp.Body.Close() //nolint:errcheck
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("refresh failed (HTTP %d)", status)
-	}
-	if decodeErr != nil {
-		return nil, fmt.Errorf("parsing refresh response: %w", decodeErr)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponse)).Decode(&token); err != nil {
+		return nil, providerProtocolError("meta", "refresh")
 	}
 	creds, err := metaCredentials(token.AccessToken, token.RefreshToken, refreshToken, token.ExpiresIn)
 	if err != nil {
-		return nil, err
+		return nil, providerProtocolError("meta", "refresh")
 	}
 	key, err := mintMetaAPIKey(ctx, client, endpoints, creds.Access)
 	if err != nil {

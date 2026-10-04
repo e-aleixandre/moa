@@ -78,8 +78,10 @@ export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_
       // the server actually answered (409 busy, 503 queue full) from a request
       // that never got an answer (aborted fetch, network failure), which proves
       // nothing about the operation's outcome.
-      const error = new Error(`${r.status}: ${await r.text()}`);
+      const body = await r.text();
+      const error = new Error(`${r.status}: ${body}`);
       error.status = r.status;
+      attachStructuredError(error, body);
       throw error;
     }
     if (r.status === 204) return null;
@@ -96,6 +98,27 @@ export async function api(method, path, body, { timeoutMs = DEFAULT_API_TIMEOUT_
   } finally {
     if (timer !== null) clearTimeout(timer);
   }
+}
+
+// attachStructuredError — additive: a JSON error body of the shape
+// {"error": "<copy>", "error_detail": {provider, class, action}} also lands on
+// the error as `userMessage` and `detail`. The message keeps its old
+// "<status>: <body>" form, so plain-text callers read exactly what they did.
+export function attachStructuredError(error, body) {
+  if (typeof body !== 'string' || body.trimStart()[0] !== '{') return error;
+  let parsed;
+  try { parsed = JSON.parse(body); } catch { return error; }
+  if (!parsed || typeof parsed !== 'object') return error;
+  if (typeof parsed.error === 'string' && parsed.error) error.userMessage = parsed.error;
+  const detail = parsed.error_detail;
+  if (detail && typeof detail === 'object' && typeof detail.class === 'string') {
+    error.detail = {
+      provider: typeof detail.provider === 'string' ? detail.provider : '',
+      class: detail.class,
+      action: typeof detail.action === 'string' ? detail.action : '',
+    };
+  }
+  return error;
 }
 
 export function getVersion() {

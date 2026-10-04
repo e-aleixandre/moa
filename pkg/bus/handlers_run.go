@@ -742,7 +742,7 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 		// State transition.
 		if sctx.State != nil {
 			if err != nil && !cancelled {
-				_ = sctx.State.TransitionWithError(StateError, cleanRunError(err))
+				_ = sctx.State.TransitionWithErrorDetail(StateError, cleanRunError(err), core.CredentialErrorDetail(err))
 			} else {
 				_ = sctx.State.Transition(StateIdle)
 			}

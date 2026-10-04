@@ -35,6 +35,11 @@ func isRetryableStreamError(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
+	// A credential failure needs the user, not a replay of the turn and its
+	// tools, whatever text the wrappers around it carry.
+	if _, ok := core.AsProviderCredentialError(err); ok {
+		return false
+	}
 	s := strings.ToLower(err.Error())
 	if strings.Contains(s, "invalid_grant") || strings.Contains(s, "authentication failed") {
 		return false

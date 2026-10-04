@@ -124,6 +124,10 @@ func runServe(args []string) {
 		UpdateCheckEnabled: core.IsUpdateCheckEnabled(moaCfg),
 	})
 
+	// Settings → Providers administers the same live store every provider
+	// request resolves from, so a saved login applies on the next request.
+	providerLogins := auth.NewProviderLoginManager(ctx, authStore)
+
 	// serve speaks plain HTTP (the security boundary is Tailscale), so the auth
 	// cookie is not forced Secure: it becomes Secure per request when the
 	// browser arrived over TLS, directly or through a loopback proxy.
@@ -143,6 +147,7 @@ func runServe(args []string) {
 		serve.WithAutomationToken(automationToken),
 		serve.WithDeviceAuthentication(),
 		serve.WithPreviewController(preview),
+		serve.WithProviderCredentials(authStore, providerLogins),
 		serve.WithRealtimeClientSecretBroker(func() (string, bool) {
 			// Priority:
 			//  1) dedicated OpenAI API key ("openai-transcribe" slot, shared
@@ -184,6 +189,7 @@ func runServe(args []string) {
 		defer c()
 		_ = httpServer.Shutdown(shutdownCtx)
 		preview.Close()
+		providerLogins.Close()
 	}()
 
 	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {

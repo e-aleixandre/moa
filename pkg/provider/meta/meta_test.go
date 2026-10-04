@@ -125,7 +125,7 @@ func TestNewOAuth_RemintsOnceOn401(t *testing.T) {
 	}))
 	defer server.Close()
 	target, _ := url.Parse(server.URL)
-	p := NewOAuth("stale", func(rejected string) (string, error) {
+	p := NewOAuth("stale", func(_ context.Context, rejected string) (string, error) {
 		if rejected != "stale" {
 			t.Errorf("rejected = %q", rejected)
 		}
@@ -151,7 +151,7 @@ func TestNewOAuth_SecondUnauthorizedIsTerminal(t *testing.T) {
 	}))
 	defer server.Close()
 	target, _ := url.Parse(server.URL)
-	p := NewOAuth("stale", func(string) (string, error) { return "fresh", nil })
+	p := NewOAuth("stale", func(context.Context, string) (string, error) { return "fresh", nil })
 	p.client.Transport = rewriteTransport{target}
 	_, err := p.Stream(context.Background(), core.Request{Model: core.Model{ID: "muse-spark-1.3"}, Options: core.StreamOptions{ThinkingLevel: "low"}})
 	if err == nil || !strings.Contains(err.Error(), "authentication failed") {

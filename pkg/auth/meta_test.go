@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // noWait removes the device-flow polling delay from tests.
@@ -179,7 +181,7 @@ func TestRefreshMetaToken_RejectionFails(t *testing.T) {
 	defer server.Close()
 	endpoints := metaEndpoints{TokenURL: server.URL + "/device/token", MintURL: server.URL + "/mint", Wait: noWait}
 	_, err := refreshMetaToken(context.Background(), server.Client(), endpoints, "refresh-0")
-	if err == nil || !strings.Contains(err.Error(), "refresh failed") {
+	if pe, ok := core.AsProviderCredentialError(err); !ok || pe.Class != core.CredentialReconnect || pe.OAuthCode != "invalid_grant" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -208,13 +210,13 @@ func TestRefreshOAuthIfCurrent_MetaRemintsRejectedKey(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	store.refresh = func(provider, refreshToken string) (*OAuthCredentials, error) {
+	store.refresh = func(_ context.Context, provider, refreshToken string) (*OAuthCredentials, error) {
 		if provider != "meta" || refreshToken != "refresh-1" {
 			t.Errorf("refresh(%q, %q)", provider, refreshToken)
 		}
 		return &OAuthCredentials{Access: "access-2", Refresh: "refresh-2", APIKey: "minted-2", Expires: time.Now().Add(time.Hour).UnixMilli()}, nil
 	}
-	key, err := store.RefreshOAuthIfCurrent("meta", "minted-1")
+	key, err := refreshOAuthIfCurrent(store, "meta", "minted-1")
 	if err != nil || key != "minted-2" {
 		t.Fatalf("key=%q err=%v", key, err)
 	}

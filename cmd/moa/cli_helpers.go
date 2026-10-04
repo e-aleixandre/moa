@@ -1,9 +1,9 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -18,106 +18,42 @@ type ProviderBuildResult struct {
 	AuthNotice string
 }
 
-// refreshingProvider injects a fresh API key into each Stream request.
-// This enables OAuth refresh during long-running sessions without restart.
-type refreshingProvider struct {
-	base         core.Provider
-	providerName string
-	authStore    *auth.Store
-}
-
-func (p *refreshingProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
-	apiKey, _, err := p.authStore.GetAPIKey(p.providerName)
-	if err != nil {
-		return nil, err
-	}
-	req.Options.APIKey = apiKey
-	return p.base.Stream(ctx, req)
-}
-
-// Unwrap exposes the provider decorated with API-key refreshing so optional
-// provider capabilities remain available to callers.
-func (p *refreshingProvider) Unwrap() core.Provider {
-	return p.base
-}
-
 // buildProvider creates the appropriate provider based on the model's Provider field.
 // Side-effect free: it writes nothing, so callers own their own output.
 func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult, error) {
-	providerName := model.Provider
-	if providerName == "" {
-		providerName = "anthropic"
-	}
+	return buildProviderWithClient(model, authStore, nil)
+}
 
-	// Deliberately not fatal. The key fetched here is never the one used:
-	// refreshingProvider asks for a fresh one on every Stream. Failing the
-	// build meant expired credentials blocked creating a session and even
-	// reopening an existing one, which left no way back in from a phone. The
-	// honest failure belongs at send time, where the token is really needed.
-	apiKey, isOAuth, err := authStore.GetAPIKey(providerName)
-	if err != nil {
-		apiKey, isOAuth = "", authStore.CredentialKind(providerName) == "oauth"
-	}
-
-	cfg := provider.Config{
-		APIKey:  apiKey,
-		IsOAuth: isOAuth,
-	}
-	if providerName == "xai" || providerName == "meta" {
-		cfg.AuthKind = provider.AuthKindAPIKey
-		if authStore.CredentialKind(providerName) == "oauth" {
-			cfg.AuthKind = provider.AuthKindOAuth
-		}
-	}
-
-	var authNotice string
-	switch providerName {
-	case "openai":
-		if isOAuth {
-			cfg.AccountID = authStore.GetAccountID("openai")
-			// chatgpt.com can reject an access token before its advertised
-			// expiry, so the proactive expiry check alone is not enough: the
-			// transport needs a reactive refresh path for rejected tokens.
-			cfg.RefreshOAuth = func(rejected string) (string, error) {
-				return authStore.RefreshOAuthIfCurrent("openai", rejected)
-			}
-			authNotice = "ChatGPT subscription OAuth"
-		}
-	case "anthropic":
-		if isOAuth {
-			authNotice = "Claude Max OAuth"
-		}
-	case "xai":
-		if isOAuth {
-			cfg.RefreshOAuth = func(rejected string) (string, error) {
-				return authStore.RefreshOAuthIfCurrent("xai", rejected)
-			}
-			authNotice = "SuperGrok/X subscription OAuth"
-		}
-	case "meta":
-		if isOAuth {
-			// The rejected value here is the minted Model API key, not the
-			// access token; the store re-mints it from the OAuth session.
-			cfg.RefreshOAuth = func(rejected string) (string, error) {
-				return authStore.RefreshOAuthIfCurrent("meta", rejected)
-			}
-			authNotice = "Muse subscription OAuth"
-		}
-	}
-
+// buildProviderWithClient is buildProvider whose provider requests go through
+// httpClient (nil = default). Tests use it to route the fixed origins locally.
+//
+// Building never resolves or refreshes a credential, and never fails for want
+// of one: expired or missing credentials must not block creating or
+// reopening a session, which left no way back in from a phone. The honest
+// failure belongs at send time, where snapshotProvider resolves the
+// credential for each request.
+func buildProviderWithClient(model core.Model, authStore *auth.Store, httpClient *http.Client) (ProviderBuildResult, error) {
 	m := model
-	m.Provider = providerName
-	p, err := provider.New(m, cfg)
-	if err != nil {
+	m.Provider = providerNameForModel(model)
+	p := &snapshotProvider{model: m, authStore: authStore, httpClient: httpClient}
+
+	snap, _ := authStore.PeekSnapshot(m.Provider)
+	// Validate the provider and model now, with the transport the next
+	// request would use.
+	if _, err := provider.New(m, p.config(snap, nil)); err != nil {
 		return ProviderBuildResult{}, err
 	}
 
-	wrapped := &refreshingProvider{
-		base:         p,
-		providerName: providerName,
-		authStore:    authStore,
+	var authNotice string
+	if snap.Kind == "oauth" {
+		authNotice = map[string]string{
+			"openai":    "ChatGPT subscription OAuth",
+			"anthropic": "Claude Max OAuth",
+			"xai":       "SuperGrok/X subscription OAuth",
+			"meta":      "Muse subscription OAuth",
+		}[m.Provider]
 	}
-	return ProviderBuildResult{Provider: wrapped, AuthNotice: authNotice}, nil
+	return ProviderBuildResult{Provider: p, AuthNotice: authNotice}, nil
 }
 
 // auxiliaryModelResolver uses only a provider's normal completion credential.

@@ -27,7 +27,7 @@ const (
 // key is minted from an OAuth token and can be re-minted when rejected.
 type Meta struct {
 	apiKey  string
-	remint  func(rejectedKey string) (string, error)
+	remint  func(ctx context.Context, rejectedKey string) (string, error)
 	client  *http.Client
 	baseURL string
 }
@@ -39,10 +39,17 @@ func New(apiKey string) *Meta {
 
 // NewOAuth creates a Meta provider for a Muse subscription. The key is the one
 // minted at login; remint exchanges a rejected key for a fresh one.
-func NewOAuth(mintedKey string, remint func(rejectedKey string) (string, error)) *Meta {
+func NewOAuth(mintedKey string, remint func(ctx context.Context, rejectedKey string) (string, error)) *Meta {
 	p := New(mintedKey)
 	p.remint = remint
 	return p
+}
+
+// WithHTTPClient replaces the HTTP client while keeping the pinned endpoint.
+// It is a server-side seam for tests that route the fixed origin locally.
+func (m *Meta) WithHTTPClient(c *http.Client) *Meta {
+	m.client = c
+	return m
 }
 
 // SupportsDocuments is true: input_file parts carrying a base64 data URL were
@@ -106,9 +113,9 @@ func (m *Meta) Stream(ctx context.Context, req core.Request) (<-chan core.Assist
 	// API key.
 	if resp.StatusCode == http.StatusUnauthorized && m.remint != nil {
 		resp.Body.Close() //nolint:errcheck
-		fresh, remintErr := m.remint(apiKey)
+		fresh, remintErr := m.remint(ctx, apiKey)
 		if remintErr != nil {
-			return nil, fmt.Errorf("meta: authentication failed")
+			return nil, core.ReactiveRefreshError("meta", remintErr)
 		}
 		apiKey = fresh
 		resp, err = retry.Do(ctx, m.client, request(apiKey), policy, nil)
@@ -163,10 +170,8 @@ func classifyHTTP(status int, body []byte, headers http.Header) error {
 	// Upstream bodies can carry request IDs and account details; keep the
 	// messages stable and actionable instead.
 	switch status {
-	case http.StatusUnauthorized:
-		return fmt.Errorf("meta: authentication failed")
-	case http.StatusForbidden:
-		return fmt.Errorf("meta: subscription entitlement denied")
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return &core.ProviderAuthError{Provider: "meta", Status: status}
 	case http.StatusNotFound:
 		return fmt.Errorf("meta: model or endpoint not found")
 	case http.StatusTooManyRequests:
