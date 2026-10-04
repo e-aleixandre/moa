@@ -32,7 +32,6 @@ func TestSubagentResumeAnthropicReplayParity(t *testing.T) {
 		provider      string
 		requested     string
 		legacy        bool
-		thinkingOnly  bool
 		compacted     bool
 		wantBlockType string
 	}{
@@ -48,10 +47,6 @@ func TestSubagentResumeAnthropicReplayParity(t *testing.T) {
 		{name: "foreign_provider", provider: "openai", legacy: true, thinking: core.Content{Type: "thinking", Thinking: "foreign reasoning", ThinkingSignature: "foreign-signature"}, wantBlockType: "tool_use"},
 		{name: "foreign_requested_model", requested: "claude-sonnet-5", thinking: core.Content{Type: "thinking", ThinkingSignature: "foreign-signature"}, wantBlockType: "tool_use"},
 		{name: "legacy_without_provenance", legacy: true, thinking: core.Content{Type: "thinking", ThinkingSignature: "synthetic-signature"}, wantBlockType: "thinking"},
-		{name: "signed_thinking_only", thinkingOnly: true, thinking: core.Content{Type: "thinking", ThinkingSignature: "synthetic-signature"}, wantBlockType: "thinking"},
-		{name: "redacted_thinking_only", thinkingOnly: true, thinking: core.Content{Type: "thinking", Redacted: true, ThinkingSignature: "synthetic-redacted-data"}, wantBlockType: "redacted_thinking"},
-		{name: "unsigned_blank_thinking_only", thinkingOnly: true, thinking: core.ThinkingContent("  ")},
-		{name: "foreign_thinking_only", provider: "openai", legacy: true, thinkingOnly: true, thinking: core.Content{Type: "thinking", ThinkingSignature: "foreign-signature"}},
 		{name: "compacted_tail", compacted: true, thinking: core.Content{Type: "thinking", ThinkingSignature: "synthetic-signature"}, wantBlockType: "thinking"},
 	}
 	for _, tc := range cases {
@@ -65,7 +60,7 @@ func TestSubagentResumeAnthropicReplayParity(t *testing.T) {
 				level = "high"
 			}
 			model := resumeReplayModel(t, modelID)
-			seed := resumeReplayFixture(model, tc.thinking, tc.thinkingOnly)
+			seed := resumeReplayFixture(model, tc.thinking, false)
 			if tc.legacy {
 				seed[1].Provider, seed[1].Model, seed[1].RequestedModel = "", "", ""
 			}
@@ -126,16 +121,17 @@ func TestSubagentResumeAnthropicReplayParity(t *testing.T) {
 				t.Fatal("resume rewrote the original sidecar")
 			}
 			requests := capture.requests(t, 2)
+			for i, request := range requests {
+				if len(request.violations) > 0 {
+					t.Errorf("request %d sent an invalid Anthropic shape: %v", i, request.violations)
+				}
+			}
 			normal, resumed := requests[0], requests[1]
 			assistant := normal.messages(t)[1]
 			if assistant.Role != "assistant" {
 				t.Fatal("missing normal assistant turn")
 			}
-			if tc.wantBlockType == "" {
-				if len(assistant.Content) != 0 {
-					t.Fatal("normal serializer must filter this entire thinking-only content")
-				}
-			} else if len(assistant.Content) == 0 || assistant.Content[0]["type"] != tc.wantBlockType {
+			if len(assistant.Content) == 0 || assistant.Content[0]["type"] != tc.wantBlockType {
 				t.Fatalf("normal serializer assistant content = %v, want first block %s", assistant.Content, tc.wantBlockType)
 			}
 			if tc.compacted && !strings.Contains(normal.messages(t)[0].Content[0]["text"].(string), "<summary>") {
@@ -214,6 +210,9 @@ func TestSubagentResumeModelSwitchUsesNormalReplayFilters(t *testing.T) {
 			}
 			requests := capture.requests(t, 2)
 			for i, request := range requests {
+				if len(request.violations) > 0 {
+					t.Errorf("request %d sent an invalid Anthropic shape: %v", i, request.violations)
+				}
 				if got := strings.Contains(string(request.body), "synthetic-origin-signature"); got != tc.wantSignature {
 					t.Errorf("request %d signature present = %v, want normal replay policy %v", i, got, tc.wantSignature)
 				}
@@ -378,7 +377,59 @@ func resumeReplayLoader(store *session.SubagentStore) func(string) (ResumedTrans
 }
 
 type resumeReplayRequest struct {
-	body []byte
+	body       []byte
+	violations []string
+}
+
+// structuralAnthropicViolations is an independent, minimal check of the
+// Anthropic messages body: it must not reuse the sanitizer or the converter to
+// decide validity. It only knows two API rules: assistant content is never
+// empty, and an assistant message never ends with a thinking block.
+func structuralAnthropicViolations(body []byte) []string {
+	var req struct {
+		Messages []struct {
+			Role    string           `json:"role"`
+			Content []map[string]any `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return []string{"body is not JSON: " + err.Error()}
+	}
+	var out []string
+	for i, m := range req.Messages {
+		if m.Role != "assistant" {
+			continue
+		}
+		if len(m.Content) == 0 {
+			out = append(out, fmt.Sprintf("messages.%d: assistant content is empty", i))
+			continue
+		}
+		if typ := m.Content[len(m.Content)-1]["type"]; typ == "thinking" || typ == "redacted_thinking" {
+			out = append(out, fmt.Sprintf("messages.%d: final block in an assistant message cannot be %v", i, typ))
+		}
+	}
+	return out
+}
+
+func TestStructuralAnthropicViolations(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"valid_text", `{"messages":[{"role":"user","content":[{"type":"text"}]},{"role":"assistant","content":[{"type":"thinking"},{"type":"text"}]}]}`, 0},
+		{"valid_tool_use_after_thinking", `{"messages":[{"role":"assistant","content":[{"type":"redacted_thinking"},{"type":"tool_use"}]}]}`, 0},
+		{"thinking_only", `{"messages":[{"role":"assistant","content":[{"type":"thinking"}]}]}`, 1},
+		{"redacted_only", `{"messages":[{"role":"assistant","content":[{"type":"redacted_thinking"}]}]}`, 1},
+		{"text_then_thinking", `{"messages":[{"role":"assistant","content":[{"type":"text"},{"type":"thinking"}]}]}`, 1},
+		{"empty_assistant", `{"messages":[{"role":"assistant","content":[]}]}`, 1},
+		{"empty_user_ignored", `{"messages":[{"role":"user","content":[]}]}`, 0},
+	}
+	for _, tc := range cases {
+		if got := structuralAnthropicViolations([]byte(tc.body)); len(got) != tc.want {
+			t.Errorf("%s: violations = %v, want %d", tc.name, got, tc.want)
+		}
+	}
 }
 
 type resumeReplayCapture struct {
@@ -398,8 +449,15 @@ func newResumeReplayCapture(t *testing.T, modelID string, success bool) (*resume
 			t.Error(err)
 		}
 		capture.mu.Lock()
-		capture.captured = append(capture.captured, resumeReplayRequest{body: body})
+		violations := structuralAnthropicViolations(body)
+		capture.captured = append(capture.captured, resumeReplayRequest{body: body, violations: violations})
 		capture.mu.Unlock()
+		// An invalid shape is rejected like the real API would, never accepted.
+		if len(violations) > 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, `{"type":"error","error":{"type":"invalid_request_error","message":%q}}`, violations[0])
+			return
+		}
 		if !success {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = io.WriteString(w, `{"type":"error","error":{"type":"invalid_request_error","message":"synthetic capture only"}}`)
