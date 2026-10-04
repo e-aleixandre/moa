@@ -283,7 +283,7 @@ test('scheduledSessionStatusAndPinnedLine', () => {
   // Only a self-made schedule: the status line still has a Tasks entry.
   const own = { requests: [], checklist: [], scheduled: [tmpl(1, { created_by_session_id: 'ci', next: at(30, 17) })] };
   expect(sessionTasksVerdict(own, NOW, TZ)).toBe('next 17:00');
-  expect(sessionTasksStatus(own, NOW, TZ)).toEqual({ text: 'next 17:00', forYou: 0 });
+  expect(sessionTasksStatus(own, NOW, TZ)).toEqual({ text: 'next 17:00', forYou: 0, short: 'next 17:00' });
   expect(schedPin(own.scheduled, NOW, TZ)).toMatchObject({ task: { id: 1 }, more: 0, late: false, key: 'Scheduled', when: 'in 20 min', byAgent: true });
 
   // A late run and a request: the request keeps the pinned line; the late
