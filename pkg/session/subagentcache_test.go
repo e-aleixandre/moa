@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -27,22 +26,35 @@ func testFP(c string) core.RequestFingerprint {
 	}
 }
 
-func TestSubagentCacheAudit_CountFirstLastAndPermissions(t *testing.T) {
+func testAudit(job, source string, count uint64, first, last string) SubagentCacheAudit {
+	a := SubagentCacheAudit{JobID: job, ResumedFrom: source, Count: count, First: testFP(first)}
+	if last != "" {
+		l := testFP(last)
+		a.Last = &l
+	}
+	return a
+}
+
+func TestSubagentCacheAudit_SnapshotsAndPermissions(t *testing.T) {
 	old := syscall.Umask(022)
 	defer syscall.Umask(old)
-	dir := t.TempDir()
-	store := NewSubagentStore(dir, "sess")
-	for i, c := range []string{"1", "2", "3"} {
-		if err := store.RecordRequestFingerprint("sa-1", "sa-0", testFP(c)); err != nil {
-			t.Fatalf("record %d: %v", i, err)
-		}
+	store := NewSubagentStore(t.TempDir(), "sess")
+	if err := store.SaveCacheAudit(testAudit("sa-1", "sa-0", 1, "1", "")); err != nil {
+		t.Fatal(err)
 	}
 	a, err := store.LoadCacheAudit("sa-1")
+	if err != nil || a.Last != nil || a.Count != 1 || a.Version != 1 {
+		t.Fatalf("start snapshot = %+v, %v", a, err)
+	}
+	if err := store.SaveCacheAudit(testAudit("sa-1", "sa-0", 3, "1", "3")); err != nil {
+		t.Fatal(err)
+	}
+	a, err = store.LoadCacheAudit("sa-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Version != 1 || a.JobID != "sa-1" || a.ResumedFrom != "sa-0" || a.Count != 3 ||
-		a.First.BodySHA256 != hex64("1") || a.Last.BodySHA256 != hex64("3") {
+	if a.JobID != "sa-1" || a.ResumedFrom != "sa-0" || a.Count != 3 ||
+		a.First.BodySHA256 != hex64("1") || a.Last == nil || a.Last.BodySHA256 != hex64("3") {
 		t.Fatalf("audit = %+v", a)
 	}
 	path := filepath.Join(store.Dir(), "sa-1.cache.json")
@@ -52,8 +64,7 @@ func TestSubagentCacheAudit_CountFirstLastAndPermissions(t *testing.T) {
 	if info, _ := os.Stat(store.Dir()); info.Mode().Perm() != 0700 {
 		t.Fatalf("dir mode %v", info.Mode().Perm())
 	}
-	entries, _ := os.ReadDir(store.Dir())
-	if len(entries) != 1 {
+	if entries, _ := os.ReadDir(store.Dir()); len(entries) != 1 {
 		t.Fatalf("leftover files: %v", entries)
 	}
 	if _, err := store.LoadCacheAudit("sa-missing"); !errors.Is(err, ErrNotFound) {
@@ -61,30 +72,33 @@ func TestSubagentCacheAudit_CountFirstLastAndPermissions(t *testing.T) {
 	}
 }
 
-func TestSubagentCacheAudit_ConcurrentRecordsAreNotLost(t *testing.T) {
+// Old files stored last as an always-present object; they must still load, and
+// a file without last loads with Last nil.
+func TestSubagentCacheAudit_LoadsOldAndLastlessFiles(t *testing.T) {
 	store := NewSubagentStore(t.TempDir(), "sess")
-	const n = 40
-	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := store.RecordRequestFingerprint("sa-1", "", testFP("4")); err != nil {
-				t.Error(err)
-			}
-		}()
+	if err := os.MkdirAll(store.Dir(), 0700); err != nil {
+		t.Fatal(err)
 	}
-	wg.Wait()
-	a, err := store.LoadCacheAudit("sa-1")
-	if err != nil || a.Count != n {
-		t.Fatalf("count=%v err=%v, want %d", a, err, n)
+	fp, _ := json.Marshal(testFP("1"))
+	path := filepath.Join(store.Dir(), "sa-1.cache.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"job_id":"sa-1","count":2,"first":`+string(fp)+`,"last":`+string(fp)+`}`), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if entries, _ := os.ReadDir(store.Dir()); len(entries) != 1 {
-		t.Fatalf("temporary files left: %v", entries)
+	if a, err := store.LoadCacheAudit("sa-1"); err != nil || a.Last == nil {
+		t.Fatalf("old file: %+v, %v", a, err)
+	}
+	if err := os.WriteFile(path, []byte(`{"version":1,"job_id":"sa-1","count":1,"first":`+string(fp)+`}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if a, err := store.LoadCacheAudit("sa-1"); err != nil || a.Last != nil {
+		t.Fatalf("lastless file: %+v, %v", a, err)
 	}
 }
 
-func TestSubagentCacheAudit_CorruptOrForeignIsNeitherResetNorOverwritten(t *testing.T) {
+// Saving never reads the previous file, so whatever was there (corrupt, from
+// another job, another source) is replaced by the new snapshot. This replaces
+// the old contract that refused to overwrite an unreadable audit.
+func TestSubagentCacheAudit_SaveOverwritesWithoutReading(t *testing.T) {
 	store := NewSubagentStore(t.TempDir(), "sess")
 	if err := os.MkdirAll(store.Dir(), 0700); err != nil {
 		t.Fatal(err)
@@ -99,25 +113,35 @@ func TestSubagentCacheAudit_CorruptOrForeignIsNeitherResetNorOverwritten(t *test
 		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.RecordRequestFingerprint("sa-1", "", testFP("1")); err == nil {
-			t.Fatalf("%s: record succeeded over an unreadable audit", name)
+		if _, err := store.LoadCacheAudit("sa-1"); err == nil {
+			t.Fatalf("%s: unreadable audit was accepted", name)
 		}
-		if got, _ := os.ReadFile(path); string(got) != content {
-			t.Fatalf("%s: file was rewritten", name)
+		if err := store.SaveCacheAudit(testAudit("sa-1", "", 2, "1", "2")); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if a, err := store.LoadCacheAudit("sa-1"); err != nil || a.Count != 2 {
+			t.Fatalf("%s: not replaced: %+v, %v", name, a, err)
 		}
 	}
 }
 
-func TestSubagentCacheAudit_SourceCannotChange(t *testing.T) {
+func TestSubagentCacheAudit_RejectsInvalidSnapshots(t *testing.T) {
 	store := NewSubagentStore(t.TempDir(), "sess")
-	if err := store.RecordRequestFingerprint("sa-1", "sa-0", testFP("1")); err != nil {
-		t.Fatal(err)
+	zero := testAudit("sa-1", "", 0, "1", "")
+	badLast := testAudit("sa-1", "", 2, "1", "2")
+	badLast.Last.BodySHA256 = "raw"
+	for name, a := range map[string]SubagentCacheAudit{
+		"zero count": zero,
+		"bad last":   badLast,
+		"bad job":    testAudit("../x", "", 1, "1", ""),
+		"bad source": testAudit("sa-1", "../x", 1, "1", ""),
+	} {
+		if err := store.SaveCacheAudit(a); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
 	}
-	if err := store.RecordRequestFingerprint("sa-1", "", testFP("2")); err == nil {
-		t.Fatal("source change accepted")
-	}
-	if a, _ := store.LoadCacheAudit("sa-1"); a.Count != 1 {
-		t.Fatalf("count = %d", a.Count)
+	if _, err := os.Stat(store.Dir()); !os.IsNotExist(err) {
+		t.Fatal("rejected snapshots must not create the directory")
 	}
 }
 
@@ -138,18 +162,12 @@ func TestSubagentCacheAudit_RejectsNonDigestValues(t *testing.T) {
 		bad = append(bad, f)
 	}
 	for i, f := range bad {
-		if err := store.RecordRequestFingerprint("sa-1", "", f); err == nil {
+		if err := store.SaveCacheAudit(SubagentCacheAudit{JobID: "sa-1", Count: 1, First: f}); err == nil {
 			t.Fatalf("case %d accepted", i)
 		}
 	}
 	if _, err := os.Stat(store.Dir()); !os.IsNotExist(err) {
 		t.Fatal("rejected fingerprints must not create the directory")
-	}
-	if err := store.RecordRequestFingerprint("../x", "", testFP("1")); err == nil {
-		t.Fatal("unsafe job id accepted")
-	}
-	if err := store.RecordRequestFingerprint("sa-1", "../x", testFP("1")); err == nil {
-		t.Fatal("unsafe source accepted")
 	}
 }
 
@@ -158,7 +176,7 @@ func TestSubagentCacheAudit_ListsIgnoreItAndTranscriptSavesDoNotTouchIt(t *testi
 	if err := store.Save(sampleTranscript("sa-1")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RecordRequestFingerprint("sa-1", "", testFP("1")); err != nil {
+	if err := store.SaveCacheAudit(testAudit("sa-1", "", 1, "1", "")); err != nil {
 		t.Fatal(err)
 	}
 	// A cache file whose content looks like a transcript must still be skipped.
@@ -176,7 +194,7 @@ func TestSubagentCacheAudit_ListsIgnoreItAndTranscriptSavesDoNotTouchIt(t *testi
 		t.Fatalf("ListSummaries = %d, %v", len(sums), err)
 	}
 	// Adding only an audit leaves the cached summaries valid and still equal.
-	if err := store.RecordRequestFingerprint("sa-2", "", testFP("2")); err != nil {
+	if err := store.SaveCacheAudit(testAudit("sa-2", "", 1, "2", "")); err != nil {
 		t.Fatal(err)
 	}
 	if sums, _ = store.ListSummaries(); len(sums) != 1 {
@@ -216,9 +234,8 @@ func TestSubagentStore_ReservesCacheJobSuffix(t *testing.T) {
 }
 
 // A well-formed JSON audit whose digests or source were altered is as
-// untrustworthy as a corrupt one: it must be rejected on load and never be
-// overwritten by a later record.
-func TestSubagentCacheAudit_AlteredValidJSONIsRejectedAndNotOverwritten(t *testing.T) {
+// untrustworthy as a corrupt one: Load rejects it.
+func TestSubagentCacheAudit_AlteredValidJSONIsRejectedOnLoad(t *testing.T) {
 	for name, mutate := range map[string]func(*SubagentCacheAudit){
 		"first_body": func(a *SubagentCacheAudit) { a.First.BodySHA256 = "INVALID_RAW_VALUE" },
 		"last_body":  func(a *SubagentCacheAudit) { a.Last.BodySHA256 = "INVALID_RAW_VALUE" },
@@ -230,7 +247,7 @@ func TestSubagentCacheAudit_AlteredValidJSONIsRejectedAndNotOverwritten(t *testi
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := NewSubagentStore(t.TempDir(), "sess")
-			if err := store.RecordRequestFingerprint("sa-1", "sa-0", testFP("1")); err != nil {
+			if err := store.SaveCacheAudit(testAudit("sa-1", "sa-0", 2, "1", "2")); err != nil {
 				t.Fatal(err)
 			}
 			path := filepath.Join(store.Dir(), "sa-1.cache.json")
@@ -250,15 +267,8 @@ func TestSubagentCacheAudit_AlteredValidJSONIsRejectedAndNotOverwritten(t *testi
 			if err := os.WriteFile(path, altered, 0600); err != nil {
 				t.Fatal(err)
 			}
-
 			if _, err := store.LoadCacheAudit("sa-1"); err == nil {
 				t.Fatal("Load accepted an altered audit")
-			}
-			if err := store.RecordRequestFingerprint("sa-1", audit.ResumedFrom, testFP("2")); err == nil {
-				t.Fatal("Record accepted an altered audit")
-			}
-			if got, _ := os.ReadFile(path); string(got) != string(altered) {
-				t.Fatal("altered audit was overwritten")
 			}
 		})
 	}

@@ -227,13 +227,18 @@ type StreamOptions struct {
 	// because the account cannot use the premium tier. It is process-local
 	// state coordination, never part of a provider payload.
 	OnFastUnavailable func() `json:"-"`
-	// OnRequestFingerprint, when set, receives a content-free description of
-	// the final provider request body (hashes and cache-marker positions only).
-	// Providers that do not fingerprint requests ignore it. It is called
-	// synchronously before the request is sent, so a slow sink (e.g. disk I/O)
-	// delays the request.
-	OnRequestFingerprint func(RequestFingerprint) `json:"-"`
+	// OnRequestFingerprint, when set, receives a lazy thunk for the final
+	// provider request body, once per logical request, before it is sent.
+	// Providers that do not fingerprint requests ignore it. The consumer
+	// decides when to evaluate it: subagents hash the first request here and
+	// retain only the latest thunk for evaluation when the job ends.
+	OnRequestFingerprint func(RequestFingerprintFunc) `json:"-"`
 }
+
+// RequestFingerprintFunc computes the fingerprint of one final request body on
+// demand. It holds only that immutable body, so retaining it keeps one request
+// alive; the cost of hashing is paid only when it is called.
+type RequestFingerprintFunc func() (RequestFingerprint, error)
 
 // RequestFingerprint describes one final provider request without carrying any
 // of its content: only SHA-256 digests and the positions of cache markers, so

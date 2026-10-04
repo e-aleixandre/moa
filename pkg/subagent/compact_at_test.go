@@ -13,9 +13,10 @@ import (
 func TestNewChildAgentInheritsCompactAt(t *testing.T) {
 	newChild := func(t *testing.T, cfg Config) int {
 		t.Helper()
-		child, err := newChildAgent(
+		child, _, err := newChildAgent(
 			cfg, newMockProvider(textResponse("hi")), core.Model{ID: "m", Provider: "mock"},
 			"medium", 0, "sys", core.NewRegistry(), "job-test",
+			"",
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -38,9 +39,10 @@ func TestNewChildAgentInheritsCompactAt(t *testing.T) {
 
 	t.Run("inherited value is a default, never the child's own choice", func(t *testing.T) {
 		cfg := Config{InheritedCompactAt: func() int { return 90_000 }}
-		child, err := newChildAgent(
+		child, _, err := newChildAgent(
 			cfg, newMockProvider(textResponse("hi")), core.Model{ID: "m", Provider: "mock"},
 			"medium", 0, "sys", core.NewRegistry(), "job-test",
+			"",
 		)
 		if err != nil {
 			t.Fatal(err)

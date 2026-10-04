@@ -152,7 +152,7 @@ type SessionConfig struct {
 	OnSubagentTitle      func(jobID, title string)
 	// OnSubagentRequestFingerprint receives content-free request fingerprints
 	// of subagent provider calls (see subagent.Config.OnChildRequestFingerprint).
-	OnSubagentRequestFingerprint func(jobID, resumedFrom string, fp core.RequestFingerprint)
+	OnSubagentRequestFingerprint func(jobID, resumedFrom string, count uint64, first core.RequestFingerprint, last *core.RequestFingerprint)
 
 	// Background bash callbacks feed the shared session bus/UI. Output is a
 	// lossy live delta; end carries the authoritative bounded log.

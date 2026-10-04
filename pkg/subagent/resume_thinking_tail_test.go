@@ -14,9 +14,8 @@ import (
 	"github.com/e-aleixandre/moa/pkg/provider/anthropic"
 )
 
-// These tests cover sanitizeResumeTranscript on its own. They do NOT claim the
-// provider accepts the result: the normal agent loop still has its own
-// thinking-tail debt, tracked separately from resume.
+// These tests cover sanitizeResumeTranscript on its own. The normal loop's
+// continuation cleanup is covered separately by the agent wire-contract tests.
 
 var (
 	tailSigned   = core.Content{Type: "thinking", ThinkingSignature: "synthetic-signature"}

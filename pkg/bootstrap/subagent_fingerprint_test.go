@@ -17,7 +17,9 @@ type fingerprintingProvider struct{}
 func (fingerprintingProvider) Stream(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	if cb := req.Options.OnRequestFingerprint; cb != nil {
 		h := strings.Repeat("d", 64)
-		cb(core.RequestFingerprint{BodySHA256: h, OptionsSHA256: h})
+		cb(func() (core.RequestFingerprint, error) {
+			return core.RequestFingerprint{BodySHA256: h, OptionsSHA256: h}, nil
+		})
 	}
 	msg := core.Message{Role: "assistant", Content: []core.Content{core.TextContent("done")}, StopReason: "end_turn", Timestamp: time.Now().Unix()}
 	ch := make(chan core.AssistantEvent, 2)
@@ -36,9 +38,9 @@ func TestBuildSessionSubagentFingerprintReachesStore(t *testing.T) {
 	cfg.Provider = fingerprintingProvider{}
 	cfg.ProviderFactory = func(core.Model) (core.Provider, error) { return fingerprintingProvider{}, nil }
 	store := session.NewSubagentStore(t.TempDir(), "parent")
-	cfg.OnSubagentRequestFingerprint = func(jobID, resumedFrom string, fp core.RequestFingerprint) {
-		if err := store.RecordRequestFingerprint(jobID, resumedFrom, fp); err != nil {
-			t.Errorf("record: %v", err)
+	cfg.OnSubagentRequestFingerprint = func(jobID, resumedFrom string, count uint64, first core.RequestFingerprint, last *core.RequestFingerprint) {
+		if err := store.SaveCacheAudit(session.SubagentCacheAudit{JobID: jobID, ResumedFrom: resumedFrom, Count: count, First: first, Last: last}); err != nil {
+			t.Errorf("save: %v", err)
 		}
 	}
 	sess, err := BuildSession(cfg)
@@ -58,7 +60,7 @@ func TestBuildSessionSubagentFingerprintReachesStore(t *testing.T) {
 		t.Fatal("no job id in result")
 	}
 	audit, err := store.LoadCacheAudit(jobID)
-	if err != nil || audit.Count != 1 {
+	if err != nil || audit.Count != 1 || audit.Last == nil {
 		t.Fatalf("audit=%+v err=%v", audit, err)
 	}
 }

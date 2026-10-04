@@ -145,9 +145,10 @@ func TestSyncParentTaskIsAnnouncedAndRecorded(t *testing.T) {
 // A resumed child appends its new task after the replayed history, and that
 // append is announced too — a resume is as live as a fresh start.
 func TestResumedParentTaskIsAnnounced(t *testing.T) {
-	child, err := newChildAgent(
+	child, _, err := newChildAgent(
 		Config{}, newMockProvider(textResponse("done")), core.Model{ID: "m", Provider: "mock"},
 		"medium", 0, "sys", core.NewRegistry(), "job-resume",
+		"",
 	)
 	if err != nil {
 		t.Fatal(err)

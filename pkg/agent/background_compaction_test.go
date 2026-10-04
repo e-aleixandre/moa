@@ -142,7 +142,7 @@ func newBGT(t *testing.T, script func(call int) *core.Message) *bgtFix {
 	ag, err := New(AgentConfig{
 		Provider: f.prov, Model: f.model, Tools: reg, Compaction: &settings, MaxTurns: 10, MaxRunDuration: 20 * time.Second,
 		SessionCheckpoint:    f.slot,
-		OnRequestFingerprint: func(core.RequestFingerprint) {},
+		OnRequestFingerprint: func(core.RequestFingerprintFunc) {},
 		CompactSummarizer: func(m core.Model) (core.Provider, core.Model, string) {
 			m.Pricing = bgtPricing
 			return f.sum, m, ""

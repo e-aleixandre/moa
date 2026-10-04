@@ -278,12 +278,16 @@ session. It holds only SHA-256 digests of the final request (whole body,
 tools, system, options, a rolling hash per block) and the position and TTL of
 each cache marker — never prompt text, signatures, images or credentials. It
 records the first and the latest request plus `count`: the number of final
-request bodies built for that job. Each resume is a new job with its own file,
+request bodies built for that job. The file is written when the first request
+is built and again when the job ends, so if moa crashes mid-job only the first
+request (`count` 1, no `last`) is kept; `last` is also absent if it could not be
+computed. Each resume is a new job with its own file,
 so counts are per job, not summed across resumes. An HTTP retry resends the
 same body and counts once; a fast-mode fallback rebuilds the body and counts
 again. A resumed job's `resumed_from` names the job it continued: compare the
 original job's `last` with the resumed job's `first` to see where the prefix
-diverged. The terminal UI does not persist subagents and keeps no audit.
+diverged. Treat this file as private: hashes can confirm guessed content; do not share it publicly.
+The terminal UI does not persist subagents and keeps no audit.
 
 ## Custom script tools
 

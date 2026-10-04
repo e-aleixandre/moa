@@ -18,9 +18,10 @@ func TestChildAgentUsesOwnCacheKey(t *testing.T) {
 		return textResponse("done")(context.Background(), req)
 	})
 
-	child, err := newChildAgent(
+	child, _, err := newChildAgent(
 		Config{PromptCacheKey: parentKey}, provider,
 		core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", core.NewRegistry(), "sa-999",
+		"",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -45,9 +46,10 @@ func TestChildAgentWithoutParentKey(t *testing.T) {
 		seen = req.Options.PromptCacheKey
 		return textResponse("done")(context.Background(), req)
 	})
-	child, err := newChildAgent(
+	child, _, err := newChildAgent(
 		Config{}, provider,
 		core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", core.NewRegistry(), "sa-999",
+		"",
 	)
 	if err != nil {
 		t.Fatal(err)

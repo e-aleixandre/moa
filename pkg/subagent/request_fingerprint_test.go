@@ -10,15 +10,19 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/provider/anthropic"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 type fingerprintEvent struct {
 	jobID, resumedFrom string
-	fp                 core.RequestFingerprint
+	count              uint64
+	first              core.RequestFingerprint
+	last               *core.RequestFingerprint
 }
 
 // Sync and async children, fresh and resumed, report their final wire body
-// together with the job and the job they resumed.
+// together with the job and the job they resumed: a start snapshot (no last)
+// when the first request is built and a final one when the job ends.
 func TestChildRequestFingerprintCorrelatesJobsAndSources(t *testing.T) {
 	isolatedResumeReplayEnvironment(t)
 	model := resumeReplayModel(t, "claude-opus-5-5")
@@ -34,12 +38,12 @@ func TestChildRequestFingerprintCorrelatesJobsAndSources(t *testing.T) {
 	defer cancel()
 	cfg.AppCtx = ctx
 	cfg.TranscriptLoader = resumeReplayLoader(store)
-	cfg.OnChildRequestFingerprint = func(jobID, resumedFrom string, fp core.RequestFingerprint) {
-		if err := store.RecordRequestFingerprint(jobID, resumedFrom, fp); err != nil {
+	cfg.OnChildRequestFingerprint = func(jobID, resumedFrom string, count uint64, first core.RequestFingerprint, last *core.RequestFingerprint) {
+		if err := store.SaveCacheAudit(session.SubagentCacheAudit{JobID: jobID, ResumedFrom: resumedFrom, Count: count, First: first, Last: last}); err != nil {
 			t.Errorf("persist native request fingerprint: %v", err)
 		}
 		mu.Lock()
-		events = append(events, fingerprintEvent{jobID, resumedFrom, fp})
+		events = append(events, fingerprintEvent{jobID, resumedFrom, count, first, last})
 		mu.Unlock()
 	}
 	tool := newSubagent(cfg, newJobStore())
@@ -58,7 +62,7 @@ func TestChildRequestFingerprintCorrelatesJobsAndSources(t *testing.T) {
 		defer capture.mu.Unlock()
 		return len(capture.captured) == 3
 	})
-	waitFor(t, 5*time.Second, func() bool { mu.Lock(); defer mu.Unlock(); return len(events) == 3 })
+	waitFor(t, 5*time.Second, func() bool { mu.Lock(); defer mu.Unlock(); return len(events) == 6 })
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -69,22 +73,30 @@ func TestChildRequestFingerprintCorrelatesJobsAndSources(t *testing.T) {
 	}
 	jobs := map[string]bool{}
 	sources := map[string]int{}
+	finals := 0
 	for _, e := range events {
 		jobs[e.jobID] = true
-		sources[e.resumedFrom]++
-		if !wire[e.fp.BodySHA256] {
-			t.Errorf("job %s fingerprint does not match any wire body", e.jobID)
+		if e.count != 1 || !wire[e.first.BodySHA256] {
+			t.Errorf("job %s snapshot count=%d does not match a wire body", e.jobID, e.count)
+		}
+		if e.last == nil {
+			sources[e.resumedFrom]++
+			continue
+		}
+		finals++
+		if e.last.BodySHA256 != e.first.BodySHA256 {
+			t.Errorf("job %s final last differs from first for a single request", e.jobID)
 		}
 		audit, err := store.LoadCacheAudit(e.jobID)
 		if err != nil {
 			t.Fatalf("load native request fingerprint: %v", err)
 		}
-		if audit.Count != 1 || audit.ResumedFrom != e.resumedFrom ||
-			audit.First.BodySHA256 != e.fp.BodySHA256 || audit.Last.BodySHA256 != e.fp.BodySHA256 {
-			t.Fatalf("persisted fingerprint differs from native callback for job %s", e.jobID)
+		if audit.Count != 1 || audit.ResumedFrom != e.resumedFrom || audit.Last == nil ||
+			audit.First.BodySHA256 != e.first.BodySHA256 || audit.Last.BodySHA256 != e.first.BodySHA256 {
+			t.Fatalf("persisted audit differs from native callback for job %s", e.jobID)
 		}
 	}
-	if len(jobs) != 3 || sources[""] != 1 || sources["synthetic-original-job"] != 2 {
-		t.Fatalf("jobs=%v sources=%v", jobs, sources)
+	if len(jobs) != 3 || finals != 3 || sources[""] != 1 || sources["synthetic-original-job"] != 2 {
+		t.Fatalf("jobs=%v sources=%v finals=%d", jobs, sources, finals)
 	}
 }

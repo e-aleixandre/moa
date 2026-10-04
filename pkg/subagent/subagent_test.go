@@ -1452,7 +1452,7 @@ func TestNewChildAgentAppliesGuardrails(t *testing.T) {
 	cfg := Config{ChildMaxTurns: 7, ChildMaxRunDuration: 3 * time.Minute}
 	provider := newMockProvider(textResponse("hi"))
 	reg := core.NewRegistry()
-	child, err := newChildAgent(cfg, provider, core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", reg, "job-test")
+	child, _, err := newChildAgent(cfg, provider, core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", reg, "job-test", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1467,9 +1467,10 @@ func TestNewChildAgentAppliesGuardrails(t *testing.T) {
 func TestRunChildMarksFreshAndResumedParentTasks(t *testing.T) {
 	newChild := func(provider core.Provider) *agent.Agent {
 		t.Helper()
-		child, err := newChildAgent(
+		child, _, err := newChildAgent(
 			Config{}, provider, core.Model{ID: "m", Provider: "mock"},
 			"medium", 0, "sys", core.NewRegistry(), "job-test",
+			"",
 		)
 		if err != nil {
 			t.Fatal(err)

@@ -53,9 +53,6 @@ type SubagentStore struct {
 	summaryMu    sync.Mutex
 	summarySig   map[string]summaryFileSig
 	summaryCache []SubagentTranscript
-
-	// auditMu serializes read-modify-write of cache-audit sidecars.
-	auditMu sync.Mutex
 }
 
 type summaryFileSig struct {

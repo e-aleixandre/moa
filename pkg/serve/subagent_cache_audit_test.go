@@ -21,6 +21,15 @@ func auditTestFingerprint(c string) core.RequestFingerprint {
 	}
 }
 
+func auditTestSnapshot(job, source string, count uint64, first, last string) session.SubagentCacheAudit {
+	a := session.SubagentCacheAudit{JobID: job, ResumedFrom: source, Count: count, First: auditTestFingerprint(first)}
+	if last != "" {
+		l := auditTestFingerprint(last)
+		a.Last = &l
+	}
+	return a
+}
+
 func newAuditPersister(t *testing.T) (*servePersister, *session.FileStore) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
@@ -31,7 +40,7 @@ func newAuditPersister(t *testing.T) (*servePersister, *session.FileStore) {
 	return newServePersister(&session.Session{ID: "sess"}, store, func() (string, string, bool) { return "", "", false }), store
 }
 
-// A record that was already waiting for the persister when the session was
+// A snapshot that was already waiting for the persister when the session was
 // deleted must observe the deletion under the same lock and write nothing.
 func TestSubagentCacheAuditCannotRecreateDeletedSession(t *testing.T) {
 	sp, store := newAuditPersister(t)
@@ -42,12 +51,12 @@ func TestSubagentCacheAuditCannotRecreateDeletedSession(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		close(started)
-		done <- sp.recordSubagentRequestFingerprint("sess", "sa-1", "", auditTestFingerprint("a"))
+		done <- sp.saveSubagentCacheAudit("sess", auditTestSnapshot("sa-1", "", 1, "a", ""))
 	}()
 	<-started
 	select {
 	case err := <-done:
-		t.Fatalf("record did not wait for sp.mu: %v", err)
+		t.Fatalf("save did not wait for sp.mu: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
 	sp.deleted = true
@@ -60,22 +69,44 @@ func TestSubagentCacheAuditCannotRecreateDeletedSession(t *testing.T) {
 	}
 }
 
-func TestSubagentCacheAuditPersisterRecordsAndKeepsCountAcrossCalls(t *testing.T) {
+// Start and end snapshots each overwrite the file: first without last, then
+// with the final count and last.
+func TestSubagentCacheAuditPersisterOverwritesWithSnapshots(t *testing.T) {
 	sp, store := newAuditPersister(t)
-	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := sp.recordSubagentRequestFingerprint("sess", "sa-1", "sa-0", auditTestFingerprint("b")); err != nil {
-				t.Error(err)
-			}
-		}()
+	reader := session.NewSubagentStore(store.Dir(), "sess")
+	if err := sp.saveSubagentCacheAudit("sess", auditTestSnapshot("sa-1", "sa-0", 1, "b", "")); err != nil {
+		t.Fatal(err)
 	}
-	wg.Wait()
-	a, err := session.NewSubagentStore(store.Dir(), "sess").LoadCacheAudit("sa-1")
-	if err != nil || a.Count != 8 || a.ResumedFrom != "sa-0" {
-		t.Fatalf("audit=%+v err=%v", a, err)
+	a, err := reader.LoadCacheAudit("sa-1")
+	if err != nil || a.Count != 1 || a.Last != nil || a.ResumedFrom != "sa-0" {
+		t.Fatalf("start audit=%+v err=%v", a, err)
+	}
+	if err := sp.saveSubagentCacheAudit("sess", auditTestSnapshot("sa-1", "sa-0", 8, "b", "c")); err != nil {
+		t.Fatal(err)
+	}
+	a, err = reader.LoadCacheAudit("sa-1")
+	if err != nil || a.Count != 8 || a.Last == nil || a.Last.BodySHA256 != strings.Repeat("c", 64) {
+		t.Fatalf("end audit=%+v err=%v", a, err)
+	}
+}
+
+// Neither the start nor the end snapshot may write after the session was deleted.
+func TestSubagentCacheAuditSnapshotsAfterDeleteWriteNothing(t *testing.T) {
+	sp, store := newAuditPersister(t)
+	dir := session.NewSubagentStore(store.Dir(), "sess").Dir()
+	sp.mu.Lock()
+	sp.deleted = true
+	sp.mu.Unlock()
+	for _, a := range []session.SubagentCacheAudit{
+		auditTestSnapshot("sa-1", "", 1, "a", ""),
+		auditTestSnapshot("sa-1", "", 3, "a", "b"),
+	} {
+		if err := sp.saveSubagentCacheAudit("sess", a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("snapshot after delete wrote: %v", err)
 	}
 }
 
@@ -95,7 +126,7 @@ func TestSubagentRequestFingerprintReachesSessionStore(t *testing.T) {
 					parentObserved++
 				} else {
 					childObserved++
-					cb(auditTestFingerprint("c"))
+					cb(func() (core.RequestFingerprint, error) { return auditTestFingerprint("c"), nil })
 				}
 			}
 			return inner(ctx, req)
@@ -121,8 +152,8 @@ func TestSubagentRequestFingerprintReachesSessionStore(t *testing.T) {
 			return false
 		}
 		jobID = list[0].JobID
-		_, err := store.LoadCacheAudit(jobID)
-		return err == nil
+		a, err := store.LoadCacheAudit(jobID)
+		return err == nil && a.Last != nil
 	})
 	audit, err := store.LoadCacheAudit(jobID)
 	if err != nil {
@@ -131,7 +162,7 @@ func TestSubagentRequestFingerprintReachesSessionStore(t *testing.T) {
 	mu.Lock()
 	p, c := parentObserved, childObserved
 	mu.Unlock()
-	if audit.Count != 1 || audit.ResumedFrom != "" || audit.JobID != jobID || p != 0 || c != 1 {
+	if audit.Count != 1 || audit.Last == nil || audit.ResumedFrom != "" || audit.JobID != jobID || p != 0 || c != 1 {
 		t.Fatalf("audit=%+v parentObserved=%d childObserved=%d", audit, p, c)
 	}
 	pollUntil(t, 5*time.Second, "parent run completion", func() bool { return sessState(sess) == StateIdle })

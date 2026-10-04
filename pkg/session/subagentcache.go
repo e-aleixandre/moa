@@ -28,16 +28,22 @@ const (
 // Count is the number of final provider request bodies built for THIS job.
 // Every resume starts a new job with its own audit file, so counts are never
 // aggregated across resumes. An HTTP retry of the same body is one request; a
-// fast-mode fallback that rebuilds the body is another. To judge whether a
-// resume kept the cache prefix, compare the original job's Last with the
-// resumed job's First (linked by ResumedFrom), not First and Last of one job.
+// fast-mode fallback that rebuilds the body is another. The file is written
+// when the first request is built (Last nil) and again when the job ends, so a
+// crash in between leaves only First and Count 1. Last is also nil when the
+// final fingerprint could not be computed. To judge whether a resume kept the
+// cache prefix, compare the original job's Last with the resumed job's First
+// (linked by ResumedFrom), not First and Last of one job.
+//
+// The file holds hashes only, but hashes can confirm guessed content: treat it
+// as private.
 type SubagentCacheAudit struct {
-	Version     int                     `json:"version"`
-	JobID       string                  `json:"job_id"`
-	ResumedFrom string                  `json:"resumed_from,omitempty"`
-	Count       uint64                  `json:"count"`
-	First       core.RequestFingerprint `json:"first"`
-	Last        core.RequestFingerprint `json:"last"`
+	Version     int                      `json:"version"`
+	JobID       string                   `json:"job_id"`
+	ResumedFrom string                   `json:"resumed_from,omitempty"`
+	Count       uint64                   `json:"count"`
+	First       core.RequestFingerprint  `json:"first"`
+	Last        *core.RequestFingerprint `json:"last,omitempty"`
 }
 
 func isCacheAuditFile(name string) bool { return strings.HasSuffix(name, cacheAuditFileSuffix) }
@@ -46,40 +52,31 @@ func (s *SubagentStore) cachePath(jobID string) string {
 	return filepath.Join(s.dir, jobID+cacheAuditFileSuffix)
 }
 
-// RecordRequestFingerprint folds one request into the job's audit: the first
-// fingerprint is kept forever, Last is replaced and Count grows. An unreadable,
-// corrupt or foreign existing file is reported and left untouched rather than
-// silently reset.
-func (s *SubagentStore) RecordRequestFingerprint(jobID, resumedFrom string, fp core.RequestFingerprint) error {
-	if err := validJobID(jobID); err != nil {
+// SaveCacheAudit atomically overwrites the job's audit with a complete
+// snapshot. It never reads the previous file: a snapshot is self-contained, so
+// a corrupt or stale file is simply replaced.
+func (s *SubagentStore) SaveCacheAudit(a SubagentCacheAudit) error {
+	if err := validJobID(a.JobID); err != nil {
 		return err
 	}
-	if resumedFrom != "" {
-		if err := validJobID(resumedFrom); err != nil {
+	if a.ResumedFrom != "" {
+		if err := validJobID(a.ResumedFrom); err != nil {
 			return err
 		}
 	}
-	if err := validateFingerprint(fp); err != nil {
+	if a.Count == 0 {
+		return errors.New("session: subagent cache audit has no requests")
+	}
+	if err := validateFingerprint(a.First); err != nil {
 		return err
 	}
-
-	s.auditMu.Lock()
-	defer s.auditMu.Unlock()
-
-	audit, err := s.readCacheAudit(jobID)
-	switch {
-	case err == nil:
-		if audit.ResumedFrom != resumedFrom {
-			return errors.New("session: subagent cache audit source mismatch")
+	if a.Last != nil {
+		if err := validateFingerprint(*a.Last); err != nil {
+			return err
 		}
-		audit.Count++
-		audit.Last = fp
-	case errors.Is(err, ErrNotFound):
-		audit = &SubagentCacheAudit{Version: subagentCacheAuditVersion, JobID: jobID, ResumedFrom: resumedFrom, Count: 1, First: fp, Last: fp}
-	default:
-		return err
 	}
-	return s.writeCacheAudit(jobID, audit)
+	a.Version = subagentCacheAuditVersion
+	return s.writeCacheAudit(a.JobID, &a)
 }
 
 // LoadCacheAudit reads one job's cache audit. Returns ErrNotFound (wrapped)
@@ -88,8 +85,6 @@ func (s *SubagentStore) LoadCacheAudit(jobID string) (*SubagentCacheAudit, error
 	if err := validJobID(jobID); err != nil {
 		return nil, err
 	}
-	s.auditMu.Lock()
-	defer s.auditMu.Unlock()
 	return s.readCacheAudit(jobID)
 }
 
@@ -111,7 +106,7 @@ func (s *SubagentStore) readCacheAudit(jobID string) (*SubagentCacheAudit, error
 	if a.ResumedFrom != "" && validJobID(a.ResumedFrom) != nil {
 		return nil, errors.New("session: subagent cache audit has invalid source")
 	}
-	if validateFingerprint(a.First) != nil || validateFingerprint(a.Last) != nil {
+	if validateFingerprint(a.First) != nil || (a.Last != nil && validateFingerprint(*a.Last) != nil) {
 		return nil, errors.New("session: subagent cache audit has invalid fingerprint")
 	}
 	return &a, nil

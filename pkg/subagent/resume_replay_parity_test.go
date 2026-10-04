@@ -85,7 +85,7 @@ func TestSubagentResumeAnthropicReplayParity(t *testing.T) {
 				t.Fatal(textOf(*errorResult))
 			}
 			system := buildSystemPrompt(cfg.PromptBuilder, "", registry.Specs(), cfg.WorkspaceRoot, "", "")
-			child, err := newChildAgent(cfg, provider, model, level, 0, system, registry, "synthetic-original-job")
+			child, _, err := newChildAgent(cfg, provider, model, level, 0, system, registry, "synthetic-original-job", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -190,7 +190,7 @@ func TestSubagentResumeModelSwitchUsesNormalReplayFilters(t *testing.T) {
 				t.Fatal(textOf(*errorResult))
 			}
 			system := buildSystemPrompt(cfg.PromptBuilder, "", registry.Specs(), cfg.WorkspaceRoot, "", "")
-			child, err := newChildAgent(cfg, provider, target, "high", 0, system, registry, "synthetic-control-job")
+			child, _, err := newChildAgent(cfg, provider, target, "high", 0, system, registry, "synthetic-control-job", "")
 			if err != nil {
 				t.Fatal(err)
 			}

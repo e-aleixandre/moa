@@ -470,11 +470,11 @@ type AgentConfig struct {
 	// PromptCacheKey identifies this agent's conversation for cache routing on
 	// the Responses providers (OpenAI, xAI). Empty omits the field entirely.
 	PromptCacheKey string
-	// OnRequestFingerprint receives a content-free fingerprint of every final
+	// OnRequestFingerprint receives a lazy fingerprint thunk for every final
 	// provider request the agent's own turns send (never its compaction
 	// summarizer calls). nil = no fingerprinting.
-	OnRequestFingerprint func(core.RequestFingerprint) `json:"-"`
-	MaxTokens            int                           // Max output tokens per LLM call. 0 = shared model-aware default.
+	OnRequestFingerprint func(core.RequestFingerprintFunc) `json:"-"`
+	MaxTokens            int                               // Max output tokens per LLM call. 0 = shared model-aware default.
 	Tools                *core.Registry
 	// CompactStrategy is what the agent gets before an automatic compaction:
 	// core.CompactPlain, CompactNotify or CompactPrepare. Empty behaves as

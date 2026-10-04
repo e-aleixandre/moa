@@ -154,10 +154,15 @@ type Config struct {
 	// final total.
 	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
 
-	// OnChildRequestFingerprint receives a content-free fingerprint of each
-	// final provider request a child sends. resumedFrom is the job a resumed
-	// child continues ("" for a fresh one). nil disables fingerprinting.
-	OnChildRequestFingerprint func(jobID, resumedFrom string, fp core.RequestFingerprint)
+	// OnChildRequestFingerprint receives content-free fingerprints of the
+	// final provider requests of one child job as a snapshot: count requests
+	// were built, first is the first one, last the most recent (nil when it
+	// could not be computed or when count is 1 and only first is known). It is
+	// called once when the first request is built (count 1, last nil) and once
+	// when the job ends (the final snapshot), always from the job's goroutine.
+	// A crash before the end keeps only the first. resumedFrom is the job a
+	// resumed child continues ("" for a fresh one). nil disables fingerprinting.
+	OnChildRequestFingerprint func(jobID, resumedFrom string, count uint64, first core.RequestFingerprint, last *core.RequestFingerprint)
 
 	// OnChildEnd is called once when a child agent (sync or async) finishes.
 	// Result/Error are the terminal child outcome, not the one-time model
@@ -369,7 +374,8 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				return *errResult, nil
 			}
 			seedMsgs := resumed.Messages
-			resumedFrom := strings.TrimSpace(stringParam(params, "resume"))
+			resumedFrom, _ := params["resume"].(string)
+			resumedFrom = strings.TrimSpace(resumedFrom)
 			model, errResult := resolveModel(defaultModel(cfg, resumed), params, currentAllowedModels(cfg))
 			if errResult != nil {
 				return *errResult, nil
@@ -873,7 +879,7 @@ func syncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Mode
 // sync job may be promoted to async mid-run) decides how each streamed event
 // is forwarded, so there is a single subscription with no resubscription and
 // therefore no risk of losing or duplicating events across a promotion.
-func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result), startNotified bool, resumedFrom ...string) {
+func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result), startNotified bool, resumedFrom string) {
 	defer j.cancel()
 	defer close(j.done)
 	var finalMsgs []core.AgentMessage
@@ -927,10 +933,15 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		}
 	}()
 
-	child, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, j.id, resumedFrom...)
+	child, finishFingerprints, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, j.id, resumedFrom)
 	if err != nil {
 		jobs.setFailed(j.id, err.Error())
 		return
+	}
+	if finishFingerprints != nil {
+		// Registered after the terminal defer above, so the final audit
+		// snapshot lands before OnChildEnd, async notifications and close(done).
+		defer finishFingerprints()
 	}
 	jobs.setChildAgent(j.id, child)
 	unsub := child.Subscribe(func(e core.AgentEvent) {
@@ -1244,22 +1255,22 @@ func resolveChildGuardrails(cfg Config, perCallDuration time.Duration) (maxTurns
 	return maxTurns, maxRunDuration
 }
 
-func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, jobID string, resumedFrom ...string) (*agent.Agent, error) {
+func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, jobID, resumedFrom string) (*agent.Agent, func(), error) {
 	maxTurns, runDuration := resolveChildGuardrails(cfg, maxRunDuration)
 	effectiveThinking, err := core.EffectiveThinkingLevel(model, thinkingLevel)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var onFingerprint func(core.RequestFingerprint)
-	if cfg.OnChildRequestFingerprint != nil {
-		source := ""
-		if len(resumedFrom) > 0 {
-			source = resumedFrom[0]
-		}
-		sink := cfg.OnChildRequestFingerprint
-		onFingerprint = func(fp core.RequestFingerprint) { sink(jobID, source, fp) }
+	var onFingerprint func(core.RequestFingerprintFunc)
+	var finish func()
+	if sink := cfg.OnChildRequestFingerprint; sink != nil {
+		tracker := &childRequestFingerprints{emit: func(count uint64, first core.RequestFingerprint, last *core.RequestFingerprint) {
+			sink(jobID, resumedFrom, count, first, last)
+		}}
+		onFingerprint = tracker.observe
+		finish = tracker.finish
 	}
-	return agent.New(agent.AgentConfig{
+	child, err := agent.New(agent.AgentConfig{
 		OnRequestFingerprint: onFingerprint,
 		Provider:             provider,
 		Model:                model,
@@ -1300,6 +1311,10 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		// setting is global, and a child's compaction is a summary too.
 		CompactSummarizer: cfg.CompactSummarizer,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return child, finish, nil
 }
 
 // childCompactionSettings are the session defaults with context trimming
@@ -1599,14 +1614,15 @@ func defaultThinking(cfg Config, resumed ResumedTranscript, model core.Model) st
 // resume unsupported, etc.).
 func resolveResume(cfg Config, params map[string]any) (ResumedTranscript, *core.Result) {
 	jobID, _ := params["resume"].(string)
-	if strings.TrimSpace(jobID) == "" {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
 		return ResumedTranscript{}, nil
 	}
 	if cfg.TranscriptLoader == nil {
 		res := core.ErrorResult("resume is not supported in this environment")
 		return ResumedTranscript{}, &res
 	}
-	t, err := cfg.TranscriptLoader(strings.TrimSpace(jobID))
+	t, err := cfg.TranscriptLoader(jobID)
 	if err != nil {
 		res := core.ErrorResult("cannot resume subagent " + jobID + ": " + err.Error())
 		return ResumedTranscript{}, &res
@@ -1864,11 +1880,6 @@ func tailLinesWithFlag(s string, n int) (string, bool) {
 		return s, false
 	}
 	return strings.Join(lines[len(lines)-n:], "\n"), true
-}
-
-func stringParam(params map[string]any, key string) string {
-	v, _ := params[key].(string)
-	return v
 }
 
 func getBool(params map[string]any, key string) bool {

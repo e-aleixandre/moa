@@ -77,7 +77,7 @@ func TestFingerprintBodyHashIsActualWireBytesAndObserverIsInert(t *testing.T) {
 		}))
 		a := NewWithBaseURL(key, srv.URL)
 
-		run := func(observe func(core.RequestFingerprint)) {
+		run := func(observe func(core.RequestFingerprintFunc)) {
 			req := fpRequest(convo(2)...)
 			req.Options.OnRequestFingerprint = observe
 			ch, err := a.Stream(context.Background(), req)
@@ -87,17 +87,26 @@ func TestFingerprintBodyHashIsActualWireBytesAndObserverIsInert(t *testing.T) {
 			for range ch {
 			}
 		}
-		var got []core.RequestFingerprint
+		var got []core.RequestFingerprintFunc
 		run(nil)
-		run(func(fp core.RequestFingerprint) { got = append(got, fp) })
+		run(func(f core.RequestFingerprintFunc) { got = append(got, f) })
 		srv.Close()
 
 		if len(bodies) != 2 || string(bodies[0]) != string(bodies[1]) {
 			t.Fatalf("%s: observer changed the wire body or request count (%d requests)", key, len(bodies))
 		}
+		if len(got) != 1 {
+			t.Fatalf("%s: thunks=%d, want 1", key, len(got))
+		}
+		// The thunk outlives Stream and still describes the exact wire bytes.
 		sum := sha256.Sum256(bodies[1])
-		if len(got) != 1 || got[0].BodySHA256 != hex.EncodeToString(sum[:]) {
-			t.Fatalf("%s: captures=%d, body hash does not match the wire bytes", key, len(got))
+		fp, err := got[0]()
+		if err != nil || fp.BodySHA256 != hex.EncodeToString(sum[:]) {
+			t.Fatalf("%s: err=%v, body hash does not match the wire bytes", key, err)
+		}
+		again, err := got[0]()
+		if err != nil || again.BodySHA256 != fp.BodySHA256 || !again.BuiltAt.Equal(fp.BuiltAt) || fp.BuiltAt.IsZero() || fp.BuiltAt.Location() != time.UTC {
+			t.Fatalf("%s: thunk is not stable or lacks the build time", key)
 		}
 	}
 }
@@ -287,8 +296,8 @@ func TestFingerprintAndStoredAuditContainNoContent(t *testing.T) {
 		core.NewToolResultMessage("t1", "alpha", []core.Content{core.TextContent("SENTINEL_RESULT")}, false),
 	)
 	req.Options.APIKey = key
-	var fp core.RequestFingerprint
-	req.Options.OnRequestFingerprint = func(f core.RequestFingerprint) { fp = f }
+	var thunk core.RequestFingerprintFunc
+	req.Options.OnRequestFingerprint = func(f core.RequestFingerprintFunc) { thunk = f }
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
@@ -302,9 +311,13 @@ func TestFingerprintAndStoredAuditContainNoContent(t *testing.T) {
 	for range ch {
 	}
 
+	fp, err := thunk()
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	store := session.NewSubagentStore(dir, "s1")
-	if err := store.RecordRequestFingerprint("sa-1", "", fp); err != nil {
+	if err := store.SaveCacheAudit(session.SubagentCacheAudit{JobID: "sa-1", Count: 1, First: fp, Last: &fp}); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(store.Dir(), "sa-1.cache.json"))
@@ -337,22 +350,22 @@ func TestFingerprintRetryIsOneCaptureAndFallbackIsTwo(t *testing.T) {
 		_, _ = io.WriteString(w, fpSSE)
 	}))
 	defer srv.Close()
-	var captures []core.RequestFingerprint
+	var thunks []core.RequestFingerprintFunc
 	req := fpRequest(convo(1)...)
-	req.Options.OnRequestFingerprint = func(f core.RequestFingerprint) { captures = append(captures, f) }
+	req.Options.OnRequestFingerprint = func(f core.RequestFingerprintFunc) { thunks = append(thunks, f) }
 	ch, err := NewWithBaseURL("sk-ant-api03-x", srv.URL).Stream(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range ch {
 	}
-	if hits != 2 || len(captures) != 1 {
-		t.Fatalf("hits=%d captures=%d, want 2 HTTP attempts and 1 logical capture", hits, len(captures))
+	if hits != 2 || len(thunks) != 1 {
+		t.Fatalf("hits=%d thunks=%d, want 2 HTTP attempts and 1 logical thunk", hits, len(thunks))
 	}
 
 	// Fast fallback rebuilds the body: two captures, two requests, no extra.
 	hits = 0
-	captures = nil
+	thunks = nil
 	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		hits++
@@ -367,15 +380,20 @@ func TestFingerprintRetryIsOneCaptureAndFallbackIsTwo(t *testing.T) {
 	model, _ := core.ResolveModel("claude-opus-5")
 	req = core.Request{Model: model, Messages: []core.Message{core.NewUserMessage("hi")}}
 	req.Options.Fast = true
-	req.Options.OnRequestFingerprint = func(f core.RequestFingerprint) { captures = append(captures, f) }
+	req.Options.OnRequestFingerprint = func(f core.RequestFingerprintFunc) { thunks = append(thunks, f) }
 	ch, err = NewWithBaseURL("sk-ant-api03-x", fast.URL).Stream(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range ch {
 	}
-	if hits != 2 || len(captures) != 2 || captures[0].BodySHA256 == captures[1].BodySHA256 || captures[0].OptionsSHA256 == captures[1].OptionsSHA256 {
-		t.Fatalf("hits=%d captures=%d, want 2 requests and 2 distinct captures", hits, len(captures))
+	if hits != 2 || len(thunks) != 2 {
+		t.Fatalf("hits=%d thunks=%d, want 2 requests and 2 thunks", hits, len(thunks))
+	}
+	a, errA := thunks[0]()
+	b, errB := thunks[1]()
+	if errA != nil || errB != nil || a.BodySHA256 == b.BodySHA256 || a.OptionsSHA256 == b.OptionsSHA256 {
+		t.Fatalf("errs=%v/%v, want 2 distinct fingerprints", errA, errB)
 	}
 }
 
@@ -398,7 +416,7 @@ func TestFingerprintStoredSizeMeasurement(t *testing.T) {
 		fp, body := fpOf(t, req, false)
 		store := session.NewSubagentStore(t.TempDir(), "s")
 		for i := 0; i < 3; i++ { // size must not grow with the request count
-			if err := store.RecordRequestFingerprint("sa-1", "", fp); err != nil {
+			if err := store.SaveCacheAudit(session.SubagentCacheAudit{JobID: "sa-1", Count: 3, First: fp, Last: &fp}); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -3503,7 +3503,7 @@ func TestCompactionRequestsAreNotFingerprinted(t *testing.T) {
 		MaxToolCallsPerTurn:  5,
 		MaxRunDuration:       30 * time.Second,
 		Compaction:           &core.CompactionSettings{Enabled: true, ReserveTokens: 10, KeepRecent: 10},
-		OnRequestFingerprint: func(core.RequestFingerprint) {},
+		OnRequestFingerprint: func(core.RequestFingerprintFunc) {},
 	})
 	if err != nil {
 		t.Fatal(err)
