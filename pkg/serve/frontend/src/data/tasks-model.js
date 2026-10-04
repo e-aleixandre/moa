@@ -267,7 +267,8 @@ export function sessionTasksStatus(data, now = Date.now(), tz = deviceZone()) {
   if (!data) return null;
   const verdict = sessionTasksVerdict(data, now, tz);
   if (verdict === 'none') return null;
-  return { text: verdict, forYou: openSessionRequests(data).length };
+  const forYou = openSessionRequests(data).length;
+  return { text: verdict, forYou, short: forYou ? String(forYou) : verdict };
 }
 
 export function sessionGroups(data, sessionId = '') {

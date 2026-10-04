@@ -217,7 +217,8 @@ export function StatusStrip({
             <>
               <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l1.5 1.5 3-3M3 10.5l1.5 1.5 3-3M9 5h4M9 11h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
               <span class="zl-st-word">tasks</span>
-              <span class="zl-data">{tasks.text}</span>
+              <span class="zl-data zl-st-tasks-full">{tasks.text}</span>
+              <span class="zl-data zl-st-tasks-short" aria-hidden="true">{tasks.short || tasks.text}</span>
             </>
           );
           return onOpenTasks ? (

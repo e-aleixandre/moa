@@ -161,7 +161,15 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
 @container (max-width: 640px) {
   .zl-p4 { display: none; }
 }
+.zl-st-tasks-short { display: none; }
 @container (max-width: 560px) {
+  /* The tasks verdict ("1 for you · next Tomorrow 11:00 · 2/3") is a sentence;
+     on a narrow line it shrinks to the number that asks something of you, and
+     the sentence stays in the title and the panel. Without this it pushed the
+     owner's face off the line. */
+  .zl-st-tasks-full { display: none; }
+  .zl-st-tasks-short { display: inline; }
+  .zl-st-tasks .zl-st-word { display: none; }
   /* 560, not 470: at 544 the tokens pair still ran 3.7px past the dock.
      The number that decides is the widest content, not a round figure. */
   .zl-p3 { display: none; }

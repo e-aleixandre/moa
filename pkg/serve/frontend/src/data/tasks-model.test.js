@@ -233,5 +233,5 @@ test("the status line's Tasks item speaks the panel row's words, and is absent w
   expect(sessionTasksStatus({
     requests: [{ id: 1, status: "pending" }],
     checklist: [{ id: 2, status: "done" }, { id: 3, status: "pending" }],
-  })).toEqual({ text: "1 for you · 1/2", forYou: 1 });
+  })).toEqual({ text: "1 for you · 1/2", forYou: 1, short: "1" });
 });
