@@ -470,8 +470,12 @@ type AgentConfig struct {
 	// PromptCacheKey identifies this agent's conversation for cache routing on
 	// the Responses providers (OpenAI, xAI). Empty omits the field entirely.
 	PromptCacheKey string
-	MaxTokens      int // Max output tokens per LLM call. 0 = shared model-aware default.
-	Tools          *core.Registry
+	// OnRequestFingerprint receives a content-free fingerprint of every final
+	// provider request the agent's own turns send (never its compaction
+	// summarizer calls). nil = no fingerprinting.
+	OnRequestFingerprint func(core.RequestFingerprint) `json:"-"`
+	MaxTokens            int                           // Max output tokens per LLM call. 0 = shared model-aware default.
+	Tools                *core.Registry
 	// CompactStrategy is what the agent gets before an automatic compaction:
 	// core.CompactPlain, CompactNotify or CompactPrepare. Empty behaves as
 	// plain, so an embedder that never sets it keeps today's behaviour.
@@ -2053,9 +2057,10 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 
 	// Build stream options
 	streamOpts := core.StreamOptions{
-		ThinkingLevel:  initial.thinking,
-		CacheRetention: a.config.CacheTTL,
-		PromptCacheKey: a.config.PromptCacheKey,
+		ThinkingLevel:        initial.thinking,
+		CacheRetention:       a.config.CacheTTL,
+		PromptCacheKey:       a.config.PromptCacheKey,
+		OnRequestFingerprint: a.config.OnRequestFingerprint,
 		OnFastUnavailable: func() {
 			if a.disableFast() {
 				a.emitter.Emit(core.AgentEvent{Type: core.AgentEventFastUnavailable})

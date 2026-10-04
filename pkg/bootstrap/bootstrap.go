@@ -150,6 +150,9 @@ type SessionConfig struct {
 	SubagentTitleModel   core.Model
 	SubagentTitleEnabled bool
 	OnSubagentTitle      func(jobID, title string)
+	// OnSubagentRequestFingerprint receives content-free request fingerprints
+	// of subagent provider calls (see subagent.Config.OnChildRequestFingerprint).
+	OnSubagentRequestFingerprint func(jobID, resumedFrom string, fp core.RequestFingerprint)
 
 	// Background bash callbacks feed the shared session bus/UI. Output is a
 	// lossy live delta; end carries the authoritative bounded log.
@@ -656,15 +659,16 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		InheritedCompactAt: func() int {
 			return inheritedCompactAt(sess, core.GetCompactAt(moaCfg))
 		},
-		OnChildStart:     cfg.OnSubagentStart,
-		OnChildEvent:     cfg.OnSubagentEvent,
-		OnChildUsage:     cfg.OnSubagentUsage,
-		OnChildEnd:       cfg.OnSubagentEnd,
-		TitleModel:       cfg.SubagentTitleModel,
-		TitleEnabled:     cfg.SubagentTitleEnabled,
-		OnChildTitle:     cfg.OnSubagentTitle,
-		TranscriptLoader: cfg.SubagentTranscriptLoader,
-		OutcomeLoader:    cfg.SubagentOutcomeLoader,
+		OnChildStart:              cfg.OnSubagentStart,
+		OnChildEvent:              cfg.OnSubagentEvent,
+		OnChildUsage:              cfg.OnSubagentUsage,
+		OnChildEnd:                cfg.OnSubagentEnd,
+		OnChildRequestFingerprint: cfg.OnSubagentRequestFingerprint,
+		TitleModel:                cfg.SubagentTitleModel,
+		TitleEnabled:              cfg.SubagentTitleEnabled,
+		OnChildTitle:              cfg.OnSubagentTitle,
+		TranscriptLoader:          cfg.SubagentTranscriptLoader,
+		OutcomeLoader:             cfg.SubagentOutcomeLoader,
 	})
 	if err != nil {
 		if mcpMgr != nil {

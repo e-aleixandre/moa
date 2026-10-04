@@ -244,6 +244,22 @@ func (sp *servePersister) subagentStore(sessionID string) *session.SubagentStore
 	return sp.subagents
 }
 
+// recordSubagentRequestFingerprint folds one child request fingerprint into
+// the job's cache audit. The deleted check and the disk write share sp.mu, so
+// a late request can never recreate a side directory that deletion removed
+// (lock order: sp.mu, then the store's audit mutex).
+func (sp *servePersister) recordSubagentRequestFingerprint(sessionID, jobID, resumedFrom string, fp core.RequestFingerprint) error {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.store == nil {
+		return nil
+	}
+	if sp.subagents == nil {
+		sp.subagents = session.NewSubagentStore(sp.store.Dir(), sessionID)
+	}
+	return sp.subagents.RecordRequestFingerprint(jobID, resumedFrom, fp)
+}
+
 // sessionDir returns the directory holding this session's json file, or "".
 func (sp *servePersister) sessionDir() string {
 	sp.mu.Lock()

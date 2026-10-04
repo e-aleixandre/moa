@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -93,6 +94,17 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	body, err := buildRequestBody(req, oauthMode)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: building request: %w", err)
+	}
+
+	// Fingerprinted once per logical request: retries below resend these same
+	// bytes, while the fast-mode fallback builds a different body and so
+	// reports its own. A failure here never affects the request.
+	if observe := req.Options.OnRequestFingerprint; observe != nil {
+		if fp, err := fingerprintRequestBody(body, time.Now().UTC()); err != nil {
+			slog.Warn("anthropic: request fingerprint unavailable")
+		} else {
+			observe(fp)
+		}
 	}
 
 	fastMode := req.Options.Fast && core.SupportsFast(req.Model.ID)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Provider streams LLM responses. Each provider (Anthropic, OpenAI, etc.)
@@ -226,6 +227,50 @@ type StreamOptions struct {
 	// because the account cannot use the premium tier. It is process-local
 	// state coordination, never part of a provider payload.
 	OnFastUnavailable func() `json:"-"`
+	// OnRequestFingerprint, when set, receives a content-free description of
+	// the final provider request body (hashes and cache-marker positions only).
+	// Providers that do not fingerprint requests ignore it. It is called
+	// synchronously before the request is sent, so a slow sink (e.g. disk I/O)
+	// delays the request.
+	OnRequestFingerprint func(RequestFingerprint) `json:"-"`
+}
+
+// RequestFingerprint describes one final provider request without carrying any
+// of its content: only SHA-256 digests and the positions of cache markers, so
+// it is safe to persist. Equal Prefixes mean the converted request content
+// matches up to that point; they do not guarantee a cache hit, which also
+// depends on the model, options, TTL and the provider's cache backend. Markers
+// are recorded apart from content so moving one does not change any content hash.
+type RequestFingerprint struct {
+	BuiltAt       time.Time           `json:"built_at"`
+	BodySHA256    string              `json:"body_sha256"`
+	ToolsSHA256   string              `json:"tools_sha256,omitempty"`
+	SystemSHA256  string              `json:"system_sha256,omitempty"`
+	OptionsSHA256 string              `json:"options_sha256"`
+	Prefixes      []RequestPrefixHash `json:"prefixes,omitempty"`
+	Breakpoints   []RequestBreakpoint `json:"breakpoints,omitempty"`
+}
+
+// RequestPrefixHash is the rolling hash of the request up to and including one
+// block. Section is "tools", "system" or "messages"; Message is the message
+// index (-1 outside messages) and Block the block index within its section or
+// message.
+type RequestPrefixHash struct {
+	Section string `json:"section"`
+	Message int    `json:"message"`
+	Block   int    `json:"block"`
+	SHA256  string `json:"sha256"`
+}
+
+// RequestBreakpoint is one cache_control marker: where it sits and its TTL
+// ("5m" by default, or "1h"). TTLExplicit tells whether the request spelled the
+// TTL out or relied on the provider default.
+type RequestBreakpoint struct {
+	Section     string `json:"section"`
+	Message     int    `json:"message"`
+	Block       int    `json:"block"`
+	TTL         string `json:"ttl"`
+	TTLExplicit bool   `json:"ttl_explicit,omitempty"`
 }
 
 // CacheOff is the CacheRetention value for a request whose prefix will never

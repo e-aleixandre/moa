@@ -250,6 +250,7 @@ func (a *Agent) startBackgroundCompaction(ctx context.Context, cfg *loopConfig, 
 
 	compactOpts := cfg.requestOptions()
 	compactOpts.CacheRetention = core.CacheOff
+	compactOpts.OnRequestFingerprint = nil
 	sumProvider, sumModel, fallbackNotice := cfg.provider, cfg.model, ""
 	if cfg.compactSummarizer != nil {
 		sumProvider, sumModel, fallbackNotice = cfg.compactSummarizer(cfg.model)

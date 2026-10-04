@@ -3477,6 +3477,55 @@ func TestAutoCompact_OptsOutOfCacheWrites(t *testing.T) {
 	}
 }
 
+// Automatic and manual compaction summarize with a different prefix: neither
+// may report itself as a conversation request to the fingerprint observer,
+// while the conversation's own turns still do.
+func TestCompactionRequestsAreNotFingerprinted(t *testing.T) {
+	var summarizer, conversation int
+	handler := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		if len(req.Tools) == 0 && req.System != "test" {
+			if req.Options.OnRequestFingerprint != nil {
+				summarizer++
+			}
+			return simpleTextResponse("SUMMARY")(req)
+		}
+		if req.Options.OnRequestFingerprint != nil {
+			conversation++
+		}
+		return simpleTextResponse("done")(req)
+	}
+	ag, err := New(AgentConfig{
+		Provider:             NewMockProvider(handler, handler, handler, handler),
+		Model:                core.Model{ID: "test-model", Provider: "mock", MaxInput: 100},
+		SystemPrompt:         "test",
+		Tools:                core.NewRegistry(),
+		MaxTurns:             10,
+		MaxToolCallsPerTurn:  5,
+		MaxRunDuration:       30 * time.Second,
+		Compaction:           &core.CompactionSettings{Enabled: true, ReserveTokens: 10, KeepRecent: 10},
+		OnRequestFingerprint: func(core.RequestFingerprint) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 40; i++ {
+		ag.state.Messages = append(ag.state.Messages,
+			core.WrapMessage(core.NewUserMessage(fmt.Sprintf("message number %d", i))))
+	}
+	if _, err := ag.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	if conversation == 0 {
+		t.Fatal("conversation turn did not carry the callback")
+	}
+	if _, err := ag.Compact(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if summarizer != 0 {
+		t.Fatalf("%d summarizer requests carried the fingerprint callback", summarizer)
+	}
+}
+
 // TestGlobalCompactAtReachesRunningAgent reproduces the production bug: the
 // owner set compact_at to 300k at 19:43 while a session loaded at 19:02 kept
 // running. That session — and every subagent it spawned — held the value

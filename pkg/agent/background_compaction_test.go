@@ -32,11 +32,16 @@ type bgtSummary struct {
 	entered chan struct{}
 	release chan struct{}
 	relOnce sync.Once
+	// observed counts summarizer calls that carried a fingerprint callback.
+	observed atomic.Int32
 }
 
 func (s *bgtSummary) open() { s.relOnce.Do(func() { close(s.release) }) }
 
 func (s *bgtSummary) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	if req.Options.OnRequestFingerprint != nil {
+		s.observed.Add(1)
+	}
 	if s.calls.Add(1) == 1 {
 		close(s.entered)
 		<-s.release
@@ -52,12 +57,16 @@ func (s *bgtSummary) Stream(ctx context.Context, req core.Request) (<-chan core.
 
 // bgtProvider answers from script; nil ends the turn.
 type bgtProvider struct {
-	calls  atomic.Int32
-	script func(call int) *core.Message
+	calls    atomic.Int32
+	observed atomic.Int32
+	script   func(call int) *core.Message
 }
 
 func (p *bgtProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	call := int(p.calls.Add(1))
+	if req.Options.OnRequestFingerprint != nil {
+		p.observed.Add(1)
+	}
 	m := &core.Message{Role: "assistant", Content: []core.Content{core.TextContent("ok")}, StopReason: "end_turn", Timestamp: time.Now().Unix()}
 	if p.script != nil {
 		if s := p.script(call); s != nil {
@@ -132,7 +141,8 @@ func newBGT(t *testing.T, script func(call int) *core.Message) *bgtFix {
 	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 1000, KeepRecent: 8000, CompactAt: 40000, TrimDisabled: true}
 	ag, err := New(AgentConfig{
 		Provider: f.prov, Model: f.model, Tools: reg, Compaction: &settings, MaxTurns: 10, MaxRunDuration: 20 * time.Second,
-		SessionCheckpoint: f.slot,
+		SessionCheckpoint:    f.slot,
+		OnRequestFingerprint: func(core.RequestFingerprint) {},
 		CompactSummarizer: func(m core.Model) (core.Provider, core.Model, string) {
 			m.Pricing = bgtPricing
 			return f.sum, m, ""
@@ -477,4 +487,27 @@ func mustSig(t *testing.T, m core.AgentMessage) string {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// Summarizer calls reuse the run's options but are not the conversation's
+// requests: they must never carry the fingerprint callback.
+func TestBackgroundCompaction_SummarizerRequestsAreNotFingerprinted(t *testing.T) {
+	f := newBGT(t, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.ag.Send(context.Background(), "go")
+		done <- err
+	}()
+	f.waitEntered(t)
+	f.sum.open()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	f.ag.WaitBackgroundCompaction()
+	if got := f.sum.observed.Load(); got != 0 {
+		t.Fatalf("%d summarizer requests carried the fingerprint callback", got)
+	}
+	if f.prov.observed.Load() == 0 {
+		t.Fatal("the conversation's own requests lost the callback")
+	}
 }

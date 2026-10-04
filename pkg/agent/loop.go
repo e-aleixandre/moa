@@ -500,6 +500,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				// request can read. Routing (PromptCacheKey) is preserved.
 				compactOpts := cfg.requestOptions()
 				compactOpts.CacheRetention = core.CacheOff
+				compactOpts.OnRequestFingerprint = nil
 
 				// A configured summarizer writes the summary instead of the
 				// session's model; the window stays the session's, since it is

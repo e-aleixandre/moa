@@ -154,6 +154,11 @@ type Config struct {
 	// final total.
 	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
 
+	// OnChildRequestFingerprint receives a content-free fingerprint of each
+	// final provider request a child sends. resumedFrom is the job a resumed
+	// child continues ("" for a fresh one). nil disables fingerprinting.
+	OnChildRequestFingerprint func(jobID, resumedFrom string, fp core.RequestFingerprint)
+
 	// OnChildEnd is called once when a child agent (sync or async) finishes.
 	// Result/Error are the terminal child outcome, not the one-time model
 	// delivery claim used by subagent_wait and async notifications.
@@ -364,6 +369,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				return *errResult, nil
 			}
 			seedMsgs := resumed.Messages
+			resumedFrom := strings.TrimSpace(stringParam(params, "resume"))
 			model, errResult := resolveModel(defaultModel(cfg, resumed), params, currentAllowedModels(cfg))
 			if errResult != nil {
 				return *errResult, nil
@@ -418,7 +424,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				if len(seedMsgs) == 0 {
 					go generateTitle(cfg, jobs, job.id, task)
 				}
-				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true)
+				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true, resumedFrom)
 				started := "Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."
 				return taggedWithJob(core.TextResult(started), job.id), nil
 			}
@@ -447,7 +453,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if len(seedMsgs) == 0 {
 				go generateTitle(cfg, jobs, job.id, task)
 			}
-			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate, true)
+			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate, true, resumedFrom)
 			return awaitSyncResult(cfg, jobs, job, task, model)
 		},
 	}
@@ -867,7 +873,7 @@ func syncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Mode
 // sync job may be promoted to async mid-run) decides how each streamed event
 // is forwarded, so there is a single subscription with no resubscription and
 // therefore no risk of losing or duplicating events across a promotion.
-func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result), startNotified bool) {
+func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result), startNotified bool, resumedFrom ...string) {
 	defer j.cancel()
 	defer close(j.done)
 	var finalMsgs []core.AgentMessage
@@ -921,7 +927,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		}
 	}()
 
-	child, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, j.id)
+	child, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, j.id, resumedFrom...)
 	if err != nil {
 		jobs.setFailed(j.id, err.Error())
 		return
@@ -1238,22 +1244,32 @@ func resolveChildGuardrails(cfg Config, perCallDuration time.Duration) (maxTurns
 	return maxTurns, maxRunDuration
 }
 
-func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, jobID string) (*agent.Agent, error) {
+func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, jobID string, resumedFrom ...string) (*agent.Agent, error) {
 	maxTurns, runDuration := resolveChildGuardrails(cfg, maxRunDuration)
 	effectiveThinking, err := core.EffectiveThinkingLevel(model, thinkingLevel)
 	if err != nil {
 		return nil, err
 	}
+	var onFingerprint func(core.RequestFingerprint)
+	if cfg.OnChildRequestFingerprint != nil {
+		source := ""
+		if len(resumedFrom) > 0 {
+			source = resumedFrom[0]
+		}
+		sink := cfg.OnChildRequestFingerprint
+		onFingerprint = func(fp core.RequestFingerprint) { sink(jobID, source, fp) }
+	}
 	return agent.New(agent.AgentConfig{
-		Provider:            provider,
-		Model:               model,
-		SystemPrompt:        systemPrompt,
-		ThinkingLevel:       effectiveThinking,
-		PromptCacheKey:      core.SubagentPromptCacheKey(cfg.PromptCacheKey),
-		StreamRepairBackoff: cfg.StreamRepairBackoff,
-		Tools:               childReg,
-		MaxTurns:            maxTurns,
-		MaxRunDuration:      runDuration,
+		OnRequestFingerprint: onFingerprint,
+		Provider:             provider,
+		Model:                model,
+		SystemPrompt:         systemPrompt,
+		ThinkingLevel:        effectiveThinking,
+		PromptCacheKey:       core.SubagentPromptCacheKey(cfg.PromptCacheKey),
+		StreamRepairBackoff:  cfg.StreamRepairBackoff,
+		Tools:                childReg,
+		MaxTurns:             maxTurns,
+		MaxRunDuration:       runDuration,
 		// Explicitly passed, never inherited: the child's context derives from
 		// cfg.AppCtx (see the jobCtx derivations in the subagent tool), not from
 		// the parent's tool call, so the capability must travel through the
@@ -1840,6 +1856,11 @@ func tailLinesWithFlag(s string, n int) (string, bool) {
 		return s, false
 	}
 	return strings.Join(lines[len(lines)-n:], "\n"), true
+}
+
+func stringParam(params map[string]any, key string) string {
+	v, _ := params[key].(string)
+	return v
 }
 
 func getBool(params map[string]any, key string) bool {

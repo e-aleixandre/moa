@@ -272,6 +272,19 @@ parent session (`<session-id>.subagents/<job-id>.json`), so they survive
 restarts and can be reopened. They are removed when the parent session is
 deleted.
 
+For Anthropic subagents, `moa serve` also keeps a prompt-cache audit per job in
+`<session-id>.subagents/<job-id>.cache.json`, removed together with the
+session. It holds only SHA-256 digests of the final request (whole body,
+tools, system, options, a rolling hash per block) and the position and TTL of
+each cache marker — never prompt text, signatures, images or credentials. It
+records the first and the latest request plus `count`: the number of final
+request bodies built for that job. Each resume is a new job with its own file,
+so counts are per job, not summed across resumes. An HTTP retry resends the
+same body and counts once; a fast-mode fallback rebuilds the body and counts
+again. A resumed job's `resumed_from` names the job it continued: compare the
+original job's `last` with the resumed job's `first` to see where the prefix
+diverged. The terminal UI does not persist subagents and keeps no audit.
+
 ## Custom script tools
 
 Define tools as JSON files in `.moa/tools/`:

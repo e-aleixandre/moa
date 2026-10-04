@@ -386,6 +386,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				s.runtime.Bus.Publish(bus.SubagentTitleChanged{SessionID: s.ID, JobID: jobID, Title: title})
 			}
 		},
+		OnSubagentRequestFingerprint: func(jobID, resumedFrom string, fp core.RequestFingerprint) {
+			if s := sess; s != nil && s.persister != nil {
+				if err := s.persister.recordSubagentRequestFingerprint(s.ID, jobID, resumedFrom, fp); err != nil {
+					slog.Warn("serve: subagent cache audit not recorded", "session", s.ID, "job", jobID)
+				}
+			}
+		},
 		OnSubagentEvent: func(jobID string, inner any) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentEvent{

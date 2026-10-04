@@ -53,6 +53,9 @@ type SubagentStore struct {
 	summaryMu    sync.Mutex
 	summarySig   map[string]summaryFileSig
 	summaryCache []SubagentTranscript
+
+	// auditMu serializes read-modify-write of cache-audit sidecars.
+	auditMu sync.Mutex
 }
 
 type summaryFileSig struct {
@@ -130,7 +133,7 @@ func (s *SubagentStore) List() ([]SubagentTranscript, error) {
 	}
 	var out []SubagentTranscript
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" || isCacheAuditFile(e.Name()) {
 			continue
 		}
 		jobID := e.Name()[:len(e.Name())-len(".json")]
@@ -170,7 +173,7 @@ func (s *SubagentStore) ListSummaries() ([]SubagentTranscript, error) {
 
 	sig := make(map[string]summaryFileSig, len(entries))
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" || isCacheAuditFile(e.Name()) {
 			continue
 		}
 		info, err := e.Info()
@@ -190,7 +193,7 @@ func (s *SubagentStore) ListSummaries() ([]SubagentTranscript, error) {
 
 	var out []SubagentTranscript
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" || isCacheAuditFile(e.Name()) {
 			continue
 		}
 		jobID := e.Name()[:len(e.Name())-len(".json")]
@@ -595,6 +598,9 @@ func decodeSubagentSummaryPrefix(r io.Reader) (SubagentTranscript, bool) {
 func validJobID(jobID string) error {
 	if jobID == "" {
 		return fmt.Errorf("session: subagent transcript missing job_id")
+	}
+	if strings.HasSuffix(jobID, cacheAuditJobSuffix) {
+		return fmt.Errorf("session: invalid subagent job_id %q", jobID)
 	}
 	if jobID != filepath.Base(jobID) || strings.ContainsAny(jobID, `/\`) || strings.Contains(jobID, "..") {
 		return fmt.Errorf("session: invalid subagent job_id %q", jobID)
