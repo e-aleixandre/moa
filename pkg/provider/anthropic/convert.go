@@ -335,10 +335,16 @@ func convertMessage(msg core.Message, isOAuth bool, retire *imageRetirer) map[st
 		}
 
 	case "assistant":
-		return map[string]any{
-			"role":    "assistant",
-			"content": convertAssistantContent(msg.Content, isOAuth, foreignThinking(msg)),
+		content := convertAssistantContent(msg.Content, isOAuth, foreignThinking(msg))
+		// Anthropic rejects an assistant turn that ends in thinking (e.g. one
+		// cut off before its text or tool call), so the trailing blocks go.
+		for len(content) > 0 && isThinkingBlock(content[len(content)-1]) {
+			content = content[:len(content)-1]
 		}
+		if len(content) == 0 {
+			return nil
+		}
+		return map[string]any{"role": "assistant", "content": content}
 
 	case "tool_result":
 		// Anthropic: tool results are user messages with tool_result content blocks
@@ -360,6 +366,11 @@ func convertMessage(msg core.Message, isOAuth bool, retire *imageRetirer) map[st
 	default:
 		return nil // Skip unknown roles
 	}
+}
+
+func isThinkingBlock(b any) bool {
+	m, _ := b.(map[string]any)
+	return m["type"] == "thinking" || m["type"] == "redacted_thinking"
 }
 
 // convertContentBlocks converts core.Content slices to Anthropic content blocks.
