@@ -568,13 +568,14 @@ func resolveMaxTokens(req core.Request) int {
 
 // bindsThinkingPrefix reports whether the model validates a thinking block's
 // signature against everything sent before it. Claude Fable 5.1 was the first
-// to do so, and Claude Sonnet 5.5 does too; Mythos 5.1 does not, and older
+// to do so, and Claude Sonnet 5.5 and Opus 5.5 do too; Mythos 5.1 does not, and older
 // models reject the block_binding field outright, so the check stays narrow
 // rather than "5.1 and up".
 func bindsThinkingPrefix(modelID string) bool {
 	id := strings.ToLower(modelID)
 	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1") ||
-		strings.Contains(id, "sonnet-5-5") || strings.Contains(id, "sonnet-5.5")
+		strings.Contains(id, "sonnet-5-5") || strings.Contains(id, "sonnet-5.5") ||
+		strings.Contains(id, "opus-5-5") || strings.Contains(id, "opus-5.5")
 }
 
 // resolveEffort maps our thinking levels to Anthropic adaptive effort. An

@@ -1610,9 +1610,10 @@ func resolveResume(cfg Config, params map[string]any) (ResumedTranscript, *core.
 
 // sanitizeResumeTranscript makes a persisted transcript safe to replay before a
 // new user message is appended (LoadMessages + Send). It:
-//   - strips thinking blocks (their signatures are model-specific; replaying
-//     them, possibly under a different model, causes provider errors);
-//   - drops assistant messages left empty after stripping;
+//   - keeps content (thinking blocks included) untouched: provider
+//     compatibility of thinking is decided by the normal agent loop and
+//     converter, exactly as for the parent session;
+//   - drops assistant messages with no content at all;
 //   - trims a trailing assistant turn whose tool_call(s) never received their
 //     tool_result — a transcript cut off mid-turn (the exact failure mode of a
 //     timed-out subagent) would otherwise send an orphaned tool_call followed by
@@ -1628,24 +1629,8 @@ func sanitizeResumeTranscript(msgs []core.AgentMessage) []core.AgentMessage {
 			out = append(out, m)
 			continue
 		}
-		hasThinking := false
-		for _, c := range m.Content {
-			if c.Type == "thinking" {
-				hasThinking = true
-				break
-			}
-		}
-		if hasThinking {
-			filtered := make([]core.Content, 0, len(m.Content))
-			for _, c := range m.Content {
-				if c.Type != "thinking" {
-					filtered = append(filtered, c)
-				}
-			}
-			m.Content = filtered
-		}
-		// Drop an assistant message that has no content left (e.g. it was
-		// thinking-only) — an empty assistant turn is an invalid payload.
+		// Drop a truly empty assistant message — an empty assistant turn is an
+		// invalid payload.
 		if len(m.Content) == 0 {
 			continue
 		}
@@ -1681,7 +1666,9 @@ func sanitizeResumeTranscript(msgs []core.AgentMessage) []core.AgentMessage {
 		// compaction_summary is such a boundary: compaction replaces the turns
 		// it summarised, so tool_calls before it can no longer be matched and
 		// walking further back would discard the whole history.
-		if m.Role == "assistant" || m.Role == "compaction_summary" {
+		// A thinking-only assistant is not a boundary: it satisfies nothing, so
+		// the walk must continue to find orphan tool_calls behind it.
+		if (m.Role == "assistant" && !thinkingOnly(m.Content)) || m.Role == "compaction_summary" {
 			break
 		}
 	}
@@ -1699,6 +1686,15 @@ func sanitizeResumeTranscript(msgs []core.AgentMessage) []core.AgentMessage {
 		start++
 	}
 	return out[start:]
+}
+
+func thinkingOnly(content []core.Content) bool {
+	for _, c := range content {
+		if c.Type != "thinking" {
+			return false
+		}
+	}
+	return true
 }
 
 // runChild starts a child agent's loop, either fresh (Run) or continuing a

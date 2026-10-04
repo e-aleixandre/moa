@@ -1871,7 +1871,7 @@ func TestResolveResumeAbsentReturnsNil(t *testing.T) {
 	}
 }
 
-func TestResolveResumeStripsThinking(t *testing.T) {
+func TestResolveResumePreservesThinking(t *testing.T) {
 	prior := []core.AgentMessage{
 		core.WrapMessage(core.NewUserMessage("earlier task")),
 		{Message: core.Message{Role: "assistant", Content: []core.Content{
@@ -1884,14 +1884,10 @@ func TestResolveResumeStripsThinking(t *testing.T) {
 	if errRes != nil {
 		t.Fatalf("unexpected error: %s", textOf(*errRes))
 	}
-	for _, m := range resumed.Messages {
-		for _, c := range m.Content {
-			if c.Type == "thinking" {
-				t.Fatal("thinking block was not stripped from resumed transcript")
-			}
-		}
+	if len(resumed.Messages) != 2 || len(resumed.Messages[1].Content) != 2 ||
+		resumed.Messages[1].Content[0].Type != "thinking" || resumed.Messages[1].Content[0].Text != "secret reasoning" {
+		t.Fatalf("thinking block must be replayed untouched, got %+v", resumed.Messages)
 	}
-	// Original slice must be untouched.
 	if prior[1].Content[0].Type != "thinking" {
 		t.Fatal("sanitizeResumeTranscript mutated the input transcript")
 	}
@@ -1923,12 +1919,13 @@ func TestSanitizeResumeTrimsOrphanToolCall(t *testing.T) {
 	}
 }
 
-func TestSanitizeResumeDropsThinkingOnlyAssistant(t *testing.T) {
+func TestSanitizeResumeKeepsThinkingOnlyAssistantDropsEmpty(t *testing.T) {
 	msgs := []core.AgentMessage{
 		core.WrapMessage(core.NewUserMessage("task")),
 		{Message: core.Message{Role: "assistant", Content: []core.Content{
 			{Type: "thinking", Text: "only thinking, no visible output"},
 		}}},
+		{Message: core.Message{Role: "assistant"}},
 		{Message: core.Message{Role: "assistant", Content: []core.Content{
 			core.TextContent("real answer"),
 		}}},
@@ -1939,9 +1936,9 @@ func TestSanitizeResumeDropsThinkingOnlyAssistant(t *testing.T) {
 			t.Fatal("an empty assistant message survived sanitization")
 		}
 	}
-	// user + the non-empty assistant remain.
-	if len(clean) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(clean))
+	// user + thinking-only (preserved) + real answer; the empty one is dropped.
+	if len(clean) != 3 || clean[1].Content[0].Type != "thinking" {
+		t.Fatalf("expected 3 messages with thinking preserved, got %d", len(clean))
 	}
 }
 
