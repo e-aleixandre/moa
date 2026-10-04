@@ -579,9 +579,10 @@ func resolveMaxTokens(req core.Request) int {
 
 // bindsThinkingPrefix reports whether the model validates a thinking block's
 // signature against everything sent before it. Claude Fable 5.1 was the first
-// to do so, and Claude Sonnet 5.5 and Opus 5.5 do too; Mythos 5.1 does not, and older
-// models reject the block_binding field outright, so the check stays narrow
-// rather than "5.1 and up".
+// to do so; Sonnet 5.5 and Opus 5.5 do too. This applies to every request,
+// including the main agent: drop_block opts older accounts into dropping stale
+// reasoning instead of letting it survive prefix edits. Mythos 5.1 does not
+// bind its prefix, so the check stays narrow rather than "5.1 and up".
 func bindsThinkingPrefix(modelID string) bool {
 	id := strings.ToLower(modelID)
 	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1") ||
