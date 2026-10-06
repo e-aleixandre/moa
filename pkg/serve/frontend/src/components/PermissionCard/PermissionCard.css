@@ -14,7 +14,7 @@
 
 .zl-ask {
   margin: 4px 0 0;
-  padding: 14px 16px;
+  padding: 14px 16px 0;
   border-radius: var(--zl-r-lg);
   background: var(--zl-raised);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-yellow) 40%, transparent);
@@ -23,7 +23,12 @@
   display: flex;
   flex-direction: column;
   max-height: 60vh;
-  max-height: 60dvh;
+  max-height: min(60dvh, calc(var(--mconv-visible-h, 100dvh) - 200px));
+  /* Last resort: when even the shrunk card cannot hold the head and the
+     buttons (short screen, keyboard up), the card scrolls as a whole. */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .zl-ask > * { flex: none; }
 /* The card takes focus so Enter can mean Allow; the ring goes on the
@@ -67,7 +72,7 @@
   box-shadow: var(--zl-rim);
   /* Scrolls inside, never truncates: the whole command stays reachable. */
   flex: 0 1 auto;
-  min-height: 5em;
+  min-height: 3.2em;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -81,6 +86,25 @@
   color: var(--zl-t1);
   /* The command is the evidence: wrap, never ellipsis. A clipped command
      would let you approve something other than what you saw. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+/* The permanent rule "Always" would store, shown whole inside the scrolling
+   block: a multi-line command makes the rule the whole script. */
+.zl-ask-rule {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--zl-hi);
+}
+.zl-ask-rule-k {
+  display: block;
+  color: var(--zl-t4);
+  font-size: var(--zl-fs-meta);
+}
+.zl-ask-rule-v {
+  display: block;
+  color: var(--zl-t2);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   line-height: 1.5;
@@ -102,7 +126,20 @@
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
+  /* When the card has to scroll, the decision stays pinned at its foot: the
+     command moves under it, the buttons never leave the screen. */
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: 0;
+  padding: 12px 0 14px;
+  background: var(--zl-raised);
+}
+/* An open feedback / rule editor sits after the buttons: pinning them would
+   cover the field being typed in. */
+.zl-ask:has(.perm-inline-editor) .zl-ask-acts {
+  position: static;
+  padding-bottom: 0;
 }
 .zl-ask-aux {
   display: flex;
@@ -300,6 +337,22 @@
    so the catalogue's waiting scenes stay the size they were drawn. */
 .mconv-blocking .zl-ask {
   max-width: none;
+}
+/* The strip gives way before the stream does: with a short screen the card
+   shrinks to what is left between the header and the composer. */
+@media (max-height: 520px) {
+  .mconv-blocking .zl-ask { padding: 8px 12px 0; }
+  .mconv-blocking .zl-ask-cmd { margin-top: 6px; }
+  /* One scroll surface: the card scrolls, with the buttons pinned below. */
+  .mconv-blocking .zl-ask-cmd { flex: none; overflow: visible; min-height: 0; }
+  .mconv-blocking .zl-ask-head { min-height: 22px; }
+  .mconv-blocking .zl-ask-glyph { width: 22px; height: 22px; }
+  .mconv-blocking .zl-ask-acts { padding-top: 8px; padding-bottom: 10px; flex-wrap: nowrap; }
+  /* Allow / Always / Deny share one row; the secondary toggles wait for a
+     taller screen. */
+  .mconv-blocking .zl-ask-aux { display: none; }
+  .mconv-blocking .zl-ask-btn { min-width: 0; padding: 0 10px; }
+  .mconv-blocking .zl-ask-btn.is-always { flex: 1 1 0; }
 }
 .mconv-blocking .zl-ask-btn {
   height: 44px;

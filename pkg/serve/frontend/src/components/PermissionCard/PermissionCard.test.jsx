@@ -83,11 +83,21 @@ test("a bash permission prints the command, not a JSON wrapper", () => {
 });
 
 test("a long command scrolls inside its block so the decision stays on screen", () => {
-  expect(css).toMatch(/\.zl-ask \{[^}]*max-height:\s*60dvh/);
+  expect(css).toMatch(/\.zl-ask \{[^}]*max-height:\s*min\(60dvh/);
   expect(css).toMatch(/\.zl-ask-cmd \{[^}]*overflow-y:\s*auto/);
 });
 
 test("the Always button never grows with a long rule pattern", () => {
   expect(css).toMatch(/\.zl-ask-btn\.is-always b \{[^}]*text-overflow:\s*ellipsis/);
-  expect(source).toContain("title={`Always for ${alwaysLabel}`}");
+  // The whole rule is readable inside the scrolling block, wrapped.
+  expect(source).toContain('class="zl-ask-rule-v zl-data"');
+  expect(css).toMatch(/\.zl-ask-rule-v \{[^}]*overflow-wrap:\s*anywhere/);
+  expect(css).toMatch(/\.zl-ask \{[^}]*overflow-y:\s*auto/);
+});
+
+test("the decision is pinned under a scrolling card and the short-screen layout keeps one row", () => {
+  expect(css).toMatch(/\.zl-ask-acts \{[^}]*position:\s*sticky/);
+  expect(css).toMatch(/@media \(max-height:\s*520px\)/);
+  // Geometry (Allow/Always/Deny hit-tested at 390x400 and 390x844) is checked
+  // in Chromium during QA: bun has no layout engine.
 });

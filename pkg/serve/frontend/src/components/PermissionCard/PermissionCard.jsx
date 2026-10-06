@@ -139,6 +139,12 @@ export function PermissionCard({
       <div class="zl-ask-cmd">
         {cwd && <div class="zl-ask-cwd zl-data">{cwd}</div>}
         <code class="zl-ask-cmd-text zl-data"><CommandLine command={command} dangerTokens={dangerTokens} /></code>
+        {!destructive && alwaysLabel && (
+          <div class="zl-ask-rule">
+            <span class="zl-ask-rule-k">Always allows:</span>
+            <code class="zl-ask-rule-v zl-data">{alwaysLabel}</code>
+          </div>
+        )}
       </div>
       {scope.length > 0 && (
         <div class="zl-ask-scope">
@@ -198,7 +204,6 @@ export function PermissionCard({
             type="button"
             class="zl-ask-btn is-always"
             disabled={disabled}
-            title={`Always for ${alwaysLabel}`}
             onClick={onAlways}
           >
             <span class="zl-ask-always-for">Always for</span> <b>{alwaysLabel}</b>

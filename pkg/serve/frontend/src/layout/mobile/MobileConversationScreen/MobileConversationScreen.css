@@ -37,11 +37,27 @@
   margin-top: 0;
 }
 
+/* On a short screen the blocking strip may take everything but the header: the
+   stream keeps just the band the floating header covers. */
+.mconv .zl-transcript-frame {
+  min-height: calc(var(--shell-top) + 64px);
+}
+
+/* While a permission card is up on a short screen the status line and its
+   Stop would sit between the card and the composer: Deny already answers it,
+   and those 55px are what keeps the command readable. */
+@media (max-height: 520px) {
+  .mconv:has(.mconv-blocking .zl-ask) .zl-live { display: none; }
+}
+
 /* Blocking prompts (permission / mcp) sit between the stream and the composer,
    exactly like the desktop .conversation-blocking. The card's own CSS (and
    the 44px tap floor) lives on PermissionCard; this host only pads the strip. */
 .mconv-blocking {
-  flex: none;
+  /* Shrinks before the stream does: a tall card must not push the composer
+     off a short screen. */
+  flex: 0 1 auto;
+  min-height: 0;
   padding: 0 var(--space-4) var(--space-2);
   display: flex;
   flex-direction: column;
