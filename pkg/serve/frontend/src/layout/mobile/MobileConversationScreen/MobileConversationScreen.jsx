@@ -136,18 +136,12 @@ function MobileConversationBody({ forceMobile = false }) {
   // detect the soft keyboard by a large shrink of visualViewport vs the layout
   // viewport, the standard heuristic (no dedicated API).
   const [kbdOpen, setKbdOpen] = useState(false);
-  // The visible height (keyboard excluded): dvh does not follow the iOS keyboard,
-  // visualViewport does. The permission card is capped against it.
-  const [visibleH, setVisibleH] = useState(null);
   useEffect(() => {
     const vv = typeof window !== "undefined" && window.visualViewport;
     if (!vv) return;
     let frame = null;
     let settleTimer = null;
-    const sync = () => {
-      setKbdOpen(window.innerHeight - vv.height > 150);
-      setVisibleH(Math.round(vv.height));
-    };
+    const sync = () => setKbdOpen(window.innerHeight - vv.height > 150);
     // Safari can report its final visual-viewport height a frame or two after
     // it sends the event, especially when an installed PWA returns foreground.
     // Sample both immediately and after that settle period so the Live Dock is
@@ -317,7 +311,7 @@ function MobileConversationBody({ forceMobile = false }) {
           tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
         />
         {blocking && (
-          <div class="mconv-blocking" style={visibleH ? { "--mconv-visible-h": `${visibleH}px` } : undefined}>
+          <div class="mconv-blocking">
             {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
             {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
           </div>

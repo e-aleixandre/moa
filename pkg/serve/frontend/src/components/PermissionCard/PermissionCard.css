@@ -23,9 +23,9 @@
   display: flex;
   flex-direction: column;
   max-height: 60vh;
-  max-height: min(60dvh, calc(var(--mconv-visible-h, 100dvh) - 200px));
+  max-height: 60dvh;
   /* Last resort: when even the shrunk card cannot hold the head and the
-     buttons (short screen, keyboard up), the card scrolls as a whole. */
+     buttons (short screen), the card scrolls as a whole. */
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -141,6 +141,9 @@
   position: static;
   padding-bottom: 0;
 }
+/* Short phone screens: the secondary toggles leave the pinned row and sit
+   after the command, inside the scrolling area. */
+.zl-ask-aux.is-flow { display: none; margin: 8px 0 0; }
 .zl-ask-aux {
   display: flex;
   flex-wrap: wrap;
@@ -216,7 +219,7 @@
   font-weight: 500;
 }
 /* The rule pattern can be a whole script: the button never grows with it.
-   The command block above is the evidence; the full pattern is the title. */
+   The whole pattern is shown in the "Always allows" line of the command block. */
 .zl-ask-btn.is-always {
   max-width: 100%;
   min-width: 0;
@@ -348,9 +351,10 @@
   .mconv-blocking .zl-ask-head { min-height: 22px; }
   .mconv-blocking .zl-ask-glyph { width: 22px; height: 22px; }
   .mconv-blocking .zl-ask-acts { padding-top: 8px; padding-bottom: 10px; flex-wrap: nowrap; }
-  /* Allow / Always / Deny share one row; the secondary toggles wait for a
-     taller screen. */
-  .mconv-blocking .zl-ask-aux { display: none; }
+  /* Allow / Always / Deny share one row; the secondary toggles move into the
+     scrolling area (the `is-flow` copy). */
+  .mconv-blocking .zl-ask-acts .zl-ask-aux { display: none; }
+  .mconv-blocking .zl-ask-aux.is-flow { display: flex; }
   .mconv-blocking .zl-ask-btn { min-width: 0; padding: 0 10px; }
   .mconv-blocking .zl-ask-btn.is-always { flex: 1 1 0; }
 }

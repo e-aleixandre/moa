@@ -120,6 +120,35 @@ export function PermissionCard({
     onAllow?.();
   };
 
+  const aux = (flow = false) => (
+    (onRuleToggle || onFeedbackToggle) && (
+          <div class={`zl-ask-aux${flow ? " is-flow" : ""}`}>
+            {onRuleToggle && (
+              <button
+                type="button"
+                class="zl-ask-btn is-quiet"
+                disabled={disabled}
+                aria-pressed={ruleActive}
+                onClick={onRuleToggle}
+              >
+                Add rule
+              </button>
+            )}
+            {onFeedbackToggle && (
+              <button
+                type="button"
+                class="zl-ask-btn is-quiet"
+                disabled={disabled}
+                aria-pressed={feedbackActive}
+                onClick={onFeedbackToggle}
+              >
+                + feedback
+              </button>
+            )}
+          </div>
+        )
+  );
+
   return (
     <div
       class={`zl-ask${destructive ? " is-danger" : ""}`}
@@ -146,6 +175,7 @@ export function PermissionCard({
           </div>
         )}
       </div>
+      {aux(true)}
       {scope.length > 0 && (
         <div class="zl-ask-scope">
           {scope.map((chip, i) => (
@@ -160,32 +190,7 @@ export function PermissionCard({
       )}
       {error && <div class="zl-ask-error">{error}</div>}
       <div class="zl-ask-acts">
-        {(onRuleToggle || onFeedbackToggle) && (
-          <div class="zl-ask-aux">
-            {onRuleToggle && (
-              <button
-                type="button"
-                class="zl-ask-btn is-quiet"
-                disabled={disabled}
-                aria-pressed={ruleActive}
-                onClick={onRuleToggle}
-              >
-                Add rule
-              </button>
-            )}
-            {onFeedbackToggle && (
-              <button
-                type="button"
-                class="zl-ask-btn is-quiet"
-                disabled={disabled}
-                aria-pressed={feedbackActive}
-                onClick={onFeedbackToggle}
-              >
-                + feedback
-              </button>
-            )}
-          </div>
-        )}
+        {aux()}
         {/* Allow first, then Always, then Deny: the order the tests fix and
             the one a keyboard reaches first. The reference puts the solid
             button last; the product keeps its own order and only moves the

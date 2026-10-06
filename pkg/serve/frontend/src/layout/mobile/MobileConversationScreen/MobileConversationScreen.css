@@ -42,6 +42,11 @@
 .mconv .zl-transcript-frame {
   min-height: calc(var(--shell-top) + 64px);
 }
+/* The transcript's own padding (74px + 24px) is taller than that band, and its
+   overflow would sit on top of the strip below and eat its first taps. */
+@media (max-height: 520px) {
+  .mconv .zl-transcript-frame { overflow: hidden; }
+}
 
 /* While a permission card is up on a short screen the status line and its
    Stop would sit between the card and the composer: Deny already answers it,
