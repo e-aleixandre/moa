@@ -439,3 +439,21 @@ func TestParseTextSignature_ValidatesPhase(t *testing.T) {
 		}
 	}
 }
+
+func TestConvertMessages_DropsUnansweredFunctionCall(t *testing.T) {
+	msgs := []core.Message{
+		{Role: "user", Content: []core.Content{core.TextContent("go")}},
+		{Role: "assistant", StopReason: "refusal", Content: []core.Content{
+			{Type: "tool_call", ToolCallID: "call_1", ToolName: "write"},
+		}},
+		{Role: "user", Content: []core.Content{core.TextContent("sigue")}},
+	}
+	for _, it := range convertMessages(msgs, Dialect{}) {
+		if it["type"] == "function_call" {
+			t.Fatalf("unanswered function_call replayed: %+v", it)
+		}
+	}
+	if len(msgs[1].Content) != 1 {
+		t.Fatal("persisted history was modified")
+	}
+}

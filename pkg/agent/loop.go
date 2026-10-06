@@ -948,6 +948,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			if assistantMsg.StopReason == "sensitive" {
 				reason = "content flagged by safety filters: " + reason
 			}
+			// A call streamed before the cut is never executed; without a
+			// result the persisted history is rejected by every later request.
+			if calls := extractToolCalls(assistantMsg); len(calls) > 0 {
+				injectErrorToolResults(cfg, calls, "tool call not executed: the model stopped ("+assistantMsg.StopReason+") before it could run")
+			}
 			loopErr = fmt.Errorf("model stopped (%s): %s", assistantMsg.StopReason, reason)
 			inTurn = false
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})

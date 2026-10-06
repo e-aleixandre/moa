@@ -298,6 +298,9 @@ func (r *imageRetirer) takeOldest() bool {
 func convertMessages(msgs []core.Message, isOAuth bool) []map[string]any {
 	var result []map[string]any
 
+	// A call with no result right after it would 400 every future request.
+	msgs = core.DropUnansweredToolCalls(msgs)
+
 	// Message order is chronological, so conversion order is age order: the
 	// retirer hands out its slots to the oldest images first.
 	retire := newImageRetirer(msgs)

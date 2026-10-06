@@ -17,7 +17,7 @@ func TestBuildRequestBody_DropsForeignResponseMetadata(t *testing.T) {
 			{Type: "tool_call", ToolCallID: "call_x", ToolName: "tool", ToolCallItemID: "fc_x"},
 		},
 	}
-	body, err := BuildRequestBody(core.Request{Model: core.Model{ID: "gpt-5.5"}, Messages: []core.Message{msg}}, Dialect{Provider: "openai", Model: "gpt-5.5"})
+	body, err := BuildRequestBody(core.Request{Model: core.Model{ID: "gpt-5.5"}, Messages: []core.Message{msg, core.NewToolResultMessage("call_legacy", "tool", nil, false)}}, Dialect{Provider: "openai", Model: "gpt-5.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestBuildRequestBody_DropsLegacyOpaqueMetadata(t *testing.T) {
 		{Type: "thinking", ThinkingSignature: `{"type":"reasoning","encrypted_content":"secret"}`},
 		{Type: "tool_call", ToolCallID: "call_kept", ToolName: "tool", ToolCallItemID: "fc_legacy"},
 	}}
-	body, err := BuildRequestBody(core.Request{Model: core.Model{ID: "grok-4.5"}, Messages: []core.Message{msg}}, Dialect{Provider: "xai", Model: "grok-4.5"})
+	body, err := BuildRequestBody(core.Request{Model: core.Model{ID: "grok-4.5"}, Messages: []core.Message{msg, core.NewToolResultMessage("call_kept", "tool", nil, false)}}, Dialect{Provider: "xai", Model: "grok-4.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestBuildRequestBody_PreservesKnownProviderLegacyModelMetadata(t *testing.T
 		{Type: "thinking", ThinkingSignature: `{"type":"reasoning","encrypted_content":"legacy-reasoning"}`},
 		{Type: "tool_call", ToolCallID: "call_legacy", ToolName: "tool", ToolCallItemID: "fc_legacy"},
 	}}
-	body, err := BuildRequestBody(core.Request{Model: core.Model{ID: "gpt-5.5"}, Messages: []core.Message{msg}}, Dialect{Provider: "openai", Model: "gpt-5.5"})
+	body, err := BuildRequestBody(core.Request{Model: core.Model{ID: "gpt-5.5"}, Messages: []core.Message{msg, core.NewToolResultMessage("call_legacy", "tool", nil, false)}}, Dialect{Provider: "openai", Model: "gpt-5.5"})
 	if err != nil {
 		t.Fatal(err)
 	}

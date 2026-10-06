@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -1128,5 +1129,33 @@ func TestCacheBreakpoints_DefaultAndHourStillWrite(t *testing.T) {
 		if !bytes.Contains(data, []byte("cache_control")) {
 			t.Fatalf("CacheRetention %q dropped cache_control: conversation turns share a prefix and must keep caching", ttl)
 		}
+	}
+}
+
+// Shape of a real session: a refusal cut the stream after a tool_call was
+// emitted, nothing answered it, and the user wrote again (entries 608-610).
+func orphanRefusalHistory() []core.Message {
+	return []core.Message{
+		{Role: "user", Content: []core.Content{core.TextContent("go")}},
+		{Role: "assistant", StopReason: "refusal", ErrorMessage: "cyber filter", Content: []core.Content{
+			{Type: "thinking", Thinking: "a", ThinkingSignature: "sig1"},
+			{Type: "thinking", Thinking: "b", ThinkingSignature: "sig2"},
+			{Type: "tool_call", ToolCallID: "toolu_01JDA83FEBqLEC96waSN8mBk", ToolName: "write", Arguments: map[string]any{"path": "x"}},
+		}},
+		{Role: "user", Content: []core.Content{core.TextContent("sigue")}},
+	}
+}
+
+func TestBuildRequestBody_DropsUnansweredToolUse(t *testing.T) {
+	hist := orphanRefusalHistory()
+	data, err := buildRequestBody(core.Request{Model: core.Model{ID: "claude-opus-5-5"}, Messages: hist}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "tool_use") {
+		t.Fatalf("unanswered tool_use was sent: %s", data)
+	}
+	if len(hist[1].Content) != 3 {
+		t.Fatal("persisted history was modified")
 	}
 }

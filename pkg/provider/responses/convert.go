@@ -179,6 +179,10 @@ func MapReasoningEffort(level string, allowed []string) string {
 func convertMessages(msgs []core.Message, dialect Dialect) []map[string]any {
 	var result []map[string]any
 
+	// A function_call with no output right after it is rejected on every
+	// future request, so such calls are not replayed.
+	msgs = core.DropUnansweredToolCalls(msgs)
+
 	for i, msg := range msgs {
 		items := convertMessageForDialect(msg, dialect, i)
 		result = append(result, items...)

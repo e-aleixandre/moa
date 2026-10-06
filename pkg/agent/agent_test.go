@@ -3574,3 +3574,16 @@ func TestGlobalCompactAtReachesRunningAgent(t *testing.T) {
 		t.Errorf("EffectiveCompactAt = %d, want 120000: an explicit session threshold outranks the global default", got)
 	}
 }
+
+func TestLoop_RefusalWithToolCallKeepsTranscriptValid(t *testing.T) {
+	provider := NewMockProvider(stopReasonToolCallResponse("toolu_01JDA83FEBqLEC96waSN8mBk", "write", "refusal"))
+	ag := newTestAgent(provider)
+
+	msgs, err := ag.Run(context.Background(), "go")
+	if err == nil || !strings.Contains(err.Error(), "refusal") {
+		t.Fatalf("expected refusal error, got: %v", err)
+	}
+	if len(msgs) != 3 || msgs[2].Role != "tool_result" || !msgs[2].IsError || msgs[2].ToolCallID != "toolu_01JDA83FEBqLEC96waSN8mBk" {
+		t.Fatalf("refused tool call must receive an error result, got: %+v", msgs)
+	}
+}
