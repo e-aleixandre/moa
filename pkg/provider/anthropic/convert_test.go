@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"strings"
 	"testing"
 
@@ -1157,5 +1158,52 @@ func TestBuildRequestBody_DropsUnansweredToolUse(t *testing.T) {
 	}
 	if len(hist[1].Content) != 3 {
 		t.Fatal("persisted history was modified")
+	}
+}
+
+// The real flow: reopening the session synthesizes a late error result for the
+// unanswered call (appended at the leaf), which must not reach the wire either.
+func TestConvertMessages_RestoredSessionHasNoOrphanToolBlocks(t *testing.T) {
+	const id = "toolu_01JDA83FEBqLEC96waSN8mBk"
+	msg := func(i, parent string, m core.Message) session.Entry {
+		m.MsgID = i
+		return session.Entry{ID: i, ParentID: parent, Type: session.EntryMessage, Message: core.WrapMessage(m)}
+	}
+	hist := orphanRefusalHistory()
+	entries := []session.Entry{
+		msg("e606", "", core.Message{Role: "assistant", Content: []core.Content{{Type: "tool_call", ToolCallID: "toolu_prev", ToolName: "bash"}}}),
+		msg("e607", "e606", core.NewToolResultMessage("toolu_prev", "bash", []core.Content{core.TextContent("ok")}, false)),
+		msg("e608", "e607", hist[1]),
+		msg("e609", "e608", hist[2]),
+		msg("e610", "e609", core.Message{Role: "assistant", Content: []core.Content{core.TextContent("hola")}}),
+	}
+	entries[2].Message.Content[2].ToolCallID = id
+	tree, err := session.NewTreeFromEntries(entries, "e610")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := tree.BuildContext()
+	var msgs []core.Message
+	late := false
+	for _, m := range ctx {
+		msgs = append(msgs, m.Message)
+		late = late || (m.Role == "tool_result" && m.ToolCallID == id)
+	}
+	if !late {
+		t.Fatal("restore did not synthesize the late result; test no longer exercises the flow")
+	}
+	uses, results := 0, 0
+	for _, m := range convertMessages(msgs, false) {
+		for _, b := range m["content"].([]any) {
+			switch b.(map[string]any)["type"] {
+			case "tool_use":
+				uses++
+			case "tool_result":
+				results++
+			}
+		}
+	}
+	if uses != 1 || results != 1 {
+		t.Fatalf("tool_use=%d tool_result=%d, want 1/1", uses, results)
 	}
 }

@@ -444,7 +444,7 @@ func TestConvertMessages_DropsUnansweredFunctionCall(t *testing.T) {
 	msgs := []core.Message{
 		{Role: "user", Content: []core.Content{core.TextContent("go")}},
 		{Role: "assistant", StopReason: "refusal", Content: []core.Content{
-			{Type: "tool_call", ToolCallID: "call_1", ToolName: "write"},
+			{Type: "tool_call", ToolCallID: "toolu_01JDA83FEBqLEC96waSN8mBk", ToolName: "write"},
 		}},
 		{Role: "user", Content: []core.Content{core.TextContent("sigue")}},
 	}
