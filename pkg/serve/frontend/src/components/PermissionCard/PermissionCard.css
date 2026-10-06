@@ -18,7 +18,14 @@
   border-radius: var(--zl-r-lg);
   background: var(--zl-raised);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--zl-yellow) 40%, transparent);
+  /* The card never outgrows the screen: the command block below shrinks and
+     scrolls, so the decision buttons stay on screen however long it is. */
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+  max-height: 60dvh;
 }
+.zl-ask > * { flex: none; }
 /* The card takes focus so Enter can mean Allow; the ring goes on the
    primary rather than around the whole card, which is where the key lands. */
 .zl-ask:focus { outline: none; }
@@ -58,6 +65,11 @@
   border-radius: var(--zl-r-md);
   background: var(--zl-canvas);
   box-shadow: var(--zl-rim);
+  /* Scrolls inside, never truncates: the whole command stays reachable. */
+  flex: 0 1 auto;
+  min-height: 5em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .zl-ask-cwd {
   margin-bottom: 4px;
@@ -165,6 +177,19 @@
 .zl-ask-btn b {
   font-family: var(--mono);
   font-weight: 500;
+}
+/* The rule pattern can be a whole script: the button never grows with it.
+   The command block above is the evidence; the full pattern is the title. */
+.zl-ask-btn.is-always {
+  max-width: 100%;
+  min-width: 0;
+}
+.zl-ask-btn.is-always .zl-ask-always-for { flex: none; }
+.zl-ask-btn.is-always b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .zl-ask-btn[aria-pressed="true"] {
   background: var(--zl-raised);

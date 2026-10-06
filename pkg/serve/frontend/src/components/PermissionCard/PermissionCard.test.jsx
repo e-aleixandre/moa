@@ -46,7 +46,10 @@ test("the command is the evidence, never clipped", () => {
   expect(source).toMatch(/<code class="zl-ask-cmd-text zl-data">/);
   expect(source).toContain("CommandLine");
   expect(source).toMatch(/cwd && <div class="zl-ask-cwd zl-data">\{cwd\}<\/div>/);
-  expect(css).not.toMatch(/text-overflow:\s*ellipsis/);
+  // Only the Always button's rule label may be shortened (its full text is the
+  // title); nothing that shows the command or the cwd may be.
+  const shown = css.match(/\.zl-ask-(?:cmd|cwd|cmd-text) \{[^}]*\}/g).join("");
+  expect(shown).not.toMatch(/text-overflow:\s*ellipsis|line-clamp/);
   expect(css).not.toMatch(/-webkit-line-clamp/);
   expect(css).toMatch(/overflow-wrap:\s*anywhere/);
   expect(css).toMatch(/white-space:\s*pre-wrap/);
@@ -77,4 +80,14 @@ test("a bash permission prints the command, not a JSON wrapper", () => {
   expect(prompt).not.toMatch(/Object\.keys\(args\)\.length === 1/);
   expect(prompt).toContain("command={permissionCommand(perm)}");
   expect(prompt).toContain("scope={permissionScope(perm)}");
+});
+
+test("a long command scrolls inside its block so the decision stays on screen", () => {
+  expect(css).toMatch(/\.zl-ask \{[^}]*max-height:\s*60dvh/);
+  expect(css).toMatch(/\.zl-ask-cmd \{[^}]*overflow-y:\s*auto/);
+});
+
+test("the Always button never grows with a long rule pattern", () => {
+  expect(css).toMatch(/\.zl-ask-btn\.is-always b \{[^}]*text-overflow:\s*ellipsis/);
+  expect(source).toContain("title={`Always for ${alwaysLabel}`}");
 });

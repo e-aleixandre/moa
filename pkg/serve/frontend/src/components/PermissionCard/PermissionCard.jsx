@@ -194,8 +194,14 @@ export function PermissionCard({
           <kbd class="zl-ask-key" aria-hidden="true">⏎</kbd>
         </button>
         {!destructive && alwaysLabel && (
-          <button type="button" class="zl-ask-btn" disabled={disabled} onClick={onAlways}>
-            Always for <b>{alwaysLabel}</b>
+          <button
+            type="button"
+            class="zl-ask-btn is-always"
+            disabled={disabled}
+            title={`Always for ${alwaysLabel}`}
+            onClick={onAlways}
+          >
+            <span class="zl-ask-always-for">Always for</span> <b>{alwaysLabel}</b>
           </button>
         )}
         <button type="button" class="zl-ask-btn" disabled={disabled} onClick={onDeny}>
