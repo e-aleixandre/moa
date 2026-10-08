@@ -199,7 +199,8 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
    keeps its word down to the narrowest dock; only a datum-bearing alarm
    (unhealthy MCP) may fall back to a glyph, because its number stays.
    Specificity beats `.zl-p2 .zl-st-word { display: none }` on purpose. */
-.zl-st-ev.is-alarm-yellow .zl-st-word { display: inline; }
+.zl-st-ev.is-alarm-yellow .zl-st-word,
+.zl-st-api .zl-st-word { display: inline; }
 
 /* Compact (grid pane, phone): goal is already dropped in the JSX;
    the line itself only tightens. */

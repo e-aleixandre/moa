@@ -162,7 +162,7 @@ func TestBackupToolContinuationRevokeNeverEvadesViaOAuth(t *testing.T) {
 		tools++
 		st, err := s.AnthropicBackupStatus()
 		if err == nil {
-			_, err = s.RemoveAnthropicBackup(st.Revision)
+			err = s.RemoveAnthropicAPIKey(st.Revision.Key)
 		}
 		return core.TextResult("executed then revoked"), err
 	}}); err != nil {

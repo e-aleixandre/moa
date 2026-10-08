@@ -146,7 +146,7 @@ func TestBackupRuntimeAPICreditsErrorPreservesOAuth(t *testing.T) {
 	}
 }
 func TestBackupRuntimeStopConfigAndRevokeBeforeDispatch(t *testing.T) {
-	for _, what := range []string{"stop", "config", "disable", "replace", "remove"} {
+	for _, what := range []string{"stop", "config", "replace", "remove"} {
 		t.Run(what, func(t *testing.T) {
 			p, s, tr, req := backupRuntime(t)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -168,7 +168,7 @@ func TestBackupRuntimeStopConfigAndRevokeBeforeDispatch(t *testing.T) {
 				return nil
 			}
 			// Store mutations win before backup selection, not inside its lock.
-			if what == "disable" || what == "replace" || what == "remove" {
+			if what == "replace" || what == "remove" {
 				tr.serve = func(_ *http.Request, n int) (int, http.Header, string) {
 					if n != 0 {
 						t.Fatal("revoked dispatch")
@@ -178,12 +178,10 @@ func TestBackupRuntimeStopConfigAndRevokeBeforeDispatch(t *testing.T) {
 						t.Fatal(e)
 					}
 					switch what {
-					case "disable":
-						_, e = s.SetAnthropicBackupEnabled(st.Revision, false)
 					case "replace":
-						_, e = s.SaveAnthropicBackup(st.Revision, "replaced-fake-key")
+						_, e = s.SaveAnthropicAPIKey(st.Revision.Primary, "replaced-fake-key")
 					case "remove":
-						_, e = s.RemoveAnthropicBackup(st.Revision)
+						e = s.RemoveAnthropicAPIKey(st.Revision.Key)
 					}
 					if e != nil {
 						t.Fatal(e)
@@ -222,7 +220,7 @@ func TestBackupRuntimeContinuationOriginAndRevoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RemoveAnthropicBackup(st.Revision); err != nil {
+	if err := s.RemoveAnthropicAPIKey(st.Revision.Key); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.Stream(context.Background(), req); err == nil || len(tr.headers) != 3 {

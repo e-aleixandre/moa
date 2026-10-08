@@ -20,24 +20,23 @@ func TestBackupFailedRevokeDoesNotResumePaidDispatch(t *testing.T) {
 	const refresh = "REVIEW-PRIMARY-REFRESH-SENTINEL"
 	const key = "sk-ant-api03-REVIEW-BACKUP-KEY-SENTINEL"
 	f.commit(t, f.store, "anthropic", auth.Credential{Type: "oauth", Access: access, Refresh: refresh, Expires: 4102444800000})
+	gen, err := f.store.StoredGeneration("anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.SaveAnthropicAPIKey(gen, key); err != nil {
+		t.Fatal(err)
+	}
 	st, err := f.store.AnthropicBackupStatus()
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, err = f.store.SaveAnthropicBackup(st.Revision, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, err = f.store.SetAnthropicBackupEnabled(st.Revision, true)
-	if err != nil || !st.Enabled {
-		t.Fatalf("fixture enable: enabled=%t err=%v", st.Enabled, err)
+	if err != nil || !st.Active {
+		t.Fatalf("fixture: active=%t err=%v", st.Active, err)
 	}
 	lockPath := f.path + ".lock"
 	if err := os.Chmod(lockPath, 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(lockPath, 0600) })
-	_, revokeErr := f.store.RemoveAnthropicBackup(st.Revision)
+	revokeErr := f.store.RemoveAnthropicAPIKey(st.Revision.Key)
 	pe, classified := core.AsProviderCredentialError(revokeErr)
 	if !classified || pe.Class != core.CredentialStoreUnavailable {
 		t.Fatalf("fixture did not fail at lock open: %v", revokeErr)

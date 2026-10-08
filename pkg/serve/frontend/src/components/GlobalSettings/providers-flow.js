@@ -79,16 +79,10 @@ export function retrySave(api, provider) {
   return api("POST", `${base(provider)}/retry-save`, {}, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
 }
 
-export function saveAnthropicBackup(api, key, revision) {
-  return api("POST", "/api/providers/anthropic/backup/key", { key: String(key || "").trim(), expected_revision: revision }, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
-}
-
-export function enableAnthropicBackup(api, enabled, revision) {
-  return api("POST", "/api/providers/anthropic/backup/enabled", { enabled, expected_revision: revision }, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
-}
-
-export function removeAnthropicBackup(api, revision) {
-  return api("POST", "/api/providers/anthropic/backup/remove", { expected_revision: revision }, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
+// removeApiKey — the Anthropic key stored next to the plan sign-in; the
+// sign-in stays. `generation` is the key's, not the sign-in's.
+export function removeApiKey(api, provider, generation) {
+  return api("POST", `${base(provider)}/api-key/remove`, { expected_generation: generation || "" }, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
 }
 
 // copyText — the device code to the clipboard. Only ever the user code: the

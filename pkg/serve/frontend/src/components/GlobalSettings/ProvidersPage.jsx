@@ -6,10 +6,9 @@ import { applyProviderStatus, loadProviderStatus, useProviderStatus } from "../.
 import { createRowController, IDLE, newRowScope } from "./provider-row-controller.js";
 import { PROGRESS_INTERVAL_MS, copyText, listProviders } from "./providers-flow.js";
 import {
-  PROVIDER_ROWS, deadlineLabel, flowCopy, kindLabel, replaceNotice, rowActions, rowReading,
+  PROVIDER_ROWS, deadlineLabel, flowCopy, planKeyNote, replaceNotice, rowActions, rowKind, rowReading,
 } from "./providers-model.js";
 import { providerHue } from "./settings-rows.js";
-import { AnthropicBackup } from "./AnthropicBackup.jsx";
 import "./ProvidersPage.css";
 
 // ProvidersPage — Settings → Providers. One row per provider, its state and
@@ -157,8 +156,9 @@ export function ProviderRow({ def, row, canAdmin, loading, focused, returnSessio
   }, [attemptId]);
 
   const reading = loading ? { text: "…", tone: "muted" } : row ? rowReading(row, canAdmin) : { text: "Unavailable", tone: "muted" };
-  const actions = row ? rowActions(row, canAdmin) : { signIn: null, apiKey: null, retrySave: false };
-  const kind = row && row.source !== "env" ? kindLabel(row.kind) : "";
+  const actions = row ? rowActions(row, canAdmin) : { signIn: null, apiKey: null, removeKey: false, retrySave: false };
+  const keyNote = canAdmin ? planKeyNote(row) : "";
+  const kind = row && row.source !== "env" ? rowKind(row) : "";
   const attention = !!row?.attention;
   const idle = state.step === "idle";
 
@@ -192,6 +192,8 @@ export function ProviderRow({ def, row, canAdmin, loading, focused, returnSessio
         <button type="button" class="zl-prov-btn" onClick={() => onReturn(returnSessionId)}>Return to session</button>
       )}
 
+      {idle && keyNote && <p class="zl-prov-msg is-warn" role="status">{keyNote}</p>}
+
       {idle && (actions.signIn || actions.apiKey || actions.retrySave) && (
         <div class="zl-prov-acts">
           {actions.retrySave && (
@@ -209,6 +211,11 @@ export function ProviderRow({ def, row, canAdmin, loading, focused, returnSessio
               {actions.apiKey}
             </button>
           )}
+          {actions.removeKey && (
+            <button type="button" class="zl-prov-btn" disabled={state.busy} onClick={() => ctl.removeKey()}>
+              Remove API key
+            </button>
+          )}
         </div>
       )}
 
@@ -216,7 +223,6 @@ export function ProviderRow({ def, row, canAdmin, loading, focused, returnSessio
       {state.step === "paste" && <PasteStep def={def} state={state} ctl={ctl} inputRef={inputRef} />}
       {state.step === "device" && <DeviceStep state={state} ctl={ctl} />}
       {state.step === "key" && <KeyStep def={def} row={row} state={state} ctl={ctl} inputRef={inputRef} />}
-      {idle && canAdmin && row?.actions?.includes("backup") && row.backup && <AnthropicBackup backup={row.backup} onChanged={onChanged} />}
     </div>
   );
 }

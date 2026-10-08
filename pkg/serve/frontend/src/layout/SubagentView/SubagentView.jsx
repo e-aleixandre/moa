@@ -7,6 +7,7 @@ import { WorkHead, StateWord, CopyAction, RunIds } from "../WorkChrome/WorkChrom
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { ModelSelector } from '../../components/ModelSelector/ModelSelector.jsx';
 import { ProviderWaitInfo } from '../LiveBar/ProviderWaitInfo.jsx';
+import { onAPIKey } from '../../data/provider-wait.js';
 import { api } from '../../data/api.js';
 import { addToast } from '../../data/notifications.js';
 import { modelCatalog, ensureModelCatalog, catalogSpec } from '../../data/model-catalog.js';
@@ -272,6 +273,7 @@ export function SubagentStatusStrip({ view, compact = false, sessionId, jobId })
       onModel={sessionId && jobId ? () => setOpen(true) : undefined}
       showPermission={false}
       showTokens={false}
+      onAPI={onAPIKey(view.providerExecution)}
     >
       <Sheet open={open} onClose={() => setOpen(false)} title="Child model">
         <ModelSelector models={specs} selected={catalogSpec(specs, view.modelSpec)?.id} thinking={view.thinking}

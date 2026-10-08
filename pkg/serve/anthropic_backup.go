@@ -2,60 +2,30 @@ package serve
 
 import (
 	"net/http"
-
-	"github.com/e-aleixandre/moa/pkg/auth"
 )
 
-func (pc *providerCredentials) backupKey(w http.ResponseWriter, r *http.Request, provider string) {
+// anthropicPlanKey is the Anthropic API key stored next to the plan sign-in.
+// The plan stays the primary; the key takes over at a 5h or weekly limit.
+type anthropicPlanKey struct {
+	Generation string `json:"generation"`
+	State      string `json:"state"`
+}
+
+// removeAPIKey deletes the key stored next to the plan sign-in. A primary API
+// key (no plan sign-in) is not removable here, as before.
+func (pc *providerCredentials) removeAPIKey(w http.ResponseWriter, r *http.Request, provider string) {
 	var body struct {
-		Expected *auth.BackupRevision `json:"expected_revision"`
-		Key      string               `json:"key"`
+		ExpectedGeneration *string `json:"expected_generation"`
 	}
 	if !decodeProviderBody(w, r, provider, &body) {
 		return
 	}
-	if provider != "anthropic" || body.Expected == nil {
-		writeProviderError(w, 400, provider, "invalid_request")
+	if provider != "anthropic" || body.ExpectedGeneration == nil {
+		writeProviderError(w, http.StatusBadRequest, provider, "invalid_request")
 		return
 	}
-	_, err := pc.store.SaveAnthropicBackup(*body.Expected, body.Key)
-	pc.backupResult(w, provider, err)
-}
-
-func (pc *providerCredentials) backupEnabled(w http.ResponseWriter, r *http.Request, provider string) {
-	var body struct {
-		Expected *auth.BackupRevision `json:"expected_revision"`
-		Enabled  *bool                `json:"enabled"`
-	}
-	if !decodeProviderBody(w, r, provider, &body) {
-		return
-	}
-	if provider != "anthropic" || body.Expected == nil || body.Enabled == nil {
-		writeProviderError(w, 400, provider, "invalid_request")
-		return
-	}
-	_, err := pc.store.SetAnthropicBackupEnabled(*body.Expected, *body.Enabled)
-	pc.backupResult(w, provider, err)
-}
-
-func (pc *providerCredentials) backupRemove(w http.ResponseWriter, r *http.Request, provider string) {
-	var body struct {
-		Expected *auth.BackupRevision `json:"expected_revision"`
-	}
-	if !decodeProviderBody(w, r, provider, &body) {
-		return
-	}
-	if provider != "anthropic" || body.Expected == nil {
-		writeProviderError(w, 400, provider, "invalid_request")
-		return
-	}
-	_, err := pc.store.RemoveAnthropicBackup(*body.Expected)
-	pc.backupResult(w, provider, err)
-}
-
-func (pc *providerCredentials) backupResult(w http.ResponseWriter, provider string, err error) {
-	if err != nil {
-		writeProviderFailure(w, provider, "backup", err)
+	if err := pc.store.RemoveAnthropicAPIKey(*body.ExpectedGeneration); err != nil {
+		writeProviderFailure(w, provider, "api_key", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, pc.row(pc.store.ProviderStatus(provider), true, true))

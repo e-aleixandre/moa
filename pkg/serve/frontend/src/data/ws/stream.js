@@ -252,7 +252,10 @@ export function handleWsUserMessage(id, data) {
     return;
   }
   const secretBatch = secretBatchFromMessage(data);
-  if (data.custom?.source === 'provider_wait' || data.custom?.type === 'provider_source_note') {
+  // Notes of an API-key dispatch stay in the record but not in the conversation:
+  // the status line says when the key is in use.
+  if (data.custom?.type === 'provider_source_note') return;
+  if (data.custom?.source === 'provider_wait') {
     updateSession(id, { messages: [...messages, { _type: 'system', _msg_id: data.msg_id,
       timestamp: data.timestamp, text: (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('') || data.text || '' }] });
     return;

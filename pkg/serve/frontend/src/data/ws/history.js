@@ -97,7 +97,9 @@ export function normalizeHistory(raw, liveSubagents = []) {
       // Rendered as a system line, matching the live goal event styling.
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
       result.push({ _type: 'system', _msg_id: msg.msg_id, text });
-    } else if (msg.custom?.source === 'provider_wait' || msg.custom?.type === 'provider_source_note') {
+    } else if (msg.custom?.type === 'provider_source_note') {
+      // Kept in the record, not drawn: the status line says when the API key is in use.
+    } else if (msg.custom?.source === 'provider_wait') {
       result.push({ _type: 'system', _msg_id: msg.msg_id, timestamp: msg.timestamp,
         text: (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('') });
     } else if (msg.role === 'session_event' && msg.custom?.type === 'trim_marker') {

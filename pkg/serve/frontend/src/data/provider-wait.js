@@ -21,3 +21,16 @@ export function providerWaitDetails(execution) {
     : 'Change model to try now, or Stop to end the wait.');
   return lines;
 }
+
+// onAPIKey — a run is being served with the Anthropic API key because the plan
+// hit its limit. The source stays set between its requests; a finished run
+// (phase "") is not paying for anything.
+export function onAPIKey(execution) {
+  return !!execution?.phase && execution.source?.kind === 'api_backup';
+}
+
+// sessionOnAPIKey — the session or one of its running children is on the key.
+export function sessionOnAPIKey(session) {
+  if (onAPIKey(session?.providerExecution)) return true;
+  return Object.values(session?.subagents || {}).some((sub) => sub?.status === 'running' && onAPIKey(sub.providerExecution));
+}

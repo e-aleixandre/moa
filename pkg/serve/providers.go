@@ -73,11 +73,11 @@ type providerRow struct {
 	RenewAt              string `json:"renew_at,omitempty"`
 	LastUseOKAt          string `json:"last_use_ok_at,omitempty"`
 	// Owner-only fields (GET /api/providers and mutation responses).
-	OAuthEnabled  *bool                       `json:"oauth_enabled,omitempty"`
-	APIKeyEnabled *bool                       `json:"api_key_enabled,omitempty"`
-	Actions       []string                    `json:"actions,omitempty"`
-	PendingSave   *bool                       `json:"pending_save,omitempty"`
-	Backup        *auth.AnthropicBackupStatus `json:"backup,omitempty"`
+	OAuthEnabled  *bool             `json:"oauth_enabled,omitempty"`
+	APIKeyEnabled *bool             `json:"api_key_enabled,omitempty"`
+	Actions       []string          `json:"actions,omitempty"`
+	PendingSave   *bool             `json:"pending_save,omitempty"`
+	PlanAPIKey    *anthropicPlanKey `json:"plan_api_key,omitempty"`
 }
 
 type providersStatus struct {
@@ -145,13 +145,6 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 		RenewAt:              formatTime(st.RenewAt),
 		LastUseOKAt:          formatTime(st.LastUseOKAt),
 	}
-	if st.Provider == "anthropic" {
-		backup, err := pc.store.AnthropicBackupStatus()
-		if err != nil {
-			backup.State = "store_unavailable"
-		}
-		r.Backup = &backup
-	}
 	if !owner {
 		// A device can only report the problem; it cannot fix it.
 		if r.Action != "" && r.Action != "retry" {
@@ -164,12 +157,17 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 	}
 	enabled, pending := true, st.PendingSave
 	r.OAuthEnabled, r.APIKeyEnabled, r.PendingSave = &enabled, &enabled, &pending
+	if st.Provider == "anthropic" && st.Source == core.CredentialSourceStore && st.Kind == "oauth" {
+		// The key beside the plan is reported only where the field can save it.
+		key := &anthropicPlanKey{State: "store_unavailable"}
+		if backup, err := pc.store.AnthropicBackupStatus(); err == nil {
+			key = &anthropicPlanKey{Generation: backup.Revision.Key, State: backup.State}
+		}
+		r.PlanAPIKey = key
+	}
 	r.Actions = []string{}
 	if st.Source == core.CredentialSourceStore && st.State != auth.StatusStoreUnavailable {
 		r.Actions = append(r.Actions, "sign_in", "api_key")
-		if st.Provider == "anthropic" && st.Kind == "oauth" {
-			r.Actions = append(r.Actions, "backup")
-		}
 		if st.PendingSave {
 			r.Actions = append(r.Actions, "retry_save")
 		}
@@ -226,9 +224,7 @@ func (pc *providerCredentials) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		"oauth/cancel":   pc.cancel,
 		"api-key":        pc.apiKey,
 		"retry-save":     pc.retrySave,
-		"backup/key":     pc.backupKey,
-		"backup/enabled": pc.backupEnabled,
-		"backup/remove":  pc.backupRemove,
+		"api-key/remove": pc.removeAPIKey,
 	}
 	handle, known := handlers[action]
 	if !ok || !known {

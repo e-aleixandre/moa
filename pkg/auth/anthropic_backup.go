@@ -1,30 +1,29 @@
 package auth
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
-	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
+// anthropicBackupSlot holds the Anthropic API key saved next to a plan sign-in.
+// The name is the one PR #36 shipped, so a key stored then keeps working.
 const anthropicBackupSlot = "__anthropic_backup_v1"
 
 // BackupRevision is a secret-free CAS tuple, not a credential or a capability.
 type BackupRevision struct {
 	Primary string `json:"primary_generation"`
 	Key     string `json:"key_generation"`
-	Policy  string `json:"policy_generation"`
 }
 
+// AnthropicBackupStatus describes the API key stored next to the plan sign-in.
+// Active means it is used once the plan reports a 5h or weekly limit: storing
+// the key is the whole consent, there is no separate switch.
 type AnthropicBackupStatus struct {
 	Revision   BackupRevision `json:"revision"`
 	Configured bool           `json:"configured"`
-	Enabled    bool           `json:"enabled"`
-	Eligible   bool           `json:"eligible"`
+	Active     bool           `json:"active"`
 	State      string         `json:"state"`
 }
 
@@ -33,56 +32,34 @@ type AnthropicBackupSelection struct {
 	Revision BackupRevision
 }
 
-type backupPolicy struct {
-	Version    int    `json:"version"`
-	Primary    string `json:"primary_generation"`
-	Generation string `json:"policy_generation"`
-	Enabled    bool   `json:"enabled"`
-}
-
-func readBackup(disk map[string]Credential) (Credential, backupPolicy, error) {
+// readBackup ignores the backup_policy written by PR #36: its enabled flag and
+// primary association no longer gate anything, so a key saved then keeps
+// working without a migration write.
+func readBackup(disk map[string]Credential) (Credential, error) {
 	cred, ok := disk[anthropicBackupSlot]
-	if !ok {
-		return Credential{}, backupPolicy{}, nil
+	if !ok || cred.Key == "" {
+		return Credential{}, nil
 	}
-	var policy backupPolicy
-	raw := cred.extra["backup_policy"]
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if d.Decode(&policy) != nil || d.Decode(&struct{}{}) != io.EOF || policy.Version != 1 || policy.Generation == "" || policy.Primary == "" || cred.Generation == "" || cred.Type != "api_key" {
-		return Credential{}, backupPolicy{}, storeUnavailable("anthropic", "backup")
+	if cred.Type != "api_key" || cred.Generation == "" {
+		return Credential{}, storeUnavailable("anthropic", "backup")
 	}
-	// Null is not an opt-out; unknown policy shapes are never authority.
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(raw, &fields) != nil || len(fields) != 4 {
-		return Credential{}, backupPolicy{}, storeUnavailable("anthropic", "backup")
-	}
-	for _, value := range fields {
-		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
-			return Credential{}, backupPolicy{}, storeUnavailable("anthropic", "backup")
-		}
-	}
-	return cred, policy, nil
+	return cred, nil
 }
 
 func backupView(disk map[string]Credential) (AnthropicBackupStatus, error) {
-	cred, policy, err := readBackup(disk)
+	cred, err := readBackup(disk)
 	if err != nil {
 		return AnthropicBackupStatus{}, err
 	}
 	primary := disk["anthropic"]
-	st := AnthropicBackupStatus{Revision: BackupRevision{Primary: primary.Generation, Key: cred.Generation, Policy: policy.Generation}, Configured: cred.Key != "", State: "not_configured"}
+	st := AnthropicBackupStatus{Revision: BackupRevision{Primary: primary.Generation, Key: cred.Generation}, Configured: cred.Key != "", State: "not_configured"}
 	_, env, _ := envSnapshot("anthropic")
-	st.Eligible = !env && primary.Type == "oauth" && primary.Generation != ""
-	st.Enabled = st.Configured && st.Eligible && policy.Enabled && policy.Primary == primary.Generation
-	if st.Configured {
-		st.State = "stored_off"
-	}
-	if st.Configured && policy.Primary != primary.Generation {
-		st.State = "primary_changed"
-	}
-	if st.Enabled {
-		st.State = "enabled"
+	st.Active = st.Configured && !env && primary.Type == "oauth" && primary.Generation != ""
+	switch {
+	case st.Active:
+		st.State = "active"
+	case st.Configured:
+		st.State = "inactive"
 	}
 	return st, nil
 }
@@ -101,14 +78,14 @@ func (s *Store) AnthropicBackupStatus() (AnthropicBackupStatus, error) {
 			return err
 		}
 		if s.backupBlocked || s.hasPending("anthropic") {
-			out.Enabled = false
+			out.Active = false
 			out.State = "save_failed"
 			return nil
 		}
-		// A second Store has no pending fence. Publish enabled only after its
+		// A second Store has no pending fence. Publish active only after its
 		// own durable acknowledgement, not just because rename made it visible.
 		// Reading status never flushes an unrelated primary OAuth rotation.
-		if out.Enabled {
+		if out.Active {
 			if err := s.saveLocked(disk); err != nil {
 				return persistenceFailed("anthropic", "backup_status")
 			}
@@ -143,90 +120,87 @@ func (s *Store) RecordAnthropicBackupUse(revision BackupRevision, err error) {
 	s.observe(useKey{anthropicBackupSlot, "store", revision.Key}, state)
 }
 
-func (s *Store) SaveAnthropicBackup(expected BackupRevision, key string) (AnthropicBackupStatus, error) {
-	key = strings.TrimSpace(key)
-	if key == "" || len(key) > 8192 || strings.ContainsAny(key, "\r\n\t ") || IsOAuthToken(key) {
-		return AnthropicBackupStatus{}, &LoginError{Provider: "anthropic", Class: LoginInvalidKey}
-	}
-	return s.mutateBackup(expected, "save", key, false)
-}
-
-func (s *Store) SetAnthropicBackupEnabled(expected BackupRevision, enabled bool) (AnthropicBackupStatus, error) {
-	return s.mutateBackup(expected, "enable", "", enabled)
-}
-
-func (s *Store) RemoveAnthropicBackup(expected BackupRevision) (AnthropicBackupStatus, error) {
-	return s.mutateBackup(expected, "remove", "", false)
-}
-
-func (s *Store) mutateBackup(expected BackupRevision, op, key string, enabled bool) (AnthropicBackupStatus, error) {
+// SaveAnthropicAPIKey stores the one Anthropic API key. Next to a stored plan
+// sign-in it goes to the second slot and never replaces the sign-in; without
+// one it is the primary credential, exactly as before. expectedPrimary is the
+// generation the caller saw for the primary credential. The key is validated
+// by the caller.
+func (s *Store) SaveAnthropicAPIKey(expectedPrimary, key string) (string, error) {
 	if _, env, _ := envSnapshot("anthropic"); env {
-		return AnthropicBackupStatus{}, &LoginError{Provider: "anthropic", Class: LoginEnvManaged}
+		return "", &LoginError{Provider: "anthropic", Class: LoginEnvManaged}
 	}
+	gen, err := newGeneration()
+	if err != nil {
+		return "", persistenceFailed("anthropic", "api_key")
+	}
+	besidePlan := false
 	s.refreshMu.Lock()
-	defer s.refreshMu.Unlock()
-	var out AnthropicBackupStatus
-	err := s.transact("anthropic", "backup_"+op, func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		st, err := backupView(disk)
-		if err != nil {
+	err = s.transact("anthropic", "api_key", func(disk map[string]Credential) (bool, *pendingRotation, error) {
+		primary := disk["anthropic"]
+		if primary.Generation != expectedPrimary {
+			return false, nil, credentialsChanged("anthropic", "api_key", primary.Generation)
+		}
+		if primary.Type != "oauth" {
+			return false, nil, nil
+		}
+		besidePlan = true
+		if _, err := readBackup(disk); err != nil {
 			return false, nil, err
 		}
-		if st.Revision != expected {
-			return false, nil, credentialsChanged("anthropic", "backup", st.Revision.Primary)
-		}
-		primary := disk["anthropic"]
-		if primary.Type != "oauth" {
-			return false, nil, missingCredential("anthropic")
-		}
-		// Assign a durable identity to a legacy grant without replacing it.
+		// Give a legacy grant a durable identity without replacing it.
 		if primary.Generation == "" {
-			primary.Generation, err = newGeneration()
-			if err != nil {
-				return false, nil, persistenceFailed("anthropic", "backup")
+			var err error
+			if primary.Generation, err = newGeneration(); err != nil {
+				return false, nil, persistenceFailed("anthropic", "api_key")
 			}
 			disk["anthropic"] = primary
 		}
-		cred, policy, err := readBackup(disk)
-		if err != nil {
-			return false, nil, err
-		}
-		policy = backupPolicy{Version: 1, Primary: primary.Generation, Enabled: enabled}
-		policy.Generation, err = newGeneration()
-		if err != nil {
-			return false, nil, persistenceFailed("anthropic", "backup")
-		}
-		switch op {
-		case "save", "remove":
-			cred = Credential{Type: "api_key", Key: key, extra: cred.extra}
-			cred.Generation, err = newGeneration()
-			if err != nil {
-				return false, nil, persistenceFailed("anthropic", "backup")
-			}
-		case "enable":
-			if enabled && cred.Key == "" {
-				return false, nil, missingCredential("anthropic")
-			}
-		}
-		raw, err := json.Marshal(policy)
-		if err != nil {
-			return false, nil, persistenceFailed("anthropic", "backup")
-		}
-		extra := make(map[string]json.RawMessage, len(cred.extra)+1)
-		for name, value := range cred.extra {
-			extra[name] = value
-		}
-		cred.extra = extra
-		cred.extra["backup_policy"] = raw
-		disk[anthropicBackupSlot] = cred
+		disk[anthropicBackupSlot] = Credential{Type: "api_key", Key: key, Generation: gen}
 		s.mu.Lock()
 		s.pending[anthropicBackupSlot] = pendingRotation{fence: true}
 		s.mu.Unlock()
 		if err := s.saveLocked(disk); err != nil {
-			// A failed disable/remove must not keep paying locally. Another
-			// process cannot be promised revocation before the durable ack.
-			if op == "remove" || (op == "enable" && !enabled) {
-				s.backupBlocked = true
+			if errors.Is(err, errNotWritten) {
+				s.dropPending(anthropicBackupSlot)
 			}
+			return false, nil, persistenceFailed("anthropic", "api_key")
+		}
+		s.backupBlocked = false
+		s.dropPending(anthropicBackupSlot)
+		return false, nil, nil
+	})
+	s.refreshMu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	if besidePlan {
+		return gen, nil
+	}
+	// The CAS on expectedPrimary rejects a plan sign-in that landed meanwhile.
+	return s.CommitLogin("anthropic", expectedPrimary, Credential{Type: "api_key", Key: key})
+}
+
+// RemoveAnthropicAPIKey deletes the key stored next to the plan sign-in, which
+// stays signed in. expectedKey is the key generation the caller saw.
+func (s *Store) RemoveAnthropicAPIKey(expectedKey string) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	err := s.transact("anthropic", "backup_remove", func(disk map[string]Credential) (bool, *pendingRotation, error) {
+		cred, err := readBackup(disk)
+		if err != nil {
+			return false, nil, err
+		}
+		if cred.Generation != expectedKey {
+			return false, nil, credentialsChanged("anthropic", "backup", cred.Generation)
+		}
+		delete(disk, anthropicBackupSlot)
+		s.mu.Lock()
+		s.pending[anthropicBackupSlot] = pendingRotation{fence: true}
+		s.mu.Unlock()
+		if err := s.saveLocked(disk); err != nil {
+			// A failed remove must not keep paying locally. Another process
+			// cannot be promised revocation before the durable ack.
+			s.backupBlocked = true
 			if errors.Is(err, errNotWritten) {
 				s.dropPending(anthropicBackupSlot)
 			}
@@ -234,20 +208,37 @@ func (s *Store) mutateBackup(expected BackupRevision, op, key string, enabled bo
 		}
 		s.backupBlocked = false
 		s.dropPending(anthropicBackupSlot)
-		out, err = backupView(disk)
-		return false, nil, err
+		return false, nil, nil
 	})
-	if op == "remove" || (op == "enable" && !enabled) {
-		if pe, ok := core.AsProviderCredentialError(err); ok && (pe.Class == core.CredentialStoreUnavailable || pe.Class == core.CredentialPersistenceFailed) {
-			s.backupBlocked = true
-		}
+	// transact can also fail before the callback runs (lock, pending OAuth flush).
+	if pe, ok := core.AsProviderCredentialError(err); ok && (pe.Class == core.CredentialStoreUnavailable || pe.Class == core.CredentialPersistenceFailed) {
+		s.backupBlocked = true
 	}
-	return out, err
+	return err
+}
+
+// keepKeyBesidePlan keeps an Anthropic API key that a plan sign-in is about to
+// replace as the primary credential: with both, the plan comes first and the
+// key takes over at its limit. An existing second key is never overwritten.
+func keepKeyBesidePlan(disk map[string]Credential, provider string, next Credential) error {
+	prev := disk[provider]
+	if provider != "anthropic" || next.Type != "oauth" || prev.Type != "api_key" || prev.Key == "" {
+		return nil
+	}
+	if cur, err := readBackup(disk); err != nil || cur.Key != "" {
+		return nil
+	}
+	gen, err := newGeneration()
+	if err != nil {
+		return err
+	}
+	disk[anthropicBackupSlot] = Credential{Type: "api_key", Key: prev.Key, Generation: gen}
+	return nil
 }
 
 // AdmitAnthropicBackup linearizes a paid dispatch while holding the existing
 // Store/file locks. The callback is a short Agent admission gate, never HTTP.
-// No resolved key escapes this method until durability and current consent
+// No resolved key escapes this method until durability and the current key
 // have both been acknowledged. Every retry calls it again after its sleep.
 func (s *Store) AdmitAnthropicBackup(ctx context.Context, expected BackupRevision, admit func(AnthropicBackupSelection) error) error {
 	if err := ctx.Err(); err != nil {
@@ -263,7 +254,7 @@ func (s *Store) AdmitAnthropicBackup(ctx context.Context, expected BackupRevisio
 		if err != nil {
 			return false, nil, err
 		}
-		if s.backupBlocked || !st.Enabled || st.Revision != expected || s.hasPending("anthropic") {
+		if s.backupBlocked || !st.Active || st.Revision != expected || s.hasPending("anthropic") {
 			return false, nil, credentialsChanged("anthropic", "backup", expected.Primary)
 		}
 		if err := s.saveLocked(disk); err != nil {

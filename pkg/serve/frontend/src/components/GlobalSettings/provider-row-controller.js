@@ -9,7 +9,7 @@
 //   - success says so and touches nothing else — no session, no turn.
 
 import {
-  beginSignIn, cancelSignIn, closeWindow, completeSignIn, openBlankWindow, retrySave, saveApiKey, signInProgress,
+  beginSignIn, cancelSignIn, closeWindow, completeSignIn, openBlankWindow, removeApiKey, retrySave, saveApiKey, signInProgress,
 } from "./providers-flow.js";
 import {
   SAVED_COPY, TERMINAL_PROGRESS, errorIntent, flowErrorCopy, progressEndCopy,
@@ -144,6 +144,19 @@ export function createRowController({
         } else {
           fail(error);
         }
+      }
+    },
+
+    async removeKey() {
+      if (get().busy) return;
+      patch({ busy: true, message: null });
+      const { live } = begin();
+      try {
+        const updated = await removeApiKey(api, provider, row()?.plan_api_key?.generation);
+        if (live()) set({ ...IDLE, message: { text: "API key removed.", tone: "ok" } });
+        onChanged?.(updated && updated.id ? updated : null);
+      } catch (error) {
+        if (live()) fail(error);
       }
     },
 

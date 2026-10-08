@@ -82,7 +82,11 @@ func (a *Agent) admitProviderSource(ctx context.Context, revision uint64, model 
 	a.providerExecution.Bound = bound
 	a.providerExecution.Wait = nil
 	a.providerExecution.SaveError = ""
-	a.providerExecution.Source = source
+	// Admission before dispatch keeps the last source, so the status line does
+	// not blink off between requests that keep using the API key.
+	if source != nil {
+		a.providerExecution.Source = source
+	}
 	state := a.providerExecution
 	a.mu.Unlock()
 	a.emitter.Emit(core.AgentEvent{Type: core.AgentEventProviderExecution, ProviderExecution: &state})

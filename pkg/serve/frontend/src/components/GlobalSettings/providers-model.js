@@ -23,6 +23,31 @@ export function kindLabel(kind) {
   return KIND[kind] || "";
 }
 
+// planKey — the Anthropic API key stored next to a plan sign-in, or null. The
+// plan comes first; the key takes over at a 5h or weekly limit.
+export function planKey(row) {
+  const key = row?.plan_api_key;
+  return key && key.generation ? key : null;
+}
+
+// rowKind — the kind word of a row: a plan with a key beside it says both.
+export function rowKind(row) {
+  const kind = kindLabel(row?.kind);
+  return kind && planKey(row) ? `${kind} + API key` : kind;
+}
+
+// planKeyNote — what the key beside the plan needs, or "" when nothing.
+export function planKeyNote(row) {
+  switch (planKey(row)?.state) {
+    case "api_error":
+      return "The API key failed on its last use. Replace it.";
+    case "save_failed":
+      return "The API key isn't used until the change is saved. Remove it again.";
+    default:
+      return "";
+  }
+}
+
 // rowReading — the second line of a row: what state the credential is in and,
 // when it needs something, what to do. `tone` drives colour only.
 export function rowReading(row, canAdmin) {
@@ -77,16 +102,19 @@ export function rowActions(row, canAdmin) {
   const signIn = actions.includes("sign_in") && row.oauth_enabled !== false
     ? (row.kind === "api_key" ? "Use subscription" : row.kind === "oauth" ? "Reconnect" : "Sign in")
     : null;
+  // Beside a plan sign-in the key is added, never swapped for the sign-in.
+  const besidePlan = !!row.plan_api_key;
   const apiKey = actions.includes("api_key") && row.api_key_enabled !== false
-    ? (row.kind === "api_key" ? "Replace API key" : row.kind === "oauth" ? "Use API key" : "Add API key")
+    ? (row.kind === "api_key" || planKey(row) ? "Replace API key" : row.kind === "oauth" && !besidePlan ? "Use API key" : "Add API key")
     : null;
+  const removeKey = !!apiKey && !!planKey(row);
   const retrySave = actions.includes("retry_save");
   // The primary is what the row's state needs: a rejected key wants a new key,
   // an expired sign-in wants a sign-in, a failed save wants a retry.
   const wanted = row.state === "key_rejected" ? ["apiKey", "signIn"] : ["retrySave", "signIn", "apiKey"];
   const have = { signIn, apiKey, retrySave };
   const primary = wanted.find((k) => have[k]) || null;
-  return { signIn, apiKey, retrySave, primary };
+  return { signIn, apiKey, removeKey, retrySave, primary };
 }
 
 export const REPLACE_NOTICE =
@@ -97,6 +125,8 @@ export const REPLACE_NOTICE =
 // use: "oauth" or "api_key". Switching between them changes who bills.
 export function replaceNotice(row, method) {
   if (!row || row.state === "missing") return null;
+  // A key saved beside a plan sign-in replaces nothing.
+  if (method === "api_key" && row.plan_api_key) return null;
   const name = providerName(row.id);
   let billing = "";
   if (row.kind === "api_key" && method === "oauth") {

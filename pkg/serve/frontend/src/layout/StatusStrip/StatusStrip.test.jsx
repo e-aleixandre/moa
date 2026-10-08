@@ -62,3 +62,25 @@ test("the catalogue draws production's StatusStrip, not a private line", () => {
   expect(lab).not.toMatch(/function ThinkMeter\s*\(/);
   expect(lab).toMatch(/<StatusStrip[\s\S]*\/>/);
 });
+
+const API = { generation: 1, epoch: 3, phase: "working", source: { kind: "api_backup" } };
+const apiItem = (props) => descendants(StatusStrip(props)).find((node) => typeof node.props?.class === "string" && node.props.class.includes("zl-st-api"));
+
+test("the line says api while the session runs on the API key, and only then", () => {
+  const item = apiItem({ session: { providerExecution: API } });
+  expect(item).toBeTruthy();
+  expect(item.props.class).toContain("zl-p2");
+  expect(apiItem({ session: { providerExecution: { ...API, source: { kind: "oauth" } } } })).toBeFalsy();
+  // The run ended: nothing is being paid for now.
+  expect(apiItem({ session: { providerExecution: { ...API, phase: "" } } })).toBeFalsy();
+});
+
+test("a running child on the API key lights the parent's line; a finished one does not", () => {
+  expect(apiItem({ session: { subagents: { j: { status: "running", providerExecution: API } } } })).toBeTruthy();
+  expect(apiItem({ session: { subagents: { j: { status: "completed", providerExecution: API } } } })).toBeFalsy();
+});
+
+test("a child's own strip takes its execution", () => {
+  expect(apiItem({ onAPI: true })).toBeTruthy();
+  expect(apiItem({ session: { providerExecution: API }, onAPI: false })).toBeFalsy();
+});

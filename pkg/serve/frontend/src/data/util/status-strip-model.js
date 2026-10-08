@@ -110,6 +110,7 @@ export function statusItemPriority(kind, state) {
     case "mcp":
       return state === "unhealthy" || state === "needs-sign-in" ? "p2" : "p4";
     case "extra":
+    case "api":
       return "p2";
     case "tokens":
     case "spend":

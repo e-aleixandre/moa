@@ -162,7 +162,7 @@ func TestBackupRetryRevalidatesKeyAfterSleepWithoutAnotherOAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SaveAnthropicBackup(st.Revision, "replacement-fake-not-for-old-request"); err != nil {
+	if _, err := s.SaveAnthropicAPIKey(st.Revision.Primary, "replacement-fake-not-for-old-request"); err != nil {
 		t.Fatal(err)
 	}
 	req.Options.ProviderBinding = ready.Source

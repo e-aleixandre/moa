@@ -11,7 +11,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/auth"
 )
 
-func TestNativeProvidersBackupAndOAuthCookieParity(t *testing.T) {
+func TestNativeProvidersAPIKeyAndOAuthCookieParity(t *testing.T) {
 	f := newProviderFixture(t, true)
 	d := pairedDevice(t, f.handler, ownerCookie, "own native app")
 	cookie := deviceBrowserSession(t, f.handler, d.Credential)
@@ -50,48 +50,55 @@ func TestNativeProvidersBackupAndOAuthCookieParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	beforeCalls := f.up.callCount()
-	mutate := func(action string, key string, enabled *bool) auth.AnthropicBackupStatus {
+	keyRow := func(r *httptest.ResponseRecorder) *anthropicPlanKey {
 		t.Helper()
-		st, err := f.store.AnthropicBackupStatus()
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := map[string]any{"expected_revision": st.Revision}
-		if key != "" {
-			body["key"] = key
-		}
-		if enabled != nil {
-			body["enabled"] = *enabled
-		}
-		data, _ := json.Marshal(body)
-		r := f.do("POST", "/api/providers/anthropic/backup/"+action, string(data), opt...)
-		if r.Code != 200 {
-			t.Fatalf("native backup %s: %d %s", action, r.Code, r.Body.String())
-		}
 		if strings.Contains(r.Body.String(), "SENTINEL") {
 			t.Fatal("response leaked key/access/refresh")
 		}
 		if got, err := f.store.PeekSnapshot("anthropic"); err != nil || got.Token != primary.Token || got.Generation != primary.Generation {
-			t.Fatal("backup changed OAuth")
+			t.Fatal("the API key changed OAuth")
 		}
-		return backupStatusFromResponse(t, r)
+		var row struct {
+			PlanAPIKey *anthropicPlanKey `json:"plan_api_key"`
+		}
+		if err := json.Unmarshal(r.Body.Bytes(), &row); err != nil {
+			t.Fatal(err)
+		}
+		return row.PlanAPIKey
 	}
-	on, off := true, false
-	if st := mutate("key", "sk-ant-api03-NATIVE-BACKUP-SENTINEL", nil); !st.Configured || st.Enabled {
-		t.Fatal("save activated backup")
+	save := func(key string) *anthropicPlanKey {
+		t.Helper()
+		gen, err := f.store.StoredGeneration("anthropic")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := f.do("POST", "/api/providers/anthropic/api-key", fmt.Sprintf(`{"key":%q,"expected_generation":%q}`, key, gen), opt...)
+		if r.Code != 200 {
+			t.Fatalf("native API key save: %d %s", r.Code, r.Body.String())
+		}
+		return keyRow(r)
 	}
-	if st := mutate("enabled", "", &on); !st.Enabled {
-		t.Fatal("explicit enable failed")
+	if k := save("sk-ant-api03-NATIVE-BACKUP-SENTINEL"); k == nil || k.State != "active" || k.Generation == "" {
+		t.Fatalf("saved key is not in use: %+v", k)
 	}
-	mutate("enabled", "", &off)
-	if st := mutate("key", "sk-ant-api03-REPLACED-SENTINEL", nil); st.Enabled {
-		t.Fatal("replace activated backup")
+	k := save("sk-ant-api03-REPLACED-SENTINEL")
+	if k == nil || k.State != "active" {
+		t.Fatalf("replaced key: %+v", k)
 	}
-	if st := mutate("remove", "", nil); st.Configured || st.Enabled {
-		t.Fatal("remove left backup")
+	r := f.do("POST", "/api/providers/anthropic/api-key/remove", fmt.Sprintf(`{"expected_generation":%q}`, k.Generation), opt...)
+	if r.Code != 200 {
+		t.Fatalf("native API key remove: %d %s", r.Code, r.Body.String())
+	}
+	if k := keyRow(r); k == nil || k.State != "not_configured" {
+		t.Fatalf("remove left the key: %+v", k)
+	}
+	for _, gone := range []string{"/api/providers/anthropic/backup/key", "/api/providers/anthropic/backup/enabled", "/api/providers/anthropic/backup/remove"} {
+		if r := f.do("POST", gone, `{}`, opt...); r.Code != 404 {
+			t.Fatalf("%s still routed: %d", gone, r.Code)
+		}
 	}
 	if f.up.callCount() != beforeCalls {
-		t.Fatal("backup administration called a provider")
+		t.Fatal("API key administration called a provider")
 	}
 	// Same active identity administers device list/pairing; it is not a master
 	// token and remains revocable. In-flight operation semantics are unchanged.
@@ -109,33 +116,22 @@ func TestNativeProvidersBackupAndOAuthCookieParity(t *testing.T) {
 	}
 }
 
-func backupStatusFromResponse(t *testing.T, r *httptest.ResponseRecorder) auth.AnthropicBackupStatus {
-	t.Helper()
-	var body struct {
-		Backup auth.AnthropicBackupStatus `json:"backup"`
-	}
-	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	return body.Backup
-}
-
-func TestNativeBackupOriginAndUnauthenticatedRemainDenied(t *testing.T) {
+func TestNativeAPIKeyOriginAndUnauthenticatedRemainDenied(t *testing.T) {
 	f := newProviderFixture(t, true)
 	d := pairedDevice(t, f.handler, ownerCookie, "own app")
 	cookie := deviceBrowserSession(t, f.handler, d.Credential)
 	f.seed("anthropic", auth.Credential{Type: "oauth", Access: "FAKE-SENTINEL", Expires: 4102444800000})
-	st, err := f.store.AnthropicBackupStatus()
+	gen, err := f.store.StoredGeneration("anthropic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]any{"key": "sk-ant-api03-FAKE-SENTINEL", "expected_revision": st.Revision})
+	body, _ := json.Marshal(map[string]any{"key": "sk-ant-api03-FAKE-SENTINEL", "expected_generation": gen})
 	for _, opts := range [][]reqOpt{{withCookie(cookie), withHeader("Origin", "https://other.invalid")}, {withCookie(cookie), withoutHeader("X-Moa-Request")}, {withHeader("Authorization", "Bearer automation-token")}, nil} {
-		if r := f.do("POST", "/api/providers/anthropic/backup/key", string(body), opts...); r.Code != 401 && r.Code != 403 {
+		if r := f.do("POST", "/api/providers/anthropic/api-key", string(body), opts...); r.Code != 401 && r.Code != 403 {
 			t.Fatalf("unsafe request %d", r.Code)
 		}
 	}
 	if st, err := f.store.AnthropicBackupStatus(); err != nil || st.Configured {
-		t.Fatal("denied request mutated backup")
+		t.Fatal("denied request stored a key")
 	}
 }

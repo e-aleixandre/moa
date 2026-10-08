@@ -33,91 +33,79 @@ func backupStatus(t *testing.T, s *Store) AnthropicBackupStatus {
 
 func saveBackup(t *testing.T, s *Store) AnthropicBackupStatus {
 	t.Helper()
-	st, err := s.SaveAnthropicBackup(backupStatus(t, s).Revision, "sk-ant-api03-offline-backup-only")
+	gen, err := s.StoredGeneration("anthropic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return st
+	if _, err := s.SaveAnthropicAPIKey(gen, "sk-ant-api03-offline-backup-only"); err != nil {
+		t.Fatal(err)
+	}
+	return backupStatus(t, s)
 }
 
-func TestAnthropicBackupDualReopenAndReplaceRemove(t *testing.T) {
+func TestAnthropicBackupReopenReplaceRemove(t *testing.T) {
 	s, path, primary := backupFixture(t)
 	st := saveBackup(t, s)
-	if !st.Configured || st.Enabled {
-		t.Fatalf("save must store OFF: %+v", st)
+	if !st.Configured || !st.Active || st.State != "active" {
+		t.Fatalf("a saved key is in use: %+v", st)
 	}
 	other := NewStore(path)
 	if got, _ := other.Get("anthropic"); !sameCredential(got, primary) {
 		t.Fatal("save replaced OAuth")
 	}
-	if snap, err := other.ResolveSnapshot(context.Background(), "anthropic"); err != nil || snap.Kind != "oauth" {
-		t.Fatalf("primary = %s, %v", snap.Kind, err)
+	if _, err := other.SaveAnthropicAPIKey(st.Revision.Primary, "sk-ant-api03-offline-replaced"); err != nil {
+		t.Fatal(err)
 	}
-	st, err := other.SetAnthropicBackupEnabled(st.Revision, true)
-	if err != nil || !st.Enabled {
-		t.Fatalf("enable: %+v %v", st, err)
+	st = backupStatus(t, s)
+	if !st.Active || !admitsKey(t, s, "sk-ant-api03-offline-replaced") {
+		t.Fatalf("replace: %+v", st)
 	}
-	st, err = s.SaveAnthropicBackup(st.Revision, "sk-ant-api03-offline-replaced")
-	if err != nil || st.Enabled {
-		t.Fatalf("replace must store OFF: %+v %v", st, err)
+	if err := other.RemoveAnthropicAPIKey(st.Revision.Key); err != nil {
+		t.Fatal(err)
 	}
-	st, err = other.RemoveAnthropicBackup(st.Revision)
-	if err != nil || st.Configured || st.Enabled {
-		t.Fatalf("remove: %+v %v", st, err)
+	if st = backupStatus(t, s); st.Configured || st.Active || st.State != "not_configured" {
+		t.Fatalf("remove: %+v", st)
 	}
 	if got, _ := NewStore(path).Get("anthropic"); !sameCredential(got, primary) {
 		t.Fatal("replace/remove changed OAuth")
 	}
 }
 
-func TestAnthropicBackupCASAndDisableRevoke(t *testing.T) {
+func TestAnthropicBackupStaleRemoveAndRevoke(t *testing.T) {
 	s, path, _ := backupFixture(t)
 	st := saveBackup(t, s)
-	st, err := s.SetAnthropicBackupEnabled(st.Revision, true)
-	if err != nil {
-		t.Fatal(err)
-	}
 	old := st.Revision
 	other := NewStore(path)
-	st, err = other.SetAnthropicBackupEnabled(old, false)
-	if err != nil {
+	if _, err := other.SaveAnthropicAPIKey(old.Primary, "sk-ant-api03-offline-newer"); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(path)
-	if _, err := s.SetAnthropicBackupEnabled(old, true); err == nil {
-		t.Fatal("stale CAS enabled")
+	if err := s.RemoveAnthropicAPIKey(old.Key); err == nil {
+		t.Fatal("stale remove deleted a newer key")
 	}
 	after, _ := os.ReadFile(path)
-	if string(before) != string(after) {
-		t.Fatal("stale CAS rewrote winner")
+	if string(before) != string(after) || s.backupBlocked {
+		t.Fatal("stale remove rewrote the winner or fenced it")
 	}
 	calls := 0
 	if err := s.AdmitAnthropicBackup(context.Background(), old, func(AnthropicBackupSelection) error { calls++; return nil }); err == nil {
-		t.Fatal("disabled backup admitted")
+		t.Fatal("replaced key admitted")
 	}
-	st, err = s.SetAnthropicBackupEnabled(st.Revision, true)
-	if err != nil {
+	cur := backupStatus(t, s)
+	if err := other.RemoveAnthropicAPIKey(cur.Revision.Key); err != nil {
 		t.Fatal(err)
 	}
-	old = st.Revision
-	if _, err := other.RemoveAnthropicBackup(old); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AdmitAnthropicBackup(context.Background(), old, func(AnthropicBackupSelection) error { calls++; return nil }); err == nil {
-		t.Fatal("removed backup admitted")
+	if err := s.AdmitAnthropicBackup(context.Background(), cur.Revision, func(AnthropicBackupSelection) error { calls++; return nil }); err == nil {
+		t.Fatal("removed key admitted")
 	}
 	if calls != 0 {
 		t.Fatalf("revoked dispatches=%d", calls)
 	}
 }
 
-func TestAnthropicBackupRefreshPreservesNewLoginInvalidates(t *testing.T) {
+func TestAnthropicBackupRefreshPreservesKey(t *testing.T) {
 	s, path, primary := backupFixture(t)
 	st := saveBackup(t, s)
-	st, err := s.SetAnthropicBackupEnabled(st.Revision, true)
-	if err != nil {
-		t.Fatal(err)
-	}
 	s.refresh = func(context.Context, string, string) (*OAuthCredentials, error) {
 		return &OAuthCredentials{Access: "rotated-fake", Refresh: "rotated-refresh", Expires: time.Now().Add(time.Hour).UnixMilli()}, nil
 	}
@@ -125,23 +113,13 @@ func TestAnthropicBackupRefreshPreservesNewLoginInvalidates(t *testing.T) {
 	if _, err := s.RefreshOAuthIfGeneration(context.Background(), snap, primary.Access); err != nil {
 		t.Fatal(err)
 	}
-	if got := backupStatus(t, NewStore(path)); !got.Enabled || got.Revision != st.Revision {
-		t.Fatal("same-grant rotation lost backup")
-	}
-	if _, err := s.CommitLogin("anthropic", primary.Generation, primary); err != nil {
-		t.Fatal(err)
-	}
-	if got := backupStatus(t, NewStore(path)); got.Enabled || !got.Configured {
-		t.Fatalf("new login reauthorized old backup: %+v", got)
-	}
-	if err := s.AdmitAnthropicBackup(context.Background(), st.Revision, func(AnthropicBackupSelection) error { t.Fatal("old primary admitted"); return nil }); err == nil {
-		t.Fatal("new primary not fenced")
+	if got := backupStatus(t, NewStore(path)); !got.Active || got.Revision != st.Revision {
+		t.Fatal("same-grant rotation lost the key")
 	}
 }
 
 func TestAnthropicBackupDurableReopenDispatchAndStop(t *testing.T) {
-	s, path, _ := backupFixture(t)
-	st := saveBackup(t, s)
+	s, path, primary := backupFixture(t)
 	writer := s.writeFile
 	s.writeFile = func(path string, data []byte) error {
 		if err := writer(path, data); err != nil {
@@ -149,11 +127,11 @@ func TestAnthropicBackupDurableReopenDispatchAndStop(t *testing.T) {
 		}
 		return errors.New("synthetic failure after real rename")
 	}
-	if _, err := s.SetAnthropicBackupEnabled(st.Revision, true); err == nil {
+	if _, err := s.SaveAnthropicAPIKey(primary.Generation, "sk-ant-api03-offline-backup-only"); err == nil {
 		t.Fatal("post-rename failure reported success")
 	}
 	other := NewStore(path)
-	st = backupStatus(t, other)
+	st := backupStatus(t, NewStore(path))
 	calls, syncs := 0, 0
 	other.writeFile = func(string, []byte) error { syncs++; return errors.New("sync unavailable") }
 	admit := func(AnthropicBackupSelection) error { calls++; return nil }
@@ -171,31 +149,20 @@ func TestAnthropicBackupDurableReopenDispatchAndStop(t *testing.T) {
 	}
 }
 
-func TestAnthropicBackupLegacyCodecRoundTripAndEnv(t *testing.T) {
+func TestAnthropicBackupLegacyCodecRoundTrip(t *testing.T) {
 	s, path, primary := backupFixture(t)
-	st := saveBackup(t, s)
-	st, err := s.SetAnthropicBackupEnabled(st.Revision, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The unchanged c995 codec treats policy as extra and the reserved slot as
-	// another provider; a legacy general rewrite must preserve both verbatim.
+	saveBackup(t, s)
+	// The codec treats the reserved slot as another provider; a general
+	// rewrite must preserve it verbatim.
 	disk := readAuthFile(t, path)
 	if err := s.Set("unknown-future-provider", Credential{Type: "future", extra: map[string]json.RawMessage{"future": json.RawMessage(`{"nested":true}`)}}); err != nil {
 		t.Fatal(err)
 	}
 	got := readAuthFile(t, path)
-	if !sameCredential(got[anthropicBackupSlot], disk[anthropicBackupSlot]) || string(got[anthropicBackupSlot].extra["backup_policy"]) != string(disk[anthropicBackupSlot].extra["backup_policy"]) {
-		t.Fatal("legacy codec dropped slot/policy")
+	if !sameCredential(got[anthropicBackupSlot], disk[anthropicBackupSlot]) {
+		t.Fatal("codec dropped the key slot")
 	}
 	if !sameCredential(got["anthropic"], primary) {
-		t.Fatal("legacy rewrite changed OAuth")
-	}
-	t.Setenv("ANTHROPIC_API_KEY", "env-primary-not-backup")
-	if snap, err := s.ResolveSnapshot(context.Background(), "anthropic"); err != nil || snap.Token != "env-primary-not-backup" {
-		t.Fatal("env legacy priority changed")
-	}
-	if err := s.AdmitAnthropicBackup(context.Background(), st.Revision, func(AnthropicBackupSelection) error { t.Fatal("env used as backup"); return nil }); err == nil {
-		t.Fatal("env admitted backup")
+		t.Fatal("rewrite changed OAuth")
 	}
 }

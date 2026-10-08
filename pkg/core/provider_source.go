@@ -11,7 +11,6 @@ type ProviderSource struct {
 	Kind                 string     `json:"kind"`
 	PrimaryGeneration    string     `json:"primary_generation,omitempty"`
 	BackupGeneration     string     `json:"backup_generation,omitempty"`
-	PolicyGeneration     string     `json:"policy_generation,omitempty"`
 	WireProfile          string     `json:"wire_profile,omitempty"`
 	Provider             string     `json:"provider,omitempty"`
 	Model                string     `json:"model,omitempty"`

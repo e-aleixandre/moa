@@ -1,6 +1,7 @@
 import "./StatusStrip.css";
 import { statusItemPriority, statusStripModel } from "../../data/util/status-strip-model.js";
 import { activityPhase } from "../../data/util/activity.js";
+import { sessionOnAPIKey } from "../../data/provider-wait.js";
 import { TokenFlow } from "../../components/index.js";
 
 // StatusStrip — the line under the composer. Markup and CSS are the
@@ -93,6 +94,7 @@ export function StatusStrip({
   owner,
   tasks = null,
   onOpenTasks,
+  onAPI,
   children,
 }) {
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
@@ -104,6 +106,9 @@ export function StatusStrip({
   const { perm, modes, alerts } = strip;
 
   const hasSpend = !!spend;
+  // Paid like fast, so it sits beside fast; an alarm's priority, so a phone
+  // still shows it. A child's strip passes its own execution.
+  const apiKey = onAPI ?? sessionOnAPIKey(session);
   const phase = activityPhase(session);
   // taskLive overrides the session-derived liveness for a strip whose task
   // belongs to something other than the main run — a subagent's, whose activity
@@ -188,6 +193,13 @@ export function StatusStrip({
           <span class={`zl-st zl-st-fast zl-${statusItemPriority("fast")}`} title="Fast mode: billed at a premium rate">
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5L3.5 9h4l-.5 5.5L12.5 7h-4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
             <span class="zl-st-word">fast</span>
+          </span>
+        )}
+
+        {apiKey && (
+          <span class={`zl-st zl-st-fast zl-st-api zl-${statusItemPriority("api")}`} title="Plan limit reached: using the API key until the plan is back">
+            <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5.5" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M8.5 8h6M12.5 8v2.5M14.5 8v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+            <span class="zl-st-word">api</span>
           </span>
         )}
       </div>

@@ -322,6 +322,9 @@ func (m *ProviderLoginManager) SaveAPIKey(provider, expectedGeneration, key stri
 	if provider == "anthropic" && strings.HasPrefix(key, "sk-ant-oat") {
 		return "", loginError(provider, LoginNotAPIKey)
 	}
+	if provider == "anthropic" {
+		return m.store.SaveAnthropicAPIKey(expectedGeneration, key)
+	}
 	return m.store.CommitLogin(provider, expectedGeneration, Credential{Type: "api_key", Key: key})
 }
 

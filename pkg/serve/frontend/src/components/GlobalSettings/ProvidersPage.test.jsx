@@ -60,10 +60,26 @@ function render(id, { state = IDLE, row = ROW.anthropic, canAdmin = true } = {})
 const fields = (tree) => all(tree, (n) => n.type === "input" || n.type === "textarea");
 const buttons = (tree) => all(tree, (n) => n.type === "button");
 
-test("an active own-device DTO exposes separate backup administration without replacing OAuth", () => {
-  const tree = render("anthropic", { row: { ...ROW.anthropic, kind: "oauth", state: "saved", actions: ["sign_in", "api_key", "backup"], backup: { configured: false, enabled: false, eligible: true, state: "not_configured", revision: { primary_generation: "g", key_generation: "", policy_generation: "" } } } });
-  expect(text(tree)).toContain("API backup");
-  expect(buttons(tree).map((b) => text(b).trim())).toContain("Add backup key");
+const PLAN = { ...ROW.anthropic, kind: "oauth", state: "ready", attention: false, actions: ["sign_in", "api_key"] };
+
+test("a plan sign-in offers one API key field, with no backup key, toggle or replace warning", () => {
+  const idle = render("anthropic", { row: { ...PLAN, plan_api_key: { generation: "", state: "not_configured" } } });
+  const labels = buttons(idle).map((b) => text(b).trim());
+  expect(labels).toContain("Add API key");
+  expect(labels.join(" ")).not.toMatch(/backup|Enable|Disable|Use API key/i);
+  const key = render("anthropic", { state: { ...IDLE, step: "key" }, row: { ...PLAN, plan_api_key: { generation: "", state: "not_configured" } } });
+  expect(text(key)).not.toContain("instead of your subscription");
+  expect(buttons(key).map((b) => text(b).trim())).toContain("Save");
+});
+
+test("a key beside the plan reads on the row and can be replaced or removed", () => {
+  const tree = render("anthropic", { row: { ...PLAN, plan_api_key: { generation: "k1", state: "active" } } });
+  expect(text(tree)).toContain("Subscription + API key");
+  const labels = buttons(tree).map((b) => text(b).trim());
+  expect(labels).toContain("Replace API key");
+  expect(labels).toContain("Remove API key");
+  const rejected = render("anthropic", { row: { ...PLAN, plan_api_key: { generation: "k1", state: "api_error" } } });
+  expect(text(rejected)).toContain("Replace it");
 });
 
 test("the API key field is write-only: password, empty, no autofill, no reveal or copy", () => {

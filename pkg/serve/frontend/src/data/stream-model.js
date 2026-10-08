@@ -300,11 +300,6 @@ export function projectStream(session) {
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
-    if (msg?.provider_source?.kind && (msg.role === 'assistant' || msg._type === 'tool_start')) {
-      const doc = ensureDoc(msg, i);
-      const id = `source-${msg._msg_id || msg.msg_id || i}`;
-      if (!doc.blocks.some((b) => b.type === 'provider_source' && b.id === id)) doc.blocks.push({ type: 'provider_source', id, source: msg.provider_source });
-    }
     if (msg && msg._type === 'system') {
       // System line breaks the turn: emit at top level, start fresh doc after.
       blocks.push({ kind: 'system', id: blockID('sys', msg, i), text: msg.text || '', systemType: msg.systemType });

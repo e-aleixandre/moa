@@ -34,14 +34,14 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 	var source core.ProviderSource
 	backup, backupErr := p.authStore.AnthropicBackupStatus()
 	if backupErr != nil {
-		backup.Enabled = false
+		backup.Active = false
 	}
 	streamBackup := func(revision auth.BackupRevision, notBefore *time.Time) (<-chan core.AssistantEvent, error) {
 		if !backupReplaySupported(req) {
 			return nil, errors.New("API backup cannot replay this model or mode. Stop and continue with a supported model, or wait for the plan")
 		}
 		if req.Options.OnProviderPrepare != nil {
-			if err := req.Options.OnProviderPrepare(ctx, core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, PolicyGeneration: revision.Policy, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore}); err != nil {
+			if err := req.Options.OnProviderPrepare(ctx, core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore}); err != nil {
 				return nil, err
 			}
 		}
@@ -67,7 +67,7 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 		base.WithDispatch(func(ctx context.Context) (string, error) {
 			var key string
 			err := p.authStore.AdmitAnthropicBackup(ctx, revision, func(selected auth.AnthropicBackupSelection) error {
-				next := core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, PolicyGeneration: revision.Policy, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore}
+				next := core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore}
 				if err := dispatch(next); err != nil {
 					return err
 				}
@@ -92,7 +92,7 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 		if binding.Provider != req.Model.Provider || binding.Model != req.Model.ID || binding.WireProfile != "oauth" {
 			return nil, errors.New("API continuation no longer matches this request. Stop and continue explicitly")
 		}
-		return streamBackup(auth.BackupRevision{Primary: binding.PrimaryGeneration, Key: binding.BackupGeneration, Policy: binding.PolicyGeneration}, binding.OAuthNotBefore)
+		return streamBackup(auth.BackupRevision{Primary: binding.PrimaryGeneration, Key: binding.BackupGeneration}, binding.OAuthNotBefore)
 	}
 	base := anthropic.NewWithKind("", primary.Kind == "oauth")
 	if p.httpClient != nil {
@@ -123,7 +123,7 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 	})
 	ch, err := base.Stream(ctx, req)
 	if err != nil {
-		if qe, ok := core.AsQuotaExceeded(err); ok && qe.Wait != nil && qe.Wait.Kind == "quota_confirmed" && (qe.Wait.Scope == "five_hour" || qe.Wait.Scope == "seven_day") && primary.Source == core.CredentialSourceStore && primary.Kind == "oauth" && backup.Enabled && backup.Revision.Primary == primary.Generation && backupReplaySupported(req) {
+		if qe, ok := core.AsQuotaExceeded(err); ok && qe.Wait != nil && qe.Wait.Kind == "quota_confirmed" && (qe.Wait.Scope == "five_hour" || qe.Wait.Scope == "seven_day") && primary.Source == core.CredentialSourceStore && primary.Kind == "oauth" && backup.Active && backup.Revision.Primary == primary.Generation && backupReplaySupported(req) {
 			notBefore := qe.Wait.NextAttemptAt
 			return streamBackup(backup.Revision, &notBefore)
 		}
