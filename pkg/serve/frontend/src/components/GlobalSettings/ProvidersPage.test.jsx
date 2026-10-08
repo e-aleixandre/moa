@@ -60,6 +60,12 @@ function render(id, { state = IDLE, row = ROW.anthropic, canAdmin = true } = {})
 const fields = (tree) => all(tree, (n) => n.type === "input" || n.type === "textarea");
 const buttons = (tree) => all(tree, (n) => n.type === "button");
 
+test("an active own-device DTO exposes separate backup administration without replacing OAuth", () => {
+  const tree = render("anthropic", { row: { ...ROW.anthropic, kind: "oauth", state: "saved", actions: ["sign_in", "api_key", "backup"], backup: { configured: false, enabled: false, eligible: true, state: "not_configured", revision: { primary_generation: "g", key_generation: "", policy_generation: "" } } } });
+  expect(text(tree)).toContain("API backup");
+  expect(buttons(tree).map((b) => text(b).trim())).toContain("Add backup key");
+});
+
 test("the API key field is write-only: password, empty, no autofill, no reveal or copy", () => {
   const tree = render("anthropic", { state: { ...IDLE, step: "key" } });
   const [input, ...rest] = fields(tree);

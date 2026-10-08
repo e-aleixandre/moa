@@ -17,6 +17,7 @@ import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.
 import { deviceZone } from './schedule-model.js';
 import { normalizeErrorDetail, sameErrorDetail } from './provider-error.js';
 import { claimProviderToast, loadProviderStatus } from './providers.js';
+import { newerProviderExecution } from './provider-wait.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -167,6 +168,7 @@ function normalizeSessionInfo(info, existing, visible) {
     // epoch exactly like cached messages.
     olderHistory: existing ? existing.olderHistory : undefined,
     contextPercent: wsOwns ? existing.contextPercent : (info.context_percent ?? (existing ? existing.contextPercent : -1)),
+    providerExecution: cursorTransition.reset ? (info.provider_execution || null) : newerProviderExecution(existing?.providerExecution, info.provider_execution),
     contextWindow: wsOwns ? existing.contextWindow : (info.context_window || (existing ? existing.contextWindow : 0)),
     compactAt: wsOwns ? existing.compactAt : (info.compact_at || (existing ? existing.compactAt : 0)),
     compactAtMin: wsOwns ? existing.compactAtMin : (info.compact_at_min || (existing ? existing.compactAtMin : 0)),
@@ -1002,6 +1004,7 @@ export async function openPersistedSubagent(id, jobId, opts = {}) {
     finishedAtMs: epochMs(t.finished_at) || (existing && existing.finishedAtMs) || null,
     usage,
     contextPercent: t.context_percent == null ? -1 : t.context_percent,
+    providerExecution: t.source === 'active' ? newerProviderExecution(existing?.providerExecution, t.provider_execution) : null,
   };
   // Clearing viewingBashJob keeps the two detail views mutually exclusive:
   // only one thing is being looked at, whichever was opened last.

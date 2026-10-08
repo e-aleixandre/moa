@@ -143,7 +143,8 @@ type Config struct {
 	// core.AgentEvent — pkg/subagent imports pkg/bus directly (no import
 	// cycle: pkg/bus does not import pkg/subagent), so translation happens
 	// here rather than at the call site.
-	OnChildEvent func(jobID string, inner any)
+	OnChildEvent  func(jobID string, inner any)
+	SaveChildWait func(context.Context, string, []core.AgentMessage) error
 
 	// OnChildUsage is called each time a child closes a message (its
 	// message_end), with the child's accumulated usage/cost so far (cost using
@@ -944,6 +945,13 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		defer finishFingerprints()
 	}
 	jobs.setChildAgent(j.id, child)
+	if cfg.SaveChildWait != nil {
+		child.SetProviderWaitSave(func(ctx context.Context) error {
+			msgs := child.Messages()
+			jobs.setMessages(j.id, msgs)
+			return cfg.SaveChildWait(ctx, j.id, msgs)
+		})
+	}
 	unsub := child.Subscribe(func(e core.AgentEvent) {
 		if j.isSync() {
 			forwardSyncEvent(e, onUpdate)
@@ -972,7 +980,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 			// aggregation as OnChildEnd, keeping the live value consistent
 			// with the final total.
 			usage, cost := childUsage(msgs), childCost(model, msgs)
-			ctxPct := childContextPercent(msgs, model, child.CompactionEpoch())
+			ctxPct := childContextPercent(msgs, child.Model(), child.CompactionEpoch())
 			jobs.setUsage(j.id, usage, cost, ctxPct)
 			if cfg.OnChildUsage != nil {
 				cfg.OnChildUsage(j.id, usage, cost, ctxPct)
@@ -988,7 +996,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)
 	finalMsgs = msgs
 	jobs.setMessages(j.id, msgs)
-	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs), childContextPercent(msgs, model, child.CompactionEpoch()))
+	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs), childContextPercent(msgs, child.Model(), child.CompactionEpoch()))
 	if err != nil {
 		// Classify from authoritative signals, not the returned error's chain
 		// (a provider may wrap a context error while the context is still live).
@@ -1021,7 +1029,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		// that resume will not immediately fail. In the usual case it includes
 		// the original delegated task even when the provider failed before
 		// producing output.
-		jobs.setFailed(j.id, failureMessage(err.Error(), partialOutput(msgs), j.id, canResumeFailure(cfg, j.id, msgs)))
+		jobs.setFailed(j.id, failureMessage(err.Error(), partialOutput(msgs), j.id, !errors.Is(err, core.ErrProviderWaitNotSaved) && canResumeFailure(cfg, j.id, msgs)))
 		return
 	}
 	jobs.setCompleted(j.id, core.ExtractFinalAssistantText(msgs))
@@ -1209,6 +1217,22 @@ func childUsage(msgs []core.AgentMessage) *core.Usage {
 // epoch — a child is a separate agent, so the parent's reading describes
 // nothing about it.
 func childContextPercent(msgs []core.AgentMessage, model core.Model, epoch int) int {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role != "assistant" || m.RequestedModel == "" {
+			continue
+		}
+		spec := m.RequestedModel
+		if m.Provider != "" {
+			spec = m.Provider + "/" + spec
+		}
+		served, ok := core.ResolveModel(spec)
+		if !ok {
+			return -1
+		}
+		model = served
+		break
+	}
 	if model.MaxInput <= 0 {
 		return -1
 	}
@@ -1223,13 +1247,22 @@ func childContextPercent(msgs []core.AgentMessage, model core.Model, epoch int) 
 // childCost computes the USD cost of a child's usage using the CHILD's model
 // pricing (which may differ from the parent's).
 func childCost(model core.Model, msgs []core.AgentMessage) float64 {
-	if model.Pricing == nil {
-		return 0
-	}
 	var cost float64
 	for _, m := range msgs {
 		if m.Role == "assistant" && m.Usage != nil {
-			cost += model.Pricing.Cost(*m.Usage)
+			if amount, ok := m.Custom["request_cost_usd"].(float64); ok {
+				cost += amount
+			} else {
+				served := model
+				if m.RequestedModel != "" {
+					if resolved, ok := core.ResolveModel(m.Provider + "/" + m.RequestedModel); ok {
+						served = resolved
+					}
+				}
+				if served.Pricing != nil {
+					cost += served.Pricing.Cost(*m.Usage)
+				}
+			}
 		}
 	}
 	return cost
@@ -1281,6 +1314,7 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		Tools:                childReg,
 		MaxTurns:             maxTurns,
 		MaxRunDuration:       runDuration,
+		PauseQuotaBudget:     true,
 		// Explicitly passed, never inherited: the child's context derives from
 		// cfg.AppCtx (see the jobCtx derivations in the subagent tool), not from
 		// the parent's tool call, so the capability must travel through the

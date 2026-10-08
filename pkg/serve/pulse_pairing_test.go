@@ -372,11 +372,11 @@ func TestPulsePairingDeviceAuthAndRevocation(t *testing.T) {
 			t.Fatalf("device generic read %s = %d, want 200: %s", path, got.Code, got.Body.String())
 		}
 	}
-	if got := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{}`, nil, credential.Credential); got.Code != http.StatusForbidden {
-		t.Fatalf("device pairing administration = %d, want 403: %s", got.Code, got.Body.String())
+	if got := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{}`, nil, credential.Credential); got.Code != http.StatusCreated {
+		t.Fatalf("device pairing administration = %d, want 201: %s", got.Code, got.Body.String())
 	}
-	if got := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", nil, credential.Credential); got.Code != http.StatusForbidden {
-		t.Fatalf("device list auth = %d, want 403: %s", got.Code, got.Body.String())
+	if got := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", nil, credential.Credential); got.Code != http.StatusOK {
+		t.Fatalf("device list auth = %d, want 200: %s", got.Code, got.Body.String())
 	}
 	devices := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", owner, "")
 	if devices.Code != http.StatusOK || !strings.Contains(devices.Body.String(), credential.DeviceID) || strings.Contains(devices.Body.String(), credential.Credential) || strings.Contains(devices.Body.String(), "verifier") {

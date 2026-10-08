@@ -163,6 +163,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/cancel", handleCancelSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/bash-jobs/{jobID}/cancel", handleCancelBashJob(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/promote", handlePromoteSubagent(manager))
+	mux.HandleFunc("PATCH /api/sessions/{id}/subagents/{jobID}", handleReconfigureSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steer", handleSteerSubagent(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleSubagentList(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", withGzip(handleSubagentConversation(manager)))
@@ -1343,6 +1344,30 @@ func handlePromoteSubagent(mgr *Manager) http.HandlerFunc {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "subagent already finished"})
 		default:
 			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	}
+}
+
+func handleReconfigureSubagent(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model    string `json:"model"`
+			Thinking string `json:"thinking"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		result, err := mgr.ReconfigureSubagent(r.PathValue("id"), r.PathValue("jobID"), body.Model, body.Thinking)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case errors.Is(err, subagent.ErrNotRunning):
+			http.Error(w, "subagent is not running", http.StatusConflict)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			writeJSON(w, http.StatusOK, result)
 		}
 	}
 }

@@ -11,6 +11,13 @@ import { normalizeBackgroundCompaction } from './shared.js';
 import { markUnseen, acknowledgeVisibleLiveAttention, flashSession } from './attention.js';
 import { normalizeErrorDetail, sameErrorDetail } from '../provider-error.js';
 import { claimProviderToast, loadProviderStatus } from '../providers.js';
+import { newerProviderExecution } from '../provider-wait.js';
+
+export function handleWsProviderExecution(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess) return;
+  updateSession(id, { providerExecution: newerProviderExecution(sess.providerExecution, data) });
+}
 
 export function handleWsStateChange(id, data, seq = 0) {
   const state = store.get();

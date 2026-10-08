@@ -149,7 +149,7 @@ function MobileSubagentLive({ view, session, jobId, onBack, onStop, confirmCance
           compact
           steer={{ jobId, name: view.name, onRebound: onBack }}
         />
-        <SubagentStatusStrip view={view} compact />
+        <SubagentStatusStrip view={view} sessionId={session.id} jobId={jobId} compact />
       </div>
     </>
   );

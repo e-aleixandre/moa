@@ -14,9 +14,7 @@ const streamCss = readFileSync(new URL("../Stream/Stream.css", import.meta.url),
 // its test deps. Treat a failure here as "the rule was crossed", then go look.
 
 test("a subagent screen does not grow a second set of turn controls", () => {
-  // A subagent is an errand you are reading, not a session you configure, so
-  // it must not grow the parent's controls. Its read-only StatusStrip carries
-  // only the child's own model, thinking, and context.
+  // Child model control targets the same job, not the parent's configuration.
   expect(view).not.toContain("<ModelPill");
   expect(view).not.toContain("<PermissionControl");
   expect(view).toMatch(/<StatusStrip[\s\S]*showPermission=\{false\}/);
@@ -27,8 +25,8 @@ test("the model is configuration in the status strip and provenance in the repor
   // the same below-composer status-strip slot as the parent; when the run has
   // ended, that configuration settles into the report foot beside its figures.
   expect(view).toContain("view.model");
-  expect(view).toMatch(/<SubagentStatusStrip view=\{view\} \/>/);
-  expect(mobile).toMatch(/<SubagentStatusStrip view=\{view\} compact \/>/);
+  expect(view).toMatch(/<SubagentStatusStrip view=\{view\} sessionId=\{session.id\} jobId=\{jobId\} \/>/);
+  expect(mobile).toMatch(/<SubagentStatusStrip view=\{view\} sessionId=\{session.id\} jobId=\{jobId\} compact \/>/);
   expect(view).toMatch(/<SubIdent view=\{view\} \/>[\s\S]*marks\.map/);
   const liveBar = view.slice(view.indexOf("export function SubagentLiveBar"), view.indexOf("// SubagentLive —"));
   expect(liveBar).not.toContain("<SubIdent");

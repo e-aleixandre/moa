@@ -184,6 +184,8 @@ func enrichEditToolStart(e Event, cwd string) Event {
 
 func wsEventFromBus(event any) (Event, bool) {
 	switch e := event.(type) {
+	case bus.ProviderExecutionChanged:
+		return Event{Type: "provider_execution", Data: e.State}, true
 	case bus.StateChanged:
 		return Event{Type: "state_change", Data: StateChangeData{
 			State: e.State, Error: e.Error, ErrorDetail: e.ErrorDetail,
@@ -207,7 +209,8 @@ func wsEventFromBus(event any) (Event, bool) {
 			outputTok = e.Message.Usage.Output
 		}
 		return Event{Type: "message_end", Data: MessageEndData{
-			Text: truncateHistoryString(e.FullText), MsgID: e.Message.MsgID, Timestamp: e.Message.Timestamp,
+			ProviderSource: e.Message.ProviderSource,
+			Text:           truncateHistoryString(e.FullText), MsgID: e.Message.MsgID, Timestamp: e.Message.Timestamp,
 			InputTokens: inputTok, OutputTokens: outputTok,
 		}}, true
 	case bus.ToolCallStreaming:
@@ -733,6 +736,9 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	// this init payload routable to a real owner.
 	bashJobs, _ := bus.QueryTyped[bus.GetBashJobs, []bus.BashJobSnapshot](b, bus.GetBashJobs{})
 	subagents, _ := bus.QueryTyped[bus.GetSubagents, []bus.SubagentSnapshot](b, bus.GetSubagents{})
+	for i := range subagents {
+		subagents[i].ProviderExecution = streaming.SubagentProviderExecutions[subagents[i].JobID]
+	}
 	goalInfo, _ := bus.QueryTyped[bus.GetGoal, bus.GoalInfo](b, bus.GetGoal{})
 	cost, _ := bus.QueryTyped[bus.GetSessionCost, float64](b, bus.GetSessionCost{})
 	cacheUsage, _ := bus.QueryTyped[bus.GetCacheUsage, core.CacheUsageSummary](b, bus.GetCacheUsage{})
@@ -743,6 +749,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	pendingSteers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](b, bus.GetPendingSteers{})
 
 	data := InitData{
+		ProviderExecution:    streaming.ProviderExecution,
 		ServerInstance:       sess.serverInstance,
 		AttentionNamespace:   sess.attentionNamespace,
 		Messages:             msgs,
@@ -963,18 +970,19 @@ func liveSubagentInitData(subagents []bus.SubagentSnapshot) []SubagentInitData {
 		messages, _ := limitInitHistoryWithin(sa.Messages, share)
 		remainingBytes = max(0, remainingBytes-encodedHistorySize(messages))
 		sad := SubagentInitData{
-			JobID:            sa.JobID,
-			OriginToolCallID: sa.OriginToolCallID,
-			Task:             truncateSubagentTask(sa.Task),
-			Title:            truncateSubagentTask(sa.Title),
-			Model:            sa.Model,
-			Thinking:         sa.Thinking,
-			Status:           sa.Status,
-			Async:            sa.Async,
-			Messages:         messages,
-			LiveTools:        liveToolInitData(sa.LiveTools),
-			ContextPercent:   sa.ContextPercent,
-			AccentIndex:      sa.AccentIndex,
+			ProviderExecution: sa.ProviderExecution,
+			JobID:             sa.JobID,
+			OriginToolCallID:  sa.OriginToolCallID,
+			Task:              truncateSubagentTask(sa.Task),
+			Title:             truncateSubagentTask(sa.Title),
+			Model:             sa.Model,
+			Thinking:          sa.Thinking,
+			Status:            sa.Status,
+			Async:             sa.Async,
+			Messages:          messages,
+			LiveTools:         liveToolInitData(sa.LiveTools),
+			ContextPercent:    sa.ContextPercent,
+			AccentIndex:       sa.AccentIndex,
 		}
 		if !sa.StartedAt.IsZero() {
 			sad.StartedAtMs = sa.StartedAt.UnixMilli()

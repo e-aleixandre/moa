@@ -20,6 +20,7 @@ import { TurnFoot } from "../../components/AssistantDocument/TurnFoot.jsx";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { ProviderErrorAction } from "../../components/ProviderErrorAction/ProviderErrorAction.jsx";
 import { turnFinalResponse } from "../../data/stream-model.js";
+import { providerSourceLabel } from "../../data/provider-source.js";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { parsePreviewReference } from "../../data/util/preview-reference.js";
 import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
@@ -59,6 +60,9 @@ export function docChildren(blocks, onOpenSubagent, visibleDone, sessionId, onEx
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
     switch (b.type) {
+      case "provider_source":
+        out.push(<div key={b.id} class="zl-sys">{providerSourceLabel(b.source)}</div>);
+        break;
       case "prose":
         out.push(
           <Prose

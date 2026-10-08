@@ -17,8 +17,8 @@ import (
 // credential snapshot, so the token, account, transport and refresh hook of a
 // request always belong to the same login. A login or key saved by anyone
 // (Settings, the CLI, another process) is picked up by the next request; a
-// request already in flight finishes with the snapshot it started with,
-// including all of its HTTP retries.
+// legacy request already in flight finishes with its original snapshot.
+// Stored Anthropic plan requests use the per-dispatch backup admission seam.
 type snapshotProvider struct {
 	model      core.Model // Provider is always set
 	authStore  *auth.Store
@@ -33,6 +33,9 @@ func (p *snapshotProvider) Stream(ctx context.Context, req core.Request) (<-chan
 	}
 	secrets := &secretSet{}
 	secrets.add(snap)
+	if p.model.Provider == "anthropic" && ((snap.Kind == "oauth" && snap.Source == core.CredentialSourceStore) || (req.Options.ProviderBinding != nil && req.Options.ProviderBinding.Kind == "api_backup")) {
+		return p.streamAnthropic(ctx, req, snap, secrets)
+	}
 	base, err := provider.New(p.model, p.config(snap, secrets))
 	if err != nil {
 		return nil, err

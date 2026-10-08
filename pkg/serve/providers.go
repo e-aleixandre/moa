@@ -73,10 +73,11 @@ type providerRow struct {
 	RenewAt              string `json:"renew_at,omitempty"`
 	LastUseOKAt          string `json:"last_use_ok_at,omitempty"`
 	// Owner-only fields (GET /api/providers and mutation responses).
-	OAuthEnabled  *bool    `json:"oauth_enabled,omitempty"`
-	APIKeyEnabled *bool    `json:"api_key_enabled,omitempty"`
-	Actions       []string `json:"actions,omitempty"`
-	PendingSave   *bool    `json:"pending_save,omitempty"`
+	OAuthEnabled  *bool                       `json:"oauth_enabled,omitempty"`
+	APIKeyEnabled *bool                       `json:"api_key_enabled,omitempty"`
+	Actions       []string                    `json:"actions,omitempty"`
+	PendingSave   *bool                       `json:"pending_save,omitempty"`
+	Backup        *auth.AnthropicBackupStatus `json:"backup,omitempty"`
 }
 
 type providersStatus struct {
@@ -144,6 +145,13 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 		RenewAt:              formatTime(st.RenewAt),
 		LastUseOKAt:          formatTime(st.LastUseOKAt),
 	}
+	if st.Provider == "anthropic" {
+		backup, err := pc.store.AnthropicBackupStatus()
+		if err != nil {
+			backup.State = "store_unavailable"
+		}
+		r.Backup = &backup
+	}
 	if !owner {
 		// A device can only report the problem; it cannot fix it.
 		if r.Action != "" && r.Action != "retry" {
@@ -159,6 +167,9 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 	r.Actions = []string{}
 	if st.Source == core.CredentialSourceStore && st.State != auth.StatusStoreUnavailable {
 		r.Actions = append(r.Actions, "sign_in", "api_key")
+		if st.Provider == "anthropic" && st.Kind == "oauth" {
+			r.Actions = append(r.Actions, "backup")
+		}
 		if st.PendingSave {
 			r.Actions = append(r.Actions, "retry_save")
 		}
@@ -180,7 +191,7 @@ func (pc *providerCredentials) status(owner, detailed bool) providersStatus {
 
 func isOwnerIdentity(r *http.Request) bool {
 	identity, ok := requestAuthIdentity(r)
-	return ok && (identity.Kind == "token" || identity.Kind == "network")
+	return ok && (identity.Kind == "token" || identity.Kind == "network" || identity.Kind == "device")
 }
 
 // isProvidersPath reports whether path belongs to the Providers API subtree.
@@ -215,6 +226,9 @@ func (pc *providerCredentials) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		"oauth/cancel":   pc.cancel,
 		"api-key":        pc.apiKey,
 		"retry-save":     pc.retrySave,
+		"backup/key":     pc.backupKey,
+		"backup/enabled": pc.backupEnabled,
+		"backup/remove":  pc.backupRemove,
 	}
 	handle, known := handlers[action]
 	if !ok || !known {

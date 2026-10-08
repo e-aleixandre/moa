@@ -297,6 +297,16 @@ func (r *SessionRuntime) AttachPersister(p SessionPersister) {
 	r.persister = p
 	r.persisterMu.Unlock()
 	r.sctx.PersistNow = r.Flush
+	if a, ok := r.sctx.Agent.(interface {
+		SetProviderWaitSave(func(context.Context) error)
+	}); ok && p != nil {
+		a.SetProviderWaitSave(func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return r.flush(true)
+		})
+	}
 	RegisterPersistenceReactor(r.Bus, r.sctx, p)
 }
 
@@ -309,10 +319,17 @@ func (r *SessionRuntime) AttachPersister(p SessionPersister) {
 // exits, which would lose a turn that finished moments before. Flush is
 // idempotent and safe to call once activity has quiesced.
 func (r *SessionRuntime) Flush() error {
+	return r.flush(false)
+}
+
+func (r *SessionRuntime) flush(acknowledged bool) error {
 	r.persisterMu.Lock()
 	p := r.persister
 	r.persisterMu.Unlock()
 	if p == nil {
+		if acknowledged {
+			return core.ErrProviderWaitNotSaved
+		}
 		return nil
 	}
 	r.sctx.persistMu.Lock()
@@ -327,10 +344,26 @@ func (r *SessionRuntime) Flush() error {
 	meta := collectMetadata(r.sctx)
 	if tp, ok := p.(TreePersister); ok && r.sctx.Tree != nil {
 		entries, leafID := r.sctx.Tree.Snapshot()
+		if acknowledged {
+			if ap, ok := p.(interface {
+				SnapshotTreeAcknowledged([]session.Entry, string, map[string]any) error
+			}); ok {
+				return ap.SnapshotTreeAcknowledged(entries, leafID, meta)
+			}
+			return core.ErrProviderWaitNotSaved
+		}
 		return tp.SnapshotTree(entries, leafID, meta)
 	}
 	msgs := r.sctx.Agent.Messages()
 	epoch := r.sctx.Agent.CompactionEpoch()
+	if acknowledged {
+		if ap, ok := p.(interface {
+			SnapshotAcknowledged([]core.AgentMessage, int, map[string]any) error
+		}); ok {
+			return ap.SnapshotAcknowledged(msgs, epoch, meta)
+		}
+		return core.ErrProviderWaitNotSaved
+	}
 	return p.Snapshot(msgs, epoch, meta)
 }
 

@@ -117,7 +117,7 @@ export function handleWsThinkingDelta(id, delta) {
   scheduleFlush();
 }
 
-function stampMaterializedAssistant(messages, timestamp) {
+function stampMaterializedAssistant(messages, timestamp, source, msgId) {
   if (!timestamp) return messages;
   let next = messages;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -126,12 +126,12 @@ function stampMaterializedAssistant(messages, timestamp) {
     if (row?.timestamp) break;
     if (row?.role !== 'assistant' && !(row?._type === 'tool_start' && row.status === 'generating')) continue;
     if (next === messages) next = [...messages];
-    next[i] = { ...row, timestamp };
+    next[i] = { ...row, timestamp, ...(source ? { provider_source: source, _msg_id: msgId || row._msg_id } : {}) };
   }
   return next;
 }
 
-export function handleWsMessageEnd(id, fullText, msgId = '', timestamp) {
+export function handleWsMessageEnd(id, fullText, msgId = '', timestamp, source) {
   const pendingText = wsState.pendingTextDeltas[id] || '';
   delete wsState.pendingTextDeltas[id];
   delete wsState.pendingThinkingDeltas[id];
@@ -142,8 +142,8 @@ export function handleWsMessageEnd(id, fullText, msgId = '', timestamp) {
   }
 
   if (msgId && sess.messages.some(m => m._msg_id === msgId)) {
-    if (timestamp) {
-      const messages = sess.messages.map(m => m._msg_id === msgId && !m.timestamp ? { ...m, timestamp } : m);
+    if (timestamp || source) {
+      const messages = sess.messages.map(m => m._msg_id === msgId ? { ...m, ...(timestamp && !m.timestamp ? { timestamp } : {}), ...(source ? { provider_source: source } : {}) } : m);
       if (messages.some((m, i) => m !== sess.messages[i])) updateSession(id, { messages });
     }
     delete wsState.materializedTextDuringMessage[id];
@@ -172,13 +172,14 @@ export function handleWsMessageEnd(id, fullText, msgId = '', timestamp) {
     streamingText: null,
     thinkingText: null,
   };
-  const timestampedMessages = stampMaterializedAssistant(sess.messages, timestamp);
+  const timestampedMessages = stampMaterializedAssistant(sess.messages, timestamp, source, msgId);
   if (timestampedMessages !== sess.messages) patch.messages = timestampedMessages;
   if (assistantText) {
     const msg = {
       role: 'assistant',
       _msg_id: msgId || undefined,
       ...(timestamp ? { timestamp } : {}),
+	  ...(source ? { provider_source: source } : {}),
       content: [{ type: 'text', text: assistantText }],
     };
     patch.messages = [...timestampedMessages, msg];
@@ -251,6 +252,11 @@ export function handleWsUserMessage(id, data) {
     return;
   }
   const secretBatch = secretBatchFromMessage(data);
+  if (data.custom?.source === 'provider_wait' || data.custom?.type === 'provider_source_note') {
+    updateSession(id, { messages: [...messages, { _type: 'system', _msg_id: data.msg_id,
+      timestamp: data.timestamp, text: (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('') || data.text || '' }] });
+    return;
+  }
   if (secretBatch) {
     updateSession(id, { messages: [...messages, {
       _type: 'secret_batch',

@@ -9,16 +9,14 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 )
 
 // The Live Preview target is a generic owner surface: a paired device — a
 // phone or another browser holding its own device credential, not the owner
 // cookie — can read and drive it exactly like the owner's own browser.
-// Pairing administration itself stays owner-only, and its rejection must
-// describe the route generically rather than leaking the word "pairing" onto
-// every admin surface.
+// The same active device also administers pairing, without becoming a master
+// token or weakening the separate native-only claim and push boundaries.
 func TestPreviewTargetIsAGenericOwnerSurfaceForPairedDevices(t *testing.T) {
 	if !deviceStoreLockSupported() {
 		t.Skip("device auth fails closed where advisory process locks are unavailable")
@@ -112,24 +110,15 @@ func TestPreviewTargetIsAGenericOwnerSurfaceForPairedDevices(t *testing.T) {
 		t.Fatal("deactivation left the listener open")
 	}
 
-	// Pairing administration is not part of that generic surface. The paired
-	// device is refused, and the refusal must not describe the route as
-	// pairing-specific — that language is reserved for the pairing routes
-	// that actually are one (claim).
+	// Pairing already authorizes another own device, including administration.
 	forbidden := pairingRequest(handler, http.MethodGet, "/api/pulse/devices", "", nil, device.Credential)
-	if forbidden.Code != http.StatusForbidden {
+	if forbidden.Code != http.StatusOK {
 		t.Fatalf("paired device GET /api/pulse/devices = %d: %s", forbidden.Code, forbidden.Body.String())
-	}
-	if msg := strings.ToLower(strings.TrimSpace(forbidden.Body.String())); strings.Contains(msg, "pairing") {
-		t.Fatalf("owner-admin rejection leaked pairing-specific wording: %q", msg)
 	}
 
 	createPairing := pairingRequest(handler, http.MethodPost, "/api/pulse/pairings", `{}`, nil, device.Credential)
-	if createPairing.Code != http.StatusForbidden {
+	if createPairing.Code != http.StatusCreated {
 		t.Fatalf("paired device POST /api/pulse/pairings = %d: %s", createPairing.Code, createPairing.Body.String())
-	}
-	if msg := strings.ToLower(strings.TrimSpace(createPairing.Body.String())); strings.Contains(msg, "pairing") {
-		t.Fatalf("owner-admin rejection leaked pairing-specific wording: %q", msg)
 	}
 
 	// The owner keeps full access to that admin surface.

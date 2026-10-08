@@ -312,8 +312,8 @@ func (s testProvidersStatus) row(t *testing.T, id string) testProviderRow {
 func beginBody(gen string) string  { return fmt.Sprintf(`{"expected_generation":%q}`, gen) }
 func attemptJSON(id string) string { return fmt.Sprintf(`{"attempt_id":%q}`, id) }
 
-// R01: the whole subtree is owner administration except GET status.
-func TestProviders_OwnerOnlyAdministration(t *testing.T) {
+// R01: active own devices have the same administration as token/network.
+func TestProviders_UserIdentityAdministration(t *testing.T) {
 	type caller struct {
 		name    string
 		allowed bool
@@ -339,13 +339,13 @@ func TestProviders_OwnerOnlyAdministration(t *testing.T) {
 			{"automation_bearer", true, true, func(*providerFixture) []reqOpt {
 				return []reqOpt{withHeader("Authorization", "Bearer automation-token")}
 			}},
-			{"device_header", false, true, func(f *providerFixture) []reqOpt { return deviceHeader(f, nil) }},
-			{"device_cookie", false, true, func(f *providerFixture) []reqOpt { return deviceCookie(f, nil) }},
+			{"device_header", true, true, func(f *providerFixture) []reqOpt { return deviceHeader(f, nil) }},
+			{"device_cookie", true, true, func(f *providerFixture) []reqOpt { return deviceCookie(f, nil) }},
 		}},
 		{"token", true, []caller{
 			{"owner", true, true, func(*providerFixture) []reqOpt { return []reqOpt{withCookie(ownerCookie)} }},
-			{"device_header", false, true, func(f *providerFixture) []reqOpt { return deviceHeader(f, ownerCookie) }},
-			{"device_cookie", false, true, func(f *providerFixture) []reqOpt { return deviceCookie(f, ownerCookie) }},
+			{"device_header", true, true, func(f *providerFixture) []reqOpt { return deviceHeader(f, ownerCookie) }},
+			{"device_cookie", true, true, func(f *providerFixture) []reqOpt { return deviceCookie(f, ownerCookie) }},
 			{"automation_bearer", false, false, func(*providerFixture) []reqOpt {
 				return []reqOpt{withHeader("Authorization", "Bearer automation-token")}
 			}},
@@ -549,7 +549,7 @@ func TestProviders_EveryResponseIsNoStore(t *testing.T) {
 		{"origin", network, 403, func(f *providerFixture) *httptest.ResponseRecorder {
 			return f.do(http.MethodPost, "/api/providers/openai/oauth/begin", beginBody(""), withoutHeader("Origin"))
 		}},
-		{"device_admin", network, 403, func(f *providerFixture) *httptest.ResponseRecorder {
+		{"device_admin", network, 200, func(f *providerFixture) *httptest.ResponseRecorder {
 			return f.do(http.MethodGet, "/api/providers", "", withDevice(device.Credential))
 		}},
 		{"host", network, 403, func(f *providerFixture) *httptest.ResponseRecorder {
@@ -853,7 +853,7 @@ func TestProviders_StatusIsHonestAndSideEffectFree(t *testing.T) {
 		f.store.RecordUse(anSnap, rejected)
 	}
 	dev := get("/api/providers/status", withDevice(device.Credential))
-	if dev.AttentionCount != 1 || dev.CanAdmin || dev.row(t, "anthropic").State != auth.StatusKeyRejected || dev.row(t, "anthropic").Action != "ask_owner" {
+	if dev.AttentionCount != 1 || !dev.CanAdmin || dev.row(t, "anthropic").State != auth.StatusKeyRejected || dev.row(t, "anthropic").Action != "replace_key" {
 		t.Errorf("device status after rejection = %+v", dev)
 	}
 	if o := get("/api/providers"); o.AttentionCount != 1 || o.row(t, "anthropic").Action != "replace_key" {

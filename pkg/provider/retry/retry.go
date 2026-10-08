@@ -18,6 +18,11 @@ import (
 // Use DefaultPolicy for standard settings. A zero-value Policy
 // means "use defaults" — set Disabled=true to skip retries entirely.
 type Policy struct {
+	NoNetworkRetry bool
+	StartAttempt   int
+	// Wait replaces only the sleeper. The caller may return typed control flow
+	// to release the credential snapshot before the next attempt.
+	Wait       func(context.Context, int, int, time.Duration) error
 	MaxRetries int           // max retry attempts (default 5)
 	BaseDelay  time.Duration // initial wait (default 1s)
 	MaxDelay   time.Duration // cap per wait (default 32s)
@@ -99,8 +104,10 @@ func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request
 		// that don't participate in the "zero means default" rule (e.g. the
 		// Retryable veto).
 		retryable := p.Retryable
+		wait, start := p.Wait, p.StartAttempt
 		p = DefaultPolicy
 		p.Retryable = retryable
+		p.Wait, p.StartAttempt = wait, start
 	}
 	if p.BaseDelay == 0 {
 		p.BaseDelay = DefaultPolicy.BaseDelay
@@ -110,7 +117,7 @@ func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request
 	}
 
 	var lastErr error
-	for attempt := 0; attempt <= p.MaxRetries; attempt++ {
+	for attempt := p.StartAttempt; attempt <= p.MaxRetries; attempt++ {
 		req, err := buildReq()
 		if err != nil {
 			return nil, err
@@ -118,6 +125,9 @@ func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request
 
 		resp, err := client.Do(req)
 		if err != nil {
+			if p.NoNetworkRetry {
+				return nil, err
+			}
 			// Network error — retry.
 			lastErr = err
 			if attempt == p.MaxRetries {
@@ -127,7 +137,7 @@ func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request
 			if notify != nil {
 				notify(attempt+1, 0, wait)
 			}
-			if err := sleep(ctx, wait); err != nil {
+			if err := policySleep(ctx, p, attempt+1, 0, wait); err != nil {
 				return nil, err
 			}
 			continue
@@ -175,12 +185,27 @@ func Do(ctx context.Context, client *http.Client, buildReq func() (*http.Request
 			notify(attempt+1, resp.StatusCode, wait)
 		}
 
-		if err := sleep(ctx, wait); err != nil {
+		if err := policySleep(ctx, p, attempt+1, resp.StatusCode, wait); err != nil {
 			return nil, err
 		}
 	}
 
 	return nil, fmt.Errorf("exhausted %d retries: %w", p.MaxRetries, lastErr)
+}
+
+func policySleep(ctx context.Context, p Policy, attempt, status int, wait time.Duration) error {
+	if p.Wait != nil {
+		return p.Wait(ctx, attempt, status, wait)
+	}
+	return sleep(ctx, wait)
+}
+
+// Backoff supplies the existing positive pacing floor for confirmed quota.
+func Backoff(attempt int) time.Duration {
+	if attempt > 5 {
+		attempt = 5
+	}
+	return backoff(attempt, DefaultPolicy)
 }
 
 // sleep waits for d or until ctx is cancelled.

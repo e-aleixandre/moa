@@ -79,6 +79,18 @@ export function retrySave(api, provider) {
   return api("POST", `${base(provider)}/retry-save`, {}, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
 }
 
+export function saveAnthropicBackup(api, key, revision) {
+  return api("POST", "/api/providers/anthropic/backup/key", { key: String(key || "").trim(), expected_revision: revision }, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
+}
+
+export function enableAnthropicBackup(api, enabled, revision) {
+  return api("POST", "/api/providers/anthropic/backup/enabled", { enabled, expected_revision: revision }, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
+}
+
+export function removeAnthropicBackup(api, revision) {
+  return api("POST", "/api/providers/anthropic/backup/remove", { expected_revision: revision }, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
+}
+
 // copyText — the device code to the clipboard. Only ever the user code: the
 // one value that is meant to be typed somewhere else.
 export function copyText(text, nav = globalThis.navigator) {

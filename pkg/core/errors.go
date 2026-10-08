@@ -24,6 +24,8 @@ type QuotaExceededError struct {
 	ResetsAt time.Time
 	// Window labels which limit was hit ("5h", "weekly", or "" if unknown).
 	Window string
+	// Wait is populated only for a proven, automatically waitable rejection.
+	Wait *ProviderWait
 }
 
 func (e *QuotaExceededError) Error() string {

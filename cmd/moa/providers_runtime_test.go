@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/auth"
@@ -670,4 +672,130 @@ func TestRuntime_CredentialFailuresAreClassified(t *testing.T) {
 			}
 		})
 	}
+}
+
+type weeklyRuntimeTransport struct {
+	mu        sync.Mutex
+	headers   http.Header
+	bearers   []string
+	generic   bool
+	refreshes int
+}
+
+func (tr *weeklyRuntimeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.String() != "https://api.anthropic.com/v1/messages" {
+		tr.mu.Lock()
+		tr.refreshes++
+		tr.mu.Unlock()
+		return nil, errors.New("test refuses auth, refresh, polling and network")
+	}
+	_, _ = io.Copy(io.Discard, r.Body)
+	_ = r.Body.Close()
+	tr.mu.Lock()
+	n := len(tr.bearers)
+	tr.bearers = append(tr.bearers, r.Header.Get("Authorization"))
+	tr.mu.Unlock()
+	code, body, h := 429, `{"error":{"type":"rate_limit_error","message":"generic"}}`, tr.headers.Clone()
+	if tr.generic {
+		h = http.Header{"Retry-After": []string{"3600"}}
+	}
+	if n > 0 {
+		code = 200
+		body = "event: message_start\ndata: {\"message\":{\"id\":\"fake\",\"model\":\"claude-opus-5-5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\nevent: content_block_stop\ndata: {\"index\":0}\n\nevent: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {}\n\n"
+	}
+	return &http.Response{StatusCode: code, Header: h, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+}
+
+func TestWeeklyRuntimeNormalStoreResolvesNextAttemptAfterHours(t *testing.T) {
+	clearProviderEnv(t)
+	raw, err := os.ReadFile("../../pkg/provider/anthropic/testdata/weekly-oauth-capture.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Headers http.Header `json:"rate_limit_headers"`
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		tr := &weeklyRuntimeTransport{headers: fixture.Headers}
+		client := &http.Client{Transport: tr}
+		path := filepath.Join(t.TempDir(), "auth.json")
+		store := auth.NewStoreWithHTTPClient(path, client)
+		other := auth.NewStoreWithHTTPClient(path, client)
+		first := auth.Credential{Type: "oauth", Access: "offline-weekly-token-one", Refresh: "offline-refresh-unused", Expires: time.Now().Add(72 * time.Hour).UnixMilli()}
+		if _, err := store.CommitLogin("anthropic", "", first); err != nil {
+			t.Fatal(err)
+		}
+		model, _ := core.ResolveModel("opus")
+		p := &snapshotProvider{model: model, authStore: store, httpClient: client}
+		req := core.Request{Model: model, Messages: []core.Message{core.NewUserMessage("offline")}, Options: core.StreamOptions{ThinkingLevel: "high"}}
+		ch, err := p.Stream(context.Background(), req)
+		quota, ok := core.AsQuotaExceeded(err)
+		if !ok || ch != nil || quota.Wait == nil || quota.Wait.Scope != "seven_day" {
+			t.Fatalf("wrapper lost classification: %v/%v", ch, err)
+		}
+		if _, ok := core.AsProviderCredentialError(err); ok {
+			t.Fatal("quota classified as auth")
+		}
+		if strings.Contains(err.Error(), first.Access) {
+			t.Fatal("credential in quota error")
+		}
+		time.Sleep(18 * time.Hour)
+		gen, err := other.StoredGeneration("anthropic")
+		if err != nil {
+			t.Fatal(err)
+		}
+		second := first
+		second.Access = "offline-weekly-token-two"
+		second.Expires = time.Now().Add(72 * time.Hour).UnixMilli()
+		if _, err := other.CommitLogin("anthropic", gen, second); err != nil {
+			t.Fatal(err)
+		}
+		ch, err = p.Stream(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range ch {
+		}
+		tr.mu.Lock()
+		defer tr.mu.Unlock()
+		if len(tr.bearers) != 2 || tr.bearers[0] != "Bearer "+first.Access || tr.bearers[1] != "Bearer "+second.Access || tr.refreshes != 0 {
+			t.Fatalf("normal Store binding=%v refreshes=%d", tr.bearers, tr.refreshes)
+		}
+	})
+}
+
+func TestWeeklyRuntimeRetryControlUnwrapIsNotAuthentication(t *testing.T) {
+	clearProviderEnv(t)
+	synctest.Test(t, func(t *testing.T) {
+		tr := &weeklyRuntimeTransport{generic: true}
+		client := &http.Client{Transport: tr}
+		store := auth.NewStoreWithHTTPClient(filepath.Join(t.TempDir(), "auth.json"), client)
+		if _, err := store.CommitLogin("anthropic", "", auth.Credential{Type: "oauth", Access: "offline-control-token", Expires: time.Now().Add(time.Hour).UnixMilli()}); err != nil {
+			t.Fatal(err)
+		}
+		model, _ := core.ResolveModel("opus")
+		p := &snapshotProvider{model: model, authStore: store, httpClient: client}
+		start := time.Now()
+		_, err := p.Stream(context.Background(), core.Request{Model: model, Messages: []core.Message{core.NewUserMessage("offline")}, Options: core.StreamOptions{OnProviderRetry: func(ctx context.Context, w core.ProviderWait) error {
+			return &core.ProviderRetryReady{Attempt: w.Attempt, Wait: &w}
+		}}})
+		var ready *core.ProviderRetryReady
+		if !errors.As(err, &ready) || ready.Wait == nil || ready.Wait.Kind != "transport_retry" || ready.Attempt != 1 {
+			t.Fatalf("control lost=%v", err)
+		}
+		if _, ok := core.AsProviderCredentialError(err); ok {
+			t.Fatal("control classified as auth")
+		}
+		if time.Since(start) != 0 {
+			t.Fatal("wrapper retained credentials during retry sleep")
+		}
+		tr.mu.Lock()
+		defer tr.mu.Unlock()
+		if len(tr.bearers) != 1 || tr.refreshes != 0 {
+			t.Fatal("control performed another request")
+		}
+	})
 }

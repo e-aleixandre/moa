@@ -1,0 +1,61 @@
+{
+  "error": {
+    "message": "This request would exceed your account's rate limit. Please try again later.",
+    "type": "rate_limit_error"
+  },
+  "generation_requests": 1,
+  "max_tokens": 1,
+  "model": "claude-opus-5-5",
+  "oauth_access_expired_before_resolution": true,
+  "oauth_refresh_requests": 1,
+  "oauth_refreshed_and_persisted": true,
+  "rate_limit_headers": {
+    "anthropic-ratelimit-unified-5h-reset": [
+      "1791405600"
+    ],
+    "anthropic-ratelimit-unified-5h-status": [
+      "allowed"
+    ],
+    "anthropic-ratelimit-unified-5h-utilization": [
+      "0.0"
+    ],
+    "anthropic-ratelimit-unified-7d-reset": [
+      "1791453600"
+    ],
+    "anthropic-ratelimit-unified-7d-status": [
+      "rejected"
+    ],
+    "anthropic-ratelimit-unified-7d-surpassed-threshold": [
+      "1.0"
+    ],
+    "anthropic-ratelimit-unified-7d-utilization": [
+      "1.0"
+    ],
+    "anthropic-ratelimit-unified-fallback-percentage": [
+      "0.5"
+    ],
+    "anthropic-ratelimit-unified-overage-disabled-reason": [
+      "[redacted]"
+    ],
+    "anthropic-ratelimit-unified-overage-status": [
+      "rejected"
+    ],
+    "anthropic-ratelimit-unified-representative-claim": [
+      "seven_day"
+    ],
+    "anthropic-ratelimit-unified-reset": [
+      "1791453600"
+    ],
+    "anthropic-ratelimit-unified-status": [
+      "rejected"
+    ]
+  },
+  "request_id": "req_011Cfo924AGCmoFhZ4rfShWW",
+  "response_utc": "2026-10-07T15:47:54.515025316Z",
+  "retry_after": "65525",
+  "status": 429,
+  "stream": false,
+  "thinking_field_sent": false,
+  "transport": "OAuth",
+  "utc": "2026-10-07T15:47:53.910592604Z"
+}

@@ -27,6 +27,12 @@ type AgentStarted struct {
 	RunGen    uint64
 }
 
+type ProviderExecutionChanged struct {
+	SessionID string
+	RunGen    uint64
+	State     core.ProviderExecution
+}
+
 // AgentEnded is published when the agent loop finishes normally.
 type AgentEnded struct {
 	SessionID string

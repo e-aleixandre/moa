@@ -126,6 +126,47 @@ function descendants(node, result = []) {
   return result;
 }
 
+const weeklyExecution = {
+  phase: "provider_wait",
+  wait: { kind: "quota_confirmed", scope: "seven_day" },
+};
+
+test("confirmed weekly wait selects suspended copy in the real composer at every density", () => {
+  for (const density of [{}, { shortPlaceholder: true }, { compact: true }]) {
+    const tree = Composer({ sessionId: "s1", session: { state: "running", providerExecution: weeklyExecution }, ...density });
+    const textarea = descendants(tree).find((node) => node.type === "textarea");
+    expect(textarea.props.placeholder).toBe("Add instructions for when it resumes…");
+  }
+});
+
+test("ordinary and unconfirmed waits retain the existing composer copy", () => {
+  for (const execution of [undefined, { phase: "awaiting_provider" }, { ...weeklyExecution, phase: "working" },
+    { ...weeklyExecution, wait: { kind: "transport_retry", scope: "seven_day" } },
+    { ...weeklyExecution, wait: { kind: "quota_confirmed", scope: "five_hour" } }]) {
+    for (const shortPlaceholder of [false, true]) {
+      const tree = Composer({ sessionId: "s1", session: { state: "running", providerExecution: execution }, shortPlaceholder });
+      const textarea = descendants(tree).find((node) => node.type === "textarea");
+      expect(textarea.props.placeholder).toBe(shortPlaceholder
+        ? "Steer — it keeps working…"
+        : "Steer the agent — ⏎ sends while it works, it won't stop it…");
+    }
+  }
+  const idle = Composer({ sessionId: "s1", session: { state: "idle", providerExecution: weeklyExecution } });
+  expect(descendants(idle).find((node) => node.type === "textarea").props.placeholder).toBe("Message moa");
+});
+
+test("a child composer selects only its own confirmed weekly wait copy", () => {
+  for (const childWaiting of [false, true]) {
+    const tree = Composer({ sessionId: "s1", steer: { jobId: "J1", name: "child" }, compact: true,
+      session: { state: "running", providerExecution: childWaiting ? undefined : weeklyExecution,
+        subagents: { J1: { providerExecution: childWaiting ? weeklyExecution : undefined } } } });
+    const textarea = descendants(tree).find((node) => node.type === "textarea");
+    expect(textarea.props.placeholder).toBe(childWaiting
+      ? "Add instructions for when it resumes…"
+      : "Steer — it keeps working…");
+  }
+});
+
 test("ordinary textarea Enter sends through the Composer component", async () => {
   refs.length = 0;
   sent.length = 0;

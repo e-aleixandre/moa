@@ -1137,9 +1137,16 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // the subagent. Busy (parent run) copy states that Enter STEERS without stopping —
   // the persistent Send button already signals "you can always talk to it", so
   // the copy names the consequence. Mobile's pill has no room for the long form.
-  const busyPlaceholder = short
-    ? "Steer — it keeps working…"
-    : "Steer the agent — ⏎ sends while it works, it won't stop it…";
+  const execution = steer
+    ? session?.subagents?.[steer.jobId]?.providerExecution
+    : session?.providerExecution;
+  const weeklyWait = execution?.phase === "provider_wait"
+    && execution.wait?.kind === "quota_confirmed" && execution.wait?.scope === "seven_day";
+  const busyPlaceholder = weeklyWait
+    ? "Add instructions for when it resumes…"
+    : short
+      ? "Steer — it keeps working…"
+      : "Steer the agent — ⏎ sends while it works, it won't stop it…";
   const placeholder = (steer || busy) ? busyPlaceholder : idlePlaceholder;
 
   /* `is-armed` — there is something to send. The send button is a quiet

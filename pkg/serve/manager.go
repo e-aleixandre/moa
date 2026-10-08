@@ -49,6 +49,7 @@ const (
 
 // ManagedSession wraps a bus.SessionRuntime with metadata for the web dashboard.
 type ManagedSession struct {
+	subagentSaveMu sync.Mutex
 	// Immutable after construction.
 	ID      string    `json:"id"`
 	CWD     string    `json:"cwd"`
@@ -301,12 +302,13 @@ type MCPSummary struct {
 
 // SessionInfo is the public representation returned by List/Get endpoints.
 type SessionInfo struct {
-	ID       string       `json:"id"`
-	Title    string       `json:"title"`
-	State    SessionState `json:"state"`
-	Model    string       `json:"model"`
-	Provider string       `json:"provider"`
-	Thinking string       `json:"thinking"`
+	ProviderExecution core.ProviderExecution `json:"provider_execution"`
+	ID                string                 `json:"id"`
+	Title             string                 `json:"title"`
+	State             SessionState           `json:"state"`
+	Model             string                 `json:"model"`
+	Provider          string                 `json:"provider"`
+	Thinking          string                 `json:"thinking"`
 	// Fast is whether this session buys premium speed, and FastSupported
 	// whether the model it is on can serve it at all.
 	Fast          bool      `json:"fast,omitempty"`
@@ -433,12 +435,24 @@ func (s *ManagedSession) History() []core.AgentMessage {
 // and dropped on error. Metadata (task/model/async/messages) comes from the
 // live Jobs handle, which still holds the job at OnChildEnd time.
 func (s *ManagedSession) persistSubagentTranscript(jobID, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) {
+	if err := s.saveSubagentTranscript(jobID, status, result, resultErr, finishedAt, usage, costUSD); err != nil {
+		slog.Warn("subagent transcript save failed", "session", s.ID, "job", jobID, "error", err)
+	}
+}
+
+func (s *ManagedSession) saveSubagentWait(jobID string, msgs []core.AgentMessage) error {
+	return s.saveSubagentTranscript(jobID, "running", "", "", time.Time{}, nil, 0)
+}
+
+func (s *ManagedSession) saveSubagentTranscript(jobID, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64) error {
+	s.subagentSaveMu.Lock()
+	defer s.subagentSaveMu.Unlock()
 	if s.persister == nil || s.subagents == nil {
-		return
+		return core.ErrProviderWaitNotSaved
 	}
 	store := s.persister.subagentStore(s.ID)
 	if store == nil {
-		return
+		return core.ErrProviderWaitNotSaved
 	}
 	if finishedAt.IsZero() {
 		finishedAt = time.Now()
@@ -455,6 +469,9 @@ func (s *ManagedSession) persistSubagentTranscript(jobID, status, result, result
 	}
 	for _, info := range s.subagents.Snapshot() {
 		if info.JobID == jobID {
+			if status == "running" && info.Status != "running" {
+				return core.ErrProviderWaitNotSaved
+			}
 			t.Task = info.Task
 			t.Title = info.Title
 			t.Model = info.Model
@@ -469,9 +486,7 @@ func (s *ManagedSession) persistSubagentTranscript(jobID, status, result, result
 	if previous, err := store.Load(jobID); err == nil && previous.Title != "" && t.Title == "" {
 		t.Title = previous.Title
 	}
-	if err := store.Save(t); err != nil {
-		slog.Warn("subagent transcript save failed", "session", s.ID, "job", jobID, "error", err)
-	}
+	return s.persister.saveSubagentTranscript(s.ID, t)
 }
 
 // info returns the session info via bus queries.
@@ -501,6 +516,10 @@ func (s *ManagedSession) info() SessionInfo {
 	cacheProvider := s.lastRunProvider
 	startedFresh := s.startedFreshAt
 	info := SessionInfo{
+		ProviderExecution: func() core.ProviderExecution {
+			streaming, _, _ := s.runtime.Context().SnapshotInFlightWithCut()
+			return streaming.ProviderExecution
+		}(),
 		ID:             s.ID,
 		Title:          s.Title,
 		State:          SessionState(state),

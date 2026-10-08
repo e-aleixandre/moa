@@ -128,9 +128,11 @@ type GetAutoVerifying struct{ SessionID string }
 // SessionContext.SnapshotInFlightWithCut. Empty Text and Thinking mean nothing
 // is streaming right now.
 type StreamingAggregate struct {
-	Text     string
-	Thinking string
-	MsgID    string
+	ProviderExecution          core.ProviderExecution
+	SubagentProviderExecutions map[string]core.ProviderExecution
+	Text                       string
+	Thinking                   string
+	MsgID                      string
 }
 
 // Live tool-call phases. The values match the status clients render for a live
@@ -286,7 +288,8 @@ type GetSubagents struct{ SessionID string }
 // SubagentSnapshot describes one reconnect-visible subagent job, including its
 // transcript so far. Result element type for GetSubagents.
 type SubagentSnapshot struct {
-	JobID string
+	ProviderExecution core.ProviderExecution
+	JobID             string
 	// OriginToolCallID identifies the parent model tool call that created this job.
 	OriginToolCallID string
 	Task             string

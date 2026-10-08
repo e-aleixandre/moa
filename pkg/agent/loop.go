@@ -15,6 +15,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/compaction"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/provider/retry"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
@@ -92,6 +93,8 @@ func (cfg *loopConfig) appendState(msgs ...core.AgentMessage) {
 
 // loopConfig holds all dependencies for the agent loop.
 type loopConfig struct {
+	quotaBudget     *activeBudget
+	requestRevision uint64
 	// background moves automatic compaction off the request path (see
 	// background_compaction.go). The loop's agent owns the job; false keeps
 	// the foreground compaction (preparation runs, embedders without a
@@ -193,6 +196,7 @@ type loopConfig struct {
 // change while a run is in flight. Read as one value so a request never mixes
 // halves of a concurrent reconfiguration.
 type requestSettings struct {
+	revision uint64
 	provider core.Provider
 	model    core.Model
 	thinking string
@@ -207,6 +211,7 @@ type requestSettings struct {
 // from it.
 func (cfg *loopConfig) applySettings(s requestSettings) {
 	cfg.provider, cfg.model = s.provider, s.model
+	cfg.requestRevision = s.revision
 	cfg.streamOpts.ThinkingLevel = s.thinking
 	cfg.stateMu.Lock()
 	cfg.state.Messages = syncHistoryModel(cfg.state, s.model)
@@ -352,6 +357,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	// paused message and lose the continuation).
 	pauseResubmits := 0
 	justPaused := false
+	// Local to this admitted work, never inherited by another Send or child.
+	// A tool result can change ordinary settings without being a new entry
+	// into API while this work's OAuth restriction still makes return early.
+	var apiWorkOrigin *core.ProviderSource
 	// Which compaction epoch has already had its preparation turn.
 	preparedEpoch := -1
 
@@ -659,6 +668,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		emptyRetry := false
 		recheckContext := false
 		requestCompaction := compactionSettings
+		transportAttempt, quotaAttempt := 0, 0
+		waitNoteID := ""
+		backupNoteID := ""
+		var retrySource *core.ProviderSource
+		var retryRevision uint64
 		for attempt := 0; ; attempt++ {
 			// Last read before the request leaves: hooks, materialization and
 			// repair backoff all take time a change can land in.
@@ -727,15 +741,101 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				Tools:    toolSpecs,
 				Options:  cfg.requestOptions(),
 			}
+			bound := justPaused || repairPartial != nil
+			if !bound && retrySource == nil && apiWorkOrigin != nil && apiWorkOrigin.Model == cfg.model.ID && apiWorkOrigin.OAuthNotBefore != nil && time.Now().Before(*apiWorkOrigin.OAuthNotBefore) {
+				req.Options.ProviderBinding = apiWorkOrigin
+			}
+			if !bound && retrySource != nil && cfg.requestRevision != retryRevision {
+				retrySource = nil
+				transportAttempt = 0
+			}
+			if retrySource != nil && retrySource.Model == cfg.model.ID {
+				req.Options.ProviderBinding = retrySource
+			}
+			if bound {
+				if repairPartial != nil {
+					req.Options.ProviderBinding = repairPartial.ProviderSource
+				} else {
+					for i := len(baseMessages) - 1; i >= 0; i-- {
+						if baseMessages[i].Role == "assistant" {
+							req.Options.ProviderBinding = baseMessages[i].ProviderSource
+							break
+						}
+					}
+				}
+			}
+			if cfg.agent != nil {
+				if err := cfg.agent.admitProvider(ctx, cfg.requestRevision, cfg.model, bound); err != nil {
+					if errors.Is(err, core.ErrProviderReconfigured) {
+						attempt--
+						continue
+					}
+					loopErr = err
+					return loopErr
+				}
+				req.Options.ProviderRetryAttempt = transportAttempt
+				req.Options.OnProviderDispatch = func(dispatchCtx context.Context, source core.ProviderSource) error {
+					return cfg.agent.admitProviderSource(dispatchCtx, cfg.requestRevision, cfg.model, bound, &source)
+				}
+				req.Options.OnProviderPrepare = func(prepareCtx context.Context, source core.ProviderSource) error {
+					return cfg.prepareBackup(prepareCtx, source, &backupNoteID)
+				}
+				cfg.agent.mu.Lock()
+				hasWaitSave := cfg.agent.providerWaitSave != nil
+				cfg.agent.mu.Unlock()
+				if hasWaitSave {
+					req.Options.OnProviderRetry = func(waitCtx context.Context, wait core.ProviderWait) error {
+						return &core.ProviderRetryReady{Attempt: wait.Attempt, Wait: &wait}
+					}
+				}
+			}
 
 			ch, err := cfg.provider.Stream(ctx, req)
 			if err != nil {
+				if errors.Is(err, core.ErrProviderReconfigured) {
+					retrySource = nil
+					transportAttempt = 0
+					attempt--
+					continue
+				}
+				var retryReady *core.ProviderRetryReady
+				if errors.As(err, &retryReady) {
+					if retryReady.Wait != nil {
+						if err := cfg.waitProvider(ctx, *retryReady.Wait, cfg.requestRevision, bound, &waitNoteID); err != nil {
+							loopErr = err
+							return loopErr
+						}
+					}
+					transportAttempt = retryReady.Attempt
+					retrySource = retryReady.Source
+					retryRevision = cfg.requestRevision
+					attempt--
+					continue
+				}
+				if qe, ok := core.AsQuotaExceeded(err); ok && qe.Wait != nil && qe.Provider == "anthropic" && qe.Wait.Kind == "quota_confirmed" && (qe.Wait.Scope == "seven_day" || qe.Wait.Scope == "five_hour") {
+					wait := *qe.Wait
+					wait.Attempt = quotaAttempt + 1
+					floor := wait.ObservedAt.Add(retry.Backoff(quotaAttempt))
+					if floor.After(wait.NextAttemptAt) {
+						wait.NextAttemptAt = floor
+					}
+					if err := cfg.waitProvider(ctx, wait, cfg.requestRevision, bound, &waitNoteID); err != nil {
+						loopErr = err
+						return loopErr
+					}
+					quotaAttempt++
+					attempt--
+					continue
+				}
 				loopErr = fmt.Errorf("provider: %w", err)
 				return loopErr
 			}
-
 			var consumeErr error
-			assistantMsg, consumeErr = consumeStream(ctx, ch, cfg.emitter)
+			assistantMsg, consumeErr = consumeStream(ctx, ch, cfg.emitter, func() {
+				if cfg.agent != nil {
+					cfg.agent.providerPhase("working")
+				}
+			})
 			if consumeErr == nil {
 				if repairPartial != nil {
 					assistantMsg = mergeAssistant(repairPartial, assistantMsg)
@@ -755,7 +855,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				}
 			}
 			streamErr = fmt.Errorf("stream: %w", consumeErr)
-			canRepair := ctx.Err() == nil &&
+			canRepair := ctx.Err() == nil && !errors.Is(consumeErr, core.ErrAPIBackupUncertain) &&
 				!hasStreamedToolCalls(assistantMsg) &&
 				isRetryableStreamError(streamErr) &&
 				attempt < maxStreamRepairs
@@ -818,12 +918,20 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Keep the requested identity on this response. A provider can return a
 		// safety fallback without changing the session's selected model.
 		assistantMsg.RequestedModel = cfg.model.ID
+		if assistantMsg.ProviderSource != nil && assistantMsg.ProviderSource.Kind == "api_backup" {
+			apiWorkOrigin = assistantMsg.ProviderSource
+		} else {
+			apiWorkOrigin = nil
+		}
 		// A stream succeeded: reset the consecutive-empty counter so the retry
 		// budget applies per stall point, not per run.
 		emptyRetries = 0
 
 		// Stamp assistant message with current compaction epoch for usage tracking.
 		wrapped := core.WrapMessage(*assistantMsg)
+		if assistantMsg.Usage != nil && cfg.model.Pricing != nil {
+			wrapped.Custom = map[string]any{"request_cost_usd": cfg.model.Pricing.Cost(*assistantMsg.Usage)}
+		}
 		if cfg.state.CompactionEpoch > 0 {
 			if wrapped.Custom == nil {
 				wrapped.Custom = make(map[string]any)
@@ -1021,6 +1129,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// restore or discard them, and the tool results above are already in
 		// history for it to follow.
 		deliverSteers(cfg, claimed)
+		if len(claimed) > 0 {
+			apiWorkOrigin = nil
+		}
 
 		// A stopped run must not deliver its queued steers in the narrow gap after
 		// a cancelled tool returns. The abort cleanup owns discarding them, while
@@ -1034,7 +1145,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 		// Inject steering messages between steps.
 		if cfg.drainSteers != nil {
-			deliverSteers(cfg, cfg.drainSteers())
+			drained := cfg.drainSteers()
+			deliverSteers(cfg, drained)
+			if len(drained) > 0 {
+				apiWorkOrigin = nil
+			}
 		}
 		if cfg.steerMu != nil {
 			cfg.steerMu.Unlock()
@@ -1095,8 +1210,10 @@ func deliverSteers(cfg *loopConfig, steered []core.SteerItem) {
 //
 // Semantics: message_end means the provider finished emitting this assistant
 // message. It does not mean the turn has ended (tool execution may still follow).
-func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *Emitter) (*core.Message, error) {
+func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *Emitter, onStart ...func()) (*core.Message, error) {
 	var finalMsg *core.Message
+	var startMsg *core.Message
+	started := false
 
 	// Accumulate partial content so failures cannot discard output already shown.
 	var partialText strings.Builder
@@ -1106,6 +1223,11 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 
 	accumulate := func(event core.AssistantEvent) {
 		switch event.Type {
+		case core.ProviderEventStart:
+			if event.Partial != nil {
+				metadata := *event.Partial
+				startMsg = &metadata
+			}
 		case core.ProviderEventTextDelta:
 			partialText.WriteString(event.Delta)
 		case core.ProviderEventThinkingDelta:
@@ -1139,6 +1261,10 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 			return nil
 		}
 		partial := &core.Message{Role: "assistant", Timestamp: time.Now().Unix()}
+		if startMsg != nil {
+			*partial = *startMsg
+			partial.Content = nil
+		}
 		partial.EnsureMsgID()
 		if partialThinking.Len() > 0 {
 			partial.Content = append(partial.Content, core.Content{
@@ -1201,6 +1327,28 @@ func consumeStream(ctx context.Context, ch <-chan core.AssistantEvent, emitter *
 					return partialMessage(), fmt.Errorf("stream ended without final message")
 				}
 				return finalMsg, nil
+			}
+
+			if !started && ctx.Err() == nil {
+				progress := false
+				switch event.Type {
+				case core.ProviderEventStart:
+					progress = true
+				case core.ProviderEventTextDelta, core.ProviderEventThinkingDelta:
+					progress = event.Delta != ""
+				case core.ProviderEventToolCallStart, core.ProviderEventToolCallDelta:
+					progress = event.ToolCallID != ""
+				case core.ProviderEventDone:
+					progress = event.Message != nil
+				}
+				if progress {
+					started = true
+					for _, notify := range onStart {
+						if notify != nil {
+							notify()
+						}
+					}
+				}
 			}
 
 			// Emit as message_update

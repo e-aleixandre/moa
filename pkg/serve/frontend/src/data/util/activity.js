@@ -271,6 +271,8 @@ export function activityPhase(session) {
   // same phase for parity with the TUI's "Waiting for you".
   if (session.state === 'permission' || session.pendingAsk) return 'waiting';
   if (session.state !== 'running') return null;
+  if (session.providerExecution?.phase === 'provider_wait') return 'provider_wait';
+  if (session.providerExecution?.phase === 'awaiting_provider') return 'awaiting_provider';
   if (session.thinkingText) return 'thinking';
   return 'working';
 }
@@ -292,6 +294,10 @@ export function backgroundSummarizing(session) {
 // an automatic post-edit run or a manual /verify aimed at another repository.
 export function activityLabel(phase, session = null) {
   switch (phase) {
+    case 'provider_wait':
+      return session?.providerExecution?.wait?.kind === 'quota_confirmed' ? (session.providerExecution.wait.scope === 'five_hour' ? 'Waiting for 5h quota' : 'Waiting for weekly quota') : 'Waiting to retry provider';
+    case 'awaiting_provider':
+      return 'Waiting for provider';
     case 'compacting':
       return 'Compacting context';
     case 'context_wait':

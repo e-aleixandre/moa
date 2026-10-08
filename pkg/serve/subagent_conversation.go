@@ -16,16 +16,17 @@ import (
 // SubagentSummary describes a subagent available to an owner-authorized
 // client, including the delegated task.
 type SubagentSummary struct {
-	JobID      string    `json:"job_id"`
-	Task       string    `json:"task"`
-	Title      string    `json:"title,omitempty"`
-	Model      string    `json:"model,omitempty"`
-	Thinking   string    `json:"thinking,omitempty"`
-	Status     string    `json:"status"`
-	Async      bool      `json:"async"`
-	StartedAt  time.Time `json:"started_at,omitempty"`
-	FinishedAt time.Time `json:"finished_at,omitempty"`
-	Source     string    `json:"source"`
+	ProviderExecution core.ProviderExecution `json:"provider_execution"`
+	JobID             string                 `json:"job_id"`
+	Task              string                 `json:"task"`
+	Title             string                 `json:"title,omitempty"`
+	Model             string                 `json:"model,omitempty"`
+	Thinking          string                 `json:"thinking,omitempty"`
+	Status            string                 `json:"status"`
+	Async             bool                   `json:"async"`
+	StartedAt         time.Time              `json:"started_at,omitempty"`
+	FinishedAt        time.Time              `json:"finished_at,omitempty"`
+	Source            string                 `json:"source"`
 	// Usage/cost/context of the CHILD, so a client reopening a finished
 	// subagent shows the same figures its live view showed. ContextPercent is
 	// -1 when unknown; the tokens and cost are omitted when zero.
@@ -44,9 +45,10 @@ type subagentListResponse struct {
 // includes messages and bounded tool-call arguments, while tool result output
 // remains outside the default response budget.
 type subagentConversationResponse struct {
-	SessionID string `json:"session_id"`
-	JobID     string `json:"job_id"`
-	Task      string `json:"task"`
+	ProviderExecution core.ProviderExecution `json:"provider_execution"`
+	SessionID         string                 `json:"session_id"`
+	JobID             string                 `json:"job_id"`
+	Task              string                 `json:"task"`
 	// Title is the child's generated identity label (same field the live
 	// snapshot and subagent_title event carry), so reopening a finished child
 	// from disk shows the label its live row showed instead of a model id.
@@ -125,7 +127,8 @@ func handleSubagentConversation(m *Manager) http.HandlerFunc {
 			return
 		}
 		response := subagentConversationResponse{
-			SessionID: r.PathValue("id"), JobID: snapshot.summary.JobID,
+			ProviderExecution: snapshot.summary.ProviderExecution,
+			SessionID:         r.PathValue("id"), JobID: snapshot.summary.JobID,
 			Task:  snapshot.summary.Task,
 			Title: snapshot.summary.Title,
 			Model: snapshot.summary.Model, Thinking: snapshot.summary.Thinking, Status: snapshot.summary.Status, Async: snapshot.summary.Async,
@@ -176,9 +179,11 @@ func subagentCursorScope(jobID string) string { return "subagent:" + jobID }
 
 func (m *Manager) subagentConversationSnapshot(sessionID, jobID string) (subagentConversationSnapshot, error) {
 	if sess, ok := m.Get(sessionID); ok {
+		streaming, _, _ := sess.runtime.Context().SnapshotInFlightWithCut()
 		if sess.subagents != nil {
 			for _, info := range sess.subagents.Snapshot() {
 				if info.JobID == jobID {
+					info.ProviderExecution = streaming.SubagentProviderExecutions[jobID]
 					projection := safeSubagentConversationMessages(sess.subagents.Messages(jobID))
 					return subagentConversationSnapshot{summary: subagentSummaryFromLive(info), messages: projection.messages, toolDetails: projection.toolDetails}, nil
 				}
@@ -210,6 +215,7 @@ func (m *Manager) subagentConversationSnapshot(sessionID, jobID string) (subagen
 
 func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error) {
 	if sess, ok := m.Get(sessionID); ok {
+		streaming, _, _ := sess.runtime.Context().SnapshotInFlightWithCut()
 		items := make(map[string]SubagentSummary)
 		if sess.persister != nil {
 			if store := sess.persister.subagentStore(sessionID); store != nil {
@@ -224,6 +230,7 @@ func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error)
 		}
 		if sess.subagents != nil {
 			for _, info := range sess.subagents.Snapshot() {
+				info.ProviderExecution = streaming.SubagentProviderExecutions[info.JobID]
 				items[info.JobID] = subagentSummaryFromLive(info)
 			}
 		}
@@ -246,6 +253,7 @@ func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error)
 
 func subagentSummaryFromLive(info subagent.JobInfo) SubagentSummary {
 	s := SubagentSummary{JobID: info.JobID, Task: info.Task, Title: info.Title, Model: info.Model, Thinking: info.Thinking, Status: info.Status, Async: info.Async, StartedAt: info.StartedAt, FinishedAt: info.FinishedAt, Source: "active", CostUSD: info.CostUSD, ContextPercent: info.ContextPercent}
+	s.ProviderExecution = info.ProviderExecution
 	if info.Usage != nil {
 		s.InputTokens, s.OutputTokens = info.Usage.Input, info.Usage.Output
 	}
@@ -254,6 +262,9 @@ func subagentSummaryFromLive(info subagent.JobInfo) SubagentSummary {
 
 func subagentSummaryFromTranscript(transcript session.SubagentTranscript) SubagentSummary {
 	s := SubagentSummary{JobID: transcript.JobID, Task: transcript.Task, Title: transcript.Title, Model: transcript.Model, Thinking: transcript.Thinking, Status: transcript.Status, Async: transcript.Async, StartedAt: transcript.StartedAt, FinishedAt: transcript.FinishedAt, Source: "persisted", CostUSD: transcript.CostUSD, ContextPercent: -1}
+	if s.Status == "running" || s.Status == "cancelling" {
+		s.Status = "interrupted"
+	}
 	if transcript.ContextPercent != nil {
 		s.ContextPercent = *transcript.ContextPercent
 	}
@@ -306,6 +317,11 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 			id = fmt.Sprintf("%s~%d", baseID, duplicate)
 		}
 		seenIDs[baseID]++
+		if msg.Custom["source"] == "provider_wait" {
+			text, _, truncated := safeDisplayText(msg.Content)
+			out = append(out, ConversationMessage{ID: id, Role: "system", Source: "provider_wait", Text: text, Truncated: truncated, Timestamp: conversationTimestamp(msg.Timestamp)})
+			continue
+		}
 		// A compacted child would otherwise show an unexplained gap: turns that
 		// reference work with nothing before them. The summary is emitted as its
 		// own role so the client renders the same card the parent shows, never as
@@ -371,6 +387,9 @@ func subagentConversationToolActivity(name string, args map[string]any) (action,
 // compaction summary. Other Custom messages are internal transcript records
 // (such as compaction markers), not owner-facing conversation.
 func isVisibleSubagentConversationMessage(msg core.AgentMessage) bool {
+	if msg.Custom["source"] == "provider_wait" {
+		return true
+	}
 	if msg.Role == "compaction_summary" {
 		return true
 	}

@@ -76,6 +76,7 @@ export function handleWsInit(id, data) {
     && !(data.subagents || []).some(sa => sa && sa.job_id === viewing)
     ? { [viewing]: {
       ...prev.subagents[viewing],
+      providerExecution: null,
       ...(['running', 'cancelling'].includes(prev.subagents[viewing].status)
         ? { lifecycleUnverified: true }
         : {}),
@@ -103,6 +104,7 @@ export function handleWsInit(id, data) {
     }, outcome);
   }
   updateSession(id, {
+	providerExecution: data.provider_execution || null,
     serverInstance,
     messages,
     historyTruncated: !!data.history_truncated,
@@ -269,6 +271,7 @@ export function initSubagents(raw) {
   for (const sa of (raw || [])) {
     if (!sa || !sa.job_id) continue;
     out[sa.job_id] = {
+	  providerExecution: sa.provider_execution || null,
       jobId: sa.job_id,
       originToolCallId: sa.origin_tool_call_id || '',
       task: sa.task || '',
@@ -384,4 +387,3 @@ export function attachBashJob(subagents, job) {
   };
   return out;
 }
-

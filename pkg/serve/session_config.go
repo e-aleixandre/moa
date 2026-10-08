@@ -41,6 +41,7 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 	}
 
 	result := map[string]string{}
+	application := "applies-next"
 
 	if modelSpec != "" {
 		if err := core.ValidateModelSpec(modelSpec); err != nil {
@@ -49,7 +50,7 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 		// Thinking travels with the model: a running agent must never send a
 		// request with one of them changed and not the other, and an invalid
 		// level must reject the whole change.
-		if err := sess.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: modelSpec, Thinking: normalizeThinkingLevel(thinking)}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: modelSpec, Thinking: normalizeThinkingLevel(thinking), Application: &application}); err != nil {
 			return nil, err
 		}
 		model, _ := bus.QueryTyped[bus.GetModel, core.Model](sess.runtime.Bus, bus.GetModel{})
@@ -57,7 +58,7 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 		result["model"] = modelDisplayName(model)
 	} else if thinking != "" {
 		normalized := normalizeThinkingLevel(thinking)
-		if err := sess.runtime.Bus.Execute(bus.SetThinking{Level: normalized}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.SetThinking{Level: normalized, Application: &application}); err != nil {
 			return nil, err
 		}
 		result["thinking"], _ = bus.QueryTyped[bus.GetThinkingLevel, string](sess.runtime.Bus, bus.GetThinkingLevel{})
@@ -73,6 +74,7 @@ func (m *Manager) ReconfigureSession(sessionID, modelSpec, thinking string) (map
 		result["thinking"] = t
 	}
 
+	result["application"] = application
 	return result, nil
 }
 
@@ -215,6 +217,50 @@ func (m *Manager) CancelSubagent(sessionID, jobID string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (m *Manager) ReconfigureSubagent(sessionID, jobID, modelSpec, thinking string) (map[string]string, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok || sess.subagents == nil {
+		return nil, ErrNotFound
+	}
+	sess.lifecycle.RLock()
+	defer sess.lifecycle.RUnlock()
+	if sess.closing.Load() {
+		return nil, ErrNotFound
+	}
+	if err := core.ValidateModelSpec(modelSpec); err != nil {
+		return nil, ErrInvalidModel
+	}
+	model, ok := core.ResolveModel(modelSpec)
+	if !ok {
+		return nil, ErrInvalidModel
+	}
+	if thinking == "" {
+		for _, info := range sess.subagents.Snapshot() {
+			if info.JobID == jobID {
+				thinking = info.Thinking
+				break
+			}
+		}
+	}
+	level, err := core.EffectiveThinkingLevel(model, normalizeThinkingLevel(thinking))
+	if err != nil {
+		return nil, ErrInvalidThinking
+	}
+	provider, err := m.providerFactory(model)
+	if err != nil {
+		return nil, err
+	}
+	application, err := sess.subagents.Reconfigure(jobID, provider, model, level)
+	if errors.Is(err, subagent.ErrUnknownJob) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	sess.runtime.Bus.Publish(bus.SubagentEvent{SessionID: sess.ID, JobID: jobID, Inner: bus.ConfigChanged{SessionID: jobID, Model: model.ID, Provider: model.Provider, Thinking: level}})
+	return map[string]string{"model": model.ID, "thinking": level, "application": application}, nil
 }
 
 // CancelBashJob cancels a session-scoped background bash job.

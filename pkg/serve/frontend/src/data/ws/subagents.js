@@ -7,6 +7,7 @@ import { addSessionToast } from '../notifications.js';
 import { store, updateSession } from '../store.js';
 import { isSessionAway, markUnseen } from './attention.js';
 import { noteArtifactDelivery } from './tools.js';
+import { newerProviderExecution } from '../provider-wait.js';
 
 export function handleWsSubagentTitle(id, data) {
   const sess = store.get().sessions[id];
@@ -77,6 +78,16 @@ export function flushSubagentEvents() {
       const isTerminal = existing
         && (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'cancelled');
       if (!existing || isTerminal) continue;
+	  if (evt.type === 'provider_execution') {
+	    subs[jobId] = { ...existing, providerExecution: newerProviderExecution(existing.providerExecution, evt.data) };
+	    changed = true;
+	    continue;
+	  }
+	  if (evt.type === 'config_change') {
+	    subs[jobId] = { ...existing, model: evt.data.model || existing.model, thinking: evt.data.thinking || existing.thinking };
+	    changed = true;
+	    continue;
+	  }
       // Shallow clone the mutable transcript fields before reducing.
       const target = {
         messages: existing.messages || [],
@@ -111,6 +122,7 @@ export function handleWsSubagentStart(id, data) {
   const isTerminal = existing
     && (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'cancelled');
   subs[jobId] = {
+    providerExecution: existing?.providerExecution || null,
     jobId,
     originToolCallId: data.origin_tool_call_id || (existing && existing.originToolCallId) || '',
     task: data.task || (existing && existing.task) || '',
@@ -308,4 +320,3 @@ export function chronologicalSubagentOutcomes(outcomes) {
     return at - bt;
   });
 }
-

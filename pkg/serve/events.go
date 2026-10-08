@@ -18,6 +18,7 @@ type Event struct {
 
 // InitData is sent on WebSocket connect with the full session state.
 type InitData struct {
+	ProviderExecution core.ProviderExecution `json:"provider_execution"`
 	// ServerInstance identifies the process that owns this runtime incarnation.
 	// AttentionNamespace, not this value, scopes the bus-sequence read cursor.
 	ServerInstance string `json:"server_instance"`
@@ -133,15 +134,16 @@ type LiveToolInitData struct {
 // (WS init snapshot), so a client that connects mid-run sees the agent tray
 // and its accumulated transcript instead of starting empty.
 type SubagentInitData struct {
-	JobID            string              `json:"job_id"`
-	OriginToolCallID string              `json:"origin_tool_call_id,omitempty"`
-	Task             string              `json:"task"`
-	Title            string              `json:"title,omitempty"`
-	Model            string              `json:"model"`
-	Thinking         string              `json:"thinking"`
-	Status           string              `json:"status"`
-	Async            bool                `json:"async"`
-	Messages         []core.AgentMessage `json:"messages"`
+	ProviderExecution core.ProviderExecution `json:"provider_execution"`
+	JobID             string                 `json:"job_id"`
+	OriginToolCallID  string                 `json:"origin_tool_call_id,omitempty"`
+	Task              string                 `json:"task"`
+	Title             string                 `json:"title,omitempty"`
+	Model             string                 `json:"model"`
+	Thinking          string                 `json:"thinking"`
+	Status            string                 `json:"status"`
+	Async             bool                   `json:"async"`
+	Messages          []core.AgentMessage    `json:"messages"`
 	// LiveTools are the child's calls that ended while a sibling in their
 	// batch still runs, with their results: Messages has neither yet.
 	LiveTools []LiveToolInitData `json:"live_tools,omitempty"`
@@ -206,11 +208,12 @@ type DeltaData struct {
 // MessageEndData carries the full assistant text on message completion and the
 // provider-reported usage for that message.
 type MessageEndData struct {
-	Text         string `json:"text"`
-	MsgID        string `json:"msg_id,omitempty"`
-	Timestamp    int64  `json:"timestamp,omitempty"`
-	InputTokens  int    `json:"input_tokens,omitempty"`
-	OutputTokens int    `json:"output_tokens,omitempty"`
+	ProviderSource *core.ProviderSource `json:"provider_source,omitempty"`
+	Text           string               `json:"text"`
+	MsgID          string               `json:"msg_id,omitempty"`
+	Timestamp      int64                `json:"timestamp,omitempty"`
+	InputTokens    int                  `json:"input_tokens,omitempty"`
+	OutputTokens   int                  `json:"output_tokens,omitempty"`
 }
 
 // ToolStartData is sent when a tool execution begins.

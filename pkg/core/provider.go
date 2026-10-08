@@ -204,10 +204,16 @@ func (p *Pricing) Cost(u Usage) float64 {
 
 // StreamOptions configures an LLM request.
 type StreamOptions struct {
-	Temperature   *float64 `json:"temperature,omitempty"`
-	MaxTokens     *int     `json:"max_tokens,omitempty"`
-	APIKey        string   `json:"-"`
-	ThinkingLevel string   `json:"thinking_level,omitempty"`
+	OnProviderDispatch   ProviderDispatch  `json:"-"`
+	OnProviderPrepare    ProviderDispatch  `json:"-"`
+	ProviderBinding      *ProviderSource   `json:"-"`
+	AnthropicWireProfile string            `json:"-"`
+	OnProviderRetry      ProviderRetryWait `json:"-"`
+	ProviderRetryAttempt int               `json:"-"`
+	Temperature          *float64          `json:"temperature,omitempty"`
+	MaxTokens            *int              `json:"max_tokens,omitempty"`
+	APIKey               string            `json:"-"`
+	ThinkingLevel        string            `json:"thinking_level,omitempty"`
 	// CacheRetention selects the prompt-cache TTL: "" is the provider default
 	// (5 minutes), "1h" opts into the long TTL, and CacheOff suppresses cache
 	// writes entirely.

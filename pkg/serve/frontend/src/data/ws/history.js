@@ -43,7 +43,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           textParts.push(c.text);
         } else if (c.type === 'tool_call') {
           if (textParts.length > 0) {
-            result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, requested_model: msg.requested_model, model: msg.model, content: [{ type: 'text', text: textParts.join('') }] });
+            result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, requested_model: msg.requested_model, model: msg.model, ...(msg.provider_source ? { provider_source: msg.provider_source } : {}), content: [{ type: 'text', text: textParts.join('') }] });
             textParts.length = 0;
           }
           const tr = resultMap[c.tool_call_id];
@@ -61,6 +61,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           }
           result.push({
             _type: 'tool_start',
+			...(msg.provider_source ? { provider_source: msg.provider_source } : {}),
             _msg_id: msg.msg_id,
             tool_call_id: c.tool_call_id,
             tool_name: c.tool_name,
@@ -77,7 +78,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
         }
       }
       if (textParts.length > 0) {
-        result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, requested_model: msg.requested_model, model: msg.model, content: [{ type: 'text', text: textParts.join('') }] });
+        result.push({ role: 'assistant', _msg_id: msg.msg_id, timestamp: msg.timestamp, requested_model: msg.requested_model, model: msg.model, ...(msg.provider_source ? { provider_source: msg.provider_source } : {}), content: [{ type: 'text', text: textParts.join('') }] });
       }
     } else if (msg.role === 'shell' || (msg.role === 'user' && msg.custom?.shell)) {
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
@@ -96,6 +97,9 @@ export function normalizeHistory(raw, liveSubagents = []) {
       // Rendered as a system line, matching the live goal event styling.
       const text = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
       result.push({ _type: 'system', _msg_id: msg.msg_id, text });
+    } else if (msg.custom?.source === 'provider_wait' || msg.custom?.type === 'provider_source_note') {
+      result.push({ _type: 'system', _msg_id: msg.msg_id, timestamp: msg.timestamp,
+        text: (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('') });
     } else if (msg.role === 'session_event' && msg.custom?.type === 'trim_marker') {
       // A trim elides old tool outputs from the model's context but leaves the
       // transcript intact, so this is only a thin marker: the outputs above it
@@ -326,6 +330,7 @@ function subagentTaskIdentity(task) {
 // retained so persisted activity is as informative as live activity.
 export function normalizeConversationProjection(raw, toolDetailBase = '') {
   return (raw || []).map(item => {
+    if (item.source === 'provider_wait') return { _type: 'system', _msg_id: item.id, text: item.text || '' };
     if (item.role === 'tool') {
       const status = item.status === 'ok' ? 'done'
         : item.status === 'pending' ? 'running'

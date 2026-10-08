@@ -46,9 +46,20 @@ func newServePersister(persisted *session.Session, store *session.FileStore, tit
 
 // Snapshot implements bus.SessionPersister.
 func (sp *servePersister) Snapshot(messages []core.AgentMessage, epoch int, metadata map[string]any) error {
+	return sp.snapshot(messages, epoch, metadata, false)
+}
+
+func (sp *servePersister) SnapshotAcknowledged(messages []core.AgentMessage, epoch int, metadata map[string]any) error {
+	return sp.snapshot(messages, epoch, metadata, true)
+}
+
+func (sp *servePersister) snapshot(messages []core.AgentMessage, epoch int, metadata map[string]any, acknowledged bool) error {
 	sp.mu.Lock()
 	if sp.deleted || sp.persisted == nil || sp.store == nil {
 		sp.mu.Unlock()
+		if acknowledged {
+			return core.ErrProviderWaitNotSaved
+		}
 		return nil
 	}
 
@@ -83,9 +94,20 @@ func (sp *servePersister) Snapshot(messages []core.AgentMessage, epoch int, meta
 
 // SnapshotTree implements bus.TreePersister — saves tree entries instead of flat messages.
 func (sp *servePersister) SnapshotTree(entries []session.Entry, leafID string, metadata map[string]any) error {
+	return sp.snapshotTree(entries, leafID, metadata, false)
+}
+
+func (sp *servePersister) SnapshotTreeAcknowledged(entries []session.Entry, leafID string, metadata map[string]any) error {
+	return sp.snapshotTree(entries, leafID, metadata, true)
+}
+
+func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, metadata map[string]any, acknowledged bool) error {
 	sp.mu.Lock()
 	if sp.deleted || sp.persisted == nil || sp.store == nil {
 		sp.mu.Unlock()
+		if acknowledged {
+			return core.ErrProviderWaitNotSaved
+		}
 		return nil
 	}
 
@@ -242,6 +264,19 @@ func (sp *servePersister) subagentStore(sessionID string) *session.SubagentStore
 		sp.subagents = session.NewSubagentStore(sp.store.Dir(), sessionID)
 	}
 	return sp.subagents
+}
+
+// Serialize acknowledged sidecar writes with deletion, like root snapshots.
+func (sp *servePersister) saveSubagentTranscript(sessionID string, transcript session.SubagentTranscript) error {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.store == nil {
+		return core.ErrProviderWaitNotSaved
+	}
+	if sp.subagents == nil {
+		sp.subagents = session.NewSubagentStore(sp.store.Dir(), sessionID)
+	}
+	return sp.subagents.Save(transcript)
 }
 
 // saveSubagentCacheAudit overwrites the job's cache audit with a snapshot. The

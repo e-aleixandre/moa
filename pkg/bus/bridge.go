@@ -188,10 +188,12 @@ type SessionContext struct {
 	// streamMu across the mutation and the derived publish so
 	// SnapshotInFlightWithCut can pair them with the sequence cut for the
 	// reconnect snapshot.
-	streamMu       sync.Mutex
-	streamText     []byte
-	streamThinking []byte
-	streamMsgID    string
+	streamMu                   sync.Mutex
+	streamText                 []byte
+	streamThinking             []byte
+	streamMsgID                string
+	providerExecution          core.ProviderExecution
+	subagentProviderExecutions map[string]core.ProviderExecution
 
 	// liveTools is the registry of the turn's tool calls whose results are not
 	// in history yet: the model is still streaming their arguments, they are
@@ -715,13 +717,41 @@ func (sctx *SessionContext) SnapshotInFlightWithCut() (StreamingAggregate, []Liv
 	sctx.streamMu.Lock()
 	defer sctx.streamMu.Unlock()
 	aggregate := StreamingAggregate{
-		Text:     string(sctx.streamText),
-		Thinking: string(sctx.streamThinking),
-		MsgID:    sctx.streamMsgID,
+		ProviderExecution: sctx.providerExecution,
+		Text:              string(sctx.streamText),
+		Thinking:          string(sctx.streamThinking),
+		MsgID:             sctx.streamMsgID,
+	}
+	if len(sctx.subagentProviderExecutions) > 0 {
+		aggregate.SubagentProviderExecutions = make(map[string]core.ProviderExecution, len(sctx.subagentProviderExecutions))
+		for jobID, state := range sctx.subagentProviderExecutions {
+			aggregate.SubagentProviderExecutions[jobID] = state
+		}
 	}
 	liveTools := sctx.liveToolsSnapshotLocked()
 	cut := sctx.Bus.CaptureSeq()
 	return aggregate, liveTools, cut
+}
+
+// A child's provider projection shares the root socket's publication cut;
+// reading the child agent after that cut can skip or replay the wrong epoch.
+func (sctx *SessionContext) PublishSubagentEvent(event SubagentEvent) {
+	if state, ok := event.Inner.(ProviderExecutionChanged); ok {
+		sctx.streamMu.Lock()
+		defer sctx.streamMu.Unlock()
+		if sctx.subagentProviderExecutions == nil {
+			sctx.subagentProviderExecutions = make(map[string]core.ProviderExecution)
+		}
+		sctx.subagentProviderExecutions[event.JobID] = state.State
+	}
+	sctx.Bus.Publish(event)
+}
+
+func (sctx *SessionContext) PublishSubagentEnded(event SubagentEnded) {
+	sctx.streamMu.Lock()
+	defer sctx.streamMu.Unlock()
+	delete(sctx.subagentProviderExecutions, event.JobID)
+	sctx.Bus.Publish(event)
 }
 
 // LiveTools returns the tool calls currently generating arguments or executing.
@@ -1112,7 +1142,8 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	// or below the cut (i.e. never replayed either).
 	delta, mutatesStream := streamAggregateDelta(e)
 	toolDelta, mutatesTools := liveToolDelta(e)
-	if mutatesStream || mutatesTools {
+	mutatesProvider := e.Type == core.AgentEventProviderExecution
+	if mutatesStream || mutatesTools || mutatesProvider {
 		sctx.streamMu.Lock()
 		defer sctx.streamMu.Unlock()
 	}
@@ -1182,6 +1213,9 @@ func bridgeEvent(sctx *SessionContext, e core.AgentEvent) {
 	}
 
 	translated := TranslateAgentEvent(sid, gen, e, sctx.TaskStore)
+	if mutatesProvider && e.ProviderExecution != nil {
+		sctx.providerExecution = *e.ProviderExecution
+	}
 	if mutatesStream {
 		switch delta.kind {
 		case streamKindStart:
@@ -1383,6 +1417,11 @@ func EndedLiveToolCall(e core.AgentEvent) LiveToolCall {
 // before/around calling this function.
 func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *tasks.Scope) []any {
 	switch e.Type {
+	case core.AgentEventProviderExecution:
+		if e.ProviderExecution == nil {
+			return nil
+		}
+		return []any{ProviderExecutionChanged{SessionID: sid, RunGen: gen, State: *e.ProviderExecution}}
 	case core.AgentEventStart:
 		return []any{AgentStarted{SessionID: sid, RunGen: gen}}
 

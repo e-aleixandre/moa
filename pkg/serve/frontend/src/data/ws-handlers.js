@@ -1,4 +1,5 @@
 // ws-handlers.js — WebSocket event handler public barrel.
+export { handleWsProviderExecution } from './ws/session.js';
 
 export { normalizeHistory, appendNormalizedHistoryDelta, normalizeConversationProjection } from './ws/history.js';
 export { attentionNamespaceFromInit, attentionNamespaceTransition, adoptAttentionNamespace, handleWsAskUser, handleWsPermissionRequest, handleWsPermissionResolved, handleWsAskResolved } from './ws/attention.js';

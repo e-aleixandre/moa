@@ -201,15 +201,17 @@ type CancelBashJob struct {
 // thinking level in the same step, validated against the new model; empty keeps
 // the current level (clamped to what the new model accepts).
 type SwitchModel struct {
-	SessionID string
-	ModelSpec string
-	Thinking  string
+	Application *string
+	SessionID   string
+	ModelSpec   string
+	Thinking    string
 }
 
 // SetThinking changes the thinking level.
 type SetThinking struct {
-	SessionID string
-	Level     string
+	Application *string
+	SessionID   string
+	Level       string
 }
 
 // SetPermissionMode changes the permission mode (yolo/ask/auto).

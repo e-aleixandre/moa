@@ -404,13 +404,18 @@ func ownItem(it core.SteerItem) core.SteerItem {
 // Agent runs the core loop: prompt → LLM → tool calls → execute → repeat.
 // It's a library — no I/O, no UI, no filesystem opinions.
 type Agent struct {
-	config  AgentConfig
-	state   AgentState
-	tools   *core.Registry
-	hooks   Hooks
-	emitter *Emitter
-	cancel  context.CancelFunc
-	mu      sync.Mutex
+	config                  AgentConfig
+	state                   AgentState
+	tools                   *core.Registry
+	hooks                   Hooks
+	emitter                 *Emitter
+	cancel                  context.CancelFunc
+	mu                      sync.Mutex
+	configRevision          uint64
+	providerWake            chan struct{}
+	providerExecution       core.ProviderExecution
+	providerWaitSave        func(context.Context) error
+	beforeProviderAdmission func() // deterministic wake/admission barrier; nil in production
 
 	steers     steerQueue          // inspectable queue, drained by agentLoop between steps
 	waitSteers steerWaitInterrupts // wakes an active wait when a user steer arrives
@@ -487,6 +492,7 @@ type AgentConfig struct {
 	MaxTurns            int           // Default: 50. 0 = unlimited.
 	MaxToolCallsPerTurn int           // Default: 20. 0 = unlimited.
 	MaxRunDuration      time.Duration // Default: 30m. 0 = unlimited.
+	PauseQuotaBudget    bool          // child-only: preserve remaining active time during confirmed quota
 	MaxBudget           float64       // Max USD per run. 0 = unlimited. Requires Model.Pricing when > 0.
 
 	// Permission check called before each tool execution. May block waiting
@@ -1062,18 +1068,23 @@ func (a *Agent) CompactionEpoch() int {
 // threshold, and the request already in flight keeps what it was sent with.
 // A nil provider keeps the current one. compactAt follows SetCompactAt.
 func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLevel string, compactAt int) error {
+	_, err := a.ReconfigureWithApplication(provider, model, thinkingLevel, compactAt)
+	return err
+}
+
+func (a *Agent) ReconfigureWithApplication(provider core.Provider, model core.Model, thinkingLevel string, compactAt int) (string, error) {
 	var evt core.AgentEvent
 	var changed bool
 	defer func() { a.emitBG(evt, changed) }()
 	a.lockCut()
 	defer a.unlockCut()
 	if compactAt < 0 {
-		return fmt.Errorf("compaction threshold cannot be negative")
+		return "", fmt.Errorf("compaction threshold cannot be negative")
 	}
 	// Preserve New()'s invariant: a live MaxBudget requires pricing, else the
 	// cost guardrail silently stops accumulating and never trips.
 	if a.config.MaxBudget > 0 && model.Pricing == nil {
-		return fmt.Errorf("cannot switch to a model without pricing while MaxBudget is set")
+		return "", fmt.Errorf("cannot switch to a model without pricing while MaxBudget is set")
 	}
 	evt, changed = a.invalidateOnModelChangeLocked(model)
 	if provider != nil {
@@ -1081,6 +1092,7 @@ func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLe
 	}
 	a.config.Model = model
 	a.config.ThinkingLevel = thinkingLevel
+	a.wakeProviderLocked()
 	current := 0
 	if a.config.Compaction != nil {
 		current = a.config.Compaction.CompactAt
@@ -1095,7 +1107,7 @@ func (a *Agent) Reconfigure(provider core.Provider, model core.Model, thinkingLe
 		a.config.Compaction = &settings
 	}
 	a.syncStateModelLocked()
-	return nil
+	return a.configApplicationLocked(), nil
 }
 
 // SetModel changes the model and optionally the provider (nil keeps the
@@ -1115,6 +1127,7 @@ func (a *Agent) SetModel(provider core.Provider, model core.Model) error {
 	}
 	a.config.Model = model
 	a.syncStateModelLocked()
+	a.wakeProviderLocked()
 	return nil
 }
 
@@ -1145,10 +1158,16 @@ func syncHistoryModel(state *AgentState, model core.Model) []core.AgentMessage {
 // SetThinkingLevel changes only the thinking level. Allowed while running: the
 // next provider request reads it, the one in flight keeps its own.
 func (a *Agent) SetThinkingLevel(level string) error {
+	_, err := a.SetThinkingWithApplication(level)
+	return err
+}
+
+func (a *Agent) SetThinkingWithApplication(level string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.config.ThinkingLevel = level
-	return nil
+	a.wakeProviderLocked()
+	return a.configApplicationLocked(), nil
 }
 
 // SetDefaultCompactAt updates the GLOBAL fallback threshold, leaving the
@@ -1974,12 +1993,18 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// whether it was this run's MaxRunDuration or a caller-imposed deadline that
 	// fired. parentCtx lets TimedOut() attribute the timeout correctly.
 	parentCtx := ctx
-	if a.config.MaxRunDuration > 0 {
+	var quotaBudget *activeBudget
+	if a.config.MaxRunDuration > 0 && a.config.PauseQuotaBudget {
+		ctx, quotaBudget = newActiveBudget(ctx, a.config.MaxRunDuration)
+		a.cancel = quotaBudget.cancel
+	} else if a.config.MaxRunDuration > 0 {
 		ctx, a.cancel = context.WithTimeout(ctx, a.config.MaxRunDuration)
 	} else {
 		ctx, a.cancel = context.WithCancel(ctx)
 	}
 	cancel := a.cancel
+	a.providerWake = make(chan struct{})
+	a.providerExecution = core.ProviderExecution{Generation: a.providerExecution.Generation + 1, Phase: "awaiting_provider"}
 	a.emitter.setOrigin(ctx)
 	// Model settings can change while the run is in flight, so they are read
 	// here under the lock; the loop re-reads them at each request boundary.
@@ -2009,6 +2034,10 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		a.TryApplyBackgroundCompaction()
 	}()
 	defer func() {
+		a.providerPhase("")
+		if quotaBudget != nil {
+			quotaBudget.close()
+		}
 		cancel()
 		// Keep admission closed until clearing the running slot is visible. The
 		// steerMu -> mu order matches Abort and the delivery paths below.
@@ -2087,9 +2116,11 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	}
 	cfg = &loopConfig{
 		budgetCap:           budgetCap,
+		quotaBudget:         quotaBudget,
 		background:          background,
 		agent:               a,
 		provider:            initial.provider,
+		requestRevision:     initial.revision,
 		tools:               tools,
 		hooks:               a.hooks,
 		emitter:             a.emitter,
@@ -2270,7 +2301,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// gets "(interrupted by user)". A provider failure (e.g. a ChatGPT usage
 	// limit / 429) must NOT be mislabeled as a user interruption — that both
 	// confuses the user ("I didn't stop it") and lies to the model on replay.
-	if err != nil && len(a.state.Messages) > 0 && a.state.Messages[len(a.state.Messages)-1].Role == "user" {
+	if err != nil && lastLLMRole(a.state.Messages) == "user" {
 		a.mu.Lock()
 		interrupted := core.WrapMessage(core.Message{
 			Role:    "assistant",
@@ -2347,6 +2378,7 @@ func (a *Agent) requestSettingsLocked() requestSettings {
 		model:      a.config.Model,
 		thinking:   a.config.ThinkingLevel,
 		compaction: a.config.Compaction,
+		revision:   a.configRevision,
 	}
 }
 

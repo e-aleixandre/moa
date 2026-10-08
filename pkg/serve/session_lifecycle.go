@@ -396,10 +396,19 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		},
 		OnSubagentEvent: func(jobID string, inner any) {
 			if s := sess; s != nil {
-				s.runtime.Bus.Publish(bus.SubagentEvent{
+				s.runtime.Context().PublishSubagentEvent(bus.SubagentEvent{
 					SessionID: s.ID, JobID: jobID, Inner: inner,
 				})
 			}
+		},
+		SaveSubagentWait: func(ctx context.Context, jobID string, msgs []core.AgentMessage) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if sess == nil || sess.persister == nil {
+				return core.ErrProviderWaitNotSaved
+			}
+			return sess.saveSubagentWait(jobID, msgs)
 		},
 		OnSubagentUsage: func(jobID string, usage *core.Usage, costUSD float64, contextPct int) {
 			if s := sess; s != nil {
@@ -413,7 +422,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				// Persist first: a client that reconnects immediately after the
 				// terminal WS event must be able to restore this same outcome.
 				s.persistSubagentTranscript(jobID, status, result, resultErr, finishedAt, usage, costUSD)
-				s.runtime.Bus.Publish(bus.SubagentEnded{
+				s.runtime.Context().PublishSubagentEnded(bus.SubagentEnded{
 					SessionID: s.ID, JobID: jobID, Task: task, Async: async, Status: status,
 					Result: result, Error: resultErr, FinishedAt: finishedAt, Usage: usage, CostUSD: costUSD,
 				})
@@ -780,21 +789,22 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 			}
 		}
 		out = append(out, bus.SubagentSnapshot{
-			JobID:            info.JobID,
-			OriginToolCallID: info.OriginToolCallID,
-			Task:             info.Task,
-			Title:            info.Title,
-			Model:            info.Model,
-			Thinking:         info.Thinking,
-			Status:           info.Status,
-			Async:            info.Async,
-			Messages:         messages(info.JobID),
-			LiveTools:        endedTools(info.JobID),
-			StartedAt:        info.StartedAt,
-			Usage:            info.Usage,
-			CostUSD:          info.CostUSD,
-			ContextPercent:   info.ContextPercent,
-			AccentIndex:      info.AccentIndex,
+			ProviderExecution: info.ProviderExecution,
+			JobID:             info.JobID,
+			OriginToolCallID:  info.OriginToolCallID,
+			Task:              info.Task,
+			Title:             info.Title,
+			Model:             info.Model,
+			Thinking:          info.Thinking,
+			Status:            info.Status,
+			Async:             info.Async,
+			Messages:          messages(info.JobID),
+			LiveTools:         endedTools(info.JobID),
+			StartedAt:         info.StartedAt,
+			Usage:             info.Usage,
+			CostUSD:           info.CostUSD,
+			ContextPercent:    info.ContextPercent,
+			AccentIndex:       info.AccentIndex,
 		})
 	}
 	return out

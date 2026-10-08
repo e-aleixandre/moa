@@ -5,6 +5,11 @@ import { Composer } from "../Composer/Composer.jsx";
 import { CtxRing, StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { WorkHead, StateWord, CopyAction, RunIds } from "../WorkChrome/WorkChrome.jsx";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
+import { ModelSelector } from '../../components/ModelSelector/ModelSelector.jsx';
+import { ProviderWaitInfo } from '../LiveBar/ProviderWaitInfo.jsx';
+import { api } from '../../data/api.js';
+import { addToast } from '../../data/notifications.js';
+import { modelCatalog, ensureModelCatalog, catalogSpec } from '../../data/model-catalog.js';
 import "../WorkChrome/WorkChrome.css";
 import "../LiveBar/LiveBar.css";
 import { subagentView, canPromote } from "../../data/subagent-view-model.js";
@@ -13,7 +18,7 @@ import { fmtTokens, sessionTitle } from "../../data/util/format.js";
 import { turnFinalResponse } from "../../data/stream-model.js";
 import { useStore } from "../../hooks/useStore.js";
 import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
-import { updateSession } from "../../data/store.js";
+import { store, updateSession } from "../../data/store.js";
 import { useSubagentTranscript } from "../../hooks/useSubagentTranscript.js";
 import "./SubagentView.css";
 
@@ -151,6 +156,7 @@ export function SubIdent({ view }) {
 // Exported with SubHead, and for the same reason: the state vocabulary is the
 // errand's, not the desktop's.
 export function SubState({ view }) {
+  if (view.outcome === 'interrupted') return <StateWord tone="neutral" word="Interrupted" />;
   if (view.outcome === "failed") return <StateWord tone="failed" word="Failed" />;
   if (view.outcome === "cancelled") return <StateWord tone="neutral" word="Cancelled" />;
   return <StateWord tone="neutral" word="Completed" />;
@@ -184,12 +190,13 @@ export function SubagentActions({ view, phone = false, onPromote }) {
 // It is `.zl-live` verbatim, the parent conversation's own bar, so stopping a
 // child is the same gesture in the same place as stopping the parent.
 export function SubagentLiveBar({ view, onStop, confirmCancel }) {
+  if (view.lifecycleUnverified) return null;
   if (!view.action && !view.elapsed && !onStop) return null;
   return (
     <div class="zl-live">
       <div class="zl-live-bar">
         <div class="zl-live-now" role="status" aria-live="polite">
-          <span class="zl-live-dot is-working" aria-hidden="true" />
+          <span class={`zl-live-dot is-${view.providerExecution?.phase === 'provider_wait' ? 'waiting' : 'working'}`} aria-hidden="true" />
           <span class="zl-live-txt">{view.action || "working"}</span>
           {!!view.elapsed && <span class="zl-live-el zl-data">{view.elapsed}</span>}
         </div>
@@ -206,6 +213,7 @@ export function SubagentLiveBar({ view, onStop, confirmCancel }) {
           </button>
         )}
       </div>
+      <ProviderWaitInfo execution={view.providerExecution} />
     </div>
   );
 }
@@ -231,7 +239,7 @@ function SubagentLive({ view, session, jobId, onBack, onStop, confirmCancel }) {
         session={session}
         steer={{ jobId, name: view.name, onRebound: onBack }}
       />
-      <SubagentStatusStrip view={view} />
+      <SubagentStatusStrip view={view} sessionId={session.id} jobId={jobId} />
     </>
   );
 }
@@ -239,7 +247,20 @@ function SubagentLive({ view, session, jobId, onBack, onStop, confirmCancel }) {
 // The subagent inherits neither the parent's permission setting nor its usage
 // gauges. Its strip is only the child configuration, in the same status-strip
 // position the parent uses for configuration below the composer.
-export function SubagentStatusStrip({ view, compact = false }) {
+export function SubagentStatusStrip({ view, compact = false, sessionId, jobId }) {
+  const [open, setOpen] = useState(false);
+  const catalog = useStore(modelCatalog);
+  useEffect(() => { if (open) ensureModelCatalog(); }, [open]);
+  const specs = catalog.entries || [];
+  const configure = async (model, thinking = view.thinking) => {
+    try {
+      const result = await api('PATCH', `/api/sessions/${sessionId}/subagents/${jobId}`, { model, thinking });
+      const session = store.get().sessions[sessionId];
+      const sub = session?.subagents?.[jobId];
+      if (sub) updateSession(sessionId, { subagents: { ...session.subagents, [jobId]: { ...sub, model: result.model, thinking: result.thinking } } });
+      setOpen(false);
+    } catch (error) { addToast({ title: 'Could not change model', detail: error.message, type: 'error' }); }
+  };
   if (!view.model && view.contextPercent < 0) return null;
   return (
     <StatusStrip
@@ -248,11 +269,19 @@ export function SubagentStatusStrip({ view, compact = false }) {
       modelName={view.model}
       modelMark={`var(--${view.accent})`}
       thinking={view.thinking || "off"}
+      onModel={sessionId && jobId ? () => setOpen(true) : undefined}
       showPermission={false}
       showTokens={false}
-    />
+    >
+      <Sheet open={open} onClose={() => setOpen(false)} title="Child model">
+        <ModelSelector models={specs} selected={catalogSpec(specs, view.modelSpec)?.id} thinking={view.thinking}
+          sessionModel={view.modelSpec} onSelect={(spec) => configure(spec)}
+          onThinkingChange={(level) => configure(view.modelSpec, level)} />
+      </Sheet>
+    </StatusStrip>
   );
 }
+
 
 // Context uses StatusStrip's own ring and percent, never an estimate from the
 // parent. While live it belongs in that strip as progress; once terminal the
@@ -314,6 +343,7 @@ export function SubagentReport({ view, session, phone = false }) {
 // tool's error rather than anything the child said. Those have nowhere else to
 // appear, so they close the record here — verbatim, never summarised.
 function ReportOutcome({ view }) {
+  if (view.outcome === 'interrupted') return <div class="sa-outcome">{view.error}</div>;
   if (view.outcome === "completed") {
     if (!view.result || recordEndsWith(view.blocks, view.result)) return null;
     return <div class="sa-outcome"><div class="sa-result">{view.result}</div></div>;

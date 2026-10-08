@@ -620,16 +620,17 @@ func randomJobID() string {
 
 // JobInfo describes a live (or recently finished) subagent job.
 type JobInfo struct {
-	JobID            string
-	OriginToolCallID string
-	Task             string
-	Title            string
-	Model            string
-	Thinking         string
-	Status           string
-	Async            bool
-	StartedAt        time.Time
-	FinishedAt       time.Time
+	ProviderExecution core.ProviderExecution
+	JobID             string
+	OriginToolCallID  string
+	Task              string
+	Title             string
+	Model             string
+	Thinking          string
+	Status            string
+	Async             bool
+	StartedAt         time.Time
+	FinishedAt        time.Time
 	// Usage/CostUSD carry the child's accumulated usage/cost so far (nil Usage
 	// until the child has closed at least one message), so a reconnect snapshot
 	// can restore live cost without resetting it.
@@ -647,6 +648,30 @@ type JobInfo struct {
 // Jobs is a handle onto the subagent job store, returned by RegisterAll.
 type Jobs struct {
 	store *jobStore
+}
+
+func (j *Jobs) Reconfigure(jobID string, provider core.Provider, model core.Model, thinking string) (string, error) {
+	if j == nil || j.store == nil {
+		return "", ErrUnknownJob
+	}
+	job, ok := j.store.get(jobID)
+	if !ok {
+		return "", ErrUnknownJob
+	}
+	job.mu.Lock()
+	status, child := job.status, job.childAgent
+	job.mu.Unlock()
+	if status != statusRunning || child == nil || !child.IsRunning() {
+		return "", ErrNotRunning
+	}
+	application, err := child.ReconfigureWithApplication(provider, model, thinking, child.CompactAt())
+	if err != nil {
+		return "", err
+	}
+	job.mu.Lock()
+	job.model, job.thinking = model.ID, thinking
+	job.mu.Unlock()
+	return application, nil
 }
 
 // Snapshot lists all jobs currently tracked (live and recently finished,
@@ -668,21 +693,30 @@ func (j *Jobs) Snapshot() []JobInfo {
 		if !ok {
 			continue
 		}
+		var execution core.ProviderExecution
+		if job, ok := j.store.get(id); ok {
+			if child := job.getChildAgent(); child != nil {
+				var model core.Model
+				execution, model, snap.Thinking = child.ProviderSnapshot()
+				snap.Model = model.ID
+			}
+		}
 		infos = append(infos, JobInfo{
-			JobID:            snap.ID,
-			OriginToolCallID: snap.OriginToolCallID,
-			Task:             snap.Task,
-			Title:            snap.Title,
-			Model:            snap.Model,
-			Thinking:         snap.Thinking,
-			Status:           snap.Status,
-			Async:            !snap.Sync,
-			StartedAt:        snap.StartedAt,
-			FinishedAt:       snap.FinishedAt,
-			Usage:            snap.Usage,
-			CostUSD:          snap.CostUSD,
-			ContextPercent:   snap.ContextPercent,
-			AccentIndex:      snap.AccentIndex,
+			ProviderExecution: execution,
+			JobID:             snap.ID,
+			OriginToolCallID:  snap.OriginToolCallID,
+			Task:              snap.Task,
+			Title:             snap.Title,
+			Model:             snap.Model,
+			Thinking:          snap.Thinking,
+			Status:            snap.Status,
+			Async:             !snap.Sync,
+			StartedAt:         snap.StartedAt,
+			FinishedAt:        snap.FinishedAt,
+			Usage:             snap.Usage,
+			CostUSD:           snap.CostUSD,
+			ContextPercent:    snap.ContextPercent,
+			AccentIndex:       snap.AccentIndex,
 		})
 	}
 	return infos

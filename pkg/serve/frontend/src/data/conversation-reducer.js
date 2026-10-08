@@ -48,7 +48,7 @@ export function reduceThinkingDelta(target, buffers, delta) {
   return target;
 }
 
-function stampMaterializedAssistant(messages, timestamp) {
+function stampMaterializedAssistant(messages, timestamp, source, msgID) {
   if (!timestamp) return messages;
   let next = messages;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -57,7 +57,7 @@ function stampMaterializedAssistant(messages, timestamp) {
     if (row?.timestamp) break;
     if (row?.role !== 'assistant' && !(row?._type === 'tool_start' && row.status === 'generating')) continue;
     if (next === messages) next = [...messages];
-    next[i] = { ...row, timestamp };
+    next[i] = { ...row, timestamp, ...(source ? { provider_source: source, _msg_id: msgID || row._msg_id } : {}) };
   }
   return next;
 }
@@ -180,9 +180,9 @@ export function reduceToolEnd(target, buffers, data, extractNote) {
 // msgID, when the server sends one, becomes the row's identity, so a
 // transcript later fetched over REST can recognize this same message instead
 // of appending a second copy of it.
-export function reduceMessageEnd(target, buffers, fullText, msgID, timestamp) {
+export function reduceMessageEnd(target, buffers, fullText, msgID, timestamp, source) {
   target = ensureTarget(target);
-  target.messages = stampMaterializedAssistant(target.messages, timestamp);
+  target.messages = stampMaterializedAssistant(target.messages, timestamp, source, msgID);
   const streamed = target.streamingText || '';
   const materialized = buffers.materializedText || '';
   let assistantText;
@@ -215,6 +215,7 @@ export function reduceMessageEnd(target, buffers, fullText, msgID, timestamp) {
           ...m,
           content: [{ type: 'text', text: complete }],
           ...(timestamp && !m.timestamp ? { timestamp } : {}),
+		  ...(source ? { provider_source: source } : {}),
         } : m
       ));
     }
@@ -226,6 +227,7 @@ export function reduceMessageEnd(target, buffers, fullText, msgID, timestamp) {
       role: 'assistant',
       ...(msgID ? { _msg_id: msgID } : {}),
       ...(timestamp ? { timestamp } : {}),
+	  ...(source ? { provider_source: source } : {}),
       content: [{ type: 'text', text: assistantText }],
     }];
   }
@@ -299,6 +301,11 @@ export function reduceUserMessage(target, data) {
     }
     return target;
   }
+  if (data.custom?.source === 'provider_wait') {
+    target.messages = [...target.messages, { _type: 'system', _msg_id: msgID, timestamp: data.timestamp,
+      text: (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('') || data.text || '' }];
+    return target;
+  }
   const content = Array.isArray(data.content) && data.content.length > 0
     ? data.content
     : [{ type: 'text', text: data.text }];
@@ -321,7 +328,7 @@ export function applyNestedEvent(target, buffers, evt, extractNote) {
     case 'message_start': return reduceMessageStart(target, buffers);
     case 'text_delta':    return reduceTextDelta(target, buffers, data.delta);
     case 'thinking_delta':return reduceThinkingDelta(target, buffers, data.delta);
-    case 'message_end':   return reduceMessageEnd(target, buffers, data.text, data.msg_id, data.timestamp);
+    case 'message_end':   return reduceMessageEnd(target, buffers, data.text, data.msg_id, data.timestamp, data.provider_source);
     case 'tool_call_start':return reduceToolCallStart(target, buffers, data);
     case 'tool_call_delta':return reduceToolCallDelta(target, buffers, data);
     case 'tool_start':    return reduceToolStart(target, buffers, data);

@@ -23,7 +23,7 @@ import {
 import { shortModel, modelCodename } from './util/format.js';
 import { activityText, formatElapsed } from './util/activity.js';
 
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'error', 'done']);
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'error', 'done', 'interrupted']);
 
 // countActions counts the tool rows in the child's transcript — what the
 // folded work log promises ("Work log · 4 actions"). It counts what is
@@ -61,6 +61,7 @@ function accentForIndex(i) {
 //   failed/error   → 'failed'    (red)
 //   cancelled      → 'cancelled' (neutral / grey thread)
 function terminalOutcome(status) {
+  if (status === 'interrupted') return 'interrupted';
   if (status === 'failed' || status === 'error') return 'failed';
   if (status === 'cancelled') return 'cancelled';
   return 'completed';
@@ -188,6 +189,8 @@ export function subagentView(session, jobId) {
     // ("Astra") matches no catalog entry, so the thinking meter needs this.
     modelSpec: sub.model || '',
     thinking: sub.thinking || 'off',
+    providerExecution: sub.providerExecution || null,
+    lifecycleUnverified: !!sub.lifecycleUnverified,
     task: sub.task || '',
     async: !!sub.async,
     status,
@@ -215,6 +218,7 @@ export function subagentView(session, jobId) {
       if (done) view.elapsed = done;
     }
     if (outcome === 'failed') view.error = lastError(sub);
+    if (outcome === 'interrupted') view.error = 'Continue explicitly with this saved child transcript to resume.';
     if (outcome === 'completed') {
       view.result = resultText(sub);
       view.resultChip = resultChip(sub);
@@ -231,7 +235,7 @@ export function subagentView(session, jobId) {
     // from the backend-anchored startedAtMs (started_at_ms) when present, so
     // it keeps counting across a reconnect instead of resetting. Omitted
     // (never "undefined"/"NaN") when the anchor isn't known.
-    if (liveIdx >= 0) {
+    if (liveIdx >= 0 && !sub.lifecycleUnverified) {
       const a = liveAgent(live[liveIdx], stableIdx);
       if (a.action) view.action = a.action;
       // Reuse the shared activity mapping so this reads like the main agent,
@@ -241,11 +245,12 @@ export function subagentView(session, jobId) {
         streamingText: sub.streamingText,
         thinkingText: sub.thinkingText,
         state: 'running',
+        providerExecution: sub.providerExecution,
         runStartedAtMs: sub.startedAtMs,
       });
       if (label) view.action = label;
     }
-    if (sub.startedAtMs) {
+    if (!sub.lifecycleUnverified && sub.startedAtMs && sub.providerExecution?.phase !== 'provider_wait' && sub.providerExecution?.phase !== 'awaiting_provider') {
       const elapsed = formatElapsed(Date.now() - sub.startedAtMs);
       if (elapsed) view.elapsed = elapsed;
     }

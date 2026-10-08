@@ -20,10 +20,11 @@ import (
 // Anthropic implements core.Provider for the Anthropic Messages API.
 // Supports both API key auth and OAuth tokens (Claude Max).
 type Anthropic struct {
-	apiKey  string
-	isOAuth bool // true if apiKey is an OAuth token (sk-ant-oat-...)
-	baseURL string
-	client  *http.Client
+	apiKey   string
+	isOAuth  bool // true if apiKey is an OAuth token (sk-ant-oat-...)
+	baseURL  string
+	client   *http.Client
+	dispatch func(context.Context) (string, error)
 }
 
 // New creates an Anthropic provider.
@@ -60,6 +61,13 @@ func (a *Anthropic) WithHTTPClient(c *http.Client) *Anthropic {
 	return a
 }
 
+// WithDispatch resolves credentials and current authorization separately for
+// every HTTP attempt, after retry sleep. The body/profile remains immutable.
+func (a *Anthropic) WithDispatch(fn func(context.Context) (string, error)) *Anthropic {
+	a.dispatch = fn
+	return a
+}
+
 // IsOAuth returns true if this provider is using an OAuth token.
 func (a *Anthropic) IsOAuth() bool {
 	return a.isOAuth
@@ -90,7 +98,8 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		oauthMode = isOAuthToken(apiKey)
 	}
 
-	body, err := buildRequestBody(req, oauthMode)
+	profileOAuth := oauthMode || req.Options.AnthropicWireProfile == "oauth"
+	body, err := buildRequestBody(req, profileOAuth)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: building request: %w", err)
 	}
@@ -107,6 +116,14 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	fastMode := req.Options.Fast && core.SupportsFast(req.Model.ID)
 
 	buildReq := func() (*http.Request, error) {
+		requestKey := apiKey
+		if a.dispatch != nil {
+			var err error
+			requestKey, err = a.dispatch(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
 		r, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/v1/messages", bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -114,7 +131,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("anthropic-version", "2023-06-01")
 		if oauthMode {
-			r.Header.Set("Authorization", "Bearer "+apiKey)
+			r.Header.Set("Authorization", "Bearer "+requestKey)
 			betas := "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
 			if bindsThinkingPrefix(req.Model.ID) {
 				betas += "," + thinkingBindingBeta
@@ -126,8 +143,11 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 			r.Header.Set("User-Agent", "claude-cli/"+claudeCodeVersion)
 			r.Header.Set("x-app", "cli")
 		} else {
-			r.Header.Set("X-API-Key", apiKey)
+			r.Header.Set("X-API-Key", requestKey)
 			var betas []string
+			if profileOAuth {
+				betas = append(betas, "interleaved-thinking-2025-05-14", "fine-grained-tool-streaming-2025-05-14")
+			}
 			if bindsThinkingPrefix(req.Model.ID) {
 				betas = append(betas, thinkingBindingBeta)
 			}
@@ -142,6 +162,29 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	}
 
 	policy := retry.DefaultPolicy
+	policy.NoNetworkRetry = !oauthMode && req.Options.AnthropicWireProfile == "oauth"
+	policy.StartAttempt = req.Options.ProviderRetryAttempt
+	if req.Options.OnProviderRetry != nil {
+		policy.Wait = func(ctx context.Context, attempt, status int, delay time.Duration) error {
+			observed := time.Now().UTC()
+			return req.Options.OnProviderRetry(ctx, core.ProviderWait{Kind: "transport_retry", ObservedAt: observed,
+				NextAttemptAt: observed.Add(delay), Attempt: attempt, Status: status})
+		}
+	}
+	var weekly *core.ProviderWait
+	policy.Retryable = func(resp *http.Response, body []byte) bool {
+		if scope := planQuotaIdentity(resp.Header, resp.StatusCode, oauthMode, fastMode, resp.Request, body); scope != "" {
+			w := planQuotaTiming(resp.Header, scope, time.Now().UTC(), retry.Backoff(0))
+			weekly = &w
+			return false
+		}
+		if !oauthMode && req.Options.AnthropicWireProfile == "oauth" {
+			// Spend/credit denials are terminal. A lost network response is
+			// not proof of rejection and must not be retried as a paid probe.
+			return resp.StatusCode == 429 && !strings.Contains(string(body), "enforced_spend_limit_reached") && !strings.Contains(strings.ToLower(string(body)), "credit balance")
+		}
+		return !fastMode || resp.StatusCode != http.StatusTooManyRequests || !isFastModeUnavailable(body)
+	}
 	if fastMode {
 		// A fast-mode request rejected for want of usage credits will be
 		// rejected again a second later: retrying it five times with backoff
@@ -159,6 +202,13 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	// Non-retryable error status (400, 401, etc.) — returned as-is by retry.Do.
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close() //nolint:errcheck
+		if weekly != nil {
+			window := "weekly"
+			if weekly.Scope == "five_hour" {
+				window = "five_hour"
+			}
+			return nil, &core.QuotaExceededError{Provider: "anthropic", Window: window, Wait: weekly}
+		}
 		errBody, errText := retry.ErrorBody(resp.Body)
 		// Fast mode is a paid upgrade, and an account without usage credits is
 		// refused it while its ordinary quota still works. Falling back keeps
@@ -202,7 +252,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 			ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl, Provider: "anthropic"}
 		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
-		a.consumeStream(ctx, body, ch, tools, oauthMode)
+		a.consumeStream(ctx, body, ch, tools, profileOAuth)
 	}()
 
 	return ch, nil
@@ -266,17 +316,18 @@ func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<-
 
 // streamState tracks the evolving message across SSE events.
 type streamState struct {
-	message        core.Message
-	contentIdx     int
-	blockType      string // current block type being built
-	jsonAccum      string // accumulated JSON for tool_use input
-	toolCallID     string
-	toolCallName   string
-	requestTools   []core.ToolSpec // original tool specs for reverse name mapping
-	isOAuth        bool            // whether this request used OAuth (for tool name mapping)
-	textAccum      strings.Builder
-	thinkingAccum  strings.Builder
-	signatureAccum strings.Builder
+	usageStartKnown bool
+	message         core.Message
+	contentIdx      int
+	blockType       string // current block type being built
+	jsonAccum       string // accumulated JSON for tool_use input
+	toolCallID      string
+	toolCallName    string
+	requestTools    []core.ToolSpec // original tool specs for reverse name mapping
+	isOAuth         bool            // whether this request used OAuth (for tool name mapping)
+	textAccum       strings.Builder
+	thinkingAccum   strings.Builder
+	signatureAccum  strings.Builder
 
 	// Partial JSON parsing for streaming tool call arguments.
 	partialParser jsonutil.PartialParser
@@ -377,6 +428,8 @@ func (a *Anthropic) handleMessageStart(data string, state *streamState) *core.As
 		Usage:     usage,
 		Timestamp: time.Now().Unix(),
 	}
+	state.usageStartKnown = usageFieldPresent(data, "message", "input_tokens")
+	state.message.ProviderSource = &core.ProviderSource{InputTransformations: readInputTransformations(data, "message")}
 
 	partial := state.message // copy
 	return &core.AssistantEvent{
@@ -611,6 +664,14 @@ func (a *Anthropic) handleMessageDelta(data string, state *streamState) *core.As
 			Type:  core.ProviderEventError,
 			Error: fmt.Errorf("parse message_delta: %w", err),
 		}
+	}
+	if state.message.ProviderSource != nil {
+		next := *state.message.ProviderSource
+		if transformations := readInputTransformations(data, ""); transformations != nil {
+			next.InputTransformations = transformations
+		}
+		next.UsageComplete = state.usageStartKnown && usageFieldPresent(data, "", "output_tokens")
+		state.message.ProviderSource = &next
 	}
 
 	// Guard against a stray message_delta with no stop_reason wiping a value we

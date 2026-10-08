@@ -4,6 +4,7 @@ import { activityPhase, activityText, backgroundSummarizing, formatElapsed } fro
 import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
 import { LiveSentence } from "./LiveSentence.jsx";
 import { waitsOnYou } from "../../data/owners-model.js";
+import { ProviderWaitInfo } from './ProviderWaitInfo.jsx';
 import "./LiveBar.css";
 
 // LiveBar — ONE bar of live work above the composer. Markup and CSS are the
@@ -70,7 +71,7 @@ export function foregroundLine(session, nowMs) {
   const text = session.liveLabel || activityText(session);
   if (!text) return null;
 
-  const waiting = phase === "waiting";
+  const waiting = phase === "waiting" || phase === 'provider_wait' || phase === 'awaiting_provider';
   // Elapsed only for the running phases; waiting parks the run, so no
   // elapsed-as-work counter (mirrors the app's timerless "Waiting for you").
   const runStartedAtMs = session.runStartedAtMs || 0;
@@ -122,7 +123,7 @@ export function panelHasOverflow({ scrollHeight, clientHeight }) {
 export function canStopForeground(session, sentence) {
   if (sentence?.kind === "summary") return true;
   return sentence?.kind === "foreground"
-    && (!sentence.waiting || session?.state === "permission");
+    && (!sentence.waiting || sentence.phase === 'provider_wait' || sentence.phase === 'awaiting_provider' || session?.state === "permission");
 }
 
 export function LiveBar({
@@ -293,6 +294,7 @@ export function LiveBar({
         )}
       </div>
 
+      <ProviderWaitInfo execution={session?.providerExecution} />
       {secondary && (
         <div class="zl-live-sub" role="status" aria-live="polite">
           <span class="zl-live-dot is-summary" aria-hidden="true" />

@@ -85,6 +85,9 @@ type Store struct {
 	pending map[string]pendingRotation
 
 	refreshMu sync.Mutex
+	// A failed disable/remove cannot authorize further backup dispatches in
+	// this process. Cleared only by an acknowledged explicit backup mutation.
+	backupBlocked bool
 
 	// refresh performs the network token refresh. It defaults to the pinned
 	// production endpoints; same-package tests point it at httptest servers.
@@ -284,6 +287,9 @@ func (s *Store) transact(provider, op string, fn func(disk map[string]Credential
 		}
 		return nil
 	})
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, core.ErrProviderReconfigured) {
+		return err
+	}
 	if _, ok := core.AsProviderCredentialError(err); err != nil && !ok {
 		return storeUnavailable(provider, op)
 	}

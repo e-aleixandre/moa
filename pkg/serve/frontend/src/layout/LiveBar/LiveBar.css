@@ -27,6 +27,7 @@
    well), and the production phone's own host (the bar sits above the dock, not
    inside a `.zl-phone` frame). */
 
+.provider-wait-info { padding: 0 12px 8px; font-size: 12px; line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; }
 /* ── Live zone ─────────────────────────────────────────────────────────────
    One row, in the dock's margins, between the transcript and the composer.
    It is a flex sibling (flex: none): present, it pushes the transcript up;

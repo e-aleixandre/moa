@@ -9,6 +9,7 @@ import {
   PROVIDER_ROWS, deadlineLabel, flowCopy, kindLabel, replaceNotice, rowActions, rowReading,
 } from "./providers-model.js";
 import { providerHue } from "./settings-rows.js";
+import { AnthropicBackup } from "./AnthropicBackup.jsx";
 import "./ProvidersPage.css";
 
 // ProvidersPage — Settings → Providers. One row per provider, its state and
@@ -34,6 +35,7 @@ export function ProvidersPage({ focusProvider = "", returnSessionId = "", onRetu
     return listProviders(api)
       .then((body) => {
         setList(body);
+		setReadOnly(body.can_admin === false);
         setFailed(false);
         applyProviderStatus(body);
       })
@@ -214,6 +216,7 @@ export function ProviderRow({ def, row, canAdmin, loading, focused, returnSessio
       {state.step === "paste" && <PasteStep def={def} state={state} ctl={ctl} inputRef={inputRef} />}
       {state.step === "device" && <DeviceStep state={state} ctl={ctl} />}
       {state.step === "key" && <KeyStep def={def} row={row} state={state} ctl={ctl} inputRef={inputRef} />}
+      {idle && canAdmin && row?.actions?.includes("backup") && row.backup && <AnthropicBackup backup={row.backup} onChanged={onChanged} />}
     </div>
   );
 }

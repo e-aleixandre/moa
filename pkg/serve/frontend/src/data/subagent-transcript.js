@@ -13,6 +13,7 @@
 // and splices it UNDER whatever the socket has delivered so far.
 
 import { api } from './api.js';
+import { newerProviderExecution } from './provider-wait.js';
 import { normalizeConversationProjection } from './ws-handlers.js';
 import { store, updateSession } from './store.js';
 
@@ -176,6 +177,7 @@ async function fetchTranscriptItems(id, jobId) {
     if (!summary) {
       summary = {
         status: response.status,
+        providerExecution: response.provider_execution,
         finishedAtMs: response.finished_at ? Date.parse(response.finished_at) : null,
       };
     }
@@ -214,7 +216,7 @@ export async function hydrateSubagentTranscript(id, jobId, isActive = () => true
   if (!now) return false;
   const applied = !!snapshot && isActive();
   const terminal = applied && (
-    snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled'
+    snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled' || snapshot.status === 'interrupted'
   );
   const merged = applied
     ? mergeSubagentTranscript(
@@ -237,6 +239,7 @@ export async function hydrateSubagentTranscript(id, jobId, isActive = () => true
           ? {
             messages: merged,
             status: snapshot.status || now.status,
+            providerExecution: terminal ? null : newerProviderExecution(now.providerExecution, snapshot.providerExecution),
             finishedAtMs: Number.isFinite(snapshot.finishedAtMs) ? snapshot.finishedAtMs : now.finishedAtMs,
             streamingText: terminal ? null : now.streamingText,
             thinkingText: terminal ? null : now.thinkingText,

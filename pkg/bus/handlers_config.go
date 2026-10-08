@@ -61,8 +61,19 @@ func registerConfigHandlers(sctx *SessionContext) {
 		// One change, not three: a running agent picks it up at its next
 		// request, which must not see the new model with the old model's
 		// thinking level or threshold.
-		if err := sctx.Agent.Reconfigure(newProvider, newModel, thinking, compactAt); err != nil {
+		var application string
+		if a, ok := sctx.Agent.(interface {
+			ReconfigureWithApplication(core.Provider, core.Model, string, int) (string, error)
+		}); ok {
+			application, err = a.ReconfigureWithApplication(newProvider, newModel, thinking, compactAt)
+		} else {
+			err = sctx.Agent.Reconfigure(newProvider, newModel, thinking, compactAt)
+		}
+		if err != nil {
 			return err
+		}
+		if cmd.Application != nil {
+			*cmd.Application = application
 		}
 		modelName := newModel.Name
 		if modelName == "" {
@@ -100,8 +111,17 @@ func registerConfigHandlers(sctx *SessionContext) {
 		if err != nil {
 			return err
 		}
-		if err := sctx.Agent.SetThinkingLevel(effective); err != nil {
+		var application string
+		if a, ok := sctx.Agent.(interface{ SetThinkingWithApplication(string) (string, error) }); ok {
+			application, err = a.SetThinkingWithApplication(effective)
+		} else {
+			err = sctx.Agent.SetThinkingLevel(effective)
+		}
+		if err != nil {
 			return err
+		}
+		if cmd.Application != nil {
+			*cmd.Application = application
 		}
 		sctx.Bus.Publish(ConfigChanged{
 			SessionID: sctx.SessionID,

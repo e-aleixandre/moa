@@ -4,7 +4,7 @@ bin/
 *.test
 *.out
 .DS_Store
-moa
+/moa
 plan.md
 MOA_SERVE_PLAN.md
 pkg/serve/frontend/node_modules/

@@ -8,6 +8,7 @@ import {
   handleWsStateChange, handleWsPermissionRequest,
   handleWsPermissionResolved, handleWsAskResolved,
   handleWsConfigChange,
+	 handleWsProviderExecution,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
   handleWsSubagentStart, handleWsSubagentEvent, handleWsSubagentEnd, handleWsSubagentUsage, handleWsSubagentTitle,
   handleWsBashJobStart, handleWsBashJobOutput, handleWsBashJobEnd, handleWsBashComplete,
@@ -508,6 +509,9 @@ function openWs(sessionId) {
 
 function routeEvent(sessionId, evt) {
   switch (evt.type) {
+	case 'provider_execution':
+	  handleWsProviderExecution(sessionId, evt.data);
+	  break;
     case 'text_delta':
       handleWsTextDelta(sessionId, evt.data.delta);
       break;
@@ -518,7 +522,7 @@ function routeEvent(sessionId, evt) {
       handleWsMessageStart(sessionId);
       break;
     case 'message_end':
-      handleWsMessageEnd(sessionId, evt.data.text, evt.data.msg_id, evt.data.timestamp);
+      handleWsMessageEnd(sessionId, evt.data.text, evt.data.msg_id, evt.data.timestamp, evt.data.provider_source);
       break;
     case 'run_tokens':
       handleWsRunTokens(sessionId, evt.data);

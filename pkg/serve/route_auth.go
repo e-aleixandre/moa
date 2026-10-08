@@ -6,8 +6,8 @@ import (
 )
 
 // routeAccess is the Serve authorization policy for an HTTP route. Token
-// owners and paired devices share the generic Serve API. Pairing administration
-// remains owner-only so an already paired device cannot extend its authority.
+// owners and active paired devices are the same single user's administrative
+// identities. Authentication still enforces device expiry and revocation.
 type routeAccess uint8
 
 const (
@@ -29,7 +29,7 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 
 		switch access {
 		case routeOwnerAdmin:
-			if !authenticated || (identity.Kind != "token" && identity.Kind != "network") {
+			if !authenticated || (identity.Kind != "token" && identity.Kind != "network" && identity.Kind != "device") {
 				http.Error(w, "this route requires owner authentication", http.StatusForbidden)
 				return
 			}
@@ -58,7 +58,7 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// serveRouteAccess reserves pairing and device administration to the owner.
+// serveRouteAccess reserves administration to authenticated user identities.
 // Every other generic Serve route — including the Live Preview target, a
 // per-device browser setting — is available to an authenticated paired
 // device.
@@ -82,8 +82,7 @@ func serveRouteAccess(r *http.Request) routeAccess {
 		return routeOwnerAdmin
 	case isProvidersPath(r.URL.Path):
 		// Classified by path, whatever the method, so an unknown path or
-		// method never falls through to the device-accessible default. Only
-		// the sanitized status is readable by a paired device.
+		// method never falls through to the generic default.
 		if r.Method == http.MethodGet && r.URL.Path == providersPath+"/status" {
 			return routeOwnerSurface
 		}

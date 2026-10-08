@@ -104,6 +104,35 @@ func (s *Store) PeekSnapshot(provider string) (CredentialSnapshot, error) {
 	return storeSnapshot(provider, cred), nil
 }
 
+// AdmitSnapshot checks a prepared selection under the Store lock before the
+// caller's short dispatch gate. Refresh is prepared outside this section.
+func (s *Store) AdmitSnapshot(ctx context.Context, expected CredentialSnapshot, admit func(CredentialSnapshot) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if env, set, err := envSnapshot(expected.Provider); set {
+		if err != nil {
+			return err
+		}
+		if expected.Source != env.Source || expected.Kind != env.Kind || expected.Token != env.Token {
+			return credentialsChanged(expected.Provider, "dispatch", expected.Generation)
+		}
+		return admit(env)
+	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	return s.transact(expected.Provider, "dispatch", func(disk map[string]Credential) (bool, *pendingRotation, error) {
+		if err := ctx.Err(); err != nil {
+			return false, nil, err
+		}
+		cur, ok := disk[expected.Provider]
+		if !ok || expected.Source != core.CredentialSourceStore || cur.Type != expected.Kind || cur.Generation != expected.Generation || cur.AccountID != expected.AccountID || s.hasPending(expected.Provider) || (cur.Type == "oauth" && credentialExpired(cur)) || (cur.Type == "api_key" && cur.Key != expected.Token) {
+			return false, nil, credentialsChanged(expected.Provider, "dispatch", expected.Generation)
+		}
+		return false, nil, admit(storeSnapshot(expected.Provider, cur))
+	})
+}
+
 // RefreshOAuthIfGeneration handles a consumer rejecting snap's token. If the
 // current selection is no longer snap's (source, generation, account), it
 // returns credentials_changed without any network call: the request must be
