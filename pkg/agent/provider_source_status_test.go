@@ -21,7 +21,7 @@ func TestAdmissionKeepsTheLastDispatchSource(t *testing.T) {
 	rev := a.configRevision
 	a.mu.Unlock()
 	ctx := context.Background()
-	if err := a.admitProviderSource(ctx, rev, model, false, &core.ProviderSource{Kind: "api_backup"}); err != nil {
+	if err := a.admitProviderSource(ctx, rev, model, false, &core.ProviderSource{Kind: "api_backup", Provider: model.Provider, Model: model.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.admitProvider(ctx, rev, model, false); err != nil {
@@ -35,5 +35,17 @@ func TestAdmissionKeepsTheLastDispatchSource(t *testing.T) {
 	}
 	if got := a.ProviderExecution(); got.Source == nil || got.Source.Kind != "oauth" {
 		t.Fatalf("a plan dispatch did not replace the source: %+v", got)
+	}
+	// Another model may go through a transport that reports no dispatch: the
+	// kept source must not outlive the model that produced it.
+	if err := a.admitProviderSource(ctx, rev, model, false, &core.ProviderSource{Kind: "api_backup", Provider: model.Provider, Model: model.ID}); err != nil {
+		t.Fatal(err)
+	}
+	other := core.Model{ID: "gpt-6.1-sol", Provider: "openai"}
+	if err := a.admitProvider(ctx, rev, other, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.ProviderExecution(); got.Source != nil {
+		t.Fatalf("source survived a change of model: %+v", got.Source)
 	}
 }

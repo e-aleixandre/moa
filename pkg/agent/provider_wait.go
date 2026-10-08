@@ -83,8 +83,9 @@ func (a *Agent) admitProviderSource(ctx context.Context, revision uint64, model 
 	a.providerExecution.Wait = nil
 	a.providerExecution.SaveError = ""
 	// Admission before dispatch keeps the last source, so the status line does
-	// not blink off between requests that keep using the API key.
-	if source != nil {
+	// not blink off between requests that keep using the API key. Only for the
+	// same model: another transport may never report a dispatch of its own.
+	if prev := a.providerExecution.Source; source != nil || (prev != nil && (prev.Provider != model.Provider || prev.Model != model.ID)) {
 		a.providerExecution.Source = source
 	}
 	state := a.providerExecution
