@@ -40,6 +40,7 @@ func (s *Session) RuntimeConfig() bus.RuntimeConfig {
 		Gate:              s.Gate,
 		PathPolicy:        s.PathPolicy,
 		AskBridge:         s.AskBridge,
+		SecretBroker:      s.SecretBroker,
 		BaseSystemPrompt:  base,
 		CWD:               s.CWD,
 		AutoVerify:        core.IsAutoVerifyEnabled(s.MoaCfg),

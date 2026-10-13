@@ -76,8 +76,12 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 			if !allowed() {
 				return false
 			}
-			if kind == push.KindAsk {
+			switch kind {
+			case push.KindAsk:
 				return approvals.AskPending(id)
+			case push.KindSecret:
+				broker := sess.runtime.Context().SecretBroker
+				return broker != nil && broker.IsPending(id)
 			}
 			return approvals.PermissionPending(id)
 		}
@@ -111,8 +115,12 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 				request(push.KindAsk, e.ID)
 			case bus.PermissionRequested:
 				request(push.KindPermission, e.ID)
+			case bus.SecretRequested:
+				request(push.KindSecret, e.Request.ID)
 			case bus.AskUserResolved:
 				pol.Resolved(push.KindAsk, sess.ID, e.ID)
+			case bus.SecretResolved:
+				pol.Resolved(push.KindSecret, sess.ID, e.ID)
 			case bus.PermissionResolved:
 				pol.Resolved(push.KindPermission, sess.ID, e.ID)
 			case bus.RunStarted:

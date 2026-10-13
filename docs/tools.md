@@ -36,6 +36,8 @@ Conditionally registered:
 |------|-----------|
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | The web UI is active (not headless) |
+| `run_with_secret` | The web UI is active. Runs a command in a terminal and types the password the owner enters on a card at each password prompt. The owner sees the exact command first; the value never enters the chat, the transcript or the model, and is redacted from the output. Use `ssh -tt host …` for remote commands |
+| `browser_fill_secret` | The web UI is active and a Playwright MCP server exposes `browser_type` and `browser_evaluate`. Types what the owner enters on a card into fields of the open page, after showing its real origin. Only the fill response is redacted: a later snapshot of the same page can show the field's value |
 
 In a `moa serve` session the agent also gets `send_file`, which publishes a file
 to the conversation's [Artifacts](./serve.md#files-sent-by-the-agent) as well

@@ -143,6 +143,8 @@
 import {
   toolInputLine,
   toolPath,
+  secretToolLabel,
+  secretToolOrigin,
   toolPreview,
   bookWrites,
   shortModel,
@@ -1042,9 +1044,15 @@ function toLedgerRow(msg) {
       if (out) row.out = out;
     }
   }
-  if (name.toLowerCase() === 'bash') {
+  if (name.toLowerCase() === 'bash' || name.toLowerCase() === 'run_with_secret') {
     const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
     if (args && typeof args.command === 'string' && args.command) row.command = args.command;
+  }
+  const secretLabel = secretToolLabel(name);
+  if (secretLabel) {
+    row.toolLabel = secretLabel;
+    const origin = secretToolOrigin(msg.result);
+    if (origin) row.arg = { text: origin };
   }
   // A book write/append is an edit of a file that happens to live in the book,
   // so its detail is fused like an edit's (content panel, insertion diff)

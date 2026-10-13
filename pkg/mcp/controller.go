@@ -31,6 +31,7 @@ type Controller struct {
 	// runtime can rebuild the base system prompt from the registry's specs. Nil
 	// is allowed (e.g. tests, or a caller that rebuilds elsewhere).
 	refreshPrompt func()
+	afterSync     func()
 
 	// op serializes whole reconcile operations: a reconcile tears down/starts
 	// processes and rewrites the registry, so two concurrent ones would race
@@ -51,6 +52,10 @@ type ControllerConfig struct {
 	Policy   core.MCPDisablePolicy
 	// RefreshPrompt rebuilds the base system prompt from the registry. Optional.
 	RefreshPrompt func()
+	// AfterSync runs after a server's tools were re-registered, before the
+	// prompt refresh decision, so tools derived from MCP tools follow them.
+	// Optional.
+	AfterSync func()
 }
 
 // NewController builds a Controller over an already-started manager and the
@@ -61,6 +66,7 @@ func NewController(cfg ControllerConfig) *Controller {
 		mgr:           cfg.Manager,
 		reg:           cfg.Registry,
 		refreshPrompt: cfg.RefreshPrompt,
+		afterSync:     cfg.AfterSync,
 		policy:        cfg.Policy,
 		serverTools:   map[string]map[string]struct{}{},
 	}
@@ -386,6 +392,9 @@ func (c *Controller) resyncServer(name string) {
 		c.serverTools[name] = next
 	}
 	c.mu.Unlock()
+	if c.afterSync != nil {
+		c.afterSync()
+	}
 }
 
 // refresh invokes the prompt-refresh hook if set. Caller holds c.op.

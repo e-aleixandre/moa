@@ -357,6 +357,10 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.AskUserResolved:
 		return Event{Type: "ask_resolved", Data: PromptResolvedData{ID: e.ID}}, true
+	case bus.SecretRequested:
+		return Event{Type: "secret_request", Data: e.Request}, true
+	case bus.SecretResolved:
+		return Event{Type: "secret_resolved", Data: PromptResolvedData{ID: e.ID}}, true
 	case bus.SubagentCountChanged:
 		return Event{Type: "subagent_count", Data: SubagentCountData{Count: e.Count}}, true
 	case bus.SubagentCompleted:
@@ -885,6 +889,9 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 
 	data.PendingPermission, data.PendingAsk = pendingAttentionData(pending)
+	if broker := sess.runtime.Context().SecretBroker; broker != nil {
+		data.PendingSecretRequests = broker.Pending()
+	}
 	if goalInfo.Active {
 		data.GoalActive = true
 		data.GoalObjective = goalInfo.Objective

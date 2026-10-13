@@ -19,6 +19,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
 	"github.com/e-aleixandre/moa/pkg/tasks"
@@ -304,23 +305,24 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	}
 
 	bs, err := bootstrap.BuildSession(bootstrap.SessionConfig{
-		CWD:               cwd,
-		Model:             model,
-		Provider:          prov,
-		ProviderFactory:   m.providerFactory,
-		CompactSummarizer: m.compactSummarizer,
-		MoaCfg:            &moaCfg,
-		SessionID:         id,
-		Tasks:             m.tasks,
-		MCPDisableSources: mcpSources,
-		ExtraMCPServers:   extraMCPServers,
-		Ctx:               sessionCtx,
-		EnableAskUser:     true,
-		OwnerSession:      opts != nil && opts.ownerSession,
-		CreatorTZ:         creatorTZ,
-		Fast:              initialFast,
-		BeforeWrite:       cpStore.Capture,
-		AttachmentScope:   attachScope,
+		CWD:                 cwd,
+		Model:               model,
+		Provider:            prov,
+		ProviderFactory:     m.providerFactory,
+		CompactSummarizer:   m.compactSummarizer,
+		MoaCfg:              &moaCfg,
+		SessionID:           id,
+		Tasks:               m.tasks,
+		MCPDisableSources:   mcpSources,
+		ExtraMCPServers:     extraMCPServers,
+		Ctx:                 sessionCtx,
+		EnableAskUser:       true,
+		EnableSecretActions: true,
+		OwnerSession:        opts != nil && opts.ownerSession,
+		CreatorTZ:           creatorTZ,
+		Fast:                initialFast,
+		BeforeWrite:         cpStore.Capture,
+		AttachmentScope:     attachScope,
 		OnAsyncJobChange: func(count int) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentCountChanged{SessionID: s.ID, Count: count})
@@ -1957,14 +1959,17 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		// Rebuild the controller over the new manager (the old one pointed at the
 		// now-closed manager) and rewire its prompt refresh.
 		if newMgr != nil {
+			reg, broker := s.infra.toolReg, s.runtime.Context().SecretBroker
 			s.infra.mcpController = mcp.NewController(mcp.ControllerConfig{
-				Manager:  newMgr,
-				Registry: s.infra.toolReg,
-				Policy:   reloadPolicy,
+				Manager:   newMgr,
+				Registry:  reg,
+				Policy:    reloadPolicy,
+				AfterSync: func() { secretaction.SyncBrowserFillTool(reg, broker) },
 			})
 		} else {
 			s.infra.mcpController = nil
 		}
+		secretaction.SyncBrowserFillTool(s.infra.toolReg, s.runtime.Context().SecretBroker)
 		s.infra.UntrustedMCP = false
 		s.mu.Unlock()
 

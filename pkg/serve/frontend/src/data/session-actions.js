@@ -18,6 +18,7 @@ import { deviceZone } from './schedule-model.js';
 import { normalizeErrorDetail, sameErrorDetail } from './provider-error.js';
 import { claimProviderToast, loadProviderStatus } from './providers.js';
 import { newerProviderExecution } from './provider-wait.js';
+import { withoutSecret } from './secret-action.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -175,6 +176,7 @@ function normalizeSessionInfo(info, existing, visible) {
     permissionMode: wsOwns ? existing.permissionMode : (info.permission_mode || (existing ? existing.permissionMode : 'yolo')),
     pendingPerm: existing ? existing.pendingPerm : null,
     pendingAsk: existing ? existing.pendingAsk : null,
+    pendingSecrets: existing ? existing.pendingSecrets : null,
     // A resolution leaves a client-only transcript-tail notice. The roster
     // does not carry this display state, so polling must not
     // erase it before the user can read it.
@@ -1027,6 +1029,15 @@ export async function addPermissionRule(sessionId, permId, rule) {
     action: 'add_rule',
     rule,
   });
+}
+
+// resolveSecretAction answers a secret request: `body` is the exact contract
+// body ({action:"allow",values} or {action:"deny"}). The card leaves the store
+// on success; on failure the request stays pending (a 400 keeps it too).
+export async function resolveSecretAction(sessionId, reqId, body) {
+  await api('POST', `/api/sessions/${sessionId}/secret-requests/${encodeURIComponent(reqId)}`, body);
+  const pending = store.get().sessions[sessionId]?.pendingSecrets;
+  if (pending) updateSession(sessionId, { pendingSecrets: withoutSecret(pending, reqId) });
 }
 
 export async function resolveAskUser(sessionId, askId, answers) {

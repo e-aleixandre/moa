@@ -43,6 +43,14 @@ var readOnly = map[string]bool{
 	"history": true, // reads only this session's own transcript
 }
 
+// selfApproving tools always show the user a card for the exact action and
+// cannot run without the user's answer to it, in every mode: a permission
+// prompt in front of that card would ask the same question twice. Deny globs
+// still block them.
+var selfApproving = map[string]bool{
+	"run_with_secret": true, "browser_fill_secret": true,
+}
+
 // PopApprovedFeedback removes and returns a permission feedback note (if any)
 // injected by askUser on approved decisions.
 func PopApprovedFeedback(args map[string]any) string {
@@ -202,7 +210,7 @@ func (g *Gate) Check(ctx context.Context, name string, args map[string]any) *cor
 		return g.askUser(ctx, name, args)
 	}
 
-	if readOnly[name] {
+	if readOnly[name] || selfApproving[name] {
 		return nil
 	}
 

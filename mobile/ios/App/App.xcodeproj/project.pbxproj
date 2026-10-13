@@ -33,6 +33,11 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		C00000000000000000000001 /* SavedSecretsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* SavedSecretsModel.swift */; };
+		C00000000000000000000002 /* SavedSecretsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000002 /* SavedSecretsStore.swift */; };
+		C00000000000000000000003 /* SavedSecretsBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000003 /* SavedSecretsBridge.swift */; };
+		C00000000000000000000004 /* SavedSecretsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* SavedSecretsModel.swift */; };
+		C00000000000000000000005 /* SavedSecretsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000004 /* SavedSecretsModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -102,6 +107,10 @@
 		AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
+		C10000000000000000000001 /* SavedSecretsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsModel.swift; sourceTree = "<group>"; };
+		C10000000000000000000002 /* SavedSecretsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsStore.swift; sourceTree = "<group>"; };
+		C10000000000000000000003 /* SavedSecretsBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsBridge.swift; sourceTree = "<group>"; };
+		C10000000000000000000004 /* SavedSecretsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -179,6 +188,9 @@
 				A10000000000000000000003 /* MoaBridgeViewController.swift */,
 				A10000000000000000000009 /* DeviceAuthBridge.swift */,
 				A1000000000000000000000A /* DeviceCredentialStore.swift */,
+				C10000000000000000000001 /* SavedSecretsModel.swift */,
+				C10000000000000000000002 /* SavedSecretsStore.swift */,
+				C10000000000000000000003 /* SavedSecretsBridge.swift */,
 				B10000000000000000000002 /* NativePushRegistration.swift */,
 				B10000000000000000000003 /* NativePushBridge.swift */,
 				B20000000000000000000001 /* Localizable.strings */,
@@ -228,6 +240,7 @@
 			isa = PBXGroup;
 			children = (
 				B1000000000000000000000A /* PushEnvelopeVectorsTests.swift */,
+				C10000000000000000000004 /* SavedSecretsModelTests.swift */,
 			);
 			path = PushEnvelopeTests;
 			sourceTree = "<group>";
@@ -454,6 +467,9 @@
 				A00000000000000000000003 /* MoaBridgeViewController.swift in Sources */,
 				A00000000000000000000009 /* DeviceAuthBridge.swift in Sources */,
 				A0000000000000000000000A /* DeviceCredentialStore.swift in Sources */,
+				C00000000000000000000001 /* SavedSecretsModel.swift in Sources */,
+				C00000000000000000000002 /* SavedSecretsStore.swift in Sources */,
+				C00000000000000000000003 /* SavedSecretsBridge.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				B00000000000000000000001 /* PushEnvelope.swift in Sources */,
@@ -477,6 +493,8 @@
 			files = (
 				B00000000000000000000009 /* PushEnvelope.swift in Sources */,
 				B0000000000000000000000A /* PushEnvelopeVectorsTests.swift in Sources */,
+				C00000000000000000000004 /* SavedSecretsModel.swift in Sources */,
+				C00000000000000000000005 /* SavedSecretsModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

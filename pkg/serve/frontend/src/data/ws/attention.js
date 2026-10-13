@@ -4,6 +4,7 @@ import { triggerAttention } from '../notifications.js';
 import { acknowledgeVisibleAttentionThrough } from '../api.js';
 import { store, setState, updateSession, visibleSessionIds } from '../store.js';
 import { finishHistoryHydration } from '../history-hydration.js';
+import { normalizeSecretRequest, withSecret, withoutSecret } from '../secret-action.js';
 
 export function parseAttentionNamespace(namespace) {
   const separator = typeof namespace === 'string' ? namespace.lastIndexOf(':') : -1;
@@ -128,6 +129,34 @@ export function handleWsPermissionResolved(id, data) {
   updateSession(id, {
     pendingPerm: null,
   });
+}
+
+// A secret request is a blocking prompt like a permission, but several can be
+// pending at once (parallel subagents), so they queue oldest first. The values
+// are never on the wire: this only ever stores the metadata.
+export function handleWsSecretRequest(id, data, seq = 0) {
+  const request = normalizeSecretRequest(data);
+  if (!request) return;
+  const prev = store.get().sessions[id]?.pendingSecrets;
+  updateSession(id, {
+    state: 'permission',
+    pendingSecrets: withSecret(prev, request),
+  });
+  markUnseen(id, seq, true);
+  acknowledgeVisibleLiveAttention(id, seq);
+  flashSession(id, 'attention');
+  const state = store.get();
+  if (!visibleSessionIds(state).includes(id)) {
+    const sess = state.sessions[id];
+    if (sess) triggerAttention(sess, 'Needs a password', state.soundEnabled);
+  }
+}
+
+export function handleWsSecretResolved(id, data) {
+  const pending = store.get().sessions[id]?.pendingSecrets;
+  if (!pending || !data?.id) return;
+  const next = withoutSecret(pending, data.id);
+  if (next !== pending) updateSession(id, { pendingSecrets: next });
 }
 
 export function handleWsAskResolved(id, data) {

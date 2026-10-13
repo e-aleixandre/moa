@@ -4,6 +4,7 @@ export { ModelSelector, PickerPopover, PickerSheet, usePickView } from "./ModelS
 export { Segmented } from "./Segmented/Segmented.jsx";
 export { PermissionCard } from "./PermissionCard/PermissionCard.jsx";
 export { PermissionPrompt } from "./PermissionCard/PermissionPrompt.jsx";
+export { SecretActionPrompt } from "./SecretActionCard/SecretActionPrompt.jsx";
 export { PermissionOptions, usePermissionMenu, PERMISSION_MODES } from "./PermissionControl/PermissionControl.jsx";
 export { AskUserCard } from "./AskUserCard/AskUserCard.jsx";
 export { AskUserPrompt } from "./AskUserCard/AskUserPrompt.jsx";

@@ -9,7 +9,7 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
-import { ModelSelector, PermissionPrompt, AskUserPrompt, McpBanner, Sheet, ArtifactsEntry } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, SecretActionPrompt, AskUserPrompt, McpBanner, Sheet, ArtifactsEntry } from "../../components/index.js";
 import { PickerPopover } from "../../components/ModelSelector/ModelSelector.jsx";
 import { usePermissionMenu } from "../../components/PermissionControl/PermissionControl.jsx";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
@@ -296,10 +296,11 @@ export function ConversationScreen() {
               onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
               tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
             />
-            {(session.untrustedMcp || session.pendingPerm) && (
+            {(session.untrustedMcp || session.pendingPerm || session.pendingSecrets?.length > 0) && (
               <div class="conversation-blocking">
                 {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
                 {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
+                {session.pendingSecrets?.length > 0 && <SecretActionPrompt key={session.id} session={session} />}
               </div>
             )}
             {/* The dock: live bar, composer and status line are ONE instrument,

@@ -43,6 +43,8 @@
 	<string>$(MOA_PUSH_RELAY_URL)</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan a moa pairing code.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Use a password you saved on this iPhone.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record a voice message for moa.</string>
 	<key>UIApplicationSceneManifest</key>

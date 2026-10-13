@@ -10,3 +10,6 @@ func setProcGroup(cmd *exec.Cmd) {}
 
 // killProcGroup is a no-op on Windows — see setProcGroup.
 func killProcGroup(cmd *exec.Cmd) {}
+
+// setSessionCancel is a no-op on Windows, where commands cannot run on a PTY.
+func setSessionCancel(cmd *exec.Cmd) {}

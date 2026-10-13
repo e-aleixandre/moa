@@ -29,6 +29,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/moadocs"
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/skill"
 	"github.com/e-aleixandre/moa/pkg/subagent"
@@ -113,6 +114,10 @@ type SessionConfig struct {
 
 	// Feature toggles. All default to true.
 	EnableAskUser bool // Register ask_user tool. Default: true.
+	// EnableSecretActions registers run_with_secret (and browser_fill_secret
+	// when a browser MCP is present). Only for frontends that can answer a
+	// secret request (serve); the CLI cannot, so it stays off.
+	EnableSecretActions bool
 
 	// OwnerSession marks this build as a project owner's own conversation, so
 	// it gets the owner role prompt and the writable half of the book. Every
@@ -188,6 +193,7 @@ type Session struct {
 	TaskStore     *tasks.Scope
 	Goal          *goal.Goal
 	AskBridge     *askuser.Bridge
+	SecretBroker  *secretaction.Broker // nil unless EnableSecretActions
 	Gate          *permission.Gate
 	MCPManager    *mcp.Manager
 	MCPController *mcp.Controller
@@ -510,6 +516,10 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	if len(cfg.ExtraMCPServers) > 0 {
 		moaCfg.MCPServers = core.MergeMCPServers(moaCfg.MCPServers, cfg.ExtraMCPServers)
 	}
+	var secretBroker *secretaction.Broker
+	if cfg.EnableSecretActions && !cfg.Headless {
+		secretBroker = secretaction.NewBroker(cfg.SessionID)
+	}
 	var mcpMgr *mcp.Manager
 	var mcpController *mcp.Controller
 	mcpPolicy := core.NewMCPDisablePolicy(mcpDisableSources)
@@ -529,7 +539,19 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			Manager:  mcpMgr,
 			Registry: toolReg,
 			Policy:   mcpPolicy,
+			AfterSync: func() {
+				secretaction.SyncBrowserFillTool(toolReg, secretBroker)
+			},
 		})
+	}
+	if secretBroker != nil {
+		core.RegisterOrLog(toolReg, tool.NewRunWithSecret(tool.ToolConfig{
+			WorkspaceRoot: cfg.CWD,
+			PathPolicy:    pathPolicy,
+			BashTimeout:   5 * time.Minute,
+			BashState:     bashState,
+		}, secretBroker))
+		secretaction.SyncBrowserFillTool(toolReg, secretBroker)
 	}
 
 	// 8. Skills index. load_skill is registered after subagents so it can launch
@@ -591,6 +613,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		SessionCheckpoint: sessionCheckpoint,
 		TaskStore:         taskStore,
 		AskBridge:         askBridge,
+		SecretBroker:      secretBroker,
 		Gate:              gate,
 		MCPManager:        mcpMgr,
 		MCPController:     mcpController,

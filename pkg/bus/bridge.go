@@ -11,6 +11,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/tasks"
@@ -118,6 +119,11 @@ type SessionContext struct {
 	PathPolicy        *tool.PathPolicy        // may be nil
 	AskBridge         *askuser.Bridge         // may be nil
 	PersistNow        func() error            // synchronous checkpoint-safe save
+
+	// SecretBroker holds the pending run_with_secret/browser_fill_secret
+	// requests; nil when the frontend cannot answer them. Answers reach it
+	// directly (never as a bus command), see secretaction.
+	SecretBroker *secretaction.Broker
 
 	ProviderFactory  func(core.Model) (core.Provider, error)
 	BaseSystemPrompt string

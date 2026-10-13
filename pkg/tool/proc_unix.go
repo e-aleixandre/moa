@@ -29,3 +29,16 @@ func killProcGroup(cmd *exec.Cmd) {
 	}
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
+
+// setSessionCancel makes cancellation signal the process group of a command
+// started on a PTY. pty.Start runs the child with Setsid, which already makes
+// it the leader of a new process group (pgid == pid); Setpgid on top of it
+// would fail with EPERM, so setProcGroup cannot be used there.
+func setSessionCancel(cmd *exec.Cmd) {
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	}
+}

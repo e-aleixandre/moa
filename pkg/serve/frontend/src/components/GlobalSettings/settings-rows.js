@@ -23,6 +23,7 @@ export const SETTINGS_PAGES = {
   "compact-model": "Summarize with",
   "subagent-models": "Subagent models",
   devices: "Devices",
+  "saved-secrets": "Saved passwords",
   providers: "Providers",
 };
 

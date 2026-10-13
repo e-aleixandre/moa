@@ -17,6 +17,7 @@ type Kind string
 const (
 	KindAsk        Kind = "ask"        // ask_user: the agent is waiting for an answer
 	KindPermission Kind = "permission" // a tool waits for approval
+	KindSecret     Kind = "secret"     // a tool waits for a password for one action
 	KindDone       Kind = "done"       // a run the user started finished
 	KindFailed     Kind = "failed"     // a run errored
 	KindDigest     Kind = "digest"     // an owner finished digesting a report
@@ -213,13 +214,22 @@ func (p *Policy) decide(s Signal) decision {
 		}
 	}
 	switch s.Kind {
-	case KindAsk, KindPermission:
+	case KindAsk, KindPermission, KindSecret:
 		// Blocking: urgent. A question being looked at elsewhere waits out the
 		// grace period and goes only if it is still open; if the viewer leaves
 		// sooner it still goes at the original deadline, not earlier.
-		if s.Kind == KindAsk {
+		switch s.Kind {
+		case KindAsk:
 			setTitle("moa necesita tu decisión")
-		} else {
+		case KindSecret:
+			// Generic on purpose: never the command, the host or the field.
+			setTitle("moa")
+			if s.Title != "" {
+				n.Body = s.Title + " needs a password"
+			} else {
+				n.Body = "A session needs a password"
+			}
+		default:
 			setTitle("moa espera tu aprobación")
 		}
 		n.Level = LevelUrgent

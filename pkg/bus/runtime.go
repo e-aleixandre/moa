@@ -14,6 +14,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/permission"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/tasks"
@@ -34,6 +35,7 @@ type RuntimeConfig struct {
 	Gate              *permission.Gate
 	PathPolicy        *tool.PathPolicy
 	AskBridge         *askuser.Bridge
+	SecretBroker      *secretaction.Broker // requests published here; answers bypass the bus
 	ProviderFactory   func(core.Model) (core.Provider, error)
 	BaseSystemPrompt  string
 	Persister         SessionPersister
@@ -125,6 +127,7 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		Goal:              cfg.Goal,
 		PathPolicy:        cfg.PathPolicy,
 		AskBridge:         cfg.AskBridge,
+		SecretBroker:      cfg.SecretBroker,
 		ProviderFactory:   cfg.ProviderFactory,
 		BaseSystemPrompt:  cfg.BaseSystemPrompt,
 		CWD:               cfg.CWD,
@@ -251,6 +254,9 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 	}
 	if cfg.AskBridge != nil {
 		am.StartAskBridge(cfg.Ctx, cfg.AskBridge)
+	}
+	if cfg.SecretBroker != nil {
+		wireSecretBroker(cfg.SecretBroker, b, sm, cfg.SessionID)
 	}
 
 	return rt, nil
@@ -722,4 +728,25 @@ func (sctx *SessionContext) rootIdleForCompaction() bool {
 	}
 	s := sctx.State.CurrentAtomic()
 	return s == StateIdle || s == StateError
+}
+
+// wireSecretBroker surfaces a broker's requests like an ask: the card is
+// published on the bus and the session waits in StatePermission. Only the
+// request metadata travels here; an answer goes from the HTTP handler to the
+// waiting tool through the broker itself.
+func wireSecretBroker(broker *secretaction.Broker, b EventBus, sm *StateMachine, sid string) {
+	broker.SetHooks(
+		func(req secretaction.Request) {
+			_ = sm.Transition(StatePermission)
+			b.Publish(SecretRequested{SessionID: sid, Request: req})
+		},
+		func(id string, answered bool) {
+			// A cancelled request belongs to a run that is ending: moving it
+			// back to running would race the run's own end.
+			if answered && sm.Current() == StatePermission {
+				_ = sm.Transition(StateRunning)
+			}
+			b.Publish(SecretResolved{SessionID: sid, ID: id})
+		},
+	)
 }

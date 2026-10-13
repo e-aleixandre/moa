@@ -89,47 +89,11 @@ func NewBash(cfg ToolConfig) core.Tool {
 				return core.ErrorResult("command is required"), nil
 			}
 
-			// Persisted shell state (nil = stateless, byte-identical to before).
-			// The default cwd becomes the persisted cwd (validated) when present;
-			// an explicit cwd param still overrides it. persistedEnv, when set,
-			// is applied to cmd.Env below.
-			var agentID string
-			var persistedEnv []string
-			defaultCwd := cfg.WorkspaceRoot
-			if cfg.BashState != nil {
-				agentID = core.AgentIDFromContext(ctx)
-				var persistedCwd string
-				persistedCwd, persistedEnv = cfg.BashState.Snapshot(agentID)
-				if persistedCwd != "" {
-					if fi, err := os.Stat(persistedCwd); err == nil && fi.IsDir() {
-						if cfg.WorkspaceRoot == "" {
-							defaultCwd = persistedCwd
-						} else if validated, err := safePath(cfg, persistedCwd); err == nil {
-							defaultCwd = validated
-						}
-					}
-				}
+			cwd, persistedEnv, agentID, err := bashCwdAndEnv(ctx, cfg, params)
+			if err != nil {
+				return core.ErrorResult(err.Error()), nil
 			}
-
-			cwd := getString(params, "cwd", defaultCwd)
-			if cwd == "" {
-				cwd = defaultCwd
-			}
-			if cfg.WorkspaceRoot != "" {
-				validCwd, err := safePath(cfg, cwd)
-				if err != nil {
-					return core.ErrorResult(fmt.Sprintf("invalid cwd: %v", err)), nil
-				}
-				cwd = validCwd
-			}
-
-			timeout := cfg.BashTimeout
-			if timeout == 0 {
-				timeout = 5 * time.Minute // fallback default
-			}
-			if t := getInt(params, "timeout", 0); t > 0 {
-				timeout = secondsToDuration(t)
-			}
+			timeout := bashTimeout(cfg, params)
 
 			if getBool(params, "async", false) {
 				if cfg.BashJobs == nil {
@@ -160,6 +124,55 @@ func NewBash(cfg ToolConfig) core.Tool {
 			return executeBash(ctx, cfg, command, cwd, persistedEnv, agentID, timeout, cfg.BashState != nil, onUpdate)
 		},
 	}
+}
+
+// bashCwdAndEnv resolves the working directory and environment of a shell
+// command from its params and the persisted shell state (nil BashState =
+// stateless). The default cwd becomes the persisted cwd (validated) when
+// present; an explicit cwd param still overrides it. env, when non-nil, is the
+// persisted environment to apply to cmd.Env. It only reads the state.
+func bashCwdAndEnv(ctx context.Context, cfg ToolConfig, params map[string]any) (cwd string, env []string, agentID string, err error) {
+	defaultCwd := cfg.WorkspaceRoot
+	if cfg.BashState != nil {
+		agentID = core.AgentIDFromContext(ctx)
+		var persistedCwd string
+		persistedCwd, env = cfg.BashState.Snapshot(agentID)
+		if persistedCwd != "" {
+			if fi, err := os.Stat(persistedCwd); err == nil && fi.IsDir() {
+				if cfg.WorkspaceRoot == "" {
+					defaultCwd = persistedCwd
+				} else if validated, err := safePath(cfg, persistedCwd); err == nil {
+					defaultCwd = validated
+				}
+			}
+		}
+	}
+
+	cwd = getString(params, "cwd", defaultCwd)
+	if cwd == "" {
+		cwd = defaultCwd
+	}
+	if cfg.WorkspaceRoot != "" {
+		validCwd, err := safePath(cfg, cwd)
+		if err != nil {
+			return "", nil, "", fmt.Errorf("invalid cwd: %v", err)
+		}
+		cwd = validCwd
+	}
+	return cwd, env, agentID, nil
+}
+
+// bashTimeout is the configured default, overridden by a positive `timeout`
+// param in seconds.
+func bashTimeout(cfg ToolConfig, params map[string]any) time.Duration {
+	timeout := cfg.BashTimeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute // fallback default
+	}
+	if t := getInt(params, "timeout", 0); t > 0 {
+		timeout = secondsToDuration(t)
+	}
+	return timeout
 }
 
 // executeBash is shared by synchronous and background invocations. persistState

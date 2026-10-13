@@ -300,6 +300,8 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
         // Push keys and notifications go first and regardless of the
         // credential delete below: unpairing must stop decryption offline.
         let pushSecretRemoved = await MainActor.run { NativePushRegistration.shared.forgetLocal() }
+        // Passwords saved on this iPhone belong to the pairing: unpairing drops all of them.
+        try? SavedSecretsStore().forgetAll()
         let storedOrigin = try? credentialStore.load()?.origin
         let deleteError: Error?
         do {

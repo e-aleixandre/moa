@@ -257,7 +257,7 @@ export function attentionKind(session) {
      lists — this is the same rule stated where the split is made, so a caller
      that hands over a raw roster cannot promote one. */
   if ((session.kind || "") === "owner") return null;
-  if (session.state === 'permission' || session.pendingPerm || session.pendingAsk) return 'permission';
+  if (session.state === 'permission' || session.pendingPerm || session.pendingAsk || session.pendingSecrets?.length) return 'permission';
   if (session.state === 'error') return 'error';
   if (session.unseen && !isSaved(session)) return 'unseen';
   return null;

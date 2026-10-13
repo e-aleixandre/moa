@@ -2,7 +2,7 @@
 export { handleWsProviderExecution } from './ws/session.js';
 
 export { normalizeHistory, appendNormalizedHistoryDelta, normalizeConversationProjection } from './ws/history.js';
-export { attentionNamespaceFromInit, attentionNamespaceTransition, adoptAttentionNamespace, handleWsAskUser, handleWsPermissionRequest, handleWsPermissionResolved, handleWsAskResolved } from './ws/attention.js';
+export { attentionNamespaceFromInit, attentionNamespaceTransition, adoptAttentionNamespace, handleWsAskUser, handleWsPermissionRequest, handleWsPermissionResolved, handleWsAskResolved, handleWsSecretRequest, handleWsSecretResolved } from './ws/attention.js';
 export { handleWsInit } from './ws/init.js';
 export { handleWsMessageStart, handleWsTextDelta, handleWsThinkingDelta, handleWsMessageEnd, handleWsRunTokens, handleWsRunEnd, handleWsUserMessage, handleWsSteer, handleWsSteersCanceled } from './ws/stream.js';
 export { handleWsToolCallStart, handleWsToolCallDelta, handleWsToolStart, handleWsToolUpdate, handleWsToolEnd } from './ws/tools.js';

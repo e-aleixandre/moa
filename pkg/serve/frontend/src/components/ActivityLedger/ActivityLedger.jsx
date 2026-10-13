@@ -76,6 +76,10 @@ const ICONS = {
 
   // ── outward: something that crosses the machine's edge ──────────────────
   bash: <path d="M3 4l4 4-4 4M8.5 12H13" {...STROKE_CAP} />,
+  // A key: the password tools run a command or fill a page with a value the
+  // owner typed. Both tools wear it; the row's label says which.
+  run_with_secret: <><circle cx="5.4" cy="10.6" r="2.7" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M7.4 8.6l5.8-5.8M11.2 4.8l1.7 1.7M9.6 6.4l1.4 1.4" {...STROKE_CAP} /></>,
+  browser_fill_secret: <><circle cx="5.4" cy="10.6" r="2.7" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M7.4 8.6l5.8-5.8M11.2 4.8l1.7 1.7M9.6 6.4l1.4 1.4" {...STROKE_CAP} /></>,
   fetch: <><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M2.5 8h11M8 2.5c1.6 1.8 2.4 3.6 2.4 5.5S9.6 12.2 8 13.5C6.4 12.2 5.6 10 5.6 8S6.4 4.3 8 2.5z" {...STROKE} /></>,
   fetch_content: <><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M2.5 8h11M8 2.5c1.6 1.8 2.4 3.6 2.4 5.5S9.6 12.2 8 13.5C6.4 12.2 5.6 10 5.6 8S6.4 4.3 8 2.5z" {...STROKE} /></>,
   // The globe again, with a lens handle on it: searching the same outside.
@@ -168,7 +172,7 @@ function DoneRow({ row, arrive }) {
       >
         <ToolIcon tool={row.tool} />
         <span class="zl-lg-txt" title={fullLabel(row, text)}>
-          <span class="zl-lg-tool">{row.tool}</span>
+          <span class="zl-lg-tool">{row.toolLabel || row.tool}</span>
           <span class={`zl-lg-arg zl-data${row.argTail ? " is-tail" : ""}`}>{text}</span>
           {dim && <span class="zl-lg-dim"> · {dim}</span>}
         </span>
@@ -281,7 +285,7 @@ function LiveRow({ row, arrive }) {
       >
         <ToolIcon tool={row.tool} />
         <span class="zl-lg-txt" title={fullLabel(row, text)}>
-          <span class="zl-lg-tool">{row.tool}</span>
+          <span class="zl-lg-tool">{row.toolLabel || row.tool}</span>
           <span class={`zl-lg-arg zl-data${row.argTail ? " is-tail" : ""}`}>{text}</span>
           {dim && <span class="zl-lg-dim"> · {dim}</span>}
         </span>
@@ -304,7 +308,7 @@ function LiveRow({ row, arrive }) {
   );
 }
 
-const INVARIANT_TOOLS = new Set(["bash", "ls", "tasks", "grep", "write", "fetch_content", "ask_user"]);
+const INVARIANT_TOOLS = new Set(["Password used", "Signed in", "bash", "ls", "tasks", "grep", "write", "fetch_content", "ask_user"]);
 
 function pluralizeTool(tool, n) {
   if (n === 1 || INVARIANT_TOOLS.has(tool)) return tool;
@@ -315,7 +319,7 @@ function summarizeRows(rows) {
   const order = [];
   const counts = {};
   for (const r of rows) {
-    const k = (r.tool || "tool").toLowerCase();
+    const k = r.toolLabel || (r.tool || "tool").toLowerCase();
     if (!(k in counts)) { counts[k] = 0; order.push(k); }
     counts[k]++;
   }

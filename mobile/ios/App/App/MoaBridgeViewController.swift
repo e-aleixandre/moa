@@ -8,6 +8,7 @@ final class MoaBridgeViewController: CAPBridgeViewController {
     private let shareInboxHandler = ShareInboxMessageHandler()
     private let deviceAuthHandler = DeviceAuthMessageHandler()
     private let nativePushHandler = NativePushMessageHandler()
+    private let savedSecretsHandler = SavedSecretsMessageHandler()
     private var serverRecovery: PairedServerRecoveryController?
 
     override func webView(with frame: CGRect, configuration: WKWebViewConfiguration) -> WKWebView {
@@ -26,9 +27,15 @@ final class MoaBridgeViewController: CAPBridgeViewController {
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: SavedSecretsMessageHandler.javaScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         configuration.userContentController.add(shareInboxHandler, name: ShareInboxMessageHandler.name)
         configuration.userContentController.add(deviceAuthHandler, name: DeviceAuthMessageHandler.name)
         configuration.userContentController.add(nativePushHandler, name: NativePushMessageHandler.name)
+        configuration.userContentController.add(savedSecretsHandler, name: SavedSecretsMessageHandler.name)
         return super.webView(with: frame, configuration: configuration)
     }
 
@@ -37,6 +44,7 @@ final class MoaBridgeViewController: CAPBridgeViewController {
         shareInboxHandler.webView = webView
         deviceAuthHandler.webView = webView
         nativePushHandler.webView = webView
+        savedSecretsHandler.webView = webView
         PushNavigator.shared.webView = webView
         if let webView, let capacitorDelegate = webView.navigationDelegate {
             let recovery = PairedServerRecoveryController(webView: webView, forwardingTo: capacitorDelegate)

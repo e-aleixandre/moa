@@ -58,8 +58,13 @@ export function toolPath(name, args) {
     const p = a.path || '';
     return p.length > 80 ? p.split('/').pop() : p;
   }
-  if (n === 'bash')
+  if (n === 'bash' || n === 'run_with_secret')
     return shortenCmd(a.command || '');
+  // A browser fill has no command: what it did is named by the fields it was
+  // asked to fill. The origin is not in the args; the ledger takes it from the
+  // result when it can (see secretToolOrigin).
+  if (n === 'browser_fill_secret')
+    return Array.isArray(a.fields) ? a.fields.map((f) => (f && f.label) || '').filter(Boolean).join(', ') : '';
   if (n === 'grep' || n === 'find')
     return a.pattern || a.glob || '';
   if (n === 'fetch_content')
@@ -92,6 +97,24 @@ export function toolPath(name, args) {
     }
   }
   return '';
+}
+
+/** The ledger's word for the two password tools. They carry no value, only
+ *  that one was used, so the row says so instead of the raw tool name. */
+export function secretToolLabel(name) {
+  const n = (name || '').toLowerCase();
+  if (n === 'run_with_secret') return 'Password used';
+  if (n === 'browser_fill_secret') return 'Signed in';
+  return '';
+}
+
+/** The origin a browser fill went to, read from the first line of its result
+ *  ("Filled A, B on https://host and pressed Enter."). Empty when the call
+ *  failed or the result has another shape. */
+export function secretToolOrigin(result) {
+  const text = typeof result === 'string' ? result : '';
+  const m = /^Filled .+? on (\S+?)(?: and pressed Enter)?\.(?:\n|$)/.exec(text);
+  return m ? m[1] : '';
 }
 
 /** Extract the complete tool input shown above a finished tool's output. */
@@ -566,7 +589,7 @@ export function sessionDotState(sess) {
 export function sessionDisplayDotState(sess, unseen = sess?.unseen) {
   if (!sess) return 'idle';
   if (sess.state === 'error') return 'error';
-  if (sess.state === 'permission' || sess.pendingPerm || sess.pendingAsk) return 'permission';
+  if (sess.state === 'permission' || sess.pendingPerm || sess.pendingAsk || sess.pendingSecrets?.length) return 'permission';
 
   const state = sessionDotState(sess);
   if (unseen && (state === 'idle' || state === 'running')) return 'unseen';

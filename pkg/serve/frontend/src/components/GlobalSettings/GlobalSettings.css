@@ -732,3 +732,11 @@ button.zl-set-row[disabled] { cursor: default; }
   .zl-set-dev-go, .zl-set-dev-pair { transition: none; }
   .zl-set-dev-ask { animation: none; }
 }
+
+/* ── Passwords saved on this iPhone ───────────────────────────────────────
+   Reuses the devices page's rows; only the destructive tint and the
+   full-width "Forget all" are new. Red is spent on the ACTION. */
+.zl-set-dev-act.is-forget { color: var(--zl-red); }
+.zl-set-dev-pair.is-forget-all { color: var(--zl-red); }
+.zl-set-dev-ask.is-block { margin-top: var(--space-4); width: 100%; }
+.zl-set-dev-ask.is-block > button { flex: 1; min-height: var(--control-touch); }

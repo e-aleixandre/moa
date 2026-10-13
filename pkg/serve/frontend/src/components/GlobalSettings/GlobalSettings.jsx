@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import {
-  Laptop, MonitorSmartphone, QrCode, Smartphone, Tablet,
+  KeyRound, Laptop, MonitorSmartphone, QrCode, Smartphone, Tablet,
 } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { addToast } from "../../data/notifications.js";
@@ -27,6 +27,8 @@ import {
 import {
   SETTINGS_PAGES, STRATEGY_OPTIONS, compactAtValue, providerHue, strategyValue, subagentValue,
 } from "./settings-rows.js";
+import { savedSecretsBridge, listSaved } from "../../data/saved-secrets.js";
+import { savedLine, savedValue, sortSaved, withoutAlias } from "./saved-secrets-model.js";
 import { ProvidersPage } from "./ProvidersPage.jsx";
 import { providersValue } from "./providers-model.js";
 import { useProviderStatus } from "../../data/providers.js";
@@ -798,6 +800,97 @@ function DevicesPage({ state, onClose }) {
   );
 }
 
+// ── Passwords saved on this iPhone ─────────────────────────────────────────
+// Native app only: the list lives in the iPhone's Keychain and is read through
+// window.moaSavedSecrets. On the web the bridge does not exist, so there is no
+// row and no page. Nothing here ever holds a value — the bridge's list carries
+// none.
+
+function useSavedSecrets(active) {
+  const bridge = savedSecretsBridge();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!active || !bridge) return undefined;
+    let live = true;
+    listSaved(bridge)
+      .then((list) => { if (live) { setItems(list); setFailed(false); setLoaded(true); } })
+      .catch(() => { if (live) { setFailed(true); setLoaded(true); } });
+    return () => { live = false; };
+  }, [active]);
+
+  const report = (title) => (error) => {
+    addToast({ title, detail: String(error?.message || error), type: "error" });
+  };
+  const forget = (alias) => bridge.forget({ alias })
+    .then(() => setItems((list) => withoutAlias(list, alias)))
+    .catch(report("Could not forget this password"));
+  const forgetAll = () => bridge.forgetAll()
+    .then(() => setItems([]))
+    .catch(report("Could not forget the saved passwords"));
+
+  return { available: !!bridge, items, loaded, failed, forget, forgetAll };
+}
+
+function SavedSecretsPage({ state }) {
+  const { items, loaded, failed, forget, forgetAll } = state;
+  const [armed, setArmed] = useState(false);
+  const list = sortSaved(items);
+
+  if (loaded && failed) {
+    return (
+      <div class="zl-set-dev-note" role="status">
+        <span class="zl-set-dev-note-mark" aria-hidden="true"><KeyRound size={20} strokeWidth={1.6} /></span>
+        <p class="zl-set-dev-note-t">Could not read the saved passwords</p>
+        <p class="zl-set-dev-note-d">Close Settings and open it again.</p>
+      </div>
+    );
+  }
+  if (loaded && list.length === 0) {
+    return (
+      <div class="zl-set-dev-note">
+        <span class="zl-set-dev-note-mark is-accent" aria-hidden="true"><KeyRound size={20} strokeWidth={1.6} /></span>
+        <p class="zl-set-dev-note-t">No saved passwords</p>
+        <p class="zl-set-dev-note-d">Turn on Save on this iPhone when a password card asks for one.</p>
+      </div>
+    );
+  }
+  return (
+    <>
+      <span class="zl-set-k is-page">Passwords saved on this iPhone</span>
+      <div role="group" aria-label="Passwords saved on this iPhone" aria-busy={!loaded}>
+        {list.map((item) => (
+          <div class="zl-set-dev" key={item.alias}>
+            <span class="zl-set-dev-txt">
+              <span class="zl-set-dev-n">{item.alias}</span>
+              <span class="zl-set-dev-d" title={savedLine(item)}>{savedLine(item)}</span>
+            </span>
+            <button
+              type="button"
+              class="zl-set-dev-act is-forget"
+              onClick={() => forget(item.alias)}
+              aria-label={`Forget ${item.alias}`}
+            >
+              Forget
+            </button>
+          </div>
+        ))}
+      </div>
+      <p class="zl-set-sum">Each use needs Face ID and your Allow on a card. Other devices don't see these.</p>
+      {loaded && (armed ? (
+        <div class="zl-set-dev-ask is-block" role="group" aria-label="Forget all saved passwords?">
+          <button type="button" class="zl-set-dev-cancel" onClick={() => setArmed(false)}>Cancel</button>
+          <button type="button" class="zl-set-dev-go" onClick={() => { setArmed(false); forgetAll(); }}>Forget all</button>
+        </div>
+      ) : (
+        <button type="button" class="zl-set-dev-pair is-forget-all" onClick={() => setArmed(true)}>Forget all</button>
+      ))}
+    </>
+  );
+}
+
 // ── The sheet ──────────────────────────────────────────────────────────────
 
 export function GlobalSettings({
@@ -820,6 +913,7 @@ export function GlobalSettings({
   const compactModel = useCompactModel();
   const subagents = useSubagentModels();
   const devices = useDevices(open);
+  const saved = useSavedSecrets(open);
 
   const [push, setPush] = useState(getPushState());
   useEffect(() => subscribePushState(setPush), []);
@@ -929,6 +1023,7 @@ export function GlobalSettings({
             {page === "compact-model" && <CompactModelPage state={compactModel} onDone={() => setPage("root")} />}
             {page === "subagent-models" && <SubagentModelsPage state={subagents} />}
             {page === "devices" && <DevicesPage state={devices} onClose={onClose} />}
+            {page === "saved-secrets" && <SavedSecretsPage state={saved} />}
             {page === "providers" && (
               <ProvidersPage
                 focusProvider={providerFocus?.provider || ""}
@@ -1017,6 +1112,16 @@ export function GlobalSettings({
                 onOpen={() => setPage("devices")}
                 pageLabel={SETTINGS_PAGES.devices}
               />
+              {saved.available && (
+                <Row
+                  label="Saved passwords"
+                  hint="Kept on this iPhone, behind Face ID."
+                  value={savedValue(saved.items.length, saved.loaded)}
+                  loading={!saved.loaded}
+                  onOpen={() => setPage("saved-secrets")}
+                  pageLabel={SETTINGS_PAGES["saved-secrets"]}
+                />
+              )}
             </div>
 
             <AboutVersion version={version} />

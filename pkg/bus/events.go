@@ -15,6 +15,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
@@ -769,6 +770,22 @@ type AskUserRequested struct {
 
 // AskUserResolved is published when a pending ask-user prompt is answered.
 type AskUserResolved struct {
+	SessionID string
+	ID        string
+}
+
+// SecretRequested is published when a tool waits for the user to hand it a
+// value for one exact action (run_with_secret, browser_fill_secret). It
+// carries what the card shows and never a value: the answer travels from the
+// HTTP handler to the waiting tool through secretaction.Broker, off the bus.
+type SecretRequested struct {
+	SessionID string
+	Request   secretaction.Request
+}
+
+// SecretResolved is published when a pending secret request goes away:
+// answered, denied or cancelled.
+type SecretResolved struct {
 	SessionID string
 	ID        string
 }

@@ -7,6 +7,7 @@ import {
   handleWsToolCallStart, handleWsToolCallDelta,
   handleWsStateChange, handleWsPermissionRequest,
   handleWsPermissionResolved, handleWsAskResolved,
+  handleWsSecretRequest, handleWsSecretResolved,
   handleWsConfigChange,
 	 handleWsProviderExecution,
   handleWsSubagentCount, handleWsSubagentComplete, handleWsRunEnd,
@@ -556,6 +557,12 @@ function routeEvent(sessionId, evt) {
       break;
     case 'ask_resolved':
       handleWsAskResolved(sessionId, evt.data);
+      break;
+    case 'secret_request':
+      handleWsSecretRequest(sessionId, evt.data, evt.seq);
+      break;
+    case 'secret_resolved':
+      handleWsSecretResolved(sessionId, evt.data);
       break;
     case 'config_change':
       handleWsConfigChange(sessionId, evt.data);

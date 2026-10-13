@@ -535,6 +535,9 @@ type headTailBuffer struct {
 	SpillDir        string // directory for spill files (empty = SpillOutputDir())
 	SpillPath       string // path to spill output (empty if unavailable)
 	SpillMaxBytes   int64  // 0 = maxSpillBytes; primarily useful for tests
+	// NoSpill keeps truncated output in memory only (head + tail), for output
+	// that must never touch the disk.
+	NoSpill bool
 }
 
 // Append ingests p and returns how many bytes were accepted into the head
@@ -604,6 +607,9 @@ func (b *headTailBuffer) Write(p []byte) (int, error) {
 
 // initSpillFile creates a temp file and writes the head content to it.
 func (b *headTailBuffer) initSpillFile() {
+	if b.NoSpill {
+		return
+	}
 	dir := b.SpillDir
 	if dir == "" {
 		dir = spillOutputDir

@@ -7,7 +7,7 @@ import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { LiveBar } from "../LiveBar/LiveBar.jsx";
 import {
-  McpBanner, PermissionPrompt, AskUserPrompt, ModelSelector, ArtifactsPaneButton,
+  McpBanner, PermissionPrompt, SecretActionPrompt, AskUserPrompt, ModelSelector, ArtifactsPaneButton,
 } from "../../components/index.js";
 import { PickerPopover } from "../../components/ModelSelector/ModelSelector.jsx";
 import { usePermissionMenu } from "../../components/PermissionControl/PermissionControl.jsx";
@@ -339,10 +339,11 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
   const blocks = projectStream(session);
   const dotState = sessionDisplayDotState(session);
   const thinking = session.thinking === "none" ? "off" : (session.thinking || "off");
-  const blocking = (session.untrustedMcp || session.pendingPerm || session.pendingAsk) ? (
+  const blocking = (session.untrustedMcp || session.pendingPerm || session.pendingAsk || session.pendingSecrets?.length > 0) ? (
     <>
       {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
       {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
+      {session.pendingSecrets?.length > 0 && <SecretActionPrompt key={session.id} session={session} />}
       {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
     </>
   ) : null;

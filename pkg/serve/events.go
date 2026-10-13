@@ -4,6 +4,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 )
 
 // Event is a JSON-serializable event sent to WebSocket clients.
@@ -79,6 +80,10 @@ type InitData struct {
 	// DeltaBase is the validated tree entry requested by since_msg. When set,
 	// Messages is a complete suffix after this entry and clients append it.
 	DeltaBase string `json:"delta_base,omitempty"`
+	// PendingSecretRequests restores open run_with_secret/browser_fill_secret
+	// cards, oldest first. Like the live secret_request event, they carry no
+	// values.
+	PendingSecretRequests []secretaction.Request `json:"pending_secret_requests,omitempty"`
 }
 
 // PromptResolvedData identifies the prompt cleared by a resolution event.

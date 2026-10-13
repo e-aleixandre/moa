@@ -110,6 +110,8 @@ const TOOL_ACTIONS = {
   web_search: 'Searching the web',
   send_file: 'Sending a file',
   subagent: 'Running a subagent',
+  run_with_secret: 'Running a command',
+  browser_fill_secret: 'Signing in',
   bash_wait: 'Waiting on a command',
   bash_status: 'Checking a command',
   subagent_status: 'Checking a subagent',
@@ -134,6 +136,8 @@ const LIVE_VERBS = {
   read: 'Reading',
   ls: 'Reading',
   bash: 'Running',
+  run_with_secret: 'Running',
+  browser_fill_secret: 'Signing in',
   grep: 'Searching',
   find: 'Searching',
   web_search: 'Searching',
@@ -270,7 +274,7 @@ export function activityPhase(session) {
   // session state to 'permission'; ask_user keeps the run 'running' but sets
   // pendingAsk. Either way the agent is waiting on a human, so both map to the
   // same phase for parity with the TUI's "Waiting for you".
-  if (session.state === 'permission' || session.pendingAsk) return 'waiting';
+  if (session.state === 'permission' || session.pendingAsk || session.pendingSecrets?.length) return 'waiting';
   if (session.state !== 'running') return null;
   if (session.providerExecution?.phase === 'provider_wait') return 'provider_wait';
   if (session.providerExecution?.phase === 'awaiting_provider') return 'awaiting_provider';
