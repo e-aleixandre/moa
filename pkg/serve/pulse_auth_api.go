@@ -154,7 +154,12 @@ func handlePulseDeviceSession(store *deviceStore) http.HandlerFunc {
 			MaxAge:   maxAge,
 			HttpOnly: true,
 			Secure:   true,
-			SameSite: http.SameSiteStrictMode,
+			// Lax, not Strict: the native app's first load is a top-level
+			// navigation from capacitor://localhost, which is cross-site and
+			// would not carry a Strict cookie (401 on first load). Lax still
+			// withholds the cookie from cross-site subresources and non-GET
+			// requests.
+			SameSite: http.SameSiteLaxMode,
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}

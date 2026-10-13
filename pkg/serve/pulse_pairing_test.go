@@ -156,7 +156,7 @@ func TestDeviceBrowserSessionAuthenticatesRESTAndWebSocketUntilRevocation(t *tes
 		t.Fatalf("owner device-session exchange = %d, want 403", rec.Code)
 	}
 	cookie := deviceBrowserSession(t, handler, device.Credential)
-	if cookie.Name != deviceSessionCookieName || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" || cookie.Domain != "" || cookie.MaxAge <= 0 {
+	if cookie.Name != deviceSessionCookieName || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" || cookie.Domain != "" || cookie.MaxAge <= 0 {
 		t.Fatalf("device browser cookie is not narrowly scoped: %#v", cookie)
 	}
 	if strings.Contains(cookie.Value, device.Credential) || strings.Contains(cookie.Value, strings.TrimPrefix(device.Credential, device.DeviceID+".")) {
