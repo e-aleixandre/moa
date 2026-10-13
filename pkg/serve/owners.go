@@ -13,6 +13,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
 // Owner defaults. An owner reads reports and keeps a book rather than writing
@@ -35,6 +36,10 @@ var ErrProjectSessionsOpen = errors.New("this project has open sessions")
 var ErrInvalidAvatar = errors.New("invalid owner avatar")
 
 var ErrInvalidOwnerName = errors.New("owner name is required")
+
+// ErrInvalidTaskPermission refuses a can_send_tasks_to list naming the owner
+// itself or an owner that does not exist.
+var ErrInvalidTaskPermission = errors.New("invalid can_send_tasks_to")
 
 // ownerStore resolves the on-disk owner store. It is resolved per call rather
 // than cached on the Manager so the config directory is read the same way
@@ -119,6 +124,9 @@ type CreateOwnerOpts struct {
 type UpdateOwnerOpts struct {
 	Name   *string       `json:"name"`
 	Avatar *owner.Avatar `json:"avatar"`
+	// CanSendTasksTo replaces the owners this one may send tasks to without
+	// asking ([] clears it).
+	CanSendTasksTo *[]string `json:"can_send_tasks_to"`
 }
 
 func validateOwnerAvatar(avatar owner.Avatar) error {
@@ -242,6 +250,13 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 		}
 		own.Avatar = *opts.Avatar
 	}
+	if opts.CanSendTasksTo != nil {
+		ids, err := validTaskRecipients(store, own.ID, *opts.CanSendTasksTo)
+		if err != nil {
+			return OwnerInfo{}, err
+		}
+		own.CanSendTasksTo = ids
+	}
 	if err := store.Save(own); err != nil {
 		return OwnerInfo{}, err
 	}
@@ -264,6 +279,79 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 		}
 	}
 	return m.ownerInfo(own), nil
+}
+
+// validTaskRecipients deduplicates a permission list and checks that every
+// entry is another existing owner.
+func validTaskRecipients(store *owner.Store, self string, ids []string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if id == self {
+			return nil, fmt.Errorf("%w: an owner does not send tasks to itself", ErrInvalidTaskPermission)
+		}
+		if _, found, err := store.FindByID(id); err != nil {
+			return nil, err
+		} else if !found {
+			return nil, fmt.Errorf("%w: no owner %q", ErrInvalidTaskPermission, id)
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// grantTaskSend is "Always allow from → to": it adds to to the sender's
+// owner.json. Serialized with UpdateOwner, which writes the same file.
+func (m *Manager) grantTaskSend(fromID, toID string) error {
+	m.ownerEdit.Lock()
+	defer m.ownerEdit.Unlock()
+	store, err := m.ownerStore()
+	if err != nil {
+		return err
+	}
+	own, found, err := store.FindByID(fromID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: the owner that sent this task no longer exists", tasks.ErrInvalid)
+	}
+	if own.MaySendTasksTo(toID) {
+		return nil
+	}
+	own.CanSendTasksTo = append(own.CanSendTasksTo, toID)
+	return store.Save(own)
+}
+
+// forgetTaskRecipient removes a deleted owner from every permission list, so
+// no list keeps an ID nobody can resolve.
+func (m *Manager) forgetTaskRecipient(store *owner.Store, id string) {
+	m.ownerEdit.Lock()
+	defer m.ownerEdit.Unlock()
+	owners, err := store.List()
+	if err != nil {
+		slog.Warn("owners: cannot clean task permissions", "owner", id, "error", err)
+		return
+	}
+	for _, own := range owners {
+		if !own.MaySendTasksTo(id) {
+			continue
+		}
+		kept := own.CanSendTasksTo[:0:0]
+		for _, to := range own.CanSendTasksTo {
+			if to != id {
+				kept = append(kept, to)
+			}
+		}
+		own.CanSendTasksTo = kept
+		if err := store.Save(own); err != nil {
+			slog.Warn("owners: cannot clean task permissions", "owner", own.ID, "error", err)
+		}
+	}
 }
 
 // titleForName is what SetTitle stores for a given owner name.
@@ -302,6 +390,7 @@ func (m *Manager) DeleteOwner(id string) error {
 		return err
 	}
 	m.invalidateOwnerRefs()
+	m.forgetTaskRecipient(store, own.ID)
 	if own.SessionID == "" {
 		return nil
 	}
@@ -515,7 +604,7 @@ func handleUpdateOwner(mgr *Manager) http.HandlerFunc {
 		case errors.Is(err, owner.ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
 			return
-		case errors.Is(err, ErrInvalidAvatar), errors.Is(err, ErrInvalidOwnerName):
+		case errors.Is(err, ErrInvalidAvatar), errors.Is(err, ErrInvalidOwnerName), errors.Is(err, ErrInvalidTaskPermission):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		case err != nil:

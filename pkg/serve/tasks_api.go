@@ -77,6 +77,9 @@ func (m *Manager) startTasksWatcher(ctx context.Context) {
 	go m.tasks.Watch(ctx, tasksWatchInterval, func(rev int64) {
 		m.taskHub.broadcast(rev)
 		m.publishChecklists()
+		// Agents write notices too (a task sent to another owner, a comment,
+		// a close): the dispatcher learns of them here.
+		m.notices.nudge()
 		// A schedule created or moved by any writer may change the planner's
 		// next wake-up.
 		m.planner.nudge()
@@ -446,6 +449,7 @@ type patchTaskBody struct {
 	ProjectCWD        *string               `json:"project_cwd"`
 	AssigneeSessionID *string               `json:"assignee_session_id"`
 	CompletionNote    *string               `json:"completion_note"`
+	Outcome           *string               `json:"outcome"` // done | cant_do, tasks between owners only
 	Subtasks          *[]tasks.SubtaskInput `json:"subtasks"`
 	WaitsFor          *[]int64              `json:"waits_for"`
 	Notify            *bool                 `json:"notify"`  // "Save and notify"
@@ -466,7 +470,7 @@ func handlePatchTask(m *Manager) http.HandlerFunc {
 		p := tasks.Patch{
 			Title: b.Title, Description: b.Description, Status: b.Status, Place: b.Place,
 			ProjectKey: b.ProjectKey, ProjectCWD: b.ProjectCWD, AssigneeSessionID: b.AssigneeSessionID,
-			CompletionNote: b.CompletionNote, Subtasks: b.Subtasks, WaitsFor: b.WaitsFor,
+			CompletionNote: b.CompletionNote, Outcome: b.Outcome, Subtasks: b.Subtasks, WaitsFor: b.WaitsFor,
 			Notify: b.Notify != nil && *b.Notify, Deliver: b.Deliver,
 		}
 		if b.present() {
@@ -517,6 +521,99 @@ func handlePatchTask(m *Manager) http.HandlerFunc {
 		}
 		m.notices.nudge()
 		m.planner.nudge()
+		writeJSON(w, http.StatusOK, rec)
+	}
+}
+
+// handleTaskComments is a task's thread, oldest first.
+func handleTaskComments(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := taskID(w, r)
+		if !ok {
+			return
+		}
+		cs, err := m.tasks.Comments(r.Context(), id)
+		if err != nil {
+			writeTaskError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"comments": cs})
+	}
+}
+
+// handleAddTaskComment is the user writing in a thread. Every party of the
+// task hears it.
+func handleAddTaskComment(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := taskID(w, r)
+		if !ok {
+			return
+		}
+		var b struct {
+			Body string `json:"body"`
+		}
+		if !decodeStrict(w, r, &b) {
+			return
+		}
+		c, err := m.tasks.HumanComment(r.Context(), id, b.Body)
+		if err != nil {
+			writeTaskError(w, err)
+			return
+		}
+		m.notices.nudge()
+		writeJSON(w, http.StatusCreated, c)
+	}
+}
+
+// handleResolveHandoff answers a request from one owner to send a task to
+// another: send, allow (send, and from now on without asking) or decline.
+// allow writes the sender's owner.json before the task moves, so a failure
+// there leaves the request as it was.
+func handleResolveHandoff(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := taskID(w, r)
+		if !ok {
+			return
+		}
+		var b struct {
+			Action   string `json:"action"`
+			Revision int64  `json:"revision"`
+		}
+		if !decodeStrict(w, r, &b) {
+			return
+		}
+		action := b.Action
+		switch b.Action {
+		case "allow":
+			cur, err := m.tasks.Get(r.Context(), id)
+			if err != nil {
+				writeTaskError(w, err)
+				return
+			}
+			if cur.Revision != b.Revision {
+				writeTaskError(w, &tasks.ConflictError{Current: cur})
+				return
+			}
+			if cur.Handoff == nil || cur.Handoff.State != tasks.HandoffAwaiting {
+				writeTaskError(w, badRequest("this task is not waiting for permission"))
+				return
+			}
+			if err := m.grantTaskSend(cur.Handoff.FromOwnerID, cur.Handoff.ToOwnerID); err != nil {
+				writeTaskError(w, err)
+				return
+			}
+			action = tasks.HandoffActionSend
+		case tasks.HandoffActionSend, tasks.HandoffActionDecline:
+		default:
+			writeTaskError(w, badRequest(`action must be "send", "allow" or "decline"`))
+			return
+		}
+		rec, err := m.tasks.ResolveHandoff(r.Context(), id, b.Revision, action)
+		if err != nil {
+			writeTaskError(w, err)
+			return
+		}
+		m.notices.nudge()
 		writeJSON(w, http.StatusOK, rec)
 	}
 }

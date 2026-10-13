@@ -201,6 +201,9 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/tasks/{id}", handleGetTask(manager))
 	mux.HandleFunc("PATCH /api/tasks/{id}", handlePatchTask(manager))
 	mux.HandleFunc("DELETE /api/tasks/{id}", handleDeleteTask(manager))
+	mux.HandleFunc("GET /api/tasks/{id}/comments", handleTaskComments(manager))
+	mux.HandleFunc("POST /api/tasks/{id}/comments", handleAddTaskComment(manager))
+	mux.HandleFunc("POST /api/tasks/{id}/handoff", handleResolveHandoff(manager))
 	mux.HandleFunc("POST /api/tasks/notices/{id}/deliver", handleDeliverNotice(manager))
 	// Scheduled tasks: the same owner surface, no new credential.
 	mux.HandleFunc("POST /api/tasks/when/parse", handleParseWhen(manager))
