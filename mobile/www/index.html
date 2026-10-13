@@ -33,7 +33,8 @@
     color: #cdd6f4;
     font: 15px/1.5 -apple-system, system-ui, sans-serif;
   }
-  .screen { width: 100%; display: flex; flex-direction: column; gap: 20px; }
+  /* A column, not a full-width form: on an iPad the buttons would otherwise span the screen. */
+  .screen { width: 100%; max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
   .screen[hidden] { display: none; }
   .startup { align-items: center; text-align: center; }
   .startup-mark {
