@@ -707,12 +707,3 @@ func (a *Agent) CancelBackgroundCompaction() bool {
 	a.emitBG(evt, ok)
 	return ok
 }
-
-// SetBudgetCap installs a live spending cap read at each budget checkpoint of
-// a run, with that run's context. It only narrows MaxBudget: a run stops when
-// its cost exceeds the smaller of the two. ok=false means no cap applies.
-func (a *Agent) SetBudgetCap(fn func(context.Context) (limit float64, ok bool)) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.budgetCap = fn
-}

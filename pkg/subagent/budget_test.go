@@ -6,7 +6,6 @@ import (
 	"math"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -197,40 +196,36 @@ func TestAsyncSubagentChargesLaunchingRunBudget(t *testing.T) {
 // A child on a model without pricing cannot be counted: it runs and adds
 // nothing, but it still stops when the rest of the run has used the budget.
 func TestUnpricedSubagentReadsButDoesNotFeedRunBudget(t *testing.T) {
-	var limit atomic.Value
-	limit.Store(1.0)
+	childCalling, parentSpent := make(chan struct{}), make(chan struct{})
 	childProv := newMockProvider(
 		func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
-			// The run's live cap drops below what the parent already spent
-			// (as a goal budget does when other spend lands).
-			limit.Store(0.30)
+			// The rest of the run spends the budget while the child works.
+			close(childCalling)
+			<-parentSpent
 			return usageToolCall("c1", "nothing", map[string]any{}, 100_000)(ctx, req)
 		},
 		textResponse("child done"),
 	)
-	// A tool-call turn is charged once its tools return, so the parent's
-	// $0.50 is spent in a turn before the one that launches the child.
 	parentProv := newMockProvider(
-		usageToolCall("p0", "nothing", map[string]any{}, 50), // $0.50
-		toolCallResponse("p1", "subagent", map[string]any{"task": "work"}),
-		textResponse("parent done"),
+		toolCallResponse("p1", "subagent", map[string]any{"task": "work", "async": true}),
+		func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+			<-childCalling
+			return usageTextResponse("parent done", 50)(ctx, req) // $0.50
+		},
 	)
-	parent, f := newBudgetParent(t, 0, core.Model{ID: "free", Provider: "mock"}, parentProv, childProv, nil)
-	parent.SetBudgetCap(func(context.Context) (float64, bool) { return limit.Load().(float64), true })
+	parent, f := newBudgetParent(t, 0.30, core.Model{ID: "free", Provider: "mock"}, parentProv, childProv, nil)
 
 	_, err := parent.Run(context.Background(), "go")
+	close(parentSpent)
+	waitFor(t, 5*time.Second, func() bool { return len(f.ended()) == 1 })
 
 	ends := f.ended()
-	if len(ends) != 1 {
-		t.Fatalf("child ends = %+v, want 1", ends)
-	}
 	if ends[0].status != statusFailed || !strings.Contains(ends[0].err, "budget") {
 		t.Fatalf("unpriced child ended %q with %q, want stopped by the exhausted run budget", ends[0].status, ends[0].err)
 	}
 	if callCount(childProv) != 1 {
 		t.Fatalf("unpriced child made %d calls, want 1", callCount(childProv))
 	}
-	// Exactly the parent's own $0.50: the unpriced child added nothing.
 	wantParentBudgetError(t, err, 0.50, 0.30)
 }
 

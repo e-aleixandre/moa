@@ -456,9 +456,7 @@ type Agent struct {
 	// bgOwner is the invocation now executing, the only one a summary's cost
 	// can still be debited to. Cleared, with its debits, when it finishes.
 	bgOwner *loopConfig
-	// budgetCap is the owner's live cap for a run (SetBudgetCap), guarded by mu.
-	budgetCap func(context.Context) (float64, bool)
-	bgWG      sync.WaitGroup
+	bgWG    sync.WaitGroup
 }
 
 // AgentConfig configures an Agent.
@@ -1981,7 +1979,6 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		bgEvt = a.bgChangedLocked()
 	}
 	background := !allowCheckpoint && a.bgLifetime != nil
-	budgetCap := a.budgetCap
 
 	// Invariant: every message in state carries a stable MsgID before it can be
 	// synced to the tree. The Run/Send* entry points build user messages without
@@ -2070,7 +2067,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	ctx = attachment.WithScope(ctx, a.config.AttachmentScope)
 	// One pool per run, published to the run's tools so a child it launches
 	// charges this run's limit (see RunBudget).
-	budget := runBudgetFor(ctx, a.config.ParentBudget, a.config.MaxBudget, budgetCap)
+	budget := runBudgetFor(a.config.ParentBudget, a.config.MaxBudget)
 	ctx = withRunBudget(ctx, budget)
 
 	a.steerMu.Lock()

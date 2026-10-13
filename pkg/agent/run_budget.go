@@ -15,22 +15,20 @@ import (
 type RunBudget struct {
 	mu    sync.Mutex
 	spent float64
-	// limit is the owning run's effective limit (MaxBudget narrowed by its
-	// live cap), evaluated against the owner's context.
-	limit func() (float64, bool)
+	// limit is the owning run's MaxBudget, fixed when the run starts.
+	limit float64
 }
 
 // charge adds delta to the pool and reports the pool's spend against the
 // owner's limit. A member without pricing charges 0 and still sees what the
 // others spent.
 func (b *RunBudget) charge(delta float64) (spent, limit float64, over bool) {
-	limit, ok := b.limit()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if delta > 0 {
 		b.spent += delta
 	}
-	return b.spent, limit, ok && b.spent > limit
+	return b.spent, b.limit, b.spent > b.limit
 }
 
 type runBudgetKey struct{}
@@ -52,25 +50,12 @@ func withRunBudget(ctx context.Context, b *RunBudget) context.Context {
 
 // runBudgetFor returns the pool a run charges: the launcher's when this agent
 // was started on its behalf, otherwise a fresh one when the run has a limit.
-func runBudgetFor(ctx context.Context, parent *RunBudget, maxBudget float64, budgetCap func(context.Context) (float64, bool)) *RunBudget {
+func runBudgetFor(parent *RunBudget, maxBudget float64) *RunBudget {
 	if parent != nil {
 		return parent
 	}
-	if maxBudget <= 0 && budgetCap == nil {
+	if maxBudget <= 0 {
 		return nil
 	}
-	return &RunBudget{limit: func() (float64, bool) {
-		return effectiveLimit(ctx, maxBudget, budgetCap)
-	}}
-}
-
-// effectiveLimit is MaxBudget narrowed by the live cap when one applies.
-func effectiveLimit(ctx context.Context, maxBudget float64, budgetCap func(context.Context) (float64, bool)) (float64, bool) {
-	limit, ok := maxBudget, maxBudget > 0
-	if budgetCap != nil {
-		if c, capped := budgetCap(ctx); capped && (!ok || c < limit) {
-			limit, ok = c, true
-		}
-	}
-	return limit, ok
+	return &RunBudget{limit: maxBudget}
 }

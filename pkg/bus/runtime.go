@@ -234,21 +234,6 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		}
 	}
 
-	// A goal run's cap follows the goal's live remaining budget, so spend
-	// charged to its activation after the run started (a late summary)
-	// narrows it. Scoped to the activation captured when the run launched.
-	if c, ok := cfg.Agent.(interface {
-		SetBudgetCap(func(context.Context) (float64, bool))
-	}); ok {
-		c.SetBudgetCap(func(ctx context.Context) (float64, bool) {
-			act, _ := ctx.Value(goalActivationKey{}).(uint64)
-			if act == 0 || sctx.Goal == nil {
-				return 0, false
-			}
-			return sctx.Goal.RemainingForActivation(act)
-		})
-	}
-
 	// Start approval bridges.
 	if cfg.Gate != nil {
 		am.StartPermissionBridge(cfg.Ctx, cfg.Gate)

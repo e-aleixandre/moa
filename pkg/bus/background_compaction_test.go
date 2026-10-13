@@ -402,19 +402,22 @@ func bgBudgetRun(t *testing.T, replace bool) (calls int, f *bgFix, g *goal.Goal)
 	return int(f.prov.calls), f, g
 }
 
-// B's next request is capped by the goal's live remaining pool once A's late
-// summary has been charged to the same activation.
-func TestBackgroundCompaction_LateUsageCapsSameGoalRun(t *testing.T) {
+// B's limit is what the goal had left when it started: A's late summary is
+// charged to the same activation once, without narrowing B mid-run.
+func TestBackgroundCompaction_LateUsageChargesSameGoalOnce(t *testing.T) {
 	calls, _, g := bgBudgetRun(t, false)
-	if calls != 2 {
-		t.Fatalf("B made %d requests; with $3.5 spent against a remaining $3 it must stop after 2", calls)
+	if calls != 3 {
+		t.Fatalf("B made %d requests, want 3 (its own $6 limit only)", calls)
 	}
-	if math.Abs(g.Spent()-(4+3+3.5)) > 1e-9 {
-		t.Fatalf("goal spent=%v, want 10.5 (A, A's summary, B) once each", g.Spent())
+	if math.Abs(g.Spent()-(4+3+6.5)) > 1e-9 {
+		t.Fatalf("goal spent=%v, want 13.5 (A, A's summary, B) once each", g.Spent())
+	}
+	if g.Active() {
+		t.Fatal("goal still active past its total budget")
 	}
 }
 
-// A replacement goal neither pays for nor is capped by the old job.
+// A replacement goal does not pay for the old job.
 func TestBackgroundCompaction_LateUsageIgnoresReplacementGoal(t *testing.T) {
 	calls, _, g := bgBudgetRun(t, true)
 	if calls != 3 {

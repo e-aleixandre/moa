@@ -173,7 +173,9 @@ func (l *fingerprintLog) config(cfg Config) Config {
 	cfg.OnChildRequestFingerprint = func(jobID, resumedFrom string, count uint64, first core.RequestFingerprint, last *core.RequestFingerprint) {
 		l.add(fmt.Sprintf("fp:%d:last=%t", count, last != nil))
 	}
-	cfg.OnChildEnd = func(string, string, bool, string, string, string, time.Time, *core.Usage, float64, float64, uint64) { l.add("end") }
+	cfg.OnChildEnd = func(string, string, bool, string, string, string, time.Time, *core.Usage, float64, float64, uint64) {
+		l.add("end")
+	}
 	return cfg
 }
 

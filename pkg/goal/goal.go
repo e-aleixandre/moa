@@ -244,18 +244,6 @@ func (g *Goal) AddSpentForActivation(activation uint64, cost float64) (float64, 
 	return g.spent, true
 }
 
-// RemainingForActivation is what is left of the total budget of activation,
-// as of now. ok=false when that activation is no longer the active one or has
-// no total budget.
-func (g *Goal) RemainingForActivation(activation uint64) (float64, bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if !g.active || activation == 0 || activation != g.activation || g.opts.TotalBudget <= 0 {
-		return 0, false
-	}
-	return g.opts.TotalBudget - g.spent, true
-}
-
 // Spent returns the cumulative USD spent across iterations.
 func (g *Goal) Spent() float64 {
 	g.mu.Lock()
