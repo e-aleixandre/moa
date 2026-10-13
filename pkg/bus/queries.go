@@ -283,6 +283,11 @@ type MsgIDInUse struct {
 // Handler returns: []BranchPoint
 type GetBranchPoints struct{ SessionID string }
 
+// GetBranchMessage returns the original user message stored at EntryID, the one
+// a rewind puts back in the composer. Handler returns: core.Message. It fails
+// for anything that is not a user message.
+type GetBranchMessage struct{ EntryID string }
+
 // GetSubagents returns a snapshot of currently live subagent jobs (running or
 // cancelling), plus terminal children that still own a retained background
 // bash job, including their accumulated transcript. Used to populate the

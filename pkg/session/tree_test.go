@@ -901,3 +901,115 @@ func TestTree_ConcurrentAccess(t *testing.T) {
 		t.Errorf("path tail = %q, want leafID %q", path[len(path)-1].ID, leafID)
 	}
 }
+
+// --- BranchBefore: rewinding a user message returns to just before it ---
+
+func TestBranchBefore_KeepsThePreviousAnswer(t *testing.T) {
+	tree := NewTree()
+	tree.Append(userEntry("u1"))
+	a1 := tree.Append(assistantEntry("a1"))
+	u2 := tree.Append(userEntry("u2"))
+	tree.Append(assistantEntry("a2"))
+
+	leaf, err := tree.BranchBefore(u2)
+	if err != nil {
+		t.Fatalf("BranchBefore: %v", err)
+	}
+	if leaf != a1 || tree.LeafID() != a1 {
+		t.Fatalf("leaf = %q (returned %q), want %q", tree.LeafID(), leaf, a1)
+	}
+	if tree.Len() != 4 {
+		t.Fatalf("nothing may be deleted, got %d entries", tree.Len())
+	}
+	// Re-sending makes a sibling of the rewound message.
+	next := tree.Append(userEntry("u2 edited"))
+	if got, _ := tree.Entry(next); got.ParentID != a1 {
+		t.Fatalf("parent = %q, want %q", got.ParentID, a1)
+	}
+}
+
+func TestBranchBefore_FirstMessageEmptiesTheBranch(t *testing.T) {
+	tree := NewTree()
+	u1 := tree.Append(userEntry("u1"))
+	tree.Append(assistantEntry("a1"))
+
+	leaf, err := tree.BranchBefore(u1)
+	if err != nil {
+		t.Fatalf("BranchBefore: %v", err)
+	}
+	if leaf != "" || tree.LeafID() != "" {
+		t.Fatalf("leaf = %q, want empty", tree.LeafID())
+	}
+	if msgs, _ := tree.BuildContext(); len(msgs) != 0 {
+		t.Fatalf("context should be empty, got %d", len(msgs))
+	}
+	if tree.Len() != 2 {
+		t.Fatalf("nothing may be deleted, got %d entries", tree.Len())
+	}
+	next := tree.Append(userEntry("u1 edited"))
+	if got, _ := tree.Entry(next); got.ParentID != "" {
+		t.Fatalf("new root expected, parent = %q", got.ParentID)
+	}
+}
+
+func TestBranchBefore_MidTurnMessageFallsBackToLastCompleteAnswer(t *testing.T) {
+	tree := NewTree()
+	tree.Append(userEntry("u1"))
+	a1 := tree.Append(assistantEntry("a1"))
+	tree.Append(userEntry("u2"))
+	tree.Append(assistantToolCallEntry("tc1"))
+	tree.Append(toolResultEntry("tc1", "bash", "done"))
+	steer := tree.Append(userEntry("steer"))
+	tree.Append(assistantEntry("a2"))
+
+	leaf, err := tree.BranchBefore(steer)
+	if err != nil {
+		t.Fatalf("BranchBefore: %v", err)
+	}
+	if leaf != a1 {
+		t.Fatalf("leaf = %q, want %q (last complete answer)", leaf, a1)
+	}
+}
+
+func TestBranchBefore_MidTurnWithNoEarlierAnswerEmptiesTheBranch(t *testing.T) {
+	tree := NewTree()
+	tree.Append(userEntry("u1"))
+	tree.Append(assistantToolCallEntry("tc1"))
+	tree.Append(toolResultEntry("tc1", "bash", "done"))
+	steer := tree.Append(userEntry("steer"))
+
+	leaf, err := tree.BranchBefore(steer)
+	if err != nil || leaf != "" || tree.LeafID() != "" {
+		t.Fatalf("leaf = %q err = %v, want empty", tree.LeafID(), err)
+	}
+}
+
+func TestBranchBefore_ParentThatIsABoundaryIsAValidLanding(t *testing.T) {
+	tree := NewTree()
+	u1 := tree.Append(userEntry("u1"))
+	tree.Append(assistantEntry("a1"))
+	comp := tree.Append(compactionEntry("summary", u1, 100))
+	u2 := tree.Append(userEntry("u2"))
+
+	leaf, err := tree.BranchBefore(u2)
+	if err != nil || leaf != comp {
+		t.Fatalf("leaf = %q err = %v, want %q", leaf, err, comp)
+	}
+}
+
+func TestBranchBefore_RejectsWhatIsNotAUserMessage(t *testing.T) {
+	tree := NewTree()
+	tree.Append(userEntry("u1"))
+	a1 := tree.Append(assistantEntry("a1"))
+	leafBefore := tree.LeafID()
+
+	if _, err := tree.BranchBefore(a1); err == nil {
+		t.Fatal("an assistant entry is not a user message")
+	}
+	if _, err := tree.BranchBefore("nope"); err == nil {
+		t.Fatal("unknown entry must be rejected")
+	}
+	if tree.LeafID() != leafBefore {
+		t.Fatal("a rejected rewind must not move the leaf")
+	}
+}

@@ -288,3 +288,100 @@ func TestHandler_BranchTo_RejectsDanglingToolCall(t *testing.T) {
 		}
 	}
 }
+
+func rewindTestTree() (*session.Tree, map[string]string) {
+	tree := session.NewTree()
+	ids := map[string]string{}
+	add := func(name, role, text string) {
+		ids[name] = tree.Append(session.Entry{
+			Type:    session.EntryMessage,
+			Message: core.WrapMessage(core.Message{Role: role, Content: []core.Content{core.TextContent(text)}}),
+		})
+	}
+	add("u1", "user", "first")
+	add("a1", "assistant", "answer one")
+	add("u2", "user", "second")
+	add("a2", "assistant", "answer two")
+	return tree, ids
+}
+
+// TestHandler_BranchTo_Before rewinds to just before a user message: the
+// previous answer stays and the agent is rehydrated from that branch.
+func TestHandler_BranchTo_Before(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	tree, ids := rewindTestTree()
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(BranchTo{EntryID: ids["u2"], Before: true}); err != nil {
+		t.Fatalf("BranchTo before: %v", err)
+	}
+	if got := tree.LeafID(); got != ids["a1"] {
+		t.Fatalf("leaf = %s, want %s", got, ids["a1"])
+	}
+	if len(fa.messages) != 2 {
+		t.Fatalf("agent was rehydrated with %d messages, want 2", len(fa.messages))
+	}
+}
+
+// TestHandler_BranchTo_BeforeFirstMessage leaves an empty branch and an empty
+// agent, without deleting the old branch.
+func TestHandler_BranchTo_BeforeFirstMessage(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	tree, ids := rewindTestTree()
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(BranchTo{EntryID: ids["u1"], Before: true}); err != nil {
+		t.Fatalf("BranchTo before first: %v", err)
+	}
+	if tree.LeafID() != "" || len(fa.messages) != 0 || tree.Len() != 4 {
+		t.Fatalf("leaf=%q agent=%d entries=%d", tree.LeafID(), len(fa.messages), tree.Len())
+	}
+}
+
+// TestHandler_BranchTo_BeforeRejectedWhileBusy keeps the existing guard.
+func TestHandler_BranchTo_BeforeRejectedWhileBusy(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	fa := &fakeAgent{}
+	sctx := newTestSessionContextWithState(b, fa)
+	tree, ids := rewindTestTree()
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+	if err := sctx.State.Transition(StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	leaf := tree.LeafID()
+	if err := b.Execute(BranchTo{EntryID: ids["u2"], Before: true}); err == nil {
+		t.Fatal("expected rejection while running")
+	}
+	if tree.LeafID() != leaf {
+		t.Fatal("leaf moved despite the rejection")
+	}
+}
+
+// TestQuery_GetBranchMessage returns the original message a rewind puts back
+// in the composer, and only for user messages.
+func TestQuery_GetBranchMessage(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	tree, ids := rewindTestTree()
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	msg, err := QueryTyped[GetBranchMessage, core.Message](b, GetBranchMessage{EntryID: ids["u2"]})
+	if err != nil || len(msg.Content) != 1 || msg.Content[0].Text != "second" {
+		t.Fatalf("msg=%+v err=%v", msg, err)
+	}
+	if _, err := QueryTyped[GetBranchMessage, core.Message](b, GetBranchMessage{EntryID: ids["a1"]}); err == nil {
+		t.Fatal("an assistant entry must be rejected")
+	}
+}

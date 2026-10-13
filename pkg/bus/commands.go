@@ -315,7 +315,15 @@ type UndoLastChange struct{ SessionID string }
 // BranchTo moves the session tree leaf to the given entry ID, starting a new branch.
 // The agent state is rehydrated from the new branch context.
 // Returns error if the agent is running or the target is invalid.
-type BranchTo struct{ EntryID string }
+//
+// With Before set, EntryID must be a user message and the branch lands just
+// before it (the previous answer stays), so the message can be edited and sent
+// again. A message sent while moa was working lands on the last complete answer
+// before it; the first message of a session leaves an empty branch.
+type BranchTo struct {
+	EntryID string
+	Before  bool
+}
 
 // ---------------------------------------------------------------------------
 // Goal mode

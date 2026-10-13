@@ -574,9 +574,9 @@ func registerTreeHandlers(sctx *SessionContext) {
 		var msgs []core.AgentMessage
 		var err error
 		if sctx.treeSyncer != nil {
-			msgs, err = sctx.treeSyncer.BranchAndLoad(cmd.EntryID)
+			msgs, err = sctx.treeSyncer.BranchAndLoad(cmd.EntryID, cmd.Before)
 		} else {
-			msgs, err = branchAndLoad(sctx.Tree, sctx.Agent, cmd.EntryID)
+			msgs, err = branchAndLoad(sctx.Tree, sctx.Agent, cmd.EntryID, cmd.Before)
 		}
 		if err != nil {
 			return err
@@ -587,6 +587,17 @@ func registerTreeHandlers(sctx *SessionContext) {
 			Messages:  msgs,
 		})
 		return nil
+	})
+
+	b.OnQuery(func(q GetBranchMessage) (core.Message, error) {
+		if sctx.Tree == nil {
+			return core.Message{}, fmt.Errorf("branching not available (no session tree)")
+		}
+		e, ok := sctx.Tree.Entry(q.EntryID)
+		if !ok || e.Type != session.EntryMessage || e.Message.Role != "user" {
+			return core.Message{}, fmt.Errorf("entry %s is not a user message", q.EntryID)
+		}
+		return e.Message.Message, nil
 	})
 
 	b.OnQuery(func(q GetDisplayMessages) ([]core.AgentMessage, error) {

@@ -1612,6 +1612,9 @@ func handleBranch(mgr *Manager) http.HandlerFunc {
 		limitBody(w, r, maxJSONBodySize)
 		var body struct {
 			EntryID string `json:"entry_id"`
+			// Before rewinds to just before a user message and hands the
+			// message back, so the client can put it in the composer.
+			Before bool `json:"before"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -1622,7 +1625,18 @@ func handleBranch(mgr *Manager) http.HandlerFunc {
 			return
 		}
 
-		if err := sess.runtime.Bus.Execute(bus.BranchTo{EntryID: body.EntryID}); err != nil {
+		// Read the message first: entries are immutable, and a branch that
+		// succeeded but could not report what it rewound would strand the text.
+		var rewound *rewoundMessage
+		if body.Before {
+			msg, err := bus.QueryTyped[bus.GetBranchMessage, core.Message](sess.runtime.Bus, bus.GetBranchMessage{EntryID: body.EntryID})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			rewound = newRewoundMessage(msg)
+		}
+		if err := sess.runtime.Bus.Execute(bus.BranchTo{EntryID: body.EntryID, Before: body.Before}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -1630,6 +1644,10 @@ func handleBranch(mgr *Manager) http.HandlerFunc {
 		// The bounded branch snapshot is delivered by CommandExecuted over the
 		// session WebSocket. Do not duplicate an unbounded history in this REST
 		// response, which can exhaust a mobile browser before WS reconnects.
+		if rewound != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": rewound})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }

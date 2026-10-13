@@ -200,6 +200,51 @@ func (t *Tree) Branch(entryID string) error {
 	return nil
 }
 
+// BranchBefore moves the leaf to just before a user message, so the message can
+// be edited and sent again as a sibling. It returns the new leaf, which is ""
+// when nothing precedes the message (the branch becomes empty; the old one stays
+// in the tree).
+//
+// A message sent while moa was working has a tool_result as its parent, and no
+// branch may end there. Landing then falls back to the nearest earlier entry
+// that is a valid target and not itself a user message: the last complete moa
+// answer (or a boundary). A user message is skipped on the way up so the
+// re-sent message never ends up right after another unanswered one.
+func (t *Tree) BranchBefore(entryID string) (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	idx, ok := t.index[entryID]
+	if !ok {
+		return "", fmt.Errorf("tree: unknown entry ID: %s", entryID)
+	}
+	e := t.entries[idx]
+	if e.Type != EntryMessage || e.Message.Role != "user" {
+		return "", fmt.Errorf("tree: entry %s is not a user message", entryID)
+	}
+
+	target := e.ParentID
+	first := true
+	for target != "" {
+		pi, ok := t.index[target]
+		if !ok {
+			return "", fmt.Errorf("tree: entry %s has a missing parent %s", entryID, target)
+		}
+		pe := t.entries[pi]
+		if t.validBranchTargetLocked(target) == nil {
+			isUser := pe.Type == EntryMessage && pe.Message.Role == "user"
+			if first || !isUser {
+				break
+			}
+		}
+		first = false
+		target = pe.ParentID
+	}
+	t.leafID = target
+	t.rev++
+	return target, nil
+}
+
 // ValidBranchTarget reports whether branching to entryID would be accepted
 // by Branch, without mutating the tree. Callers building branch-picker UIs
 // should use this to filter candidates so they never offer a target that

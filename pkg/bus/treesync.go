@@ -118,14 +118,18 @@ func (ts *TreeSyncer) ResetAndClear() error {
 // BranchAndLoad moves the tree to entryID and loads that branch into the
 // agent as one history mutation under the syncer's lock. A compaction save
 // holds the same lock, so a branch can never move the tree under it.
-func (ts *TreeSyncer) BranchAndLoad(entryID string) ([]core.AgentMessage, error) {
+func (ts *TreeSyncer) BranchAndLoad(entryID string, before bool) ([]core.AgentMessage, error) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	return branchAndLoad(ts.tree, ts.sctx.Agent, entryID)
+	return branchAndLoad(ts.tree, ts.sctx.Agent, entryID, before)
 }
 
-func branchAndLoad(tree *session.Tree, ag AgentController, entryID string) ([]core.AgentMessage, error) {
-	if err := tree.Branch(entryID); err != nil {
+func branchAndLoad(tree *session.Tree, ag AgentController, entryID string, before bool) ([]core.AgentMessage, error) {
+	if before {
+		if _, err := tree.BranchBefore(entryID); err != nil {
+			return nil, err
+		}
+	} else if err := tree.Branch(entryID); err != nil {
 		return nil, err
 	}
 	// Rehydrate agent state from the new branch context
