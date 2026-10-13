@@ -276,6 +276,14 @@ func (r *SessionRuntime) Close() {
 		}
 		// Close bus — subscribers drain and exit.
 		r.Bus.Close()
+		// Draining can settle accounting accepted before the close (a run's
+		// terminal cost) whose own save request the closed bus dropped. Save
+		// once more, outside the drain, so it reaches disk. Close stops
+		// waiting after its drain timeout: a cost a slower subscriber settles
+		// after that is not saved (accepted limit).
+		if err := r.Flush(); err != nil {
+			slog.Warn("final flush on close failed", "session", r.sctx.SessionID, "error", err)
+		}
 	})
 }
 
