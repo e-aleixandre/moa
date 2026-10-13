@@ -272,3 +272,50 @@ enum RelayConfirmation {
         return confirmedToken == token && confirmedEnv == env
     }
 }
+
+enum PushRelaySelection: Equatable {
+    case relay(String)
+    case misconfigured
+    case mismatch
+}
+
+// The relays this build may talk to, read from Info.plist (`MoaPushRelayURLs`).
+// The paired server says which relay it is configured for; the app follows it
+// only if that exact URL is baked in here, so a hostile or mistaken server
+// cannot aim the push secret and send key at an arbitrary host. Several
+// entries let a relay be added in an app update without stranding the
+// installs that still point at the previous one.
+//
+// An entry is an origin: https, a host, nothing else. Entries that are not are
+// dropped, never repaired, so a typo shrinks the list instead of widening it.
+struct PushRelayAllowlist {
+    let urls: [String]
+
+    init(plistValue: Any?) {
+        urls = (plistValue as? [Any] ?? []).compactMap { ($0 as? String).flatMap(Self.validURL) }
+    }
+
+    var isEmpty: Bool { urls.isEmpty }
+
+    static func validURL(_ raw: String) -> String? {
+        guard
+            let components = URLComponents(string: raw),
+            components.scheme == "https",
+            components.host?.isEmpty == false,
+            components.user == nil,
+            components.password == nil,
+            components.path.isEmpty,
+            components.query == nil,
+            components.fragment == nil
+        else { return nil }
+        return raw
+    }
+
+    // The server's URL is checked with the same rules as an entry and must
+    // then equal one exactly: no normalisation, no prefix match.
+    func select(reported: String?) -> PushRelaySelection {
+        guard !isEmpty else { return .misconfigured }
+        guard let reported, let url = Self.validURL(reported), urls.contains(url) else { return .mismatch }
+        return .relay(url)
+    }
+}

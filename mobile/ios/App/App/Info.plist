@@ -39,8 +39,10 @@
 	<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>MoaKeychainPushGroup</key>
 	<string>$(AppIdentifierPrefix)$(MOA_PUSH_KEYCHAIN_GROUP)</string>
-	<key>MoaPushRelayURL</key>
-	<string>$(MOA_PUSH_RELAY_URL)</string>
+	<key>MoaPushRelayURLs</key>
+	<array>
+		<string>$(MOA_PUSH_RELAY_URL)</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan a moa pairing code.</string>
 	<key>NSFaceIDUsageDescription</key>

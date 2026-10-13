@@ -257,4 +257,51 @@ final class NativePushCoordinationTests: XCTestCase {
         XCTAssertFalse(RelayConfirmation.matches(nil, nil, token: "aa", env: "production"))
         XCTAssertFalse(RelayConfirmation.matches("aa", nil, token: "aa", env: "production"))
     }
+
+    // The relay the server reports is followed only when the build lists it.
+    private let workersRelay = "https://moa-push-relay.ealeixandre.workers.dev"
+    private let customRelay = "https://push.letmoa.run"
+
+    func testRelayInTheListIsUsed() {
+        let list = PushRelayAllowlist(plistValue: [workersRelay])
+        XCTAssertEqual(list.select(reported: workersRelay), .relay(workersRelay))
+    }
+
+    func testRelayOutsideTheListIsAMismatch() {
+        let list = PushRelayAllowlist(plistValue: [workersRelay])
+        XCTAssertEqual(list.select(reported: customRelay), .mismatch)
+        XCTAssertEqual(list.select(reported: nil), .mismatch)
+        // Exact match only: no normalisation, no prefix, no other scheme.
+        XCTAssertEqual(list.select(reported: workersRelay + "/"), .mismatch)
+        XCTAssertEqual(list.select(reported: workersRelay + ".evil.example"), .mismatch)
+        XCTAssertEqual(list.select(reported: workersRelay.uppercased()), .mismatch)
+        XCTAssertEqual(list.select(reported: "http://moa-push-relay.ealeixandre.workers.dev"), .mismatch)
+    }
+
+    func testEmptyOrMissingListIsMisconfigured() {
+        XCTAssertEqual(PushRelayAllowlist(plistValue: []).select(reported: workersRelay), .misconfigured)
+        XCTAssertEqual(PushRelayAllowlist(plistValue: nil).select(reported: workersRelay), .misconfigured)
+        // The old single-string key shape is not a list.
+        XCTAssertEqual(PushRelayAllowlist(plistValue: workersRelay).select(reported: workersRelay), .misconfigured)
+        XCTAssertTrue(PushRelayAllowlist(plistValue: []).isEmpty)
+        // An unexpanded build setting is not a relay.
+        XCTAssertTrue(PushRelayAllowlist(plistValue: ["$(MOA_PUSH_RELAY_URL)"]).isEmpty)
+    }
+
+    func testEitherRelayOfATwoRelayListWorks() {
+        let list = PushRelayAllowlist(plistValue: [workersRelay, customRelay])
+        XCTAssertEqual(list.select(reported: workersRelay), .relay(workersRelay))
+        XCTAssertEqual(list.select(reported: customRelay), .relay(customRelay))
+        XCTAssertEqual(list.select(reported: "https://other.example"), .mismatch)
+    }
+
+    func testMalformedEntriesAreDroppedAndNeverMatch() {
+        let bad = [
+            "http://push.example", "https://", "https://u:p@push.example", "https://push.example/v1",
+            "https://push.example/", "https://push.example?x=1", "https://push.example#f", "push.example",
+        ]
+        let list = PushRelayAllowlist(plistValue: bad + [customRelay] + [42, ["nested"]] as [Any])
+        XCTAssertEqual(list.urls, [customRelay])
+        for entry in bad { XCTAssertEqual(list.select(reported: entry), .mismatch, entry) }
+    }
 }

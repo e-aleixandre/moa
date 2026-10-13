@@ -277,10 +277,18 @@ final class NativePushRegistration {
     // suspended must not save a key or reach a server.
     private func sync(paired: StoredDeviceCredential, generation: Int, allowNewSecret: Bool) async throws {
         try ensureCurrent(generation, paired)
-        guard let relay = Self.relayURL else { throw NativePushError.misconfigured }
+        let allowlist = Self.relayAllowlist
+        guard !allowlist.isEmpty else { throw NativePushError.misconfigured }
         let status = try await serverStatus(paired)
         try ensureCurrent(generation, paired)
-        guard status.relayURL == relay else { throw NativePushError.relayMismatch }
+        // Every relay call below, and the registration the server stores,
+        // use the relay it reported, once the build has vouched for it.
+        let relay: String
+        switch allowlist.select(reported: status.relayURL) {
+        case .relay(let url): relay = url
+        case .misconfigured: throw NativePushError.misconfigured
+        case .mismatch: throw NativePushError.relayMismatch
+        }
         // A secret whose delete failed belongs to a disable or an old pairing.
         guard retrySecretDelete() else { throw NativePushError.keychain }
 
@@ -603,19 +611,8 @@ final class NativePushRegistration {
 
     // MARK: - Helpers
 
-    static var relayURL: String? {
-        guard
-            let raw = Bundle.main.object(forInfoDictionaryKey: "MoaPushRelayURL") as? String,
-            let components = URLComponents(string: raw),
-            components.scheme == "https",
-            components.host?.isEmpty == false,
-            components.user == nil,
-            components.password == nil,
-            components.path.isEmpty,
-            components.query == nil,
-            components.fragment == nil
-        else { return nil }
-        return raw
+    static var relayAllowlist: PushRelayAllowlist {
+        PushRelayAllowlist(plistValue: Bundle.main.object(forInfoDictionaryKey: "MoaPushRelayURLs"))
     }
 
     // Xcode-installed builds carry a development profile and talk to the
