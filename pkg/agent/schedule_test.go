@@ -75,7 +75,7 @@ func runExecuteTools(ctx context.Context, cfg *loopConfig, calls []core.Content)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		executeTools(ctx, cfg, calls)
+		executeTools(ctx, cfg, calls, false)
 	}()
 	return done
 }

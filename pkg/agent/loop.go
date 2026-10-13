@@ -1078,6 +1078,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// turn N times in a row, stop to prevent infinite token burn. Turns
 		// consisting only of exempt status/wait tools (polling background async
 		// work) are skipped entirely so they neither trip nor reset the streak.
+		repeated := false
 		if nonExempt := filterDoomLoopCalls(toolCalls); len(nonExempt) > 0 {
 			sig := toolCallSignature(nonExempt)
 			if sig == lastToolSig {
@@ -1086,6 +1087,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				lastToolSig = sig
 				repeatCount = 1
 			}
+			repeated = repeatCount == doomLoopThreshold-1
 			if repeatCount >= doomLoopThreshold {
 				// Log the repeated tool calls for debugging
 				var callNames []string
@@ -1120,7 +1122,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 
 		// Execute tool calls concurrently.
-		claimed := executeTools(ctx, cfg, toolCalls)
+		claimed := executeTools(ctx, cfg, toolCalls, repeated)
 		if cfg.steerMu != nil {
 			cfg.steerMu.Lock()
 		}
@@ -1464,6 +1466,8 @@ type toolExecSlot struct {
 	permissionFeedback string      // optional approved feedback note from permission prompt
 	result             core.Result // populated after execution
 	isError            bool
+	validationError    bool // rejected by ValidateToolCall
+	executed           bool // Execute was reached after admitToolStart
 }
 
 const (
@@ -1524,6 +1528,7 @@ func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot,
 	if err := tool.ValidateToolCall(cfg.tools, tc.ToolName, tc.Arguments); err != nil {
 		slot.rejectReason = "Parameter validation error: " + err.Error()
 		slot.rejectKind = rejectKindOther
+		slot.validationError = true
 		return
 	}
 	slot.approved = true
@@ -1547,9 +1552,11 @@ func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot,
 // It returns the steer items the batch claimed when it withdrew unstarted
 // calls. The caller owns them: they are no longer in the live queue and must
 // reach history, even when the run was stopped meanwhile.
-func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content) []core.SteerItem {
+func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content, repeated bool) []core.SteerItem {
 	slots := make([]toolExecSlot, len(toolCalls))
 	batch := &toolBatch{}
+	// repeated arms a single warning for the batch's first eligible error.
+	pendingWarning := repeated
 
 	// Phase 1: pre-flight (sequential). A rejected call never runs, so it is
 	// reported ended right away; its result is appended in order with the rest.
@@ -1557,7 +1564,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		slots[i].tc = tc
 		preflightToolCall(ctx, cfg, &slots[i], i)
 		if !slots[i].approved {
-			endRejectedToolCall(cfg, &slots[i])
+			endRejectedToolCall(cfg, &slots[i], &pendingWarning)
 		}
 	}
 	onlyWaits := true
@@ -1613,7 +1620,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				pending++
 				go func(idx int) {
 					defer func() { finished <- idx }()
-					slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
+					slots[idx].result, slots[idx].isError, slots[idx].executed = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
 				}(i)
 				break
 			}
@@ -1631,7 +1638,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				if wShell != nil {
 					<-wShell
 				}
-				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
+				slots[idx].result, slots[idx].isError, slots[idx].executed = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
 			}(i, waitForPath, waitForShell)
 
 		case core.EffectWritePath:
@@ -1650,7 +1657,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				if wShell != nil {
 					<-wShell
 				}
-				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
+				slots[idx].result, slots[idx].isError, slots[idx].executed = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
 			}(i, waitForPath, waitForShell)
 
 		default: // EffectShell, EffectUnknown, EffectInteractive
@@ -1670,7 +1677,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 				for _, w := range waits {
 					<-w
 				}
-				slots[idx].result, slots[idx].isError = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
+				slots[idx].result, slots[idx].isError, slots[idx].executed = runToolInBatch(ctx, cfg, slots[idx].tc, batch)
 			}(i, waits)
 			// Shell becomes the new barrier; reset path tracking.
 			lastShell = done
@@ -1684,6 +1691,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		i := <-finished
 		resultWithFeedback := appendPermissionFeedback(slots[i].result, slots[i].permissionFeedback)
 		result := cfg.hooks.FireToolResult(ctx, slots[i].tc.ToolName, resultWithFeedback, slots[i].isError)
+		result = decorateRepeatedError(&pendingWarning, &slots[i], result)
 		slots[i].result, slots[i].isError = result, result.IsError
 		cfg.emitter.Emit(core.AgentEvent{
 			Type:       core.AgentEventToolExecEnd,
@@ -1699,6 +1707,22 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		cfg.appendState(toolResultMessage(slots[i].tc, slots[i].result, slots[i].isError, rejected))
 	}
 	return batch.steers
+}
+
+const repeatedToolErrorWarning = "\n\nRepeated tool error.\nChange the arguments or use a different\napproach; the next identical tool-call\nbatch will stop this run."
+
+// decorateRepeatedError appends the warning, once per batch, to the final
+// error result of a non-exempt call that failed validation or actually ran.
+// Content is cloned so the tool's own result is left untouched.
+func decorateRepeatedError(pending *bool, slot *toolExecSlot, result core.Result) core.Result {
+	if !*pending || doomLoopExemptTools[slot.tc.ToolName] || !result.IsError || (!slot.validationError && !slot.executed) {
+		return result
+	}
+	*pending = false
+	content := make([]core.Content, len(result.Content), len(result.Content)+1)
+	copy(content, result.Content)
+	result.Content = append(content, core.TextContent(repeatedToolErrorWarning))
+	return result
 }
 
 func appendPermissionFeedback(result core.Result, feedback string) core.Result {
@@ -1772,16 +1796,17 @@ func admitToolStart(runCtx context.Context, cfg *loopConfig, batch *toolBatch) s
 // No lifecycle events — the caller controls event ordering.
 // Panics in Execute are recovered and returned as error results.
 func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (result core.Result, isError bool) {
-	return runToolInBatch(ctx, cfg, tc, &toolBatch{})
+	result, isError, _ = runToolInBatch(ctx, cfg, tc, &toolBatch{})
+	return result, isError
 }
 
-func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, batch *toolBatch) (result core.Result, isError bool) {
+func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, batch *toolBatch) (result core.Result, isError, executed bool) {
 	t, ok := cfg.tools.Get(tc.ToolName)
 	if !ok {
-		return core.ErrorResult(fmt.Sprintf("unknown tool: %s", tc.ToolName)), true
+		return core.ErrorResult(fmt.Sprintf("unknown tool: %s", tc.ToolName)), true, false
 	}
 	if t.Execute == nil {
-		return core.ErrorResult(fmt.Sprintf("tool %s has no execute function", tc.ToolName)), true
+		return core.ErrorResult(fmt.Sprintf("tool %s has no execute function", tc.ToolName)), true, false
 	}
 
 	defer func() {
@@ -1829,19 +1854,20 @@ func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, batch
 	// an earlier call holds the shell/path barrier, or during the preparation
 	// above. Many tools ignore ctx, so a call not yet started must not start.
 	if reason := admitToolStart(runCtx, cfg, batch); reason != "" {
-		return core.ErrorResult(reason), true
+		return core.ErrorResult(reason), true, false
 	}
+	executed = true
 	result, err := t.Execute(ctx, tc.Arguments, onUpdate)
 	if err != nil {
-		return core.ErrorResult(err.Error()), true
+		return core.ErrorResult(err.Error()), true, executed
 	}
-	return result, result.IsError
+	return result, result.IsError, executed
 }
 
 // endRejectedToolCall reports a rejected call (skipped, blocked, permission
 // denied, or failed validation) as ended and keeps its error result in the
 // slot, for executeTools to append in call order.
-func endRejectedToolCall(cfg *loopConfig, slot *toolExecSlot) {
+func endRejectedToolCall(cfg *loopConfig, slot *toolExecSlot, pendingWarning *bool) {
 	if !slot.startEmitted {
 		cfg.emitter.Emit(core.AgentEvent{
 			Type:       core.AgentEventToolExecStart,
@@ -1854,7 +1880,7 @@ func endRejectedToolCall(cfg *loopConfig, slot *toolExecSlot) {
 	if reason == "" {
 		reason = "Tool call rejected"
 	}
-	result := core.ErrorResult(reason)
+	result := decorateRepeatedError(pendingWarning, slot, core.ErrorResult(reason))
 	slot.result, slot.isError = result, true
 	cfg.emitter.Emit(core.AgentEvent{
 		Type:       core.AgentEventToolExecEnd,
