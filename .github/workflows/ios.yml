@@ -89,11 +89,17 @@ jobs:
           npx cap add ios --packagemanager cocoapods || test -f ios/App/Podfile
           sed -i '' "s/platform :ios, '15.0'/platform :ios, '15.5'/" ios/App/Podfile
           npx cap sync ios
+          # The committed Info.plist already carries the usage strings, and
+          # PlistBuddy's Add fails on an existing key: add only what is missing.
+          /usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' \
+            ios/App/App/Info.plist > /dev/null 2>&1 ||
           /usr/libexec/PlistBuddy -c \
             'Add :NSCameraUsageDescription string "moa uses the camera to scan a pairing code."' \
             ios/App/App/Info.plist
           # Dictation is the reason to want a microphone, and iOS will not ask
           # for one without a sentence to show the person being asked.
+          /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' \
+            ios/App/App/Info.plist > /dev/null 2>&1 ||
           /usr/libexec/PlistBuddy -c \
             'Add :NSMicrophoneUsageDescription string "moa uses the microphone to dictate messages."' \
             ios/App/App/Info.plist
