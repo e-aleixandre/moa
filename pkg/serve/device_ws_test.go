@@ -90,6 +90,10 @@ func expectDeviceWSClose(t *testing.T, conn *websocket.Conn, name string) { // e
 	if err == nil {
 		t.Fatalf("%s received data after device access ended: %s", name, value)
 	}
+	// A read that merely timed out is not a server-side close.
+	if ctx.Err() != nil {
+		t.Fatalf("%s was not closed within the deadline: %v", name, err)
+	}
 	if status := websocket.CloseStatus(err); status != -1 && status != websocket.StatusPolicyViolation { // existing server WebSocket library compatibility
 		t.Fatalf("%s close status = %v, want policy violation or transport closure; err=%v", name, status, err)
 	}
@@ -153,7 +157,11 @@ func TestDeviceCredentialExpiryClosesEveryWebSocketWhileIdle(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "devices.json")
-	credential := createStoredDeviceCredential(t, path, time.Now().Add(150*time.Millisecond))
+	// The deadline starts before the credential is saved and the connection is
+	// prepared, so it must leave room for both (under -race and a loaded host
+	// they have taken >150ms); the assertion is only that the socket, once
+	// established, is closed by the real expiry while idle.
+	credential := createStoredDeviceCredential(t, path, time.Now().Add(2*time.Second))
 	handler := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(path))
 	server := httptest.NewServer(handler)
 	defer server.Close()
