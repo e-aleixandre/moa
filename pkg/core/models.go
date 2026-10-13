@@ -27,7 +27,7 @@ var knownModels = map[string]Model{
 	},
 	"claude-opus-5-5": {
 		ID: "claude-opus-5-5", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Opus 5.5", MaxInput: 1_000_000, MaxOutput: 131072,
+		Name: "Claude Opus 5.5", MaxInput: 1_000_000, MaxOutput: 128_000,
 		Pricing: &Pricing{Input: 4, Output: 20, CacheRead: 0.2, CacheWrite: 5, CacheWrite1h: 8},
 	},
 	"claude-opus-5": {
@@ -42,7 +42,7 @@ var knownModels = map[string]Model{
 	},
 	"claude-sonnet-5-5": {
 		ID: "claude-sonnet-5-5", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Sonnet 5.5", MaxInput: 1_000_000, MaxOutput: 131072,
+		Name: "Claude Sonnet 5.5", MaxInput: 1_000_000, MaxOutput: 128_000,
 		Pricing: &Pricing{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5, CacheWrite1h: 4},
 	},
 	"claude-sonnet-5": {

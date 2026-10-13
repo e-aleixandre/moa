@@ -172,7 +172,7 @@ func TestOpus55Pricing(t *testing.T) {
 		t.Fatalf("opus alias = %+v, %v; want claude-opus-5-5", model, ok)
 	}
 	p := model.Pricing
-	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 ||
+	if model.MaxInput != 1_000_000 || model.MaxOutput != 128_000 ||
 		p.Input != 4 || p.Output != 20 || p.CacheRead != 0.2 ||
 		p.CacheWrite != 5 || p.CacheWrite1h != 8 {
 		t.Fatalf("Opus 5.5 definition = %+v, pricing = %+v", model, p)
@@ -188,7 +188,7 @@ func TestSonnet55Pricing(t *testing.T) {
 		t.Fatalf("sonnet alias = %+v, %v; want claude-sonnet-5-5", model, ok)
 	}
 	p := model.Pricing
-	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 ||
+	if model.MaxInput != 1_000_000 || model.MaxOutput != 128_000 ||
 		p.Input != 2 || p.Output != 10 || p.CacheRead != 0.1 ||
 		p.CacheWrite != 2.5 || p.CacheWrite1h != 4 {
 		t.Fatalf("Sonnet 5.5 definition = %+v, pricing = %+v", model, p)
@@ -923,5 +923,26 @@ func TestReviewHaikuOfficialOutputLimit(t *testing.T) {
 	requested := 200_000
 	if got := ResolveMaxOutputTokens(model, &requested); got != 128_000 {
 		t.Fatalf("max output for requested=200000 = %d, want 128000", got)
+	}
+}
+
+// Only models whose official guide states max_tokens "128,000" are pinned to
+// that figure. The other Anthropic overviews say "128K", which does not settle
+// 128,000 vs 131,072, so they keep their existing value until a source does.
+func TestAnthropicMaxOutputPinnedBySource(t *testing.T) {
+	for id, want := range map[string]int{
+		"claude-opus-5-5":   128_000, // prompting-claude-opus-5-5
+		"claude-sonnet-5-5": 128_000, // prompting-claude-sonnet-5-5
+		"claude-haiku-5-5":  128_000, // prompting-claude-haiku-5-5
+		"claude-fable-5-1":  131072,  // unverified: overview says only "128K"
+		"claude-fable-5":    131072,
+		"claude-opus-5":     131072,
+		"claude-opus-4-8":   131072,
+		"claude-sonnet-5":   131072,
+	} {
+		model, ok := ResolveModel(id)
+		if !ok || model.MaxOutput != want {
+			t.Errorf("%s MaxOutput = %d, want %d", id, model.MaxOutput, want)
+		}
 	}
 }
