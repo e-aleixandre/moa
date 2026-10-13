@@ -175,8 +175,10 @@ type Config struct {
 	// for a resumed child includes spend paid in earlier runs (and shrinks if
 	// compaction replaced old messages). runCostUSD is what THIS run spent,
 	// taken from the child agent's own run ledger; a ledger must add that,
-	// never a difference of cumulative figures.
-	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64)
+	// never a difference of cumulative figures. goalActivation is the goal
+	// activation of the run that launched or resumed the child (0 = none),
+	// the one its spend is charged to.
+	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64, goalActivation uint64)
 
 	// Title generation is deliberately asynchronous: starting work must never
 	// wait on a convenience model call. Resumed children keep their saved title.
@@ -240,6 +242,13 @@ type Config struct {
 
 // PersistedOutcome is a finished subagent's verdict as recovered from disk:
 // the header of its transcript, never its messages.
+// runOwner is what a child inherits from the run whose tool call launched or
+// resumed it.
+type runOwner struct {
+	budget         *agent.RunBudget
+	goalActivation uint64
+}
+
 type PersistedOutcome struct {
 	Task   string
 	Model  string
@@ -410,6 +419,10 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				agentsMD, skillsIndex, memoryIndex = cfg.Sources.Snapshot()
 			}
 			systemPrompt := buildSystemPrompt(promptBuilder, agentsMD, childReg.Specs(), cfg.WorkspaceRoot, skillsIndex, memoryIndex)
+			// Captured from the launching (or resuming) run's tool call: the
+			// child's context derives from AppCtx, so whatever it charges must
+			// travel explicitly.
+			owner := runOwner{budget: agent.RunBudgetFrom(ctx), goalActivation: bus.GoalActivationFrom(ctx)}
 
 			if getBool(params, "async") {
 				if err := ctx.Err(); err != nil {
@@ -439,7 +452,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				if len(seedMsgs) == 0 {
 					go generateTitle(cfg, jobs, job.id, task)
 				}
-				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true, resumedFrom)
+				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true, resumedFrom, owner)
 				started := "Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."
 				return taggedWithJob(core.TextResult(started), job.id), nil
 			}
@@ -468,7 +481,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if len(seedMsgs) == 0 {
 				go generateTitle(cfg, jobs, job.id, task)
 			}
-			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate, true, resumedFrom)
+			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate, true, resumedFrom, owner)
 			return awaitSyncResult(cfg, jobs, job, task, model)
 		},
 	}
@@ -888,7 +901,7 @@ func syncResult(cfg Config, jobs *jobStore, j *job, task string, model core.Mode
 // sync job may be promoted to async mid-run) decides how each streamed event
 // is forwarded, so there is a single subscription with no resubscription and
 // therefore no risk of losing or duplicating events across a promotion.
-func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result), startNotified bool, resumedFrom string) {
+func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, task string, seedMsgs []core.AgentMessage, onUpdate func(core.Result), startNotified bool, resumedFrom string, owner runOwner) {
 	defer j.cancel()
 	defer close(j.done)
 	var finalMsgs []core.AgentMessage
@@ -941,11 +954,11 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 				finishedAt = snap.FinishedAt
 				async = !snap.Sync
 			}
-			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs), runCost)
+			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs), runCost, owner.goalActivation)
 		}
 	}()
 
-	child, finishFingerprints, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, j.id, resumedFrom)
+	child, finishFingerprints, err := newChildAgent(cfg, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, j.id, resumedFrom, owner.budget)
 	if err != nil {
 		jobs.setFailed(j.id, err.Error())
 		return
@@ -1018,6 +1031,12 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		// same unwind.
 		if jobCtx.Err() == context.Canceled {
 			jobs.setCancelled(j.id)
+			return
+		}
+		if errors.Is(err, agent.ErrBudgetExceeded) {
+			// Like the turn limit: a guardrail of the run that launched it, with
+			// the transcript intact for a resume under a new run's budget.
+			jobs.setFailed(j.id, budgetLimitMessage(partialOutput(msgs), j.id, cfg.TranscriptLoader != nil))
 			return
 		}
 		if errors.Is(err, agent.ErrMaxTurnsExceeded) {
@@ -1103,6 +1122,20 @@ func turnLimitMessage(partial, jobID string, canResume bool) string {
 	guidance += " If it was not converging, split the task into smaller steps instead of retrying it whole."
 	if partial != "" {
 		return "Partial output before the turn limit:\n" + partial + "\n\n" + guidance
+	}
+	return guidance
+}
+
+// budgetLimitMessage is turnLimitMessage for a child stopped by the budget of
+// the run that launched it: the run's spend, its children's included, reached
+// its limit. A resume runs under the budget of the run that asks for it.
+func budgetLimitMessage(partial, jobID string, canResume bool) string {
+	guidance := "subagent stopped: the run that launched it used up its budget."
+	if canResume && jobID != "" {
+		guidance += fmt.Sprintf(" Its work so far is saved: resume it with resume=%q in a later run to continue.", jobID)
+	}
+	if partial != "" {
+		return "Partial output before the budget ran out:\n" + partial + "\n\n" + guidance
 	}
 	return guidance
 }
@@ -1281,8 +1314,9 @@ func childCost(model core.Model, msgs []core.AgentMessage) float64 {
 }
 
 // resolveChildGuardrails applies defaults for the child's own turn/duration
-// limits, independent of the parent's guardrails and with no budget ($)
-// limit (children never get a MaxBudget). A positive perCallDuration overrides
+// limits, independent of the parent's guardrails. There is no $ limit here:
+// children never get a MaxBudget of their own and spend from the launching
+// run's budget instead (see newChildAgent). A positive perCallDuration overrides
 // the configured/default wall-clock budget (from the tool's max_duration arg).
 func resolveChildGuardrails(cfg Config, perCallDuration time.Duration) (maxTurns int, maxRunDuration time.Duration) {
 	maxTurns = cfg.ChildMaxTurns
@@ -1300,7 +1334,7 @@ func resolveChildGuardrails(cfg Config, perCallDuration time.Duration) (maxTurns
 	return maxTurns, maxRunDuration
 }
 
-func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, jobID, resumedFrom string) (*agent.Agent, func(), error) {
+func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, jobID, resumedFrom string, parentBudget *agent.RunBudget) (*agent.Agent, func(), error) {
 	maxTurns, runDuration := resolveChildGuardrails(cfg, maxRunDuration)
 	// thinkingLevel is already the model's effort (resolveThinking mapped the
 	// selector position once); mapping it again would raise Sol/Astra a notch.
@@ -1331,8 +1365,11 @@ func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkin
 		// the parent's tool call, so the capability must travel through the
 		// child's own config or the child silently falls back to inline.
 		AttachmentScope: cfg.AttachmentScope,
-		// No MaxBudget: children have no $ guardrail of their own (they run under
-		// the parent's own budget, if any).
+		// No MaxBudget of its own: the child charges, and is stopped by, the
+		// budget of the run that launched or resumed it. A child whose model
+		// has no pricing charges nothing but still stops when the rest of the
+		// run exhausts it.
+		ParentBudget: parentBudget,
 		PermissionCheck: func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			if fn := currentPermissionCheck(cfg); fn != nil {
 				return fn(ctx, name, args)

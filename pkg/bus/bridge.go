@@ -1299,6 +1299,19 @@ type runGenKey struct{}
 // activation and never to a replacement.
 type goalActivationKey struct{}
 
+// GoalActivationFrom returns the goal activation a run context was launched
+// under, 0 when none. Work the run starts outside its own context (a
+// subagent) captures it here to charge its spend to that activation.
+func GoalActivationFrom(ctx context.Context) uint64 {
+	act, _ := ctx.Value(goalActivationKey{}).(uint64)
+	return act
+}
+
+// WithGoalActivation marks ctx as running under goal activation act.
+func WithGoalActivation(ctx context.Context, act uint64) context.Context {
+	return context.WithValue(ctx, goalActivationKey{}, act)
+}
+
 // runGenOf returns the bus generation of the run an event's origin context
 // descends from.
 func runGenOf(origin context.Context) (uint64, bool) {

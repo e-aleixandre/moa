@@ -84,6 +84,8 @@ func runAutoPrepare(ctx context.Context, cfg *loopConfig, slot *sessioncheckpoin
 	// Cost is real regardless of the outcome, and belongs to the parent run's
 	// budget: a preparation that overran must not buy the run extra headroom.
 	cfg.runCost += sub.runCost - cfg.runCost
+	// The preparation already charged its spend to the shared pool.
+	cfg.budgetCharged = sub.budgetCharged
 
 	return err
 }

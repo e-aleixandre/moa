@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/goal"
 )
 
 func approxEqual(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
@@ -221,3 +222,40 @@ func TestSessionCost_ResumedSubagentCountsOnlyNewSpend(t *testing.T) {
 }
 
 func ptr(v float64) *float64 { return &v }
+
+// A child's new spend is charged to the goal activation of the run that
+// launched it, never to an activation started after it.
+func TestSubagentSpendChargesLaunchingGoalActivation(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	g := goal.New()
+	sctx.Goal = g
+	RegisterHandlers(sctx)
+	if err := g.Enter(goal.Options{Objective: "x", StatePath: t.TempDir() + "/STATE.md"}); err != nil {
+		t.Fatal(err)
+	}
+	first := g.Activation()
+
+	b.Publish(SubagentEnded{SessionID: "test-session", JobID: "J1", CostUSD: 5, RunCostUSD: ptr(2.0), GoalActivation: first})
+	b.Drain(time.Second)
+	if got := g.Spent(); !approxEqual(got, 2) {
+		t.Fatalf("goal spent = %v, want 2 (the child's new spend)", got)
+	}
+
+	if err := g.Enter(goal.Options{Objective: "y", StatePath: t.TempDir() + "/STATE.md"}); err != nil {
+		t.Fatal(err)
+	}
+	second := g.Activation()
+	// An async child launched under the first activation ends late.
+	b.Publish(SubagentEnded{SessionID: "test-session", JobID: "J2", RunCostUSD: ptr(1.0), GoalActivation: first})
+	b.Publish(SubagentEnded{SessionID: "test-session", JobID: "J3", RunCostUSD: ptr(0.5), GoalActivation: second})
+	b.Drain(time.Second)
+	if got := g.Spent(); !approxEqual(got, 0.5) {
+		t.Fatalf("goal spent = %v, want 0.5 (only the child launched under the new activation)", got)
+	}
+	if total := querySessionCost(t, b); !approxEqual(total, 3.5) {
+		t.Fatalf("session cost = %v, want 3.5 (every child counts for the session)", total)
+	}
+}
+

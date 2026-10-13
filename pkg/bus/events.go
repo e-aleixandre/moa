@@ -688,6 +688,10 @@ type SubagentEnded struct {
 	// produced (nil when the publisher does not know: CostUSD is then taken as
 	// the run's spend).
 	RunCostUSD *float64
+	// GoalActivation is the goal activation of the run that launched (or
+	// resumed) the child, 0 when none: its new spend is charged to that
+	// activation, never to one started after it.
+	GoalActivation uint64
 }
 
 // NewCostUSD is the spend this run added: what a ledger should accumulate.

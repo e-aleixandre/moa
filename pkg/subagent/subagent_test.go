@@ -1469,7 +1469,7 @@ func TestNewChildAgentAppliesGuardrails(t *testing.T) {
 	cfg := Config{ChildMaxTurns: 7, ChildMaxRunDuration: 3 * time.Minute}
 	provider := newMockProvider(textResponse("hi"))
 	reg := core.NewRegistry()
-	child, _, err := newChildAgent(cfg, provider, core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", reg, "job-test", "")
+	child, _, err := newChildAgent(cfg, provider, core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", reg, "job-test", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1487,7 +1487,7 @@ func TestRunChildMarksFreshAndResumedParentTasks(t *testing.T) {
 		child, _, err := newChildAgent(
 			Config{}, provider, core.Model{ID: "m", Provider: "mock"},
 			"medium", 0, "sys", core.NewRegistry(), "job-test",
-			"",
+			"", nil,
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -2407,7 +2407,7 @@ func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
 			completeN++
 			mu.Unlock()
 		},
-		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64) {
+		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64, _ uint64) {
 			ended <- terminalOutcome{status: status, result: result, err: resultErr}
 		},
 	}
@@ -2482,7 +2482,7 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 			completeN++
 			mu.Unlock()
 		},
-		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64) {
+		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64, _ uint64) {
 			ended <- struct {
 				status string
 				result string

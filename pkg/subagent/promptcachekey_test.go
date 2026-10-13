@@ -21,7 +21,7 @@ func TestChildAgentUsesOwnCacheKey(t *testing.T) {
 	child, _, err := newChildAgent(
 		Config{PromptCacheKey: parentKey}, provider,
 		core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", core.NewRegistry(), "sa-999",
-		"",
+		"", nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func TestChildAgentWithoutParentKey(t *testing.T) {
 	child, _, err := newChildAgent(
 		Config{}, provider,
 		core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", core.NewRegistry(), "sa-999",
-		"",
+		"", nil,
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -16,7 +16,7 @@ func TestNewChildAgentInheritsCompactAt(t *testing.T) {
 		child, _, err := newChildAgent(
 			cfg, newMockProvider(textResponse("hi")), core.Model{ID: "m", Provider: "mock"},
 			"medium", 0, "sys", core.NewRegistry(), "job-test",
-			"",
+			"", nil,
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -42,7 +42,7 @@ func TestNewChildAgentInheritsCompactAt(t *testing.T) {
 		child, _, err := newChildAgent(
 			cfg, newMockProvider(textResponse("hi")), core.Model{ID: "m", Provider: "mock"},
 			"medium", 0, "sys", core.NewRegistry(), "job-test",
-			"",
+			"", nil,
 		)
 		if err != nil {
 			t.Fatal(err)

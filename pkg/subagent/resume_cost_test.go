@@ -51,7 +51,7 @@ func TestResumedChildReportsOnlyNewSpendToLedgers(t *testing.T) {
 			defer mu.Unlock()
 			return store, nil
 		},
-		OnChildEnd: func(jobID, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, costUSD, runCostUSD float64) {
+		OnChildEnd: func(jobID, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, costUSD, runCostUSD float64, _ uint64) {
 			mu.Lock()
 			if firstID == "" {
 				firstID = jobID
@@ -118,7 +118,7 @@ func TestResumedChildRunCostSurvivesCompaction(t *testing.T) {
 		ProviderFactory:    func(core.Model) (core.Provider, error) { return provider, nil },
 		InheritedCompactAt: func() int { return 50000 },
 		TranscriptLoader:   func(string) (ResumedTranscript, error) { return ResumedTranscript{Messages: seed}, nil },
-		OnChildEnd: func(_, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, costUSD, runCostUSD float64) {
+		OnChildEnd: func(_, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, costUSD, runCostUSD float64, _ uint64) {
 			mu.Lock()
 			cumulative, run, ended = costUSD, runCostUSD, true
 			mu.Unlock()
@@ -157,7 +157,7 @@ func TestChildRunCostDoesNotDependOnSlowSubscribers(t *testing.T) {
 		OnChildEvent: func(string, any) {
 			once.Do(func() { time.Sleep(2500 * time.Millisecond) })
 		},
-		OnChildEnd: func(_, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, _, runCostUSD float64) {
+		OnChildEnd: func(_, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, _, runCostUSD float64, _ uint64) {
 			mu.Lock()
 			run, ended = runCostUSD, true
 			mu.Unlock()

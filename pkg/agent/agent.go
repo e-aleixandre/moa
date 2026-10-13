@@ -494,6 +494,10 @@ type AgentConfig struct {
 	MaxRunDuration      time.Duration // Default: 30m. 0 = unlimited.
 	PauseQuotaBudget    bool          // child-only: preserve remaining active time during confirmed quota
 	MaxBudget           float64       // Max USD per run. 0 = unlimited. Requires Model.Pricing when > 0.
+	// ParentBudget is the budget of the run that launched this agent (see
+	// RunBudgetFrom). Its runs charge their spend to it and stop when it is
+	// exhausted, instead of keeping a budget of their own. nil = none.
+	ParentBudget *RunBudget
 
 	// Permission check called before each tool execution. May block waiting
 	// for user approval. Return nil to approve, blocking decision to reject.
@@ -2064,6 +2068,10 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// into the parent's index with no conversation left to resolve it. Writing
 	// nil is what SHADOWS the inherited value.
 	ctx = attachment.WithScope(ctx, a.config.AttachmentScope)
+	// One pool per run, published to the run's tools so a child it launches
+	// charges this run's limit (see RunBudget).
+	budget := runBudgetFor(ctx, a.config.ParentBudget, a.config.MaxBudget, budgetCap)
+	ctx = withRunBudget(ctx, budget)
 
 	a.steerMu.Lock()
 	// A pre-cancelled context is used to finish bookkeeping for an accepted
@@ -2115,7 +2123,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		}
 	}
 	cfg = &loopConfig{
-		budgetCap:           budgetCap,
+		budget:              budget,
 		quotaBudget:         quotaBudget,
 		background:          background,
 		agent:               a,
@@ -2134,7 +2142,6 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		fast:                a.Fast,
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
-		maxBudget:           a.config.MaxBudget,
 		convertToLLM:        a.config.ConvertToLLM,
 		materializeContent:  a.materializeContent(),
 		permissionCheck:     permissionCheck,
@@ -2335,6 +2342,11 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// not ctx.Err() here — by now cleanup/drain may have crossed our deadline.
 	a.lastRunTimedOut = timedOut
 	a.mu.Unlock()
+	// Spend settled after the last checkpoint still belongs to the pool, which
+	// outlives the run: its async children keep checking it.
+	if cfg.budget != nil {
+		cfg.budget.charge(cfg.chargeBudget())
+	}
 
 	return msgs, err
 }

@@ -129,7 +129,7 @@ func TestNewChildAgentWithoutSinkInstallsNothing(t *testing.T) {
 		seen = req.Options.OnRequestFingerprint != nil
 		return textResponse("ok")(ctx, req)
 	})
-	child, finish, err := newChildAgent(Config{}, provider, core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", core.NewRegistry(), "sa-1", "")
+	child, finish, err := newChildAgent(Config{}, provider, core.Model{ID: "m", Provider: "mock"}, "medium", 0, "sys", core.NewRegistry(), "sa-1", "", nil)
 	if err != nil || finish != nil {
 		t.Fatalf("finish=%v err=%v", finish != nil, err)
 	}
@@ -173,7 +173,7 @@ func (l *fingerprintLog) config(cfg Config) Config {
 	cfg.OnChildRequestFingerprint = func(jobID, resumedFrom string, count uint64, first core.RequestFingerprint, last *core.RequestFingerprint) {
 		l.add(fmt.Sprintf("fp:%d:last=%t", count, last != nil))
 	}
-	cfg.OnChildEnd = func(string, string, bool, string, string, string, time.Time, *core.Usage, float64, float64) { l.add("end") }
+	cfg.OnChildEnd = func(string, string, bool, string, string, string, time.Time, *core.Usage, float64, float64, uint64) { l.add("end") }
 	return cfg
 }
 

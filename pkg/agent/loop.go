@@ -132,10 +132,12 @@ type loopConfig struct {
 	// Guardrails
 	maxTurns            int
 	maxToolCallsPerTurn int
-	maxBudget           float64
-	// budgetCap narrows maxBudget with a live cap (Agent.SetBudgetCap).
-	budgetCap func(context.Context) (float64, bool)
-	runCost   float64 // accumulated USD cost this run
+	// budget is the pool this run charges and is limited by (its own, or the
+	// launching run's); nil when the run has no limit.
+	budget *RunBudget
+	// budgetCharged is the part of runCost already charged to budget.
+	budgetCharged float64
+	runCost       float64 // accumulated USD cost this run
 
 	// Custom conversion (nil = default)
 	convertToLLM func([]core.AgentMessage) []core.Message
@@ -399,8 +401,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 		// Budget pre-check: catches overage added by compaction in the previous iteration
 		// before we make another provider call.
-		if limit, over := cfg.overBudget(ctx); over {
-			loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
+		if spent, limit, over := cfg.overBudget(); over {
+			loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
 			return loopErr
 		}
 
@@ -613,8 +615,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 		// Compaction itself is a provider call and may have consumed the
 		// remaining budget. Check again before issuing the normal turn request.
-		if limit, over := cfg.overBudget(ctx); over {
-			loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
+		if spent, limit, over := cfg.overBudget(); over {
+			loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
 			return loopErr
 		}
 
@@ -975,8 +977,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			toolCalls := extractToolCalls(assistantMsg)
 			addRunCost(cfg, assistantMsg.Usage)
 			if assistantMsg.Usage != nil {
-				if limit, over := cfg.overBudget(ctx); over {
-					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
+				if spent, limit, over := cfg.overBudget(); over {
+					loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
 					inTurn = false
 					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 					return loopErr
@@ -1112,8 +1114,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// callers know when a run blew through the limit.
 			addRunCost(cfg, assistantMsg.Usage)
 			if assistantMsg.Usage != nil {
-				if limit, over := cfg.overBudget(ctx); over {
-					loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
+				if spent, limit, over := cfg.overBudget(); over {
+					loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
 					inTurn = false
 					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 					return loopErr
@@ -1164,8 +1166,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// tool_result messages for every tool_call (no dangling calls).
 		addRunCost(cfg, assistantMsg.Usage)
 		if assistantMsg.Usage != nil {
-			if limit, over := cfg.overBudget(ctx); over {
-				loopErr = &BudgetExceededError{Spent: cfg.runCost, Limit: limit}
+			if spent, limit, over := cfg.overBudget(); over {
+				loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
 				return loopErr
 			}
 		}
@@ -2044,14 +2046,24 @@ func humanizeTokens(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-// overBudget reports whether the run's cost exceeds its limit: MaxBudget,
-// narrowed by the live cap when one applies.
-func (cfg *loopConfig) overBudget(ctx context.Context) (float64, bool) {
-	limit, ok := cfg.maxBudget, cfg.maxBudget > 0
-	if cfg.budgetCap != nil {
-		if c, capped := cfg.budgetCap(ctx); capped && (!ok || c < limit) {
-			limit, ok = c, true
-		}
+// overBudget charges the run's new spend to its budget pool and reports
+// whether the pool, which includes what the run's children spent, exceeds the
+// limit. Charging here, at every checkpoint, keeps the pool current without
+// touching each place that adds to runCost.
+func (cfg *loopConfig) overBudget() (spent, limit float64, over bool) {
+	if cfg.budget == nil {
+		return cfg.runCost, 0, false
 	}
-	return limit, ok && cfg.runCost > limit
+	return cfg.budget.charge(cfg.chargeBudget())
+}
+
+// chargeBudget returns the spend not yet charged to the pool and marks it
+// charged.
+func (cfg *loopConfig) chargeBudget() float64 {
+	delta := cfg.runCost - cfg.budgetCharged
+	if delta <= 0 {
+		return 0
+	}
+	cfg.budgetCharged = cfg.runCost
+	return delta
 }

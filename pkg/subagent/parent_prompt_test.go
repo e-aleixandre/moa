@@ -148,7 +148,7 @@ func TestResumedParentTaskIsAnnounced(t *testing.T) {
 	child, _, err := newChildAgent(
 		Config{}, newMockProvider(textResponse("done")), core.Model{ID: "m", Provider: "mock"},
 		"medium", 0, "sys", core.NewRegistry(), "job-resume",
-		"",
+		"", nil,
 	)
 	if err != nil {
 		t.Fatal(err)

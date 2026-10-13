@@ -419,14 +419,14 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 				})
 			}
 		},
-		OnSubagentEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64) {
+		OnSubagentEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64, goalActivation uint64) {
 			if s := sess; s != nil {
 				// Persist first: a client that reconnects immediately after the
 				// terminal WS event must be able to restore this same outcome.
 				s.persistSubagentTranscript(jobID, status, result, resultErr, finishedAt, usage, costUSD)
 				s.runtime.Context().PublishSubagentEnded(bus.SubagentEnded{
 					SessionID: s.ID, JobID: jobID, Task: task, Async: async, Status: status,
-					Result: result, Error: resultErr, FinishedAt: finishedAt, Usage: usage, CostUSD: costUSD, RunCostUSD: &runCostUSD,
+					Result: result, Error: resultErr, FinishedAt: finishedAt, Usage: usage, CostUSD: costUSD, RunCostUSD: &runCostUSD, GoalActivation: goalActivation,
 				})
 			}
 		},

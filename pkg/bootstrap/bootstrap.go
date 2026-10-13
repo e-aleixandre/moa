@@ -153,7 +153,7 @@ type SessionConfig struct {
 	OnSubagentEvent      func(jobID string, inner any)
 	SaveSubagentWait     func(context.Context, string, []core.AgentMessage) error
 	OnSubagentUsage      func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
-	OnSubagentEnd        func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64)
+	OnSubagentEnd        func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64, goalActivation uint64)
 	SubagentTitleModel   core.Model
 	SubagentTitleEnabled bool
 	OnSubagentTitle      func(jobID, title string)

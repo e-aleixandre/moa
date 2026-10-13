@@ -455,6 +455,11 @@ func registerRunReactors(sctx *SessionContext) {
 		}
 		total := sctx.addSessionCost(delta)
 		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: delta})
+		// RunEnded.Cost charges the goal with the parent's own spend only; a
+		// child's goes to the activation of the run that launched it.
+		if sctx.Goal != nil && e.GoalActivation != 0 {
+			sctx.Goal.AddSpentForActivation(e.GoalActivation, delta)
+		}
 	})
 	// A background summary is charged once, here, at the rates that wrote it:
 	// never through RunEnded (its run may have ended long before) nor through
