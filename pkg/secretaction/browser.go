@@ -255,7 +255,7 @@ func validateCardText(label, alias string) error {
 		return errors.New("alias is too long (max 64)")
 	}
 	for _, c := range alias {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' && c != '.' {
 			return errors.New("alias may only contain letters, digits, '-', '_' and '.'")
 		}
 	}

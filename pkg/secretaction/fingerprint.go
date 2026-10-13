@@ -126,8 +126,8 @@ func shellWords(command string) []string {
 	}
 	for i := 0; i < len(command); i++ {
 		c := command[i]
-		switch {
-		case c == '\'' || c == '"':
+		switch c {
+		case '\'', '"':
 			end := strings.IndexByte(command[i+1:], c)
 			if end < 0 {
 				cur.WriteString(command[i+1:])
@@ -137,9 +137,9 @@ func shellWords(command string) []string {
 				i += end + 1
 			}
 			inWord = true
-		case c == ' ' || c == '\t' || c == '\n':
+		case ' ', '\t', '\n':
 			flush()
-		case c == ';' || c == '|' || c == '&' || c == '(' || c == ')':
+		case ';', '|', '&', '(', ')':
 			flush()
 			tok := string(c)
 			if (c == '&' || c == '|') && i+1 < len(command) && command[i+1] == c {
