@@ -45,7 +45,7 @@ final class PushNavigator {
             webView = new WeakReference<>(view);
             if (pendingPairing && view != null) {
                 pendingPairing = false;
-                view.loadUrl(PAIRING_URL);
+                MoaWebViewClient.loadLocalPage(view, PAIRING_URL);
             }
         });
     }
@@ -143,7 +143,7 @@ final class PushNavigator {
             pendingPairing = true;
             return;
         }
-        view.loadUrl(PAIRING_URL);
+        MoaWebViewClient.loadLocalPage(view, PAIRING_URL);
     }
 
     // UI thread. A cold-start tap is held until the paired page has loaded,

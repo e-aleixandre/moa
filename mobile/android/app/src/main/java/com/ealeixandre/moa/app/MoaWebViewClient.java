@@ -28,15 +28,29 @@ import com.getcapacitor.BridgeWebViewClient;
 // reloads a live page: that would discard an unsent composer draft.
 final class MoaWebViewClient extends BridgeWebViewClient {
 
-    private static final long[] RETRY_DELAYS = { 1_000, 2_000, 4_000, 8_000, 15_000 };
-
     private final Bridge bridge;
     private final DeviceCredentialStore credentials;
     private final Runnable beforeNavigation;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private String retryUrl;
-    private int retryIndex;
-    private Runnable retryTask;
+    private final TransportRetry retry = new TransportRetry(new TransportRetry.Host() {
+        @Override
+        public void postDelayed(Runnable task, long delayMillis) {
+            main.postDelayed(task, delayMillis);
+        }
+
+        @Override
+        public void removeCallbacks(Runnable task) {
+            main.removeCallbacks(task);
+        }
+
+        @Override
+        public boolean reload(String url) {
+            WebView view = bridge.getWebView();
+            if (view == null || !OriginPolicy.matchesPaired(url, credentials.pairedOrigin())) return false;
+            view.loadUrl(url);
+            return true;
+        }
+    });
     // WebView reports a failed load as an error followed by onPageFinished
     // for its error page; that "finish" is not a loaded paired page.
     private boolean loadFailed;
@@ -51,7 +65,7 @@ final class MoaWebViewClient extends BridgeWebViewClient {
             connectivity.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onAvailable(Network network) {
-                    main.post(() -> retryNow(true));
+                    main.post(() -> retry.now(true));
                 }
             });
         }
@@ -74,7 +88,7 @@ final class MoaWebViewClient extends BridgeWebViewClient {
                 return false;
             case LOCAL_PAGE:
                 beforeNavigation.run();
-                view.loadUrl(OriginPolicy.localPageFor(url));
+                loadLocalPage(view, OriginPolicy.localPageFor(url));
                 return true;
             case DEFAULT:
                 return super.shouldOverrideUrlLoading(view, request);
@@ -82,6 +96,14 @@ final class MoaWebViewClient extends BridgeWebViewClient {
                 openExternally(bridge.getContext(), request.getUrl());
                 return true;
         }
+    }
+
+    // Every load of the local (pairing) page the app makes itself goes
+    // through here, so a pending retry of the paired page cannot replace it.
+    static void loadLocalPage(WebView view, String url) {
+        WebViewClient client = view.getWebViewClient();
+        if (client instanceof MoaWebViewClient) ((MoaWebViewClient) client).retry.navigating(url);
+        view.loadUrl(url);
     }
 
     static void openExternally(Context context, Uri uri) {
@@ -107,10 +129,10 @@ final class MoaWebViewClient extends BridgeWebViewClient {
         if (loadFailed) return;
         String paired = credentials.pairedOrigin();
         if (OriginPolicy.matchesPaired(url, paired)) {
-            stopRetrying();
+            retry.stop();
             PushNavigator.get().navigationFinished(url, paired);
-        } else if (retryUrl != null && !OriginPolicy.matchesPaired(retryUrl, paired)) {
-            stopRetrying();
+        } else if (retry.url() != null && !OriginPolicy.matchesPaired(retry.url(), paired)) {
+            retry.stop();
         }
     }
 
@@ -121,11 +143,7 @@ final class MoaWebViewClient extends BridgeWebViewClient {
         if (!request.isForMainFrame() || !isTransportError(error.getErrorCode())) return;
         String url = request.getUrl().toString();
         if (!OriginPolicy.matchesPaired(url, credentials.pairedOrigin())) return;
-        if (!url.equals(retryUrl)) {
-            retryUrl = url;
-            retryIndex = 0;
-        }
-        scheduleRetry();
+        retry.failed(url);
     }
 
     static boolean isTransportError(int code) {
@@ -142,38 +160,6 @@ final class MoaWebViewClient extends BridgeWebViewClient {
 
     // From the activity's onResume: a failed load is retried at once.
     void onForeground() {
-        retryNow(true);
-    }
-
-    private void scheduleRetry() {
-        if (retryTask != null || retryUrl == null) return;
-        long delay = RETRY_DELAYS[Math.min(retryIndex, RETRY_DELAYS.length - 1)];
-        retryIndex = Math.min(retryIndex + 1, RETRY_DELAYS.length - 1);
-        retryTask = () -> {
-            retryTask = null;
-            retryNow(false);
-        };
-        main.postDelayed(retryTask, delay);
-    }
-
-    private void retryNow(boolean cancelScheduled) {
-        if (retryUrl == null) return;
-        if (cancelScheduled && retryTask != null) {
-            main.removeCallbacks(retryTask);
-            retryTask = null;
-        }
-        WebView view = bridge.getWebView();
-        if (view == null || !OriginPolicy.matchesPaired(retryUrl, credentials.pairedOrigin())) {
-            stopRetrying();
-            return;
-        }
-        view.loadUrl(retryUrl);
-    }
-
-    private void stopRetrying() {
-        if (retryTask != null) main.removeCallbacks(retryTask);
-        retryTask = null;
-        retryUrl = null;
-        retryIndex = 0;
+        retry.now(true);
     }
 }
