@@ -271,3 +271,12 @@ func TestOwnerPrefsAreCapped(t *testing.T) {
 		t.Fatalf("OWNER.md contributed %d bytes", got)
 	}
 }
+
+func TestRolePromptSaysWhenToSendToAnotherOwner(t *testing.T) {
+	prompt := RolePrompt("Winerim", "master", "")
+	for _, want := range []string{"action send", "judge it with your book", "action comment"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("role prompt lacks %q", want)
+		}
+	}
+}

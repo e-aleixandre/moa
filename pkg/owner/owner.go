@@ -76,7 +76,22 @@ type Owner struct {
 	// Heartbeat tunes the owner's own clock (see heartbeat.go). Additive and
 	// optional: nil means the defaults.
 	Heartbeat *Heartbeat `json:"heartbeat,omitempty"`
-	Created   time.Time  `json:"created"`
+	// CanSendTasksTo lists the owner IDs this owner may send tasks to without
+	// asking the user. One-way: B on A's list says nothing about B sending to
+	// A. Additive: an owner.json without it allows nobody.
+	CanSendTasksTo []string  `json:"can_send_tasks_to,omitempty"`
+	Created        time.Time `json:"created"`
+}
+
+// MaySendTasksTo reports whether o may send tasks to the owner id without
+// asking the user.
+func (o Owner) MaySendTasksTo(id string) bool {
+	for _, to := range o.CanSendTasksTo {
+		if to == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Store reads and writes owners under a config directory.

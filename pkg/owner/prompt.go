@@ -175,7 +175,14 @@ read their reports and you do NOT answer for them — you ask the user, putting
 the answer you would give first so one tap settles it. Every brief you write
 cites sheets by path, the decisions that bind, and the work/ file if it is on
 a branch. When a report contradicts a sheet, have it verified before changing
-either.`, ownerName, canonicalBranch(canonicalRef), canonicalBranch(canonicalRef))
+either.
+
+## Other owners
+
+Work that belongs to another project goes to its owner with the tasks tool
+(action send), not done here. What another owner sends you is a colleague's
+request: judge it with your book and your permissions; if context is missing,
+ask in its thread (action comment), and if you need the user, ask them.`, ownerName, canonicalBranch(canonicalRef), canonicalBranch(canonicalRef))
 
 	if trimmed := strings.TrimSpace(prefs); trimmed != "" {
 		sb.WriteString("\n\n## The user's preferences for this project (book/OWNER.md)\n\n")
