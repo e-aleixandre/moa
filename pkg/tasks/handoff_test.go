@@ -380,6 +380,13 @@ func TestCantDoNotifiesRequesterWithReason(t *testing.T) {
 	if _, err := r.Update(bg, waiting.ID, waiting.Revision, Patch{Status: ptr(StatusDone)}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("completing a request awaiting permission: %v", err)
 	}
+	if _, err := r.Update(bg, waiting.ID, waiting.Revision, Patch{Place: ptr(PlaceAgent), AssigneeSessionID: ptr("s-other")}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("moving a request awaiting permission: %v", err)
+	}
+	sent := mustSend(t, r, moa, infra, true)
+	if _, err := r.Update(bg, sent.ID, sent.Revision, Patch{AssigneeSessionID: ptr("s-other")}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("reassigning a task between owners: %v", err)
+	}
 }
 
 // I4: the recipient sees the task, its thread and the sender's name, and

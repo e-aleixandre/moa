@@ -474,6 +474,10 @@ func (r *Repo) userClosesHandoff(ctx context.Context, tx *sql.Tx, before, after 
 	}
 	statusChanged := after.Status != before.Status
 	switch {
+	case after.Place != before.Place || after.AssigneeSessionID != before.AssigneeSessionID:
+		// Moving it would drop the sender (the requester) or bypass the
+		// permission answer: a task between owners stays where it was sent.
+		return invalid("task #%d is a task between owners; it cannot be moved or reassigned", before.ID)
 	case h.State == HandoffAwaiting && statusChanged:
 		return invalid("task #%d waits for your permission: send it, always allow, or decline it", before.ID)
 	case h.State == HandoffDeclined && statusChanged:
