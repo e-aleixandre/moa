@@ -99,10 +99,49 @@ final class ShareClientTests: XCTestCase {
         catch { XCTAssertEqual(error as? ShareError, .unreachable) }
     }
 
-    func testServerErrorCarriesStatus() async {
-        StubProtocol.responses = [.success((500, ""))]
+    func testExplicitRejectionsOfSendCarryTheirStatus() async {
+        for status in [400, 413, 426] {
+            StubProtocol.responses = [.success((status, ""))]
+            do { try await client.send(to: "abc", bodyFile: body); XCTFail("expected error") }
+            catch { XCTAssertEqual(error as? ShareError, .server(status)) }
+        }
+    }
+
+    func testAnyOtherAnswerToSendIsUncertain() async {
+        for status in [301, 302, 307, 402, 409, 422, 429, 500, 502, 503, 504] {
+            StubProtocol.responses = [.success((status, ""))]
+            do { try await client.send(to: "abc", bodyFile: body); XCTFail("expected error") }
+            catch { XCTAssertEqual(error as? ShareError, .outcomeUnknown, "HTTP \(status)") }
+            XCTAssertEqual(StubProtocol.seen.count, 1)
+            StubProtocol.seen = []
+        }
+    }
+
+    func testEveryConnectionEstablishmentFailureIsSafe() async {
+        let codes: [URLError.Code] = [.cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+                                      .notConnectedToInternet, .secureConnectionFailed, .serverCertificateUntrusted]
+        for code in codes {
+            StubProtocol.responses = [.failure(URLError(code))]
+            do { try await client.send(to: "abc", bodyFile: body); XCTFail("expected error") }
+            catch { XCTAssertEqual(error as? ShareError, .unreachable, "\(code)") }
+        }
+    }
+
+    func testOtherTransportErrorsAreUncertain() async {
+        let errors: [Error] = [URLError(.networkConnectionLost), URLError(.cancelled), URLError(.fileDoesNotExist),
+                               NSError(domain: "fixture", code: 1)]
+        for error in errors {
+            StubProtocol.responses = [.failure(error)]
+            do { try await client.send(to: "abc", bodyFile: body); XCTFail("expected error") }
+            catch let caught { XCTAssertEqual(caught as? ShareError, .outcomeUnknown, "\(error)") }
+        }
+    }
+
+    func testResumeFailuresStaySafe() async {
+        StubProtocol.responses = [.success((404, "")), .success((503, ""))]
         do { try await client.send(to: "abc", bodyFile: body); XCTFail("expected error") }
-        catch { XCTAssertEqual(error as? ShareError, .server(500)) }
+        catch { XCTAssertEqual(error as? ShareError, .server(503)) }
+        XCTAssertEqual(StubProtocol.seen.count, 2)
     }
 
     func testDestinationsRequestAndDecode() async throws {

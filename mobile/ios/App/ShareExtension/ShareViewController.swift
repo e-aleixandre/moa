@@ -480,12 +480,17 @@ class ShareViewController: UIViewController {
     func saveForLater() {
         do {
             guard let transaction else { throw SharedInboxError.corrupt }
-            let note = (messageField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let text = [note, sharedText].filter { !$0.isEmpty }.joined(separator: "\n")
-            _ = try transaction.commit(title: sharedTitle, text: text, url: sharedURL)
+            // The composed text Send would upload, so both paths measure the same bytes.
+            let text = ShareText.message(
+                note: messageField.text ?? "", title: sharedTitle, text: sharedText, url: sharedURL)
+            _ = try transaction.commit(title: "", text: text, url: "")
             showMessage("Saved to moa", "Open moa to choose a conversation.", [("Done", { [weak self] in
                 self?.extensionContext?.completeRequest(returningItems: nil)
             })])
+        } catch SharedInboxError.textTooLarge where !destinations.isEmpty {
+            showMessage("Too much text", "Shorten your message, then try again.", [
+                ("Back", { [weak self] in self?.showPicker() }),
+                ("Close", { [weak self] in self?.close() })])
         } catch {
             show(error: error)
         }

@@ -100,20 +100,21 @@ struct ShareClient {
                 request.httpBody = Data("{}".utf8)
                 (_, response) = try await session.data(for: request)
             }
-        } catch let error as URLError {
-            switch error.code {
-            case .cannotFindHost, .cannotConnectToHost, .notConnectedToInternet, .dnsLookupFailed,
-                 .secureConnectionFailed, .serverCertificateUntrusted:
-                throw ShareError.unreachable
-            default:
-                throw ShareError.outcomeUnknown
-            }
+        } catch let error as URLError where Self.connectionNeverEstablished.contains(error.code) {
+            throw ShareError.unreachable
         } catch {
-            // Any other failure after URLSession took the request may have reached the server.
+            // Anything else after the request left may have reached the server.
             throw ShareError.outcomeUnknown
         }
-        try check(response)
+        try check(response, sending: action == "send")
     }
+
+    // The only failures that prove the server did not process a send.
+    private static let connectionNeverEstablished: Set<URLError.Code> = [
+        .cannotFindHost, .cannotConnectToHost, .notConnectedToInternet, .dnsLookupFailed,
+        .secureConnectionFailed, .serverCertificateUntrusted
+    ]
+    private static let explicitRejections: Set<Int> = [400, 413, 426]
 
     private func makeRequest(_ path: String, method: String) -> URLRequest {
         var request = URLRequest(url: origin.appendingPathComponent(path))
@@ -123,13 +124,19 @@ struct ShareClient {
         return request
     }
 
-    private func check(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else { throw ShareError.invalidResponse }
+    // With `sending`, only an explicit rejection proves nothing was posted; any other
+    // answer (5xx, 3xx, odd 4xx, non-HTTP) may follow an accepted message.
+    private func check(_ response: URLResponse, sending: Bool = false) throws {
+        guard let http = response as? HTTPURLResponse else {
+            throw sending ? ShareError.outcomeUnknown : ShareError.invalidResponse
+        }
         switch http.statusCode {
         case 200..<300: return
         case 401, 403: throw ShareError.notPaired
         case 404: throw ShareError.notFound
-        default: throw ShareError.server(http.statusCode)
+        default:
+            if sending && !Self.explicitRejections.contains(http.statusCode) { throw ShareError.outcomeUnknown }
+            throw ShareError.server(http.statusCode)
         }
     }
 }

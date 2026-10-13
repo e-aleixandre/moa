@@ -117,8 +117,8 @@ If the server cannot be listed or reached, or the iPhone is not paired, the
 sheet says what to do and offers **Save for later**. That copies the share into
 an App Group queue; opening moa then presents the same conversation picker used
 by the web share target. Choosing a conversation puts the text and files in its
-composer; it never sends automatically. A send whose outcome is unknown (for
-example a timeout after the upload) is neither retried nor saved: the sheet says to open
+composer; it never sends automatically. A send whose outcome is unknown (a timeout, a lost
+connection, or any answer other than an explicit 400/401/403/404/413/426) is neither retried nor saved: the sheet says to open
 moa and check the conversation. A note typed in the
 sheet is kept when saving, and text over 256 KB is refused before any upload.
 

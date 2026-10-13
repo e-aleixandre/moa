@@ -4,7 +4,7 @@ import UIKit
 // Drives the real ShareViewController with a stubbed transport. Adapted from the
 // independent review (review-b1cda28d) whose RED cases it keeps.
 private final class ShareTransport: URLProtocol {
-    enum Mode: Equatable { case http(Int), ok, acceptedTimeout, acceptedConnectionLoss, offline, pending, oldServer404 }
+    enum Mode: Equatable { case http(Int), nonHTTP, otherError, ok, acceptedTimeout, acceptedConnectionLoss, offline, pending, oldServer404 }
     struct Record { let method: String; let path: String; let body: Data }
     private static let lock = NSLock()
     nonisolated(unsafe) private static var mode: Mode = .ok
@@ -38,7 +38,7 @@ private final class ShareTransport: URLProtocol {
         Self.lock.lock()
         let mode = Self.mode
         Self.records.append(Record(method: request.httpMethod ?? "", path: request.url!.path, body: body))
-        if mode == .ok || mode == .acceptedTimeout || mode == .acceptedConnectionLoss {
+        if mode != .offline && mode != .pending && mode != .oldServer404 {
             Self.accepted += 1
         }
         if mode == .pending { Self.pending.append(self) }
@@ -51,6 +51,10 @@ private final class ShareTransport: URLProtocol {
         case .pending: break
         case .oldServer404: finish(status: 404)
         case .http(let status): finish(status: status)
+        case .nonHTTP:
+            client?.urlProtocol(self, didReceive: URLResponse(url: request.url!, mimeType: nil, expectedContentLength: 0, textEncodingName: nil), cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+        case .otherError: client?.urlProtocol(self, didFailWithError: NSError(domain: "fixture", code: 1))
         }
     }
     func finish(status: Int) {
@@ -150,7 +154,7 @@ final class ShareControllerTests: XCTestCase {
     // MARK: Certain vs uncertain failures
 
     @MainActor func testUncertainSendOffersOnlyCloseAndSavesNothing() async throws {
-        for mode in [ShareTransport.Mode.acceptedTimeout, .acceptedConnectionLoss] {
+        for mode in [ShareTransport.Mode.acceptedTimeout, .acceptedConnectionLoss, .nonHTTP, .otherError] {
             ShareTransport.reset(mode)
             let controller = try controller()
             controller.sendTapped()
@@ -165,8 +169,23 @@ final class ShareControllerTests: XCTestCase {
         }
     }
 
+    @MainActor func testAnswersAfterThePostAreUncertainEvenWhenTheServerAccepted() async throws {
+        // 502 is the case the reviewer reproduced: the upstream accepted, the proxy answered 502.
+        for status in [301, 302, 307, 402, 409, 422, 500, 502, 503, 504] {
+            ShareTransport.reset(.http(status))
+            let controller = try controller(note: "typed note")
+            controller.sendTapped()
+            try await waitFor { !controller.sending }
+            XCTAssertEqual(ShareTransport.seen.count, 1, "HTTP \(status)")
+            XCTAssertNil(button(controller, "Save for later"), "HTTP \(status)")
+            XCTAssertNil(button(controller, "Try again"), "HTTP \(status)")
+            XCTAssertNotNil(button(controller, "Close"))
+            XCTAssertTrue(try manifests().isEmpty)
+        }
+    }
+
     @MainActor func testCertainFailuresOfferSaveForLater() async throws {
-        let modes: [ShareTransport.Mode] = [.offline, .http(401), .http(403), .http(400), .http(422), .http(500), .http(503)]
+        let modes: [ShareTransport.Mode] = [.offline, .http(401), .http(403), .http(400), .http(413)]
         for mode in modes {
             ShareTransport.reset(mode)
             let controller = try controller()
@@ -279,12 +298,74 @@ final class ShareControllerTests: XCTestCase {
         XCTAssertEqual(ShareTransport.seen.count, 0)
     }
 
-    @MainActor func testSaveWritesWithinTheSameLimit() throws {
-        // What Save writes is bounded by the queue's own check on the manifest text.
-        let controller = try controller(note: "n", text: String(repeating: "x", count: SharedInbox.maximumTextBytes - 1))
+    @MainActor func testSavePersistsTheComposedTextOnly() throws {
+        let controller = try controller(note: "n", text: "body", title: "Page", url: "https://a.example")
+        controller.saveForLater()
+        let manifest = try XCTUnwrap(manifests().first)
+        XCTAssertEqual(manifest.text, ShareText.message(note: "n", title: "Page", text: "body", url: "https://a.example"))
+        XCTAssertEqual(manifest.title, "")
+        XCTAssertEqual(manifest.url, "")
+    }
+
+    @MainActor func testSaveAndSendAgreeByteForByteAtTheBoundary() async throws {
+        // note "n" + title "t" + 262141 bytes: composed 262145, one over for both paths.
+        let over = try controller(note: "n", text: String(repeating: "x", count: SharedInbox.maximumTextBytes - 3), title: "t")
+        XCTAssertEqual(ShareText.message(note: "n", title: "t", text: over.sharedText, url: "").utf8.count, SharedInbox.maximumTextBytes + 1)
+        over.sendTapped()
+        try await Task.sleep(nanoseconds: 250_000_000)
+        XCTAssertEqual(ShareTransport.seen.count, 0)
+        over.saveForLater()
+        XCTAssertTrue(try manifests().isEmpty)
+
+        // One byte shorter: exactly the limit, accepted by Save and Send alike.
+        let exact = try controller(note: "n", text: String(repeating: "x", count: SharedInbox.maximumTextBytes - 4), title: "t")
+        exact.saveForLater()
+        XCTAssertEqual(try manifests().first?.text.utf8.count, SharedInbox.maximumTextBytes)
+        let sender = try controller(note: "n", text: String(repeating: "x", count: SharedInbox.maximumTextBytes - 4), title: "t")
+        sender.sendTapped()
+        try await waitFor { sender.context.completions == 1 }
+        XCTAssertEqual(try uploadedText()?.utf8.count, SharedInbox.maximumTextBytes)
+    }
+
+    @MainActor func testUTF8NoteCountsInBytes() async throws {
+        let over = try controller(note: "é", text: String(repeating: "x", count: SharedInbox.maximumTextBytes - 2))
+        over.sendTapped()
+        try await Task.sleep(nanoseconds: 250_000_000)
+        XCTAssertEqual(ShareTransport.seen.count, 0)
+        let exact = try controller(note: "é", text: String(repeating: "x", count: SharedInbox.maximumTextBytes - 3))
+        exact.sendTapped()
+        try await waitFor { exact.context.completions == 1 }
+        XCTAssertEqual(try uploadedText()?.utf8.count, SharedInbox.maximumTextBytes)
+    }
+
+    @MainActor func testSaveTooLargeGoesBackToEditingWithTheNoteIntact() throws {
+        let controller = try controller(note: "keep me", text: String(repeating: "x", count: SharedInbox.maximumTextBytes))
         controller.saveForLater()
         XCTAssertTrue(try manifests().isEmpty)
+        XCTAssertNotNil(button(controller, "Back"))
         XCTAssertNil(button(controller, "Save for later"))
+        XCTAssertTrue(press(controller, "Back"))
+        XCTAssertFalse(controller.tableView.isHidden)
+        XCTAssertEqual(controller.messageField.text, "keep me")
+    }
+
+    @MainActor func testSaveTooLargeWithoutAPickerOffersOnlyClose() throws {
+        let controller = try controller(text: String(repeating: "x", count: SharedInbox.maximumTextBytes + 1), emptyDestinations: true)
+        controller.saveForLater()
+        XCTAssertNil(button(controller, "Back"))
+        XCTAssertNotNil(button(controller, "Close"))
+    }
+
+    @MainActor func testPostFailureBeforeTheRequestIsSafeToSave() async throws {
+        let controller = try controller()
+        let source = root.appendingPathComponent("source.bin")
+        try Data([1, 2, 3]).write(to: source)
+        try controller.transaction?.addFile(at: source, name: "source.bin", mime: "application/octet-stream")
+        try FileManager.default.removeItem(at: try XCTUnwrap(controller.transaction?.stagedFiles.first?.url))
+        controller.sendTapped()
+        try await waitFor { !controller.sending }
+        XCTAssertEqual(ShareTransport.seen.count, 0)
+        XCTAssertNotNil(button(controller, "Save for later"))
     }
 
     // MARK: Kept from the review (already green)
