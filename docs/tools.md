@@ -381,7 +381,9 @@ and Stop cancels it.
   Nothing is kept for the next command.
 - The command runs with moa's own environment, not with variables exported by
   earlier `bash` calls.
-- Values with line breaks or other control characters are refused.
+- Values with line breaks or other control characters are refused. A terminal
+  line holds at most 4,095 bytes, so a longer value reaches the program cut
+  short.
 - The value does not go to the chat, the transcript, the model or any event.
   Where the command's output contains it (for example an echo), it shows as
   `[secret]`.
@@ -401,29 +403,33 @@ out of every place, and these limits are known and accepted:
   the password and report any origin, including one added for a single
   Automation API run. Its answers are what the card shows.
 - **Frames.** The origin is checked again just before typing, but against the
-  top-level page, not the frame the field is in, and only once. A field inside
-  an iframe that navigated to another site after the card appeared would still
-  be filled.
+  top-level page, not the frame the field is in, and only once before the
+  first field. A field inside an iframe that navigated to another site after
+  the card appeared would still be filled, and so would a page that navigates
+  between that check and the typing, or between two fields.
 - **Files on disk.** Playwright can write a snapshot file for the fill itself
   (for example under its `--output-dir`), and that file contains the field's
-  value. moa does not delete or redact it. Images or audio returned by the
-  server are stored or converted before the redaction runs.
-- **Escaping.** A password with characters that Playwright escapes in its own
-  way (for example a backspace) can appear escaped in the fill response, where
-  the redaction does not recognise it.
+  value. moa does not delete or redact it. Images returned by the server are
+  stored before the redaction runs, and audio or other content converted to
+  text can reach the chat and the model in an encoded form.
+- **Escaping.** A password that mixes characters Playwright escapes in its own
+  way (for example a backspace together with an apostrophe) can appear escaped
+  in the fill response, where the redaction does not recognise it.
 - **Later snapshots.** Any later look at the page with the field still filled
   (`browser_snapshot`, `browser_evaluate`, a screenshot) can show the value in
   the chat and send it to the model.
 
 ### Saving on the iPhone
 
-In the iOS app the card offers **Save on this iPhone**. The value is kept in this
+In the iOS app the card offers **Save on this iPhone** for fields the agent
+gave an `alias`. The value is kept in this
 iPhone's Keychain behind Face ID, only for the paired server, and is not synced.
 The next time the same exact action is requested, **Allow with Face ID** uses it
 in one tap. If the action is different, the card says so and the saved value has
 to be filled with Face ID before allowing. For a command, the same action means
 the same command, directory and host. For a page, it means the same origin,
-field labels and types, and the same submit. Settings › Saved passwords lists
-the saved values and forgets them. Unpairing forgets them all. Each use sends
+the same fields in the same order (label, type and kind), and the same submit. Settings › Saved passwords lists
+the saved values and forgets them. Unpairing forgets them all; if the Keychain cannot delete them, the app says
+so and asks to unpair again. Each use sends
 the value to the server, just like typing it.
 
