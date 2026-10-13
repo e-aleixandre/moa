@@ -319,7 +319,9 @@ func registerHistoryHandlers(sctx *SessionContext) {
 		if sourceModel.Provider != "" {
 			targetModelSpec = sourceModel.Provider + "/" + sourceModel.ID
 		}
-		targetThinking := sctx.Agent.ThinkingLevel()
+		// The running level is the source model's effort; the destination is
+		// created from a selector position.
+		targetThinking := core.ThinkingPosition(sourceModel, sctx.Agent.ThinkingLevel())
 		if cmd.Options.ModelSpec != "" {
 			targetModelSpec = cmd.Options.ModelSpec
 		}

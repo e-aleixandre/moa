@@ -60,3 +60,41 @@ func TestSwitchModel_SolEffortCarriesPosition(t *testing.T) {
 		t.Fatalf("effort after switch = %q, want xhigh", got)
 	}
 }
+
+// /handoff inherits the source's selector position, not its effort word:
+// Sol high runs at xhigh and must reach the destination as Sol xhigh (not max)
+// or, on a model without the shift, as high.
+func TestHandoff_SolEffortCarriesPosition(t *testing.T) {
+	for _, tc := range []struct{ command, want string }{
+		{"/handoff", "xhigh"},
+		{"/handoff --model claude-opus-5", "high"},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			dir := t.TempDir()
+			provider := newMockProvider(simpleResponseHandler("## Goal\nContinue"), simpleResponseHandler("resumed"))
+			mgr := newTestManagerWithRoot(t, ctx, provider, dir)
+			sess, err := mgr.CreateSession(CreateOpts{CWD: dir, Model: "gpt-6.1-sol", Thinking: "high"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := mgr.ExecCommand(sess.ID, tc.command, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !res.OK || res.NewSessionID == "" {
+				t.Fatalf("result = %#v", res)
+			}
+			dest, ok := mgr.Get(res.NewSessionID)
+			if !ok {
+				t.Fatal("handoff session was not registered")
+			}
+			got, _ := bus.QueryTyped[bus.GetThinkingLevel, string](dest.runtime.Bus, bus.GetThinkingLevel{})
+			if got != tc.want {
+				t.Fatalf("destination effort = %q, want %q", got, tc.want)
+			}
+			dest.runtime.WaitSettled(context.Background())
+		})
+	}
+}
