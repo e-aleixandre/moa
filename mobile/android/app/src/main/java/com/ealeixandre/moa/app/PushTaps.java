@@ -6,10 +6,10 @@ import java.util.concurrent.Executor;
 // Authenticating a notification tap, off the UI thread. Reading the current
 // key may forget an expired pairing, and forgetting waits on the push
 // lifecycle, which an incoming message holds around posting its notification
-// (PushLifecycle.publish). Only a destination still valid for the same push
-// generation and pairing goes back to the UI thread; a tap whose credential
-// has expired always ends on the local pairing page instead. Pure Java so the
-// JVM tests can drive it.
+// (PushLifecycle.publish). The destination goes back to the UI thread with
+// the generation it was authenticated in, for NavigationGate to fence; a tap
+// whose credential has expired always ends on the local pairing page
+// instead. Pure Java so the JVM tests can drive it.
 final class PushTaps {
 
     // The credential store could not be read.
@@ -28,17 +28,14 @@ final class PushTaps {
         // May load the store: background only.
         String pairedOrigin();
 
-        // From memory only, for the UI thread: the origin last loaded or
-        // saved, null when unpaired or not loaded yet.
-        String knownOrigin();
-
         // From memory only: the credential last loaded or saved exists and
         // has not expired.
         boolean knownValid();
     }
 
     interface Navigation {
-        void open(PushEnvelope.Destination destination, String pairedOrigin);
+        // `generation`: the push generation the destination was authenticated in.
+        void open(PushEnvelope.Destination destination, String pairedOrigin, int generation);
 
         // Shows the local pairing page.
         void pair();
@@ -53,8 +50,7 @@ final class PushTaps {
     }
 
     // Expiry is checked again at tap time: an envelope that is no longer
-    // valid leads home, like the fallback it was shown as. A forget or
-    // pairing change after the generation is read drops the tap.
+    // valid leads home, like the fallback it was shown as.
     void handle(Map<String, String> envelope, Source source, Navigation navigation) {
         background.execute(() -> {
             int generation = source.generation();
@@ -64,7 +60,19 @@ final class PushTaps {
             // if the forget above ended the generation, since that forget is
             // what this outcome is about. Checked after currentKeys: expiry
             // only moves forward, so a credential valid here was valid there.
-            if (expired(source)) {
+            boolean unreadable = false;
+            boolean expired;
+            try {
+                expired = source.credentialExpired();
+            } catch (Unreadable e) {
+                // Fails closed: a read error is no proof of a valid
+                // credential. The expiry last seen in memory decides; with
+                // none, pairing. Even valid in memory, the keys read before
+                // the error are not trusted with the envelope: HOME.
+                unreadable = true;
+                expired = !source.knownValid();
+            }
+            if (expired) {
                 main.execute(() -> {
                     // A pairing completed since the check (a claim saved a
                     // valid credential) wins. The generation is not compared:
@@ -74,25 +82,10 @@ final class PushTaps {
                 });
                 return;
             }
-            PushEnvelope.Content content = PushEnvelope.open(envelope, keys, System.currentTimeMillis() / 1000);
+            PushEnvelope.Content content = unreadable ? null : PushEnvelope.open(envelope, keys, System.currentTimeMillis() / 1000);
             PushEnvelope.Destination destination = content == null ? PushEnvelope.Destination.HOME : content.destination;
             String origin = source.pairedOrigin();
-            if (origin == null) return;
-            // Memory only on the main thread: the store is never read there.
-            main.execute(() -> {
-                if (source.generation() != generation || !origin.equals(source.knownOrigin())) return;
-                navigation.open(destination, origin);
-            });
+            main.execute(() -> navigation.open(destination, origin, generation));
         });
-    }
-
-    // Fails closed: a read error is no proof of a valid credential. The
-    // expiry last seen in memory decides; with none, pairing.
-    private static boolean expired(Source source) {
-        try {
-            return source.credentialExpired();
-        } catch (Unreadable e) {
-            return !source.knownValid();
-        }
     }
 }

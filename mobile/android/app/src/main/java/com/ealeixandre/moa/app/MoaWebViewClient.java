@@ -46,7 +46,7 @@ final class MoaWebViewClient extends BridgeWebViewClient {
         @Override
         public boolean reload(String url) {
             WebView view = bridge.getWebView();
-            if (view == null || !OriginPolicy.matchesPaired(url, credentials.pairedOrigin())) return false;
+            if (view == null || !PushNavigator.get().admitReload(url)) return false;
             view.loadUrl(url);
             return true;
         }
@@ -130,7 +130,7 @@ final class MoaWebViewClient extends BridgeWebViewClient {
         String paired = credentials.pairedOrigin();
         if (OriginPolicy.matchesPaired(url, paired)) {
             retry.stop();
-            PushNavigator.get().navigationFinished(url, paired);
+            PushNavigator.get().navigationFinished();
         } else if (retry.url() != null && !OriginPolicy.matchesPaired(retry.url(), paired)) {
             retry.stop();
         }

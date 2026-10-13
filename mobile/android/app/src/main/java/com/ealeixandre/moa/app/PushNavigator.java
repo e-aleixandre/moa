@@ -28,8 +28,9 @@ final class PushNavigator {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final PushTaps taps = new PushTaps(Executors.newSingleThreadExecutor(), main::post);
     private WeakReference<WebView> webView = new WeakReference<>(null);
-    private String pendingOrigin;
+    private NavigationGate gate;
     private String pendingUrl;
+    private int pendingGeneration;
     private boolean pendingPairing;
     private volatile String visibleSession;
     private volatile boolean foreground;
@@ -40,7 +41,9 @@ final class PushNavigator {
 
     private PushNavigator() {}
 
-    void setWebView(WebView view) {
+    // UI thread, from MainActivity.load.
+    void setWebView(WebView view, Context context) {
+        gateFor(context);
         main.post(() -> {
             webView = new WeakReference<>(view);
             if (pendingPairing && view != null) {
@@ -77,8 +80,47 @@ final class PushNavigator {
         return envelope;
     }
 
+    // UI thread. Both are per-process singletons, so the first caller's
+    // context builds the gate for every later one.
+    private void gateFor(Context context) {
+        if (gate != null) return;
+        NativePushRegistration registration = NativePushRegistration.get(context);
+        DeviceCredentialStore credentials = DeviceCredentialStore.get(context);
+        gate = new NavigationGate(new NavigationGate.State() {
+            @Override
+            public boolean knownValid() {
+                return credentials.knownValid();
+            }
+
+            @Override
+            public String knownOrigin() {
+                return credentials.knownOrigin();
+            }
+
+            @Override
+            public int generation() {
+                return registration.generation();
+            }
+        });
+    }
+
+    // UI thread. The one check every private navigation the app starts
+    // passes right before it (NavigationGate). `generation` is the push
+    // generation the navigation was decided in.
+    boolean admit(String url, int generation) {
+        return gate != null && gate.admit(url, generation, this::showPairing);
+    }
+
+    // UI thread. A reload of a page already on the paired origin (transport
+    // retry): not decided in any push generation, so only the credential
+    // and the origin are fenced.
+    boolean admitReload(String url) {
+        return gate != null && gate.admit(url, gate.generation(), this::showPairing);
+    }
+
     // UI thread; the authentication runs in PushTaps, off it.
     void handleTap(Context context, Map<String, String> envelope) {
+        gateFor(context);
         NativePushRegistration registration = NativePushRegistration.get(context);
         DeviceCredentialStore credentials = DeviceCredentialStore.get(context);
         taps.handle(envelope, new PushTaps.Source() {
@@ -108,18 +150,13 @@ final class PushNavigator {
             }
 
             @Override
-            public String knownOrigin() {
-                return credentials.knownOrigin();
-            }
-
-            @Override
             public boolean knownValid() {
                 return credentials.knownValid();
             }
         }, new PushTaps.Navigation() {
             @Override
-            public void open(PushEnvelope.Destination destination, String pairedOrigin) {
-                PushNavigator.this.open(destination, pairedOrigin);
+            public void open(PushEnvelope.Destination destination, String pairedOrigin, int generation) {
+                PushNavigator.this.open(destination, pairedOrigin, generation);
             }
 
             @Override
@@ -137,7 +174,6 @@ final class PushNavigator {
     // On a cold start the WebView may not be registered yet: load it then.
     private void showPairing() {
         pendingUrl = null;
-        pendingOrigin = null;
         WebView view = webView.get();
         if (view == null) {
             pendingPairing = true;
@@ -146,46 +182,45 @@ final class PushNavigator {
         MoaWebViewClient.loadLocalPage(view, PAIRING_URL);
     }
 
-    // UI thread. A cold-start tap is held until the paired page has loaded,
-    // which the local page only allows after `authorize` succeeded.
-    void navigationFinished(String url, String pairedOrigin) {
+    // UI thread, once a paired page has loaded. A cold-start tap is held
+    // until then, which the local page only allows after `authorize`
+    // succeeded.
+    void navigationFinished() {
         WebView view = webView.get();
         if (pendingUrl == null || view == null) return;
-        if (!pendingOrigin.equals(pairedOrigin) || !OriginPolicy.matchesPaired(url, pairedOrigin)) return;
         String next = pendingUrl;
         pendingUrl = null;
-        pendingOrigin = null;
-        view.loadUrl(next);
+        if (admit(next, pendingGeneration)) view.loadUrl(next);
     }
 
     void reset() {
         visibleSession = null;
-        main.post(() -> {
-            pendingUrl = null;
-            pendingOrigin = null;
-        });
+        main.post(() -> pendingUrl = null);
     }
 
-    private void open(PushEnvelope.Destination destination, String pairedOrigin) {
-        String origin = OriginPolicy.normalizeOrigin(pairedOrigin);
-        String url = destination.url(origin);
-        if (origin == null || url == null || !OriginPolicy.matchesPaired(url, origin)) return;
+    private void open(PushEnvelope.Destination destination, String pairedOrigin, int generation) {
+        String url = destination.url(pairedOrigin);
+        if (!admit(url, generation)) return;
         WebView view = webView.get();
-        if (view == null || view.getProgress() < 100 || !OriginPolicy.matchesPaired(view.getUrl(), origin)) {
+        if (view == null || view.getProgress() < 100 || !OriginPolicy.matchesPaired(view.getUrl(), pairedOrigin)) {
             // Not showing the paired page yet (cold start, pairing, loading):
             // hold the deep link until it has loaded.
-            pendingOrigin = origin;
             pendingUrl = url;
+            pendingGeneration = generation;
             return;
         }
         if ("home".equals(destination.kind)) return; // the paired page is already on screen
         // The paired page is loaded: open the destination in place so nothing
         // being typed is lost. Load the deep link only if the page cannot (an
         // older frontend, a session it does not know).
+        // The gate above ran just now, on this thread: nothing changed since.
         view.evaluateJavascript(PushMessages.openInPlaceScript(destination, url), (String result) -> {
             if ("true".equals(result)) return;
+            // Later, on its own: the page must still be the paired one (not
+            // pairing, say), and the gate is asked again.
             WebView current = webView.get();
-            if (current != null && OriginPolicy.matchesPaired(current.getUrl(), origin)) current.loadUrl(url);
+            if (current == null || !OriginPolicy.matchesPaired(current.getUrl(), pairedOrigin)) return;
+            if (admit(url, generation)) current.loadUrl(url);
         });
     }
 }

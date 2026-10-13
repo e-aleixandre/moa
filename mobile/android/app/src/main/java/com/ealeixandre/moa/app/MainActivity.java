@@ -84,7 +84,7 @@ public class MainActivity extends BridgeActivity {
         webViewClient = new MoaWebViewClient(bridge, credentials, bridges == null ? () -> { } : bridges::syncPairedOrigin);
         bridge.setWebViewClient(webViewClient);
         bridgeView.setWebChromeClient(new MoaWebChromeClient(bridge, credentials));
-        PushNavigator.get().setWebView(bridgeView);
+        PushNavigator.get().setWebView(bridgeView, this);
     }
 
     @Override

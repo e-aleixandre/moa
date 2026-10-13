@@ -4,7 +4,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -14,6 +17,10 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import org.json.JSONObject;
 import org.junit.After;
 import org.junit.Test;
 
@@ -21,7 +28,8 @@ import org.junit.Test;
 // waits on the lifecycle an incoming message holds around posting its
 // notification. The tap's authentication must run on PushTaps' executor,
 // never on the calling (UI) thread, and only a navigation still valid for
-// the same generation and pairing comes back to the main thread.
+// the same generation and pairing comes back to the main thread. The
+// navigation side goes through the real NavigationGate, as PushNavigator's.
 //
 // Owner decision: a tap with an expired credential always ends on the local
 // pairing page, never on the paired origin, and its envelope is not opened.
@@ -87,20 +95,34 @@ public class PushTapsTest {
         }
 
         @Override
-        public String knownOrigin() {
-            return cacheKnown ? paired : null;
-        }
-
-        @Override
         public boolean knownValid() {
             return cacheKnown && paired != null && !expired;
         }
     };
 
+    private final NavigationGate gate = new NavigationGate(new NavigationGate.State() {
+        @Override
+        public boolean knownValid() {
+            return source.knownValid();
+        }
+
+        @Override
+        public String knownOrigin() {
+            return cacheKnown ? paired : null;
+        }
+
+        @Override
+        public int generation() {
+            return lifecycle.generation();
+        }
+    });
+
     private final PushTaps.Navigation navigation = new PushTaps.Navigation() {
         @Override
-        public void open(PushEnvelope.Destination destination, String origin) {
-            opened.add(destination.kind + "@" + origin);
+        public void open(PushEnvelope.Destination destination, String origin, int generation) {
+            if (gate.admit(destination.url(origin), generation, () -> opened.add("pair"))) {
+                opened.add(destination.kind + "@" + origin);
+            }
         }
 
         @Override
@@ -118,6 +140,25 @@ public class PushTapsTest {
         taps.handle(envelope, source, navigation);
         background.shutdown();
         assertTrue(background.awaitTermination(5, TimeUnit.SECONDS));
+    }
+
+    // A real envelope for `keys`, valid for an hour, leading to `d`.
+    private void seal(String d) throws Exception {
+        JSONObject plaintext = new JSONObject().put("v", 1).put("exp", System.currentTimeMillis() / 1000 + 3600)
+            .put("d", d).put("lvl", "normal").put("th", "thread").put("t", "title").put("b", "body");
+        byte[] padded = new byte[PushEnvelope.PADDED_SIZE];
+        Arrays.fill(padded, (byte) 0x20);
+        byte[] text = plaintext.toString().getBytes(StandardCharsets.UTF_8);
+        System.arraycopy(text, 0, padded, 0, text.length);
+        byte[] nonce = new byte[PushEnvelope.NONCE_SIZE];
+        new SecureRandom().nextBytes(nonce);
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(keys.enc, "AES"), new GCMParameterSpec(PushEnvelope.TAG_SIZE * 8, nonce));
+        cipher.updateAAD(PushEnvelope.concat(PushEnvelope.AAD_LABEL, keys.kid));
+        envelope.put("v", "1");
+        envelope.put("k", PushEnvelope.base64UrlEncode(keys.kid));
+        envelope.put("c", PushEnvelope.base64UrlEncode(PushEnvelope.concat(nonce, cipher.doFinal(padded))));
+        envelopeReads.clear();
     }
 
     private void drainMain() {
@@ -222,14 +263,37 @@ public class PushTapsTest {
         assertEquals(Collections.singletonList("pair"), opened);
     }
 
-    // The cached expiry is used when present: valid in memory, unreadable
-    // now, the tap behaves as a valid one (home, nothing opened in the envelope).
+    // Re-review e2 case 3: the keys were read, then the expiry read failed.
+    // A valid cache allows only HOME: the envelope those keys would open
+    // stays closed, since the read that should have confirmed them failed.
     @Test
-    public void readErrorWithCachedValidCredentialIsNotTreatedAsExpired() throws Exception {
+    public void readErrorAfterTheKeysStaysHomeWithoutOpeningTheEnvelope() throws Exception {
+        seal("inbox");
         unreadable = true;
         tap();
         drainMain();
         assertEquals(Collections.singletonList("home@" + ORIGIN), opened);
+        assertTrue("the envelope was opened", envelopeReads.isEmpty());
+    }
+
+    // Control: the same envelope with a readable store opens.
+    @Test
+    public void sealedEnvelopeOpensItsDestination() throws Exception {
+        seal("inbox");
+        tap();
+        drainMain();
+        assertEquals(Collections.singletonList("inbox@" + ORIGIN), opened);
+    }
+
+    // Re-review e2 case 1: authenticated while valid, the credential expires
+    // (clock only, no forget, same origin) before the main thread delivers.
+    @Test
+    public void credentialExpiringBeforeTheMainThreadEndsOnPairing() throws Exception {
+        seal("inbox");
+        tap();
+        expired = true;
+        drainMain();
+        assertEquals(Collections.singletonList("pair"), opened);
     }
 
     @Test
