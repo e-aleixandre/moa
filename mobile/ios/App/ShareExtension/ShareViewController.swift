@@ -1,7 +1,7 @@
 import UIKit
 import UniformTypeIdentifiers
 
-final class ShareViewController: UIViewController {
+class ShareViewController: UIViewController {
     private final class CaptureState {
         var textParts: [String] = []
         var sharedURL = ""
@@ -20,24 +20,24 @@ final class ShareViewController: UIViewController {
     private lazy var sendItem = UIBarButtonItem(
         title: "Send", style: .done, target: self, action: #selector(sendTapped))
     private let spinnerItem = UIBarButtonItem(customView: UIActivityIndicatorView(style: .medium))
-    private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+    let tableView = UITableView(frame: .zero, style: .insetGrouped)
     private let searchBar = UISearchBar()
     private let composeCell = UITableViewCell()
     private let summaryLabel = UILabel()
-    private let messageField = UITextView()
+    let messageField = UITextView()
     private let placeholder = UILabel()
-    private let messageStack = UIStackView()
+    let messageStack = UIStackView()
     private let spinner = UIActivityIndicatorView(style: .large)
 
-    private var transaction: SharedInboxTransaction?
-    private var sharedTitle = ""
-    private var sharedText = ""
-    private var sharedURL = ""
-    private var client: ShareClient?
-    private var destinations: [ShareDestination] = []
-    private var selectedID: String?
+    var transaction: SharedInboxTransaction?
+    var sharedTitle = ""
+    var sharedText = ""
+    var sharedURL = ""
+    var client: ShareClient?
+    var destinations: [ShareDestination] = []
+    var selectedID: String?
     private var query = ""
-    private var sending = false
+    var sending = false
 
     private var visibleSections: [Section] {
         let rows = ShareDestinations.filter(destinations, query: query)
@@ -152,6 +152,10 @@ final class ShareViewController: UIViewController {
     }
 
     private func showPicker() {
+        guard !destinations.isEmpty else {
+            showFailure(ShareError.notFound, whileSending: false)
+            return
+        }
         clearMessage()
         spinner.stopAnimating()
         barItem.rightBarButtonItem = sendItem
@@ -212,6 +216,8 @@ final class ShareViewController: UIViewController {
     // MARK: Capture
 
     private func captureShare() {
+        // Tests inject a prepared transaction; the real capture only runs in the extension.
+        if transaction != nil { return }
         do {
             transaction = try SharedInbox.transaction()
         } catch {
@@ -407,7 +413,7 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func showFailure(_ error: Error, whileSending: Bool) {
+    func showFailure(_ error: Error, whileSending: Bool) {
         setSending(false)
         let save: MessageAction = ("Save for later", { [weak self] in self?.saveForLater() })
         let close: MessageAction = ("Close", { [weak self] in self?.close() })
@@ -421,7 +427,11 @@ final class ShareViewController: UIViewController {
         case .unreachable:
             showMessage("Can't reach moa", "Check your connection or VPN, then try again.", [retry, save])
         case .outcomeUnknown:
-            showMessage("Not sure it arrived", "Check the conversation in moa before sending again.", [save, close])
+            // Nothing may be saved or retried: it could arrive twice.
+            showMessage("It may have been sent", "Open moa to check the conversation.", [close])
+        case .notFound where !whileSending:
+            // A server without GET /api/share/destinations: there is nothing to pick from here.
+            showMessage("This moa can't list conversations", "Save this, then choose the conversation in moa.", [save, close])
         case .notFound:
             showMessage("Conversation not found", "Choose another conversation, or save this for later.", [("Choose another", { [weak self] in self?.showPicker() }), save])
         case .server(let status):
@@ -433,13 +443,21 @@ final class ShareViewController: UIViewController {
 
     // MARK: Actions
 
-    @objc private func sendTapped() {
-        guard let destination = destinations.first(where: { $0.sessionID == selectedID }),
+    @objc func sendTapped() {
+        guard !sending,
+              let destination = destinations.first(where: { $0.sessionID == selectedID }),
               let client, let transaction else { return }
         view.endEditing(true)
+        let note = messageField.text ?? ""
+        let text = ShareText.message(note: note, title: sharedTitle, text: sharedText, url: sharedURL)
+        // Same ceiling as the queue, measured on exactly what is uploaded.
+        guard text.utf8.count <= SharedInbox.maximumTextBytes else {
+            showMessage("Too much text", "Shorten your message or share a shorter selection.", [
+                ("Back", { [weak self] in self?.showPicker() }),
+                ("Close", { [weak self] in self?.close() })])
+            return
+        }
         setSending(true)
-        let text = ShareText.message(
-            note: messageField.text ?? "", title: sharedTitle, text: sharedText, url: sharedURL)
         let attachments = transaction.stagedFiles.map {
             ShareAttachment(name: $0.file.name, mime: $0.file.mime, url: $0.url)
         }
@@ -459,10 +477,12 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func saveForLater() {
+    func saveForLater() {
         do {
             guard let transaction else { throw SharedInboxError.corrupt }
-            _ = try transaction.commit(title: sharedTitle, text: sharedText, url: sharedURL)
+            let note = (messageField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = [note, sharedText].filter { !$0.isEmpty }.joined(separator: "\n")
+            _ = try transaction.commit(title: sharedTitle, text: text, url: sharedURL)
             showMessage("Saved to moa", "Open moa to choose a conversation.", [("Done", { [weak self] in
                 self?.extensionContext?.completeRequest(returningItems: nil)
             })])
@@ -473,7 +493,7 @@ final class ShareViewController: UIViewController {
 
     @objc private func cancelTapped() { close() }
 
-    private func close() {
+    func close() {
         transaction?.discard()
         extensionContext?.cancelRequest(withError: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
     }

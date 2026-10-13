@@ -53,6 +53,9 @@
 		C122D9E488203AB248FB037F /* KeychainGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5344804AC6CEE00CA033EE88 /* KeychainGroups.swift */; };
 		E300B133E0542D795A3E4AD9 /* KeychainGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5344804AC6CEE00CA033EE88 /* KeychainGroups.swift */; };
 		FE630B072FD282F42EE8ABDE /* ShareClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85ED8ED7EA7506088AA492C7 /* ShareClient.swift */; };
+		C1B0000000000000000000A1 /* ShareControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A0000000000000000000A1 /* ShareControllerTests.swift */; };
+		C1B0000000000000000000A2 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* ShareViewController.swift */; };
+		C1B0000000000000000000A3 /* SharedInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* SharedInbox.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -133,6 +136,7 @@
 		85ED8ED7EA7506088AA492C7 /* ShareClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareClient.swift; sourceTree = "<group>"; };
 		BA6D4BE125E99C1D9ED870A6 /* ShareBodyWriterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareBodyWriterTests.swift; sourceTree = "<group>"; };
 		FCEDE19112EAB7BC9752AFA4 /* ShareBodyWriter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareBodyWriter.swift; sourceTree = "<group>"; };
+		C1A0000000000000000000A1 /* ShareControllerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareControllerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -269,6 +273,7 @@
 				0EECAF3668F257616C41EFCE /* ShareLogicTests.swift */,
 				BA6D4BE125E99C1D9ED870A6 /* ShareBodyWriterTests.swift */,
 				039A9BF7103BA0E1B896C1A7 /* ShareClientTests.swift */,
+				C1A0000000000000000000A1 /* ShareControllerTests.swift */,
 			);
 			path = PushEnvelopeTests;
 			sourceTree = "<group>";
@@ -538,6 +543,9 @@
 				15E9EBC3AC9167AA4D91552B /* ShareLogicTests.swift in Sources */,
 				13EDA98D3F2E938E41E7E279 /* ShareBodyWriterTests.swift in Sources */,
 				496A587F473E45471402D4D4 /* ShareClientTests.swift in Sources */,
+				C1B0000000000000000000A1 /* ShareControllerTests.swift in Sources */,
+				C1B0000000000000000000A2 /* ShareViewController.swift in Sources */,
+				C1B0000000000000000000A3 /* SharedInbox.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

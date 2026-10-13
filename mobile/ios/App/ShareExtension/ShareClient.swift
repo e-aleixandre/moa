@@ -81,6 +81,9 @@ struct ShareClient {
             do {
                 try await post(sessionID, "resume", bodyFile: nil)
             } catch ShareError.server(409) {
+            } catch ShareError.outcomeUnknown {
+                // The message was not sent yet, so a lost resume is safe to retry or save.
+                throw ShareError.unreachable
             }
             try await post(sessionID, "send", bodyFile: bodyFile)
         }
@@ -105,6 +108,9 @@ struct ShareClient {
             default:
                 throw ShareError.outcomeUnknown
             }
+        } catch {
+            // Any other failure after URLSession took the request may have reached the server.
+            throw ShareError.outcomeUnknown
         }
         try check(response)
     }

@@ -128,4 +128,11 @@ final class ShareClientTests: XCTestCase {
         XCTAssertNil(ShareClient.validatedOrigin("https://moa.example/x"))
         XCTAssertNil(ShareClient.validatedOrigin("https://moa.example?q=1"))
     }
+
+    func testLostResumeIsNotAnUncertainSend() async {
+        StubProtocol.responses = [.success((404, "")), .failure(URLError(.timedOut))]
+        do { try await client.send(to: "abc", bodyFile: body); XCTFail("expected error") }
+        catch { XCTAssertEqual(error as? ShareError, .unreachable) }
+        XCTAssertEqual(StubProtocol.seen.map(\.path), ["/api/sessions/abc/send", "/api/sessions/abc/resume"])
+    }
 }

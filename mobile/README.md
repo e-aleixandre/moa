@@ -118,8 +118,9 @@ sheet says what to do and offers **Save for later**. That copies the share into
 an App Group queue; opening moa then presents the same conversation picker used
 by the web share target. Choosing a conversation puts the text and files in its
 composer; it never sends automatically. A send whose outcome is unknown (for
-example a timeout after the upload) is never retried: the sheet says to check the
-conversation first.
+example a timeout after the upload) is neither retried nor saved: the sheet says to open
+moa and check the conversation. A note typed in the
+sheet is kept when saving, and text over 256 KB is refused before any upload.
 
 The extension reads the device credential, read-only, from the **app's private
 keychain access group** (`$(AppIdentifierPrefix)$(MOA_APP_BUNDLE_IDENTIFIER)`),

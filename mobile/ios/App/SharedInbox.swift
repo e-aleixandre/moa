@@ -126,13 +126,13 @@ enum SharedInbox {
 
 final class SharedInboxTransaction {
     private let root: URL
-    private let id = UUID().uuidString.lowercased()
+    let id = UUID().uuidString.lowercased()
     private let staging: URL
     private var files: [SharedInboxFile] = []
     private var totalBytes = 0
     private var committed = false
 
-    fileprivate init(root: URL) throws {
+    init(root: URL) throws {
         self.root = root
         self.staging = root.appendingPathComponent(".\(id).tmp", isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)

@@ -387,3 +387,59 @@ test("while sharing, owners are listed without a query and a closed one is resum
   expect(store.get().share.status).toBe("idle");
   setState({ sessions: {}, owners: { list: [], loaded: true }, share: SHARE_CLOSED, composerDrops: {} });
 });
+
+// Review 96c1996f (palette-review.test.jsx): while sharing, every owner is a
+// destination without searching for it -- neither its age nor the Recent cap
+// may hide it.
+test("sharing still shows an owner older than seven days without query", async () => {
+  const { setState, SHARE_CLOSED } = await import("../../data/store.js");
+  const old = Date.now() - 8 * 86400000;
+  const share = { id: "review", status: "ready", url: "https://example.test", files: [] };
+  setState({
+    sessions: { o1: { id: "o1", kind: "owner", title: "Dormant owner", state: "saved", updated: old } },
+    owners: { list: [{ id: "own", name: "Dormant owner", root: "/repo", session_id: "o1", session_state: "saved", updated: old }], loaded: true },
+    share,
+  });
+  await mount({ initialStep: "search", share });
+  const before = rowTexts().join(" ");
+  await type("Dormant");
+  expect(rowTexts().join(" ")).toContain("Dormant owner");
+  setState({ sessions: {}, owners: { list: [], loaded: true }, share: SHARE_CLOSED });
+  expect(before).toContain("Dormant owner");
+});
+
+test("sharing keeps owners reachable without search when recent sessions fill the cap", async () => {
+  const { setState, SHARE_CLOSED } = await import("../../data/store.js");
+  const now = Date.now();
+  const sessions = {};
+  for (let i = 0; i < 9; i++) sessions["s" + i] = { id: "s" + i, title: "Recent " + i, state: "idle", updated: now - i };
+  sessions.o1 = { id: "o1", kind: "owner", title: "Owner behind cap", state: "saved", updated: now - 1000 };
+  const share = { id: "review", status: "ready", url: "https://example.test", files: [] };
+  setState({ sessions, owners: { list: [{ id: "own", name: "Owner behind cap", root: "/repo", session_id: "o1", session_state: "saved", updated: now - 1000 }], loaded: true }, share });
+  await mount({ initialStep: "search", share });
+  const rows = rowTexts();
+  setState({ sessions: {}, owners: { list: [], loaded: true }, share: SHARE_CLOSED });
+  expect(rows[0]).toContain("Owner behind cap");
+  // Owners come on top of the cap; the sessions keep theirs.
+  expect(rows.filter((r) => r.includes("Recent ")).length).toBe(8);
+});
+
+test("outside a share, Recent keeps its seven-day window and its cap", async () => {
+  const { setState } = await import("../../data/store.js");
+  const now = Date.now();
+  const old = now - 8 * 86400000;
+  const sessions = {};
+  for (let i = 0; i < 9; i++) sessions["s" + i] = { id: "s" + i, title: "Recent " + i, state: "idle", updated: now - i };
+  setState({
+    sessions,
+    owners: { list: [
+      { id: "own", name: "Dormant owner", root: "/repo", session_id: "o1", session_state: "saved", updated: old },
+      { id: "own2", name: "Owner behind cap", root: "/repo2", session_id: "o2", session_state: "saved", updated: now - 1000 },
+    ], loaded: true },
+  });
+  await mount({ initialStep: "search" });
+  const rows = rowTexts().join(" ");
+  setState({ sessions: {}, owners: { list: [], loaded: true } });
+  expect(rows).not.toContain("Dormant owner");
+  expect(rows).not.toContain("Owner behind cap");
+});
