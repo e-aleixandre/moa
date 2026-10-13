@@ -902,6 +902,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					toolResultErr,
 				)...)
 				cfg.appendState(msgs...)
+				// A partial that reported usage was paid for like any turn.
+				addRunCost(cfg, assistantMsg.Usage)
 				// Announce the persisted partial like any committed response,
 				// before the run ends: a client that saw it stream would
 				// otherwise drop it at run end until a reload. cfg.model is
@@ -1061,6 +1063,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			if calls := extractToolCalls(assistantMsg); len(calls) > 0 {
 				injectErrorToolResults(cfg, calls, "tool call not executed: the model stopped ("+assistantMsg.StopReason+") before it could run")
 			}
+			addRunCost(cfg, assistantMsg.Usage)
 			loopErr = fmt.Errorf("model stopped (%s): %s", assistantMsg.StopReason, reason)
 			inTurn = false
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})

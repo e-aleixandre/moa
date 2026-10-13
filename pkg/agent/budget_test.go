@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -275,5 +276,58 @@ func TestBudget_ExceededOnToolCallTurn(t *testing.T) {
 	}
 	if !hasToolResult {
 		t.Error("expected tool_result messages before budget abort")
+	}
+}
+
+// Paid usage must reach the run ledger on every path that ends a turn, not
+// only on normal ones: RunCost feeds the budget guard and the cost reported to
+// callers (a subagent's spend).
+func TestRunCost_CountsUsageOfPartialEndedByStreamError(t *testing.T) {
+	partialThenError := func(req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 4)
+		go func() {
+			defer close(ch)
+			msg := core.Message{Role: "assistant", Usage: testUsage(), Timestamp: time.Now().Unix()}
+			ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+			ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, ContentIndex: 0, Delta: "half an answer"}
+			ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("simulated stream failure")}
+		}()
+		return ch, nil
+	}
+	ag, err := New(AgentConfig{
+		Provider:            NewMockProvider(partialThenError),
+		Model:               core.Model{ID: "test", Provider: "mock", Pricing: testPricing()},
+		SystemPrompt:        "test",
+		StreamRepairBackoff: []time.Duration{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ag.Run(context.Background(), "hi"); err == nil {
+		t.Fatal("expected the stream error")
+	}
+	if want, got := testPricing().Cost(*testUsage()), ag.RunCost(); math.Abs(got-want) > 1e-12 {
+		t.Fatalf("RunCost = %v, want %v for the partial's usage", got, want)
+	}
+}
+
+func TestRunCost_CountsUsageOfRefusalAndSensitive(t *testing.T) {
+	for _, reason := range []string{"refusal", "sensitive"} {
+		t.Run(reason, func(t *testing.T) {
+			ag, err := New(AgentConfig{
+				Provider:     NewMockProvider(stopReasonResponse("no", reason, "policy", testUsage())),
+				Model:        core.Model{ID: "test", Provider: "mock", Pricing: testPricing()},
+				SystemPrompt: "test",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ag.Run(context.Background(), "hi"); err == nil {
+				t.Fatal("expected the model-stopped error")
+			}
+			if want, got := testPricing().Cost(*testUsage()), ag.RunCost(); math.Abs(got-want) > 1e-12 {
+				t.Fatalf("RunCost = %v, want %v", got, want)
+			}
+		})
 	}
 }
