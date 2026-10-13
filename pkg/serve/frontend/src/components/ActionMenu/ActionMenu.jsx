@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { registerOverlay } from "../../data/overlays.js";
 import { MOTION } from "../../hooks/motion.js";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard.js";
 import { usePresence } from "../../hooks/usePresence.js";
@@ -15,6 +16,8 @@ import "./ActionMenu.css";
 // An action is { id, icon?, label, onClick, active?, closeOnClick? }. `placement="up"`
 // opens the list above the trigger, which is what the composer needs: its `+`
 // sits at the bottom of the screen with the keyboard under it.
+let menuSeq = 0;
+
 export function ActionMenu({
   actions,
   open,
@@ -48,6 +51,22 @@ export function ActionMenu({
     document.addEventListener("mousedown", close);
     return () => {
       document.removeEventListener("mousedown", close);
+    };
+  }, [open, onOpenChange]);
+
+  // Seen by the overlay registry, and closed by an Escape aimed at the document
+  // (the native Back button sends one): the menu's own handler only hears keys
+  // while focus is inside it, and the composer's `+` never takes focus.
+  const idRef = useRef(null);
+  if (idRef.current === null) idRef.current = `action-menu-${++menuSeq}`;
+  useEffect(() => {
+    if (!open) return undefined;
+    const unregister = registerOverlay(idRef.current);
+    const onKey = (event) => { if (event.key === "Escape") onOpenChange(false); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      unregister();
     };
   }, [open, onOpenChange]);
 

@@ -15,6 +15,7 @@
 // (variant="sheet") and a decision rises as a sheet over the list.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { ArrowRight } from "lucide-preact";
+import { registerOverlay } from "../../data/overlays.js";
 import { api } from "../../data/api.js";
 import { deriveModelSpecs } from "../../data/selectors.js";
 import { defaultModelSpec } from "../CommandPalette/command-palette-model.js";
@@ -467,6 +468,23 @@ export function InboxView({
     ? (step === "model" ? "Back to destinations" : "Back to inbox")
     : "Back to sessions";
   const headTitle = card && variant === "column" ? decideTitle(card, step) : "Inbox";
+
+  // The decision sheet is an overlay: registered, and Escape (the native Back
+  // button sends one) walks its model page back, then dismisses it.
+  useEffect(() => {
+    if (!(card && variant === "sheet")) return undefined;
+    const unregister = registerOverlay("inbox-decide");
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      if (step === "model") setStep("route");
+      else close();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      unregister();
+    };
+  }, [card, variant, step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   let body;
   if (status === "loading") body = <InboxLoading />;

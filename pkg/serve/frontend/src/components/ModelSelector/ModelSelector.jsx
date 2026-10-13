@@ -1,6 +1,7 @@
 import { Fragment } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "../../data/api.js";
+import { registerOverlay } from "../../data/overlays.js";
 import { addToast } from "../../data/notifications.js";
 import { thinkingOptionsFor, thinkingPositionFor } from "../../data/selectors.js";
 import { groupByProvider, pinnedModelSpecs } from "./model-selector-model.js";
@@ -590,6 +591,10 @@ export function PickerSheet({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [dismissible, onClose]);
+  // A dismissible sheet is a real overlay: visible to the registry (so the
+  // native Back button closes it through the Escape above) until it starts
+  // leaving.
+  useEffect(() => (dismissible && onClose && !leaving ? registerOverlay(`picker-sheet-${kind}`) : undefined), [dismissible, onClose, leaving, kind]);
   return (
     <>
       {includeScrim && (

@@ -36,8 +36,9 @@ function setPushState(s) {
   listeners.forEach((fn) => fn(s));
 }
 
-// The paired iOS app injects window.MoaNativePush. When present it replaces
-// Web Push entirely: APNs through the relay, decrypted by the app's extension.
+// The paired native app (iOS or Android) injects window.MoaNativePush. When
+// present it replaces Web Push entirely: native push through the relay,
+// decrypted on the device.
 function nativePush() {
   const n = globalThis.window?.MoaNativePush;
   return n && typeof n.enable === 'function' ? n : null;
@@ -45,7 +46,7 @@ function nativePush() {
 
 const NATIVE_ERRORS = {
   not_paired: 'This app is not paired with a server.',
-  denied: 'Notifications are blocked in iOS settings.',
+  denied: 'Notifications are blocked in system settings.',
   relay_mismatch: 'The server uses a different push relay than this app.',
   unavailable: 'The push relay is not reachable. Try again later.',
   timeout: 'Activation timed out. Open the app and try again.',

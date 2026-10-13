@@ -49,6 +49,14 @@ describe("detectShell", () => {
     expect(detectShell(w)).toBe(SHELL_NATIVE);
   });
 
+  // The Android container injects no androidBridge into the paired page;
+  // moa's own device bridge is what it does inject there.
+  it("recognises the container from moa's native device bridge", () => {
+    const w = win();
+    w.MoaNativeAuth = { reauthorize: () => Promise.resolve() };
+    expect(detectShell(w)).toBe(SHELL_NATIVE);
+  });
+
   // Safari exposes window.webkit of its own accord; only the bridge means a
   // container, or every iPhone would claim the whole screen and lose 62px.
   it("is not fooled by webkit without a bridge", () => {

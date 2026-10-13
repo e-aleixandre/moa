@@ -43,6 +43,12 @@ export function isTopLayer(id) {
   return false;
 }
 
+// hasOpenLayer — is any overlay on screen and not already leaving? Read by the
+// native Back button to decide whether it has something to close.
+export function hasOpenLayer() {
+  return stack.some((entry) => !entry.closing);
+}
+
 // takeKey — is this key event `id`'s to act on? Only the top layer's, and
 // only once. Closing the top sheet shows the one below in the same synchronous
 // step, so without the once the SAME Escape would reach the sheet below — on

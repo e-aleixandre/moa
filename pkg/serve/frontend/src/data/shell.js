@@ -40,8 +40,11 @@ export function detectShell(win = typeof window !== "undefined" ? window : null)
   // pages it serves itself -- so a remote page inside a perfectly good
   // container would see nothing. What is always there is the native bridge the
   // web view was built with, which is what Capacitor itself tests for
-  // (@capacitor/core getPlatformId).
-  if (win.webkit?.messageHandlers?.bridge || win.androidBridge) {
+  // (@capacitor/core getPlatformId). The Android container exposes no
+  // androidBridge to remote pages (it would be an all-origin interface), so
+  // there the signal is moa's own device bridge, injected at document start
+  // into the main frame of the paired origin only. iOS injects it too.
+  if (win.webkit?.messageHandlers?.bridge || win.androidBridge || win.MoaNativeAuth) {
     return SHELL_NATIVE;
   }
 

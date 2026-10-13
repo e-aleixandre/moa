@@ -125,7 +125,7 @@ export function openSessionInPlace(sessionId, {
   });
 }
 
-// installNativeNavigation exposes the in-place navigation to the iOS container
+// installNativeNavigation exposes the in-place navigation to the native container
 // as window.MoaNavigation. Additive: an older container never calls it, and a
 // container that finds it missing loads the deep link as before.
 export function installNativeNavigation(target = globalThis) {

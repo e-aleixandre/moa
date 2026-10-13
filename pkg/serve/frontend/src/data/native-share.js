@@ -1,4 +1,4 @@
-// native-share.js — move the oldest retained iOS share into the ordinary
+// native-share.js — move the oldest retained native share into the ordinary
 // destination picker. The native bridge is injected at document start because
 // the container navigates from its local pairing page to this remote frontend;
 // a Capacitor JS plugin imported only by the local page would not cross that
