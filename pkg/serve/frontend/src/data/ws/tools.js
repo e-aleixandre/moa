@@ -173,6 +173,7 @@ export function handleWsToolEnd(id, data) {
         result: data.result,
         streamingResult: null,
         note,
+        ...(data.ask_responder ? { askResponder: data.ask_responder } : {}),
       };
     }
     return m;

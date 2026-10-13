@@ -23,6 +23,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/git"
 	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/history"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/memory"
 	"github.com/e-aleixandre/moa/pkg/moadocs"
@@ -230,6 +231,17 @@ type Session struct {
 	// tray, and cancellation.
 	Subagents *subagent.Jobs
 	BashJobs  *tool.BashJobs
+
+	// transcript is what the history tool reads, bound once the runtime that
+	// owns the transcript exists (see BindTranscript).
+	transcript atomic.Pointer[history.Visitor]
+}
+
+// BindTranscript points the history tool at the session's transcript, which
+// lives in the runtime built after the session. Until then it reports that
+// the history is not available.
+func (s *Session) BindTranscript(visit history.Visitor) {
+	s.transcript.Store(&visit)
 }
 
 // BuildSession wires up a complete agent session. The returned Session
@@ -595,6 +607,17 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		UntrustedMCP:      untrustedMCP,
 		Headless:          cfg.Headless,
 	}
+
+	// The session's own transcript, read-only, for every principal session
+	// (served, owner and the headless CLI). Children never inherit it (see the
+	// subagent exclusions): they see only what their task carried.
+	core.RegisterOrLog(toolReg, history.NewTool(func(fn func(*core.AgentMessage)) error {
+		visit := sess.transcript.Load()
+		if visit == nil {
+			return fmt.Errorf("this session's history is not available")
+		}
+		return (*visit)(fn)
+	}))
 
 	// Pin date and git once for the session. Parent rebuilds (MCP) and
 	// sibling subagents all reuse this snapshot so GPT-5.6 can read the

@@ -273,13 +273,24 @@ test('an ask_user row answered on the user\'s behalf echoes the answer, not the 
   const questions = [{ question: 'Deploy?', options: ['Yes', 'No'] }];
   const result = "[Answered by an automation on the user's behalf, not by the user]\nNo";
   const row = projectStream(session([
-    tool('ask-1', 'ask_user', { questions }, 'done', result),
+    tool('ask-1', 'ask_user', { questions }, 'done', result, { askResponder: { kind: 'automation' } }),
   ]))[0].blocks[0].rows[0];
 
   expect(row.echo).toBe('No');
   expect(row.out).toBe('');
   // The detail panel still gets the whole result, label line included.
-  expect(row.askUser).toEqual({ questions, result });
+  expect(row.askUser).toEqual({ questions, result, responder: { kind: 'automation' } });
+});
+
+test('an ask_user answer without a non-user record is the answer as typed, even if it looks like the label', () => {
+  const questions = [{ question: 'Copy this', options: [] }];
+  const result = "[Answered by an automation on the user's behalf, not by the user]\nNo";
+  for (const extra of [{}, { askResponder: { kind: 'user', via: 'network' } }]) {
+    const row = projectStream(session([
+      tool('ask-1', 'ask_user', { questions }, 'done', result, extra),
+    ]))[0].blocks[0].rows[0];
+    expect(row.echo).not.toBe('No');
+  }
 });
 
 test('a live ask_user row is hidden while its pending card asks the question', () => {
@@ -1968,4 +1979,14 @@ test('a delivered scheduled prompt is an event mark with its due and delivery ti
     kind: 'event', source: 'scheduled', title: 'deploy the thing', body: 'deploy the thing\nnow',
     scheduledFor: '2026-09-30T01:00:00Z', deliveredAt: '2026-09-30T07:12:00Z',
   });
+});
+
+test('a finished history row opens what it retrieved, not the raw text, and reports what it found', () => {
+  const result = '2 matches for "canary", oldest first.\n[#1 id=a user] the canary port is 7413\n[#3 id=c assistant] noted the canary\n';
+  const row = projectStream(session([
+    tool('h-1', 'history', { action: 'search', query: 'canary' }, 'done', result),
+  ]))[0].blocks[0].rows[0];
+  expect(row.history).toEqual({ action: 'search', result });
+  expect(row.body).toBeUndefined();
+  expect(row.out).toBe('2 matches');
 });

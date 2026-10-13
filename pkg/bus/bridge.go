@@ -1532,7 +1532,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 		}}
 
 	case core.AgentEventToolExecEnd:
-		events := []any{ToolExecEnded{
+		ended := ToolExecEnded{
 			SessionID:  sid,
 			RunGen:     gen,
 			ToolCallID: e.ToolCallID,
@@ -1540,7 +1540,13 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 			Result:     resultText(e.Result),
 			IsError:    e.IsError,
 			Rejected:   e.Rejected,
-		}}
+		}
+		if e.Result != nil {
+			if r, ok := askuser.ResponderFromCustom(e.Result.Custom[askuser.CustomKey]); ok {
+				ended.AskResponder = &r
+			}
+		}
+		events := []any{ended}
 		// Emit task update on tool_end only (matches serve behavior).
 		if e.ToolName == "tasks" && taskStore != nil {
 			events = append(events, TasksUpdated{

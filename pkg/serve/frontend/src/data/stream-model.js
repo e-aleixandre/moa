@@ -150,6 +150,7 @@ import {
 } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
 import { splitAskResponder } from './ask-user-machine.js';
+import { parseHistoryResult, historyOut } from './history-result.js';
 import { parseFileCardData } from './util/file-card.js';
 import { parseUnifiedDiff } from './util/unified-diff.js';
 
@@ -1003,7 +1004,7 @@ function toLedgerRow(msg) {
   // An answer given on the user's behalf starts with a label line for the
   // model; the row measures and quotes the answer itself.
   const measured = name.toLowerCase() === 'ask_user' && msg.result
-    ? { ...msg, result: splitAskResponder(msg.result).body }
+    ? { ...msg, result: splitAskResponder(msg.result, msg.askResponder).body }
     : msg;
   const status = mapStatus(msg.status);
   const preview = toolPreview(name, msg.args, msg.result, msg.status, msg.start_line);
@@ -1027,7 +1028,18 @@ function toLedgerRow(msg) {
   if (inputLine) row.inputLine = inputLine;
   if (name.toLowerCase() === 'ask_user') {
     const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
-    row.askUser = { questions: args?.questions, result: msg.result };
+    row.askUser = { questions: args?.questions, result: msg.result, responder: msg.askResponder };
+  }
+  // A finished history call shows what it retrieved, message by message,
+  // instead of the text the model read; its size is what it found.
+  if (name.toLowerCase() === 'history' && msg.status === 'done' && msg.result) {
+    const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
+    const parsed = parseHistoryResult(args?.action, msg.result);
+    if (parsed) {
+      row.history = { action: args?.action, result: msg.result };
+      const out = historyOut(parsed);
+      if (out) row.out = out;
+    }
   }
   if (name.toLowerCase() === 'bash') {
     const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
@@ -1040,7 +1052,7 @@ function toLedgerRow(msg) {
     const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
     if (bookWrites(args)) row.detailKind = 'edit';
   }
-  if (body) row.body = body;
+  if (body && !row.history) row.body = body;
   // The tool currently in flight (status running/generating) is marked `live`
   // so ActivityLedger renders it as the unified card's live row (verb +
   // object + caret + elapsed) instead of a normal terminated row.

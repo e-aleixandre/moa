@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -252,6 +253,8 @@ type ToolEndData struct {
 	IsError    bool   `json:"is_error"`
 	Rejected   bool   `json:"rejected"`
 	Result     string `json:"result"`
+	// AskResponder is who answered an ask_user (absent when not recorded).
+	AskResponder *askuser.Responder `json:"ask_responder,omitempty"`
 }
 
 // TasksUpdateData carries the full task list after a change.

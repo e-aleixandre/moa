@@ -334,6 +334,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error creating runtime: %v\n", err)
 		os.Exit(1)
 	}
+	sess.BindTranscript(func(fn func(*core.AgentMessage)) error {
+		rt.Context().VisitTranscript(fn)
+		return nil
+	})
 
 	// Match the interactive frontends: a completion joins a live parent as a
 	// steer, but when the parent has already ended it starts a notification turn

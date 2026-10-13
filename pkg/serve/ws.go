@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -233,6 +234,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "tool_end", Data: ToolEndData{
 			ToolCallID: e.ToolCallID, ToolName: e.ToolName,
 			IsError: e.IsError, Rejected: e.Rejected, Result: e.Result,
+			AskResponder: e.AskResponder,
 		}}, true
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
@@ -451,6 +453,11 @@ func wsEventFromBus(event any) (Event, bool) {
 // plus the keys only reconnect history carries: bus events project live user
 // and steer messages, this one also projects tool results.
 func projectWSMessageCustom(custom map[string]any) map[string]any {
+	// Who answered an ask_user labels its card; it is the record, so the
+	// client never has to guess it from the answer's text.
+	if r, ok := askuser.ResponderFromCustom(custom[askuser.CustomKey]); ok {
+		return map[string]any{askuser.CustomKey: r}
+	}
 	// The trim marker is a session_event like the compaction one, but carries
 	// only counters: the elided content itself never crosses.
 	if marker, _ := custom["type"].(string); marker == "trim_marker" {

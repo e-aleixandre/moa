@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { DiffBlock } from "../../components/DiffBlock/DiffBlock.jsx";
 import { CodeBlock } from "../../components/CodeBlock/CodeBlock.jsx";
 import { AskUserDetail } from "../../components/AskUserCard/AskUserDetail.jsx";
+import { HistoryDetail } from "../../components/HistoryDetail/HistoryDetail.jsx";
 import { api } from "../api.js";
 import { toolPreview } from "../util/format.js";
 import { mapToolToKind } from "../util/tool-kind.js";
@@ -83,10 +84,16 @@ export function fuseLedgerDetails(rows, siblingDiff) {
       : row.body
         ? <CodeBlock className="flush" code={row.body} lang="bash" showHeader={false} />
         : lazyOutput;
+    if (row.history) {
+      return {
+        ...row,
+        detail: { node: <HistoryDetail action={row.history.action} result={row.history.result} /> },
+      };
+    }
     if (row.askUser) {
       return {
         ...row,
-        detail: { node: <AskUserDetail questions={row.askUser.questions} result={row.askUser.result} /> },
+        detail: { node: <AskUserDetail questions={row.askUser.questions} result={row.askUser.result} responder={row.askUser.responder} /> },
       };
     }
     if (row.command) {

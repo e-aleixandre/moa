@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
@@ -157,6 +158,8 @@ type ToolExecEnded struct {
 	Result     string
 	IsError    bool
 	Rejected   bool
+	// AskResponder is who answered an ask_user, when the result records it.
+	AskResponder *askuser.Responder
 }
 
 // ---------------------------------------------------------------------------

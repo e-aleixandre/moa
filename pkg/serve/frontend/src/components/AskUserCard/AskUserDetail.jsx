@@ -4,9 +4,9 @@ import { parseMultiAnswer, splitAskResponder } from "../../data/ask-user-machine
 export { splitAskResponder };
 import "./AskUserDetail.css";
 
-export function parseAskAnswers(result, count) {
+export function parseAskAnswers(result, count, responder) {
   if (!result) return [];
-  const text = splitAskResponder(result).body;
+  const text = splitAskResponder(result, responder).body;
   if (count === 1) {
     const answer = text.trim();
     return answer ? [answer] : [];
@@ -20,10 +20,10 @@ function optionLabel(option) {
   return typeof option === "string" ? option : option?.label || "";
 }
 
-export function AskUserDetail({ questions, result }) {
+export function AskUserDetail({ questions, result, responder: recorded }) {
   const items = Array.isArray(questions) ? questions : [];
-  const answers = parseAskAnswers(result, items.length);
-  const { responder } = splitAskResponder(result);
+  const answers = parseAskAnswers(result, items.length, recorded);
+  const { responder } = splitAskResponder(result, recorded);
 
   return (
     <div class="ask-detail">

@@ -73,6 +73,8 @@ export function normalizeHistory(raw, liveSubagents = []) {
             // tool call ID is the provider's, so this is the only link from a
             // restored card to a subagent transcript on disk.
             subagentJobId: tr?.custom?.subagent_job_id || undefined,
+            // Who answered an ask_user, as recorded by the server.
+            askResponder: tr?.custom?.ask_responder || undefined,
             timestamp: tr?.timestamp || msg.timestamp,
           });
         }
@@ -262,6 +264,7 @@ export function appendNormalizedHistoryDelta(prefix, raw, liveSubagents = []) {
     // unmatchable and the turn draws a second, unopenable card for one child.
     const subagentJobId = msg.custom?.subagent_job_id;
     if (subagentJobId) update.subagentJobId = subagentJobId;
+    if (msg.custom?.ask_responder) update.askResponder = msg.custom.ask_responder;
     toolResults.set(msg.tool_call_id, update);
   }
   for (let i = 0; i < prefix.length; i++) {

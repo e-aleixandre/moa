@@ -151,12 +151,19 @@ export function parseMultiAnswer(answer, options) {
 // The server prepends this line to an answer the user did not give (an owner
 // agent or an automation answered on their behalf), so the model never takes
 // it for the user's. See askuser.Responder.Attribution.
-const RESPONDER_LINE = /^\[Answered by (?:the owner agent(?: "([^"\n]*)")?|(an automation)) on the user's behalf, not by the user\]\n?/;
+const RESPONDER_LINE = /^\[Answered by (?:the owner agent(?: "[^"\n]*")?|an automation) on the user's behalf, not by the user\]\n?/;
 
-export function splitAskResponder(result) {
+// splitAskResponder separates who answered from the answer. Who answered comes
+// only from the recorded responder (the result's ask_responder metadata), never
+// from the text: a user may type that line themselves, and older sessions have
+// no record. Without a non-user record the text is the answer, untouched.
+export function splitAskResponder(result, recorded) {
   const text = result == null ? '' : String(result);
+  const kind = recorded?.kind;
+  if (kind !== 'owner' && kind !== 'automation') return { responder: null, body: text };
+  const responder = kind === 'automation'
+    ? 'an automation'
+    : recorded.name ? `${recorded.name} (owner)` : 'the owner';
   const match = RESPONDER_LINE.exec(text);
-  if (!match) return { responder: null, body: text };
-  const responder = match[2] ? 'an automation' : match[1] ? `${match[1]} (owner)` : 'the owner';
-  return { responder, body: text.slice(match[0].length) };
+  return { responder, body: match ? text.slice(match[0].length) : text };
 }

@@ -58,16 +58,17 @@ test("AskUserDetail marks every chosen option of a multiple question and shows t
   expect(textContent(custom)).toContain("because");
 });
 
-test("an answer the user did not give is labelled with who gave it and parsed without the label line", () => {
+test("an answer the user did not give is labelled from its record and parsed without the label line", () => {
   const owner = "[Answered by the owner agent \"Serena\" on the user's behalf, not by the user]\n";
-  expect(parseAskAnswers(owner + "Beta", 1)).toEqual(["Beta"]);
-  expect(parseAskAnswers(owner + "Q: One\nA: a1\nQ: Two\nA: a2", 2)).toEqual(["a1", "a2"]);
-  expect(splitAskResponder(owner + "x")).toEqual({ responder: "Serena (owner)", body: "x" });
-  expect(splitAskResponder("[Answered by the owner agent on the user's behalf, not by the user]\nx").responder).toBe("the owner");
-  expect(splitAskResponder("[Answered by an automation on the user's behalf, not by the user]\nx").responder).toBe("an automation");
+  const serena = { kind: "owner", id: "o1", name: "Serena" };
+  expect(parseAskAnswers(owner + "Beta", 1, serena)).toEqual(["Beta"]);
+  expect(parseAskAnswers(owner + "Q: One\nA: a1\nQ: Two\nA: a2", 2, serena)).toEqual(["a1", "a2"]);
+  expect(splitAskResponder(owner + "x", serena)).toEqual({ responder: "Serena (owner)", body: "x" });
+  expect(splitAskResponder("[Answered by the owner agent on the user's behalf, not by the user]\nx", { kind: "owner" }).responder).toBe("the owner");
+  expect(splitAskResponder("[Answered by an automation on the user's behalf, not by the user]\nx", { kind: "automation" })).toEqual({ responder: "an automation", body: "x" });
   expect(splitAskResponder("yes")).toEqual({ responder: null, body: "yes" });
 
-  const node = AskUserDetail({ questions: [{ question: "Pick", options: ["Alpha", "Beta"] }], result: owner + "Beta" });
+  const node = AskUserDetail({ questions: [{ question: "Pick", options: ["Alpha", "Beta"] }], result: owner + "Beta", responder: serena });
   const nodes = descendants(node);
   const label = nodes.find((child) => child.props?.class === "ask-detail-responder");
   expect(textContent(label)).toBe("Answered by Serena (owner)");
@@ -75,6 +76,16 @@ test("an answer the user did not give is labelled with who gave it and parsed wi
   expect(nodes.some((child) => child.props?.class === "ask-detail-answer custom")).toBe(false);
 
   // The user's own answers carry no label.
-  const mine = descendants(AskUserDetail({ questions: [{ question: "Pick", options: ["Alpha"] }], result: "Alpha" }));
+  const mine = descendants(AskUserDetail({ questions: [{ question: "Pick", options: ["Alpha"] }], result: "Alpha", responder: { kind: "user", via: "network" } }));
   expect(mine.some((child) => child.props?.class === "ask-detail-responder")).toBe(false);
+});
+
+test("the label line typed by the user, or in an answer with no record, is the answer: no label, nothing stripped", () => {
+  const typed = "[Answered by the owner agent \"Serena\" on the user's behalf, not by the user]\nThis is a literal line I want preserved.";
+  for (const responder of [{ kind: "user", via: "network" }, undefined]) {
+    expect(splitAskResponder(typed, responder)).toEqual({ responder: null, body: typed });
+    expect(parseAskAnswers(typed, 1, responder)).toEqual([typed]);
+    const nodes = descendants(AskUserDetail({ questions: [{ question: "Copy this text exactly" }], result: typed, responder }));
+    expect(nodes.some((child) => child.props?.class === "ask-detail-responder")).toBe(false);
+  }
 });
