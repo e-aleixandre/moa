@@ -17,6 +17,7 @@ beforeEach(() => {
 const { MoveList, CompleteNote } = await import("./parts.jsx");
 const { MobileTasksView } = await import("./MobileTasksView.jsx");
 const { TaskDetail } = await import("./TaskDetail.jsx");
+const { PinnedTaskLine } = await import("./PinnedTaskLine.jsx");
 const { store, setState, TASKS_INITIAL } = await import("../../data/store.js");
 const { peekDraft, takeDraft } = await import("../../data/tasks.js");
 
@@ -215,4 +216,29 @@ test("sent to an owner that is gone: nobody will receive it, Can't do or delete"
   expect(labels).toContain("Can't do");
   expect(labels).not.toContain("Done");
   expect(flat(tree).some((n) => n.type === "button" && n.props["aria-label"] === "Delete task")).toBe(true);
+});
+
+function renderPinned(task) {
+  const previous = store.get();
+  setState({ tasks: { ...TASKS_INITIAL, bySession: { s_moa: { requests: [task], checklist: [] } } } });
+  calls = 0;
+  pick = () => undefined;
+  try {
+    return expand(PinnedTaskLine({ sessionId: "s_moa", onOpenTask: () => {} }));
+  } finally {
+    setState(previous);
+  }
+}
+
+test("a pinned request waiting for permission offers Answer, not Done", () => {
+  const tree = renderPinned({ ...TASK, id: 20, status: "pending", handoff: { ...HANDOFF, state: "awaiting_permission" } });
+  const labels = buttons(tree).map((b) => b.label);
+  expect(labels).toContain("Answer");
+  expect(labels).not.toContain("Done");
+});
+
+test("a pinned plain request still offers Done", () => {
+  const labels = buttons(renderPinned({ ...TASK, id: 21, status: "pending" })).map((b) => b.label);
+  expect(labels).toContain("Done");
+  expect(labels).not.toContain("Answer");
 });

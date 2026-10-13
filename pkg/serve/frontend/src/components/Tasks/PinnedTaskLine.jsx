@@ -2,7 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { Check } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { selectSessionDirectory, selectSessionTasks, watchSessionTasks } from "../../data/tasks.js";
-import { pinnedLine, sessionRecords } from "../../data/tasks-model.js";
+import { awaitingPermission, pinnedLine, sessionRecords } from "../../data/tasks-model.js";
 import { CompletionFlow, TasksGlyph } from "./parts.jsx";
 import { SchedPinBar, useNow } from "./Scheduled.jsx";
 import { deviceZone, schedPin } from "../../data/schedule-model.js";
@@ -47,9 +47,15 @@ export function PinnedTaskLine({ sessionId, phone = false, onOpenTask }) {
             <span class="tk-pin-k">For you</span>
             <button type="button" class="tk-pin-t" onClick={() => onOpenTask?.(task.id)}>{task.title}</button>
             {pin.more > 0 && <span class="tk-pin-more tk-data" aria-label={`${pin.more} more`}>+{pin.more}</span>}
-            <button type="button" class="tk-pin-done" onClick={() => setCompleting(task.id)}>
-              <Check size={14} strokeWidth={2.4} aria-hidden="true" />Done
-            </button>
+            {awaitingPermission(task) ? (
+              // The server refuses Done until the request is sent, allowed or
+              // declined; the detail has those three answers.
+              <button type="button" class="tk-pin-done" onClick={() => onOpenTask?.(task.id)}>Answer</button>
+            ) : (
+              <button type="button" class="tk-pin-done" onClick={() => setCompleting(task.id)}>
+                <Check size={14} strokeWidth={2.4} aria-hidden="true" />Done
+              </button>
+            )}
           </div>
         )}
       </div>
