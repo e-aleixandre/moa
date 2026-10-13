@@ -54,6 +54,51 @@ describe("native barcode scanner contract", () => {
     expect(calls).toEqual([{ formats: ["QR_CODE"] }]);
   });
 
+  it("treats backing out of the scanner as a cancel, not a failed scan", async () => {
+    const scanner = {
+      isSupported: async () => ({ supported: true }),
+      checkPermissions: async () => ({ camera: "granted" }),
+      scan: async () => ({ barcodes: [] }),
+    };
+    await expect(scanPairingCode({
+      Plugins: { [BARCODE_SCANNER_PLUGIN]: scanner },
+      isPluginAvailable: () => true,
+    })).resolves.toEqual({ status: "cancelled" });
+  });
+
+  it("treats ML Kit's cancel rejection as a cancel and other rejections as failures", async () => {
+    const make = (message) => ({
+      Plugins: { [BARCODE_SCANNER_PLUGIN]: {
+        isSupported: async () => ({ supported: true }),
+        checkPermissions: async () => ({ camera: "granted" }),
+        scan: async () => { throw new Error(message); },
+      } },
+      isPluginAvailable: () => true,
+    });
+    await expect(scanPairingCode(make("scan canceled."))).resolves.toEqual({ status: "cancelled" });
+    await expect(scanPairingCode(make("camera failed"))).rejects.toThrow("camera failed");
+  });
+
+  it("still reports a scan that returned a code without a value", async () => {
+    const scanner = {
+      isSupported: async () => ({ supported: true }),
+      checkPermissions: async () => ({ camera: "granted" }),
+      scan: async () => ({ barcodes: [{}] }),
+    };
+    await expect(scanPairingCode({
+      Plugins: { [BARCODE_SCANNER_PLUGIN]: scanner },
+      isPluginAvailable: () => true,
+    })).resolves.toEqual({ status: "empty" });
+  });
+
+  it("returns to pairing silently on cancel and keeps the real errors", () => {
+    const boot = readFileSync("www/boot.js", "utf8");
+    const cancelBranch = boot.match(/result\.status === "cancelled"\) \{([^}]*)\}/)?.[1];
+    expect(cancelBranch?.trim()).toBe('fail("");');
+    expect(boot).toContain("No QR code was found.");
+    expect(boot).toContain("Could not scan. Enter the code by hand instead.");
+  });
+
   it("reports a real camera absence instead of treating it as registration failure", async () => {
     const scanner = {
       isSupported: async () => ({ supported: false }),

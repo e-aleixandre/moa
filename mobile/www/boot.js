@@ -131,6 +131,8 @@ function installPairingControls() {
       const result = await scanPairingCode();
       if (result.status === "scanned") {
         await pair(result.value);
+      } else if (result.status === "cancelled") {
+        fail("");
       } else if (result.status === "denied") {
         fail("moa needs the camera to scan. Enter the code by hand instead.");
         $("manual").classList.add("on");

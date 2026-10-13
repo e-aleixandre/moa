@@ -12,6 +12,8 @@ export function getBarcodeScanner(capacitor = globalThis.Capacitor) {
   return capacitor.registerPlugin(BARCODE_SCANNER_PLUGIN);
 }
 
+const ML_KIT_CANCELED = "scan canceled.";
+
 export async function scanPairingCode(capacitor = globalThis.Capacitor) {
   const scanner = getBarcodeScanner(capacitor);
   if (!scanner) return { status: "unavailable" };
@@ -25,7 +27,17 @@ export async function scanPairingCode(capacitor = globalThis.Capacitor) {
   }
   if (permission?.camera !== "granted") return { status: "denied" };
 
-  const result = await scanner.scan({ formats: ["QR_CODE"] });
+  let result;
+  try {
+    result = await scanner.scan({ formats: ["QR_CODE"] });
+  } catch (err) {
+    // ML Kit (iOS until it is replaced) rejects a cancel instead of resolving.
+    if (err?.message === ML_KIT_CANCELED) return { status: "cancelled" };
+    throw err;
+  }
+  // The native scanners resolve an empty list when the person backs out;
+  // that is a choice, not a failure.
+  if (Array.isArray(result?.barcodes) && result.barcodes.length === 0) return { status: "cancelled" };
   const barcode = result?.barcodes?.[0];
   const value = barcode?.rawValue || barcode?.displayValue;
   return value ? { status: "scanned", value } : { status: "empty" };
