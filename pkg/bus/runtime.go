@@ -181,6 +181,7 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 	}
 	if cfg.InitialMetadata != nil {
 		sctx.SessionCheckpoint.Restore(cfg.InitialMetadata)
+		sctx.sessionCost = sessionCostFromMetadata(cfg.InitialMetadata)
 	}
 
 	// Goal mode: rebuild system prompt (inject/remove directive) and announce.

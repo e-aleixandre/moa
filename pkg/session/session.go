@@ -88,6 +88,9 @@ const (
 	MetaAllowedPaths   = "allowed_paths"
 	MetaCompactAt      = "compact_at"
 	MetaFast           = "fast"
+	// MetaSessionCostUSD is the session's accumulated spend in USD, so the
+	// total survives closing and reopening the session.
+	MetaSessionCostUSD = "session_cost_usd"
 	MetaOrigin         = "origin"
 	// Automation bookkeeping written by the Automation API. The callback fields
 	// are set at creation; the idempotency key is only written once the run's

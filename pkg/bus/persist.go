@@ -2,6 +2,7 @@ package bus
 
 import (
 	"log/slog"
+	"math"
 	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -79,7 +80,22 @@ func collectMetadataAck(sctx *SessionContext, ack *uint64) map[string]any {
 	if sctx.CWD != "" {
 		meta[session.MetaCWD] = sctx.CWD
 	}
+	// The session's spend so far, so the total survives closing and reopening
+	// it. Omitted at 0 (a cleared or new session), which loads as 0.
+	if cost := sctx.sessionCostTotal(); cost > 0 {
+		meta[session.MetaSessionCostUSD] = cost
+	}
 	return meta
+}
+
+// sessionCostFromMetadata reads a saved session total. Anything no build
+// writes (missing, not a number, negative, NaN, Inf) starts the total at 0.
+func sessionCostFromMetadata(meta map[string]any) float64 {
+	v, ok := meta[session.MetaSessionCostUSD].(float64)
+	if !ok || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
 }
 
 // RegisterPersistenceReactor subscribes to state-changing events and auto-saves.
@@ -127,6 +143,9 @@ func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersi
 	}
 	// Metadata-only changes never mutate the tree → safe to persist directly.
 	b.Subscribe(func(e ConfigChanged) { save() })
+	// A child or a background summary can finish while the session is idle:
+	// its spend must reach disk without waiting for the next turn.
+	b.Subscribe(func(e SessionCostUpdated) { save() })
 }
 
 // extractFinalAssistantText returns the text of the last assistant message

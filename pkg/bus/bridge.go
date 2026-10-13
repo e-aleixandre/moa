@@ -248,8 +248,9 @@ type SessionContext struct {
 	runStartedAnchor atomic.Pointer[runStartAnchor]
 
 	// sessionCost accumulates the session's USD spend (main run cost from
-	// RunEnded plus each subagent's cost from SubagentEnded). Reset to 0 on
-	// clear / clean-context plan execution / session load. Guarded by costMu.
+	// RunEnded plus each subagent's cost from SubagentEnded). Seeded from the
+	// saved session metadata, persisted with it, and reset to 0 on clear.
+	// Guarded by costMu.
 	costMu      sync.Mutex
 	sessionCost float64
 

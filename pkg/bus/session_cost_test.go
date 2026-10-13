@@ -7,6 +7,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 func approxEqual(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
@@ -259,3 +260,34 @@ func TestSubagentSpendChargesLaunchingGoalActivation(t *testing.T) {
 	}
 }
 
+// The saved total seeds a new runtime; values no build writes (in-process
+// metadata can carry non-finite floats) start at $0.
+func TestSessionCostSeededFromMetadata(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value any
+		want  float64
+	}{
+		"valid":    {0.75, 0.75},
+		"nan":      {math.NaN(), 0},
+		"inf":      {math.Inf(1), 0},
+		"negative": {-1.0, 0},
+		"string":   {"0.75", 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fas := newFakeAgentSubscriber()
+			rt, err := NewSessionRuntime(RuntimeConfig{
+				SessionID:       "seeded",
+				Agent:           fas.fakeAgent,
+				Subscriber:      &fas.fakeSubscriber,
+				InitialMetadata: map[string]any{session.MetaSessionCostUSD: tc.value},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(rt.Close)
+			if got := querySessionCost(t, rt.Bus); got != tc.want {
+				t.Fatalf("seeded session cost = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
