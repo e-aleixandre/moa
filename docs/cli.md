@@ -166,6 +166,8 @@ model does with them differs:
 - **Claude Sonnet 5.5** cannot turn thinking fully off. `off` sends its lowest
   setting, `between_tools`: no up-front thinking, only short progress notes
   between tool calls, at the default `high` effort.
+- **Claude Haiku 5.5** thinks adaptively at `medium` effort by default; `off`
+  sends `disabled`, which the API accepts up to `high` effort.
 - **`xhigh`** is its own effort level on every Anthropic model except Haiku
   4.5, which caps it at `high`. OpenAI models accept `xhigh` as its own
   effort level. On **GPT-6 Astra**, the five UI positions map to `low`,

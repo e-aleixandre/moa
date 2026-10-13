@@ -43,12 +43,26 @@ var knownModels = map[string]Model{
 	"claude-sonnet-5-5": {
 		ID: "claude-sonnet-5-5", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Sonnet 5.5", MaxInput: 1_000_000, MaxOutput: 131072,
-		Pricing: &Pricing{Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5, CacheWrite1h: 4},
+		Pricing: &Pricing{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5, CacheWrite1h: 4},
 	},
 	"claude-sonnet-5": {
 		ID: "claude-sonnet-5", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Sonnet 5", MaxInput: 1_000_000, MaxOutput: 131072,
 		Pricing: &Pricing{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75, CacheWrite1h: 6},
+	},
+	"claude-haiku-5-5": {
+		ID: "claude-haiku-5-5", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Haiku 5.5", MaxInput: 1_000_000, MaxOutput: 131072,
+		// Priced by prompt length: a request whose prompt (input + cache reads
+		// + cache writes) is over 100,000 tokens pays the higher rates on all
+		// of its tokens. Threshold is inclusive, so 100,001 is the first long
+		// request. https://platform.claude.com/docs/en/models/haiku-5-5/overview
+		Pricing: &Pricing{
+			Input: 0.1, Output: 0.5, CacheRead: 0.01, CacheWrite: 0.125, CacheWrite1h: 0.2,
+			Tiers: []PricingTier{
+				{Threshold: 100_001, Input: 0.5, Output: 2.5, CacheRead: 0.05, CacheWrite: 0.625, CacheWrite1h: 1},
+			},
+		},
 	},
 	"claude-haiku-4-5-20251001": {
 		ID: "claude-haiku-4-5-20251001", Provider: "anthropic", API: "anthropic-messages",
@@ -446,6 +460,7 @@ var modelDisplayOrder = []string{
 	"claude-sonnet-5-5",
 	"claude-sonnet-5",
 	"claude-opus-4-8",
+	"claude-haiku-5-5",
 	"claude-haiku-4-5-20251001",
 	// Meta
 	"muse-spark-1.3",

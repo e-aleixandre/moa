@@ -189,12 +189,48 @@ func TestSonnet55Pricing(t *testing.T) {
 	}
 	p := model.Pricing
 	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 ||
-		p.Input != 2 || p.Output != 10 || p.CacheRead != 0.2 ||
+		p.Input != 2 || p.Output != 10 || p.CacheRead != 0.1 ||
 		p.CacheWrite != 2.5 || p.CacheWrite1h != 4 {
 		t.Fatalf("Sonnet 5.5 definition = %+v, pricing = %+v", model, p)
 	}
-	if got, want := p.Cost(Usage{Input: 1_000, CacheRead: 2_000, CacheWrite: 7_000, CacheWrite1h: 4_000, Output: 5_000}), 0.0759; math.Abs(got-want) > 1e-12 {
+	if got, want := p.Cost(Usage{Input: 1_000, CacheRead: 2_000, CacheWrite: 7_000, CacheWrite1h: 4_000, Output: 5_000}), 0.0757; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("Sonnet 5.5 cost = %v, want %v", got, want)
+	}
+}
+
+func TestHaiku55Pricing(t *testing.T) {
+	model, ok := ResolveModel("claude-haiku-5-5")
+	if !ok || model.Provider != "anthropic" || model.Pricing == nil {
+		t.Fatalf("claude-haiku-5-5 = %+v, %v", model, ok)
+	}
+	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 {
+		t.Fatalf("Haiku 5.5 limits = %d/%d", model.MaxInput, model.MaxOutput)
+	}
+	// The haiku alias still follows Haiku 4.5.
+	if alias, _ := ResolveModel("haiku"); alias.ID != "claude-haiku-4-5-20251001" {
+		t.Fatalf("haiku alias = %q", alias.ID)
+	}
+	p := model.Pricing
+	usage := Usage{Input: 1_000, CacheRead: 2_000, CacheWrite: 7_000, CacheWrite1h: 4_000, Output: 5_000}
+	// 1000*.10 + 2000*.01 + 3000*.125 + 4000*.20 + 5000*.50 = 3795e-6 USD
+	if got, want := p.Cost(usage), 0.003795; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("Haiku 5.5 short cost = %v, want %v", got, want)
+	}
+	// Exactly 100K is still the short tier; the long tier prices the whole
+	// request, cache reads and writes included, once the prompt exceeds it.
+	if got, want := p.Cost(Usage{Input: 90_000, CacheRead: 10_000, Output: 1_000}), 0.0096; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("Haiku 5.5 at 100K = %v, want %v", got, want)
+	}
+	// 50000*.50 + 40000*.05 + 10001*.625 + 1000*2.50, all at the long-prompt rates
+	long := Usage{Input: 50_000, CacheRead: 40_000, CacheWrite: 10_001, Output: 1_000}
+	if got, want := p.Cost(long), 0.025+0.002+10_001*0.625/1e6+0.0025; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("Haiku 5.5 long cost = %v, want %v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 100_001, CacheWrite: 0, CacheWrite1h: 0}), 100_001*0.5/1e6; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("Haiku 5.5 just over 100K = %v, want %v", got, want)
+	}
+	if got, want := p.Cost(Usage{Input: 1, CacheWrite: 100_000, CacheWrite1h: 100_000}), 0.5/1e6+100_000*1.0/1e6; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("Haiku 5.5 long 1h write = %v, want %v", got, want)
 	}
 }
 
@@ -400,6 +436,7 @@ func TestThinkingAlwaysOn_PerModel(t *testing.T) {
 		"sonnet":                    false,
 		"claude-sonnet-5":           false,
 		"claude-haiku-4-5-20251001": false,
+		"claude-haiku-5-5":          false,
 		"gpt-6-sol":                 false,
 	}
 	for id, want := range cases {
@@ -422,6 +459,7 @@ func TestEffectiveThinkingLevel_AnthropicPerModel(t *testing.T) {
 		"claude-sonnet-5-5":         {"off", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-sonnet-5":           {"off", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-haiku-4-5-20251001": {"off", "low", "medium", "high", "high", "high"},
+		"claude-haiku-5-5":          {"off", "low", "medium", "high", "xhigh", "xhigh"},
 	}
 	for id, expected := range want {
 		model, ok := ResolveModel(id)

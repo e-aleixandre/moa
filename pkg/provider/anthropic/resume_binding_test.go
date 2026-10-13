@@ -37,6 +37,9 @@ func TestResumeReplayBindingControls(t *testing.T) {
 		{"claude-sonnet-5-5", "high", true, true},
 		// Sonnet's between_tools mode rejects block_binding, even with the beta.
 		{"claude-sonnet-5-5", "off", false, true},
+		{"claude-haiku-5-5", "high", true, true},
+		// Haiku's disabled mode rejects block_binding, like Sonnet's between_tools.
+		{"claude-haiku-5-5", "off", false, true},
 		{"claude-opus-5", "high", false, false},
 		{"claude-mythos-5-1", "high", false, false},
 	}

@@ -365,6 +365,7 @@ var anthropicThinking = []struct {
 	{[]string{"opus-4-8", "opus-4.8"}, AnthropicThinking{Adaptive: true, DefaultEffort: "high", XHigh: true}},
 	{[]string{"sonnet-5-5", "sonnet-5.5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, OffType: "between_tools", DefaultEffort: "high", XHigh: true}},
 	{[]string{"sonnet-5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, DefaultEffort: "high", XHigh: true}},
+	{[]string{"haiku-5-5", "haiku-5.5"}, AnthropicThinking{Adaptive: true, OnByDefault: true, DefaultEffort: "medium", XHigh: true}},
 	{[]string{"haiku-4-5", "haiku-4.5"}, AnthropicThinking{}},
 }
 

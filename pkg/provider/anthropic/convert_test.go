@@ -233,6 +233,7 @@ func TestBuildRequestBody_ThinkingPerModelAndLevel(t *testing.T) {
 		"claude-sonnet-5-5":         {"between_tools", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"sonnet":                    {"between_tools", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-sonnet-5":           {"disabled", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
+		"claude-haiku-5-5":          {"disabled", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-haiku-4-5-20251001": {"-", "enabled/4096", "enabled/10000", "enabled/30976", "enabled/30976"}, // budget capped by the default max_tokens,
 	}
 	for modelID, expected := range want {
