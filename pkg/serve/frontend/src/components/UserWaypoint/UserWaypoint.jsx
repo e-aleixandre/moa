@@ -38,17 +38,31 @@ export function LightboxBody({ src, label, failed, onError }) {
   );
 }
 
+// Each opening is its own attempt: a 404 is remembered for the opening that saw
+// it, so a blob that answers later is tried again on the next open (one request
+// per opening, no retry loop). Pure so the rule is checkable without a DOM.
+export function nextOpening(prev, isOpen) {
+  return { open: isOpen, seq: isOpen && !prev.open ? prev.seq + 1 : prev.seq };
+}
+
+export function lightboxFailed(failure, src, seq) {
+  return !!failure && failure.src === src && failure.seq === seq;
+}
+
 export function ImageLightbox({ attachment, sessionId, onClose }) {
   const shown = useRef(attachment);
-  const [failedSrc, setFailedSrc] = useState(null);
+  const opening = useRef({ open: false, seq: 0 });
+  const [failure, setFailure] = useState(null);
   if (attachment) shown.current = attachment;
+  opening.current = nextOpening(opening.current, !!attachment);
+  const seq = opening.current.seq;
   const src = attachmentImageSrc(shown.current, sessionId);
   if (!src) return null;
   const label = attachmentLabel(shown.current, "Image");
 
   return (
     <Sheet open={!!attachment} onClose={onClose} title={label} ariaLabel={`Preview ${label}`} class="wp-image-lightbox">
-      <LightboxBody src={src} label={label} failed={failedSrc === src} onError={() => setFailedSrc(src)} />
+      <LightboxBody src={src} label={label} failed={lightboxFailed(failure, src, seq)} onError={() => setFailure({ src, seq })} />
     </Sheet>
   );
 }

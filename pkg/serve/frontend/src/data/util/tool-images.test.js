@@ -5,7 +5,7 @@ import { withLiveTools } from '../ws/init.js';
 import { newBuffers, applyNestedEvent } from '../conversation-reducer.js';
 import { projectStream } from '../stream-model.js';
 import { fuseLedgerDetails } from './ledger-details.jsx';
-import { LightboxBody } from '../../components/UserWaypoint/UserWaypoint.jsx';
+import { LightboxBody, lightboxFailed, nextOpening } from '../../components/UserWaypoint/UserWaypoint.jsx';
 import { THUMB_MAX_BYTES, ToolImages, toolImageEntries } from '../../components/ToolImages/ToolImages.jsx';
 
 const REF = { type: 'image', attachment_id: 'att1', mime_type: 'image/png', attachment_size: 42 };
@@ -110,4 +110,20 @@ test('a lightbox whose image failed says so instead of showing a broken image', 
   const failed = LightboxBody({ src: '/a', label: 'big.jpg', failed: true, onError() {} });
   expect(hasImg(failed)).toBe(false);
   expect(text(failed)).toContain('Image unavailable');
+});
+
+// Review RED: after a 404 the lightbox stayed "unavailable" on every reopen, even
+// once the blob answered 200 again. Each opening gets one fresh attempt.
+test('a failure belongs to the opening that saw it, so reopening retries once', () => {
+  let state = { open: false, seq: 0 };
+  state = nextOpening(state, true);
+  const failure = { src: '/a', seq: state.seq };
+  expect(lightboxFailed(failure, '/a', state.seq)).toBe(true);
+  // Staying open (re-renders, the exit animation) keeps the same opening.
+  expect(nextOpening(state, true).seq).toBe(state.seq);
+  state = nextOpening(state, false);
+  expect(lightboxFailed(failure, '/a', state.seq)).toBe(true);
+  state = nextOpening(state, true);
+  expect(lightboxFailed(failure, '/a', state.seq)).toBe(false);
+  expect(lightboxFailed(failure, '/b', state.seq)).toBe(false);
 });

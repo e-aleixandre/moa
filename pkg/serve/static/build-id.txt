@@ -1,5 +1,1 @@
-<<<<<<< HEAD
-9678fde90407
-=======
-4821de808168
->>>>>>> 8ec24082 (feat(serve): show the image a tool returned in its ledger row)
+f5bd727d4bae
