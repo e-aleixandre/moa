@@ -1,6 +1,12 @@
 name: iOS app
 
-# Builds the native container and uploads it to TestFlight.
+# Builds the native container and uploads it to App Store Connect (TestFlight).
+#
+# STATUS: this workflow has not been run. Releases are currently built and
+# uploaded from the maintainer's Mac; the workflow is kept for the day that
+# moves to CI. Treat it as a draft: the signing steps in particular have only
+# been checked for syntax and for how Xcode expands their build settings, not
+# against a real certificate and real profiles.
 #
 # Deliberately manual: this is not part of CI. Every other job here proves the
 # repository is sound and costs nothing; this one signs with a real developer
@@ -15,6 +21,10 @@ name: iOS app
 #
 # The build carries no server address: which moa it talks to is decided on the
 # device, by pairing.
+#
+# Three targets are signed, each with its own App Store provisioning profile:
+# the app and its two extensions (NotificationService, ShareExtension). Their
+# bundle ids are the ones in mobile/ios/App/App.xcodeproj/project.pbxproj.
 
 on:
   workflow_dispatch:
@@ -38,6 +48,12 @@ jobs:
     # the minimum that can submit builds for iOS 18 and later.
     runs-on: macos-15
     timeout-minutes: 45
+    env:
+      # Keep in step with PRODUCT_BUNDLE_IDENTIFIER / MOA_*_BUNDLE_IDENTIFIER
+      # in project.pbxproj.
+      BUNDLE_ID_APP: com.ealeixandre.moa.app
+      BUNDLE_ID_NOTIFICATION_SERVICE: com.ealeixandre.moa.app.NotificationService
+      BUNDLE_ID_SHARE_EXTENSION: com.ealeixandre.moa.app.ShareExtension
 
     steps:
       - uses: actions/checkout@v6
@@ -78,16 +94,12 @@ jobs:
           echo "build=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           echo "moa $VERSION, build ${{ github.run_number }}"
 
-      # ios/ is not committed -- a generated Xcode project is a merge conflict
-      # with a long fuse -- so it is created here, from the config in the repo.
-      - name: Generate the Xcode project
+      # The Xcode project is committed (see mobile/README.md): it carries two
+      # extension targets, which `cap add ios` would remove. `cap sync` only
+      # copies the web assets and runs `pod install`.
+      - name: Sync the Xcode project
         working-directory: mobile
         run: |
-          # ML Kit requires iOS 15.5. Capacitor's CocoaPods template starts
-          # at 15.0 and `cap add` runs pod install before we can raise it.
-          # It nevertheless leaves the generated Podfile in place.
-          npx cap add ios --packagemanager cocoapods || test -f ios/App/Podfile
-          sed -i '' "s/platform :ios, '15.0'/platform :ios, '15.5'/" ios/App/Podfile
           npx cap sync ios
           # The committed Info.plist already carries the usage strings, and
           # PlistBuddy's Add fails on an existing key: add only what is missing.
@@ -103,14 +115,9 @@ jobs:
           /usr/libexec/PlistBuddy -c \
             'Add :NSMicrophoneUsageDescription string "moa uses the microphone to dictate messages."' \
             ios/App/App/Info.plist
-          # Recording survives the screen locking only if the app declares it:
-          # otherwise iOS suspends the web view mid-sentence and the audio
-          # already spoken is lost. This is the capability an installed web app
-          # cannot have at all.
-          /usr/libexec/PlistBuddy -c \
-            'Add :UIBackgroundModes array' ios/App/App/Info.plist 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c \
-            'Add :UIBackgroundModes: string audio' ios/App/App/Info.plist
+          # No UIBackgroundModes: the app does not record or play audio in the
+          # background, and declaring a mode it does not use is grounds for
+          # App Review to reject it.
 
       # The icon is generated from one 1024px source rather than committed as
       # a catalogue of twenty crops: the crops are derived, and a derived file
@@ -122,11 +129,18 @@ jobs:
       # A keychain of its own, unlocked for this job only: the runner is
       # ephemeral, but a build should never be able to read or write the
       # default login keychain.
-      - name: Install the signing certificate
+      #
+      # Each profile is installed under its UUID and checked against the bundle
+      # id it is meant for: a profile pasted into the wrong secret otherwise
+      # fails much later, in the archive, with a message about entitlements.
+      # Its name is what Xcode and the export plist look it up by.
+      - name: Install the signing certificate and profiles
         env:
           CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          PROFILE_APP: ${{ secrets.IOS_PROFILE_APP }}
+          PROFILE_NOTIFICATION_SERVICE: ${{ secrets.IOS_PROFILE_NOTIFICATION_SERVICE }}
+          PROFILE_SHARE_EXTENSION: ${{ secrets.IOS_PROFILE_SHARE_EXTENSION }}
         run: |
           KEYCHAIN=$RUNNER_TEMP/signing.keychain-db
           KEYCHAIN_PASSWORD=$(uuidgen)
@@ -142,55 +156,90 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: \
             -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
 
           PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
           mkdir -p "$PROFILES"
-          echo -n "$PROVISIONING_PROFILE" | base64 --decode \
-            > "$PROFILES/build.mobileprovision"
 
-          rm -f "$RUNNER_TEMP/cert.p12"
+          # install_profile <base64 profile> <bundle id> <env var for its name>
+          install_profile() {
+            local file="$RUNNER_TEMP/$3.mobileprovision" info="$RUNNER_TEMP/$3.plist"
+            echo -n "$1" | base64 --decode > "$file"
+            security cms -D -i "$file" > "$info"
+            local uuid name app_id
+            uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$info")
+            name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$info")
+            app_id=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$info")
+            if [ "${app_id#*.}" != "$2" ]; then
+              echo "::error::The profile in $3 is for ${app_id#*.}, expected $2"
+              exit 1
+            fi
+            cp "$file" "$PROFILES/$uuid.mobileprovision"
+            echo "$3=$name" >> "$GITHUB_ENV"
+          }
 
+          install_profile "$PROFILE_APP" "$BUNDLE_ID_APP" MOA_PROFILE_App
+          install_profile "$PROFILE_NOTIFICATION_SERVICE" "$BUNDLE_ID_NOTIFICATION_SERVICE" MOA_PROFILE_NotificationService
+          install_profile "$PROFILE_SHARE_EXTENSION" "$BUNDLE_ID_SHARE_EXTENSION" MOA_PROFILE_ShareExtension
+
+      # Manual signing for all three targets. The project says Automatic, and
+      # command-line settings win over it. The profile is chosen per target by
+      # expanding MOA_PROFILE_<target name>: a single PROVISIONING_PROFILE_SPECIFIER
+      # would hand the app's profile to the extensions. Targets with no such
+      # variable (the Pods) get an empty specifier, which is what they need.
       - name: Archive
         working-directory: mobile/ios/App
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
         run: |
+          # The $(...) below is for xcodebuild, not the shell.
+          # shellcheck disable=SC2016
           xcodebuild archive \
             -workspace App.xcworkspace \
             -scheme App \
             -configuration Release \
             -destination "generic/platform=iOS" \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
-            -allowProvisioningUpdates \
             MARKETING_VERSION="${{ steps.version.outputs.marketing }}" \
             CURRENT_PROJECT_VERSION="${{ steps.version.outputs.build }}" \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="${{ secrets.IOS_TEAM_ID }}"
+            CODE_SIGN_STYLE=Manual \
+            "CODE_SIGN_IDENTITY=Apple Distribution" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            'PROVISIONING_PROFILE_SPECIFIER=$(MOA_PROFILE_$(TARGET_NAME))' \
+            "MOA_PROFILE_App=$MOA_PROFILE_App" \
+            "MOA_PROFILE_NotificationService=$MOA_PROFILE_NotificationService" \
+            "MOA_PROFILE_ShareExtension=$MOA_PROFILE_ShareExtension"
 
       - name: Export the ipa
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
         run: |
-          cat > "$RUNNER_TEMP/export.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>teamID</key><string>${{ secrets.IOS_TEAM_ID }}</string>
-            <key>uploadSymbols</key><true/>
-            <key>destination</key><string>export</string>
-          </dict>
-          </plist>
-          PLIST
+          # Built with PlistBuddy rather than a heredoc so that a profile name
+          # with an ampersand or a quote cannot produce a broken plist.
+          EXPORT="$RUNNER_TEMP/export.plist"
+          rm -f "$EXPORT"
+          PB=/usr/libexec/PlistBuddy
+          $PB -c 'Add :method string app-store-connect' "$EXPORT"
+          $PB -c 'Add :signingStyle string manual' "$EXPORT"
+          $PB -c 'Add :signingCertificate string "Apple Distribution"' "$EXPORT"
+          $PB -c "Add :teamID string $TEAM_ID" "$EXPORT"
+          $PB -c 'Add :uploadSymbols bool true' "$EXPORT"
+          $PB -c 'Add :destination string export' "$EXPORT"
+          $PB -c 'Add :provisioningProfiles dict' "$EXPORT"
+          $PB -c "Add :provisioningProfiles:$BUNDLE_ID_APP string $MOA_PROFILE_App" "$EXPORT"
+          $PB -c "Add :provisioningProfiles:$BUNDLE_ID_NOTIFICATION_SERVICE string $MOA_PROFILE_NotificationService" "$EXPORT"
+          $PB -c "Add :provisioningProfiles:$BUNDLE_ID_SHARE_EXTENSION string $MOA_PROFILE_ShareExtension" "$EXPORT"
+          plutil -lint "$EXPORT"
 
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist "$RUNNER_TEMP/export.plist" \
-            -allowProvisioningUpdates
+            -exportOptionsPlist "$EXPORT"
 
       # The API key is written to disk because altool reads it from there, and
       # removed in the same step whatever happens: a private key outliving the
       # job is the one thing this workflow must not leave behind.
-      - name: Upload to TestFlight
+      - name: Upload to App Store Connect
         env:
           API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
