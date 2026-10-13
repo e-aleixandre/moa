@@ -15,6 +15,8 @@
 // Callers are responsible for persisting the result (e.g. updateSession) and
 // for any batching of high-frequency deltas.
 
+import { toolImageRefs } from './util/tool-images.js';
+
 export function newBuffers() {
   return {
     materializedText: '', // text already flushed into a message this turn
@@ -161,7 +163,7 @@ export function reduceToolEnd(target, buffers, data, extractNote) {
   const note = extractNote ? extractNote(data.result, data.rejected === true) : null;
   target.messages = target.messages.map(m => {
     if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
-      return { ...m, status: nextStatus, result: data.result, streamingResult: null, note };
+      return { ...m, status: nextStatus, result: data.result, images: toolImageRefs(data.images), streamingResult: null, note };
     }
     return m;
   });

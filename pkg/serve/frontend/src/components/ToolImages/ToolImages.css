@@ -1,0 +1,73 @@
+/* Thumbnails under a ledger row. Indented to the row's text column so they read
+   as that row's result, not as a new row. */
+.ti-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.ti-thumb {
+  display: block;
+  min-width: 44px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: var(--zl-rim);
+  border-radius: var(--zl-r-md);
+  background: var(--base);
+  cursor: pointer;
+  line-height: 0;
+}
+
+.ti-thumb img {
+  display: block;
+  max-width: min(100%, 220px);
+  max-height: 88px;
+  min-height: 44px;
+  object-fit: contain;
+}
+
+.ti-thumb:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.ti-more {
+  color: var(--zl-t3);
+  font-size: var(--text-sm);
+}
+
+.ti-tile {
+  display: flex;
+  min-height: 44px;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--base);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ti-tile-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ti-tile-size {
+  flex: none;
+  color: var(--zl-t3);
+  font-size: var(--text-sm);
+}
+
+.ti-tile:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

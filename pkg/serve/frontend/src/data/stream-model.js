@@ -1024,6 +1024,7 @@ function toLedgerRow(msg) {
   if (echo) row.echo = echo;
   if (PATH_ARG_TOOLS.has(name.toLowerCase())) row.argTail = true;
   if (msg.detailUrl) row.detailUrl = msg.detailUrl;
+  if (msg.images) row.images = msg.images;
   const inputLine = toolInputLine(name, msg.args);
   if (inputLine) row.inputLine = inputLine;
   if (name.toLowerCase() === 'ask_user') {

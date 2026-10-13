@@ -77,7 +77,7 @@ export function docChildren(blocks, onOpenSubagent, visibleDone, sessionId, onEx
         while (i + 1 < blocks.length && blocks[i + 1].type === "diff") {
           siblingDiffs.push(blocks[++i]);
         }
-        const rows = fuseLedgerDetails(b.rows, siblingDiffs);
+        const rows = fuseLedgerDetails(b.rows, siblingDiffs, sessionId);
         out.push(<ActivityLedger key={b.id} rows={rows} visibleDone={visibleDone} />);
         break;
       }

@@ -174,6 +174,9 @@ type LiveToolCall struct {
 	// AskResponder is who answered an ask_user that ended, when recorded:
 	// like Result, it is in no history until the batch is collected.
 	AskResponder *askuser.Responder
+	// Images are the stored-image references of a terminal call (see
+	// ToolExecEnded.Images).
+	Images []core.Content
 	// StartedAt anchors the client's elapsed timer to the moment the call first
 	// appeared, so a reconnect resumes the count instead of restarting it.
 	StartedAt time.Time

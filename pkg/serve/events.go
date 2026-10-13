@@ -131,6 +131,8 @@ type LiveToolInitData struct {
 	Result string `json:"result,omitempty"`
 	// AskResponder is who answered an ended ask_user (absent when not recorded).
 	AskResponder *askuser.Responder `json:"ask_responder,omitempty"`
+	// Images are the stored-image references of a terminal call (see ToolEndData).
+	Images []core.Content `json:"images,omitempty"`
 }
 
 // SubagentInitData describes one live subagent job for reconnecting clients
@@ -257,6 +259,9 @@ type ToolEndData struct {
 	Result     string `json:"result"`
 	// AskResponder is who answered an ask_user (absent when not recorded).
 	AskResponder *askuser.Responder `json:"ask_responder,omitempty"`
+	// Images are stored-image references (never bytes) the client fetches from
+	// the session's attachment endpoint, same keys as history content blocks.
+	Images []core.Content `json:"images,omitempty"`
 }
 
 // TasksUpdateData carries the full task list after a change.

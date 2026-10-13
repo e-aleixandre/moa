@@ -156,8 +156,11 @@ type ToolExecEnded struct {
 	ToolCallID string
 	ToolName   string
 	Result     string
-	IsError    bool
-	Rejected   bool
+	// Images are the stored-image references the tool returned to the model.
+	// Display only: never the bytes, which stay in the attachment store.
+	Images   []core.Content
+	IsError  bool
+	Rejected bool
 	// AskResponder is who answered an ask_user, when the result records it.
 	AskResponder *askuser.Responder
 }

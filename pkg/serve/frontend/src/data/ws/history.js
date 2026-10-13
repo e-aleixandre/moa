@@ -1,4 +1,5 @@
 // WebSocket history normalization and transcript projections.
+import { toolImageRefs } from '../util/tool-images.js';
 
 
 // skillForkLaunchRow renders a slash-launched forked skill as the SAME launch
@@ -68,6 +69,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
             args: c.arguments || {},
             status,
             result: resultText,
+            images: toolImageRefs(tr?.content),
             note: extractToolNote(resultText, status === 'rejected'),
             // The subagent tool records the job it spawned on its result: the
             // tool call ID is the provider's, so this is the only link from a
@@ -255,6 +257,7 @@ export function appendNormalizedHistoryDelta(prefix, raw, liveSubagents = []) {
     const result = (msg.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
     const update = {
       result,
+      images: toolImageRefs(msg.content),
       status: msg.custom?.rejected === true ? 'rejected' : msg.is_error ? 'error' : 'done',
       timestamp: msg.timestamp,
     };

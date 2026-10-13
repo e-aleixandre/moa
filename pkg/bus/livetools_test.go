@@ -2,6 +2,7 @@ package bus
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
@@ -359,5 +360,32 @@ func TestBridgeEvent_LiveToolSnapshotCutIsAtomic(t *testing.T) {
 		}
 	next:
 		b.Close()
+	}
+}
+
+// A stored image returned by a tool (read of a PNG, an MCP screenshot) must
+// reach clients as a reference only: the bytes stay in the attachment store,
+// and an inline image cannot be fetched back, so it is not announced.
+func TestToolEndCarriesStoredImageRefsOnly(t *testing.T) {
+	result := core.Result{Content: []core.Content{
+		core.TextContent("shot"),
+		{Type: "image", MimeType: "image/png", AttachmentID: "att1", AttachmentSize: 42, Data: "SHOULD-NOT-LEAK", Filename: "x.png"},
+		core.ImageContent("aGVsbG8=", "image/png"),
+	}}
+	end := core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolCallID: "tc1", ToolName: "read", Result: &result}
+
+	want := []core.Content{{Type: "image", MimeType: "image/png", AttachmentID: "att1", AttachmentSize: 42}}
+	events := TranslateAgentEvent("s1", 1, end, nil)
+	ended, ok := events[0].(ToolExecEnded)
+	if !ok || !reflect.DeepEqual(ended.Images, want) {
+		t.Fatalf("ToolExecEnded.Images = %+v, want %+v", events[0], want)
+	}
+	if call := EndedLiveToolCall(end); !reflect.DeepEqual(call.Images, want) {
+		t.Fatalf("LiveToolCall.Images = %+v, want %+v", call.Images, want)
+	}
+	text := core.Result{Content: []core.Content{core.TextContent("plain")}}
+	events = TranslateAgentEvent("s1", 1, core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolCallID: "tc2", ToolName: "bash", Result: &text}, nil)
+	if got := events[0].(ToolExecEnded).Images; got != nil {
+		t.Fatalf("text-only result Images = %+v, want nil", got)
 	}
 }

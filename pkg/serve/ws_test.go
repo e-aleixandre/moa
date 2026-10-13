@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -1150,5 +1151,32 @@ func TestLiveToolInitDataCarriesBoundedResult(t *testing.T) {
 	}
 	if !strings.HasSuffix(got[1].Result, truncationNotice) || len(got[1].Result) > historyContentMaxBytes+len(truncationNotice)+2 {
 		t.Fatalf("result not bounded like history: %d bytes", len(got[1].Result))
+	}
+}
+
+// The image a tool returned travels as a reference on every path that shows a
+// tool result: the live tool_end, the mid-batch reconnect snapshot, and the
+// history pages (where an old session may also carry inline bytes).
+func TestToolImageRefsReachClients(t *testing.T) {
+	refs := []core.Content{{Type: "image", MimeType: "image/png", AttachmentID: "att1", AttachmentSize: 42}}
+
+	evt, ok := wsEventFromBus(bus.ToolExecEnded{ToolCallID: "tc1", ToolName: "read", Images: refs})
+	if !ok {
+		t.Fatal("tool_end not projected")
+	}
+	raw, _ := json.Marshal(evt.Data)
+	if !strings.Contains(string(raw), `"images":[{"type":"image","mime_type":"image/png","attachment_id":"att1","attachment_size":42}]`) {
+		t.Fatalf("tool_end payload = %s, want the image reference", raw)
+	}
+
+	live := liveToolInitData([]bus.LiveToolCall{{ToolCallID: "tc1", ToolName: "read", Phase: bus.LiveToolPhaseDone, Images: refs}})
+	if len(live) != 1 || !reflect.DeepEqual(live[0].Images, refs) {
+		t.Fatalf("liveToolInitData = %+v, want the image reference", live)
+	}
+
+	msg := core.WrapMessage(core.Message{Role: "tool_result", ToolCallID: "tc1", Content: refs})
+	clean, _ := sanitizeHistoryMessage(msg)
+	if !reflect.DeepEqual(clean.Content, refs) {
+		t.Fatalf("history content = %+v, want the reference untouched", clean.Content)
 	}
 }

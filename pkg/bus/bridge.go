@@ -855,6 +855,7 @@ func (sctx *SessionContext) endLiveToolLocked(call LiveToolCall) {
 			sctx.liveTools[i].Phase = call.Phase
 			sctx.liveTools[i].Result = call.Result
 			sctx.liveTools[i].AskResponder = call.AskResponder
+			sctx.liveTools[i].Images = call.Images
 			return
 		}
 	}
@@ -1422,7 +1423,7 @@ func EndedLiveToolCall(e core.AgentEvent) LiveToolCall {
 	} else if e.IsError {
 		phase = LiveToolPhaseError
 	}
-	return LiveToolCall{ToolCallID: e.ToolCallID, ToolName: e.ToolName, Phase: phase, Result: resultText(e.Result), AskResponder: askResponderOf(e.Result)}
+	return LiveToolCall{ToolCallID: e.ToolCallID, ToolName: e.ToolName, Phase: phase, Result: resultText(e.Result), AskResponder: askResponderOf(e.Result), Images: resultImageRefs(e.Result)}
 }
 
 // askResponderOf is who answered an ask_user, as its result records it.
@@ -1434,6 +1435,24 @@ func askResponderOf(result *core.Result) *askuser.Responder {
 		return &r
 	}
 	return nil
+}
+
+// resultImageRefs lists the images a tool result carries as stored references,
+// stripped to what a client needs to fetch and label them. An inline image
+// (no AttachmentID) is skipped on purpose: its bytes would have to travel over
+// the socket, and the fetch endpoint can only serve what is in the store.
+func resultImageRefs(r *core.Result) []core.Content {
+	if r == nil {
+		return nil
+	}
+	var refs []core.Content
+	for _, c := range r.Content {
+		if c.Type != "image" || c.AttachmentID == "" {
+			continue
+		}
+		refs = append(refs, core.Content{Type: "image", MimeType: c.MimeType, AttachmentID: c.AttachmentID, AttachmentSize: c.AttachmentSize})
+	}
+	return refs
 }
 
 // TranslateAgentEvent translates a single core.AgentEvent into 0..n typed bus
@@ -1550,6 +1569,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 			ToolCallID:   e.ToolCallID,
 			ToolName:     e.ToolName,
 			Result:       resultText(e.Result),
+			Images:       resultImageRefs(e.Result),
 			IsError:      e.IsError,
 			Rejected:     e.Rejected,
 			AskResponder: askResponderOf(e.Result),

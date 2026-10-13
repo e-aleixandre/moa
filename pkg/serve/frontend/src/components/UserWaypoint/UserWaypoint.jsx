@@ -24,7 +24,7 @@ import "./UserWaypoint.css";
 // parent tore the whole thing out on the frame of the close, and the exit
 // never ran. So `open` is the real state here, and the last attachment is
 // held just long enough for the sheet to leave with something to show.
-function ImageLightbox({ attachment, sessionId, onClose }) {
+export function ImageLightbox({ attachment, sessionId, onClose }) {
   const shown = useRef(attachment);
   if (attachment) shown.current = attachment;
   const src = attachmentImageSrc(shown.current, sessionId);

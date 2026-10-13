@@ -6,6 +6,7 @@ import { HistoryDetail } from "../../components/HistoryDetail/HistoryDetail.jsx"
 import { api } from "../api.js";
 import { toolPreview } from "../util/format.js";
 import { mapToolToKind } from "../util/tool-kind.js";
+import { ToolImages } from "../../components/ToolImages/ToolImages.jsx";
 
 export function projectedToolDetailNode(tool, path, detail) {
   const preview = toolPreview(tool, detail?.args, detail?.output, 'done');
@@ -55,7 +56,7 @@ function inputDetailNode(inputText, output, prompt = null) {
 // render BORDERLESS (className="flush") since the .zl-lg-detail panel is the only
 // surface. Shared by the desktop Stream and mobile MobileStream so both fuse
 // identically (parity). Returns rows, each possibly with a `detail:{node}`.
-export function fuseLedgerDetails(rows, siblingDiff) {
+export function fuseLedgerDetails(rows, siblingDiff, sessionId) {
   const diffs = Array.isArray(siblingDiff) ? siblingDiff.filter(Boolean) : (siblingDiff ? [siblingDiff] : []);
   const editIndexes = [];
   for (let i = 0; i < rows.length; i++) {
@@ -75,6 +76,19 @@ export function fuseLedgerDetails(rows, siblingDiff) {
   }
   return rows.map((row, i) => {
     if (row.live) return row; // the live row never carries a static detail
+    const fusedRow = fuseRow(row, i);
+    // The picture a tool returned opens with the row, ahead of any text output.
+    // Closed, nothing is fetched: a session full of reads costs no image bytes
+    // until one is looked at.
+    if (row.images && sessionId) {
+      const pictures = <ToolImages images={row.images} sessionId={sessionId} path={row.arg?.text} />;
+      const existing = fusedRow.detail?.node;
+      return { ...fusedRow, detail: { node: existing ? <>{pictures}{existing}</> : pictures } };
+    }
+    return fusedRow;
+  });
+
+  function fuseRow(row, i) {
     const fused = diffByRow.get(i);
     const lazyOutput = row.detailUrl
       ? <ProjectedToolDetail url={row.detailUrl} tool={row.tool} path={row.arg?.text || ''} />
@@ -115,5 +129,5 @@ export function fuseLedgerDetails(rows, siblingDiff) {
       };
     }
     return row;
-  });
+  }
 }

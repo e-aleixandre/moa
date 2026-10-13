@@ -1979,6 +1979,19 @@ test('a live event arriving after the snapshot updates the restored row instead 
   expect(after[0].status).toBe('done');
 });
 
+// The live socket carries a stored-image reference, never bytes: the row keeps it
+// so its detail can show what the tool returned without waiting for a reload.
+test('tool_end keeps the stored image reference of the tool that returned a picture', () => {
+  setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [
+    { _type: 'tool_start', tool_call_id: 'tc1', tool_name: 'read', status: 'running', result: null },
+  ] } } });
+  handleWsToolEnd('s1', {
+    tool_call_id: 'tc1', tool_name: 'read', result: '',
+    images: [{ type: 'image', attachment_id: 'att1', mime_type: 'image/png', attachment_size: 42 }],
+  });
+  expect(store.get().sessions.s1.messages[0].images).toEqual([{ attachment_id: 'att1', mime_type: 'image/png', attachment_size: 42 }]);
+});
+
 test('tool_end only completes the first matching tool call', () => {
   setState({ sessions: { s1: { id: 's1', subagents: {}, messages: [
     { _type: 'tool_start', tool_call_id: 'reused', tool_name: 'read', status: 'running', result: null },

@@ -1,1 +1,5 @@
+<<<<<<<< HEAD:pkg/serve/static/build/9678fde90407/owners-6CAQZ565.js
 import{a as b,b as c,c as d,d as e,e as f,f as g,g as h,h as i,i as j,j as k,k as l,l as m}from"./chunk-JB4UNUAL.js";import{ua as a}from"./chunk-3IYLLLDK.js";import"./chunk-EK7ODJWE.js";export{a as OWNERS_INITIAL,h as closeOwner,f as createOwner,k as loadOwnerBook,j as loadOwnerSessions,d as loadOwners,l as openBookFile,i as openOwnerConversation,c as ownersHealth,b as ownersSlice,e as retryOwners,m as saveBookFile,g as updateOwner};
+========
+import{a as b,b as c,c as d,d as e,e as f,f as g,g as h,h as i,i as j,j as k,k as l,l as m}from"./chunk-UKUCCE2H.js";import{ua as a}from"./chunk-JL5I5IXM.js";import"./chunk-EK7ODJWE.js";export{a as OWNERS_INITIAL,h as closeOwner,f as createOwner,k as loadOwnerBook,j as loadOwnerSessions,d as loadOwners,l as openBookFile,i as openOwnerConversation,c as ownersHealth,b as ownersSlice,e as retryOwners,m as saveBookFile,g as updateOwner};
+>>>>>>>> 8ec24082 (feat(serve): show the image a tool returned in its ledger row):pkg/serve/static/build/4821de808168/owners-4OCX62JH.js

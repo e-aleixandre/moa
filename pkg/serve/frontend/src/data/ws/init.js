@@ -11,6 +11,7 @@ import { seedOlderHistory } from '../history-paging.js';
 import { refreshArtifactsAfterReconnect } from '../artifacts.js';
 import { settleFreshMarkers } from '../start-fresh.js';
 import { parseCacheUsage } from '../cache-usage.js';
+import { toolImageRefs } from '../util/tool-images.js';
 import { normalizeErrorDetail, sameErrorDetail } from '../provider-error.js';
 
 function initErrorDetail(raw, previous) {
@@ -256,6 +257,7 @@ export function liveToolRow(t) {
     // here, although its result reaches history only with the whole batch.
     status,
     result,
+    images: ended ? toolImageRefs(t.images) : undefined,
     note: extractToolNote(result, status === 'rejected'),
     // Who answered an ended ask_user, as recorded: its result reaches history
     // only with the whole batch.

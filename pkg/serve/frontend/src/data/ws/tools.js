@@ -5,6 +5,7 @@ import { store, updateSession } from '../store.js';
 import { extractToolNote } from './history.js';
 import { scheduleFlush } from './stream.js';
 import { parseFileCardData } from '../util/file-card.js';
+import { toolImageRefs } from '../util/tool-images.js';
 import { refreshArtifactsAfterDelivery } from '../artifacts.js';
 
 export function handleWsToolCallStart(id, data) {
@@ -171,6 +172,7 @@ export function handleWsToolEnd(id, data) {
         ...m,
         status: nextStatus,
         result: data.result,
+        images: toolImageRefs(data.images),
         streamingResult: null,
         note,
         ...(data.ask_responder ? { askResponder: data.ask_responder } : {}),
