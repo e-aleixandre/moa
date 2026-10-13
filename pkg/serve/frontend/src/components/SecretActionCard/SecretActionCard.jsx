@@ -178,7 +178,7 @@ export function SecretActionView({ session, request, position = 1, total = 1, ca
         </label>
       )}
       {d.savedRows.size === 0 && (
-        <div class="zl-sx-note"><Lock size={12} aria-hidden="true" /> {copy.note}</div>
+        <div class="zl-sx-note">{request.kind === "browser" ? null : <Lock size={12} aria-hidden="true" />} {copy.note}</div>
       )}
       {error && <div class="zl-ask-error" role="alert">{error}</div>}
       <div class="zl-ask-acts">

@@ -61,7 +61,7 @@ export function secretCopy(request) {
   if (request?.kind === "browser") {
     return {
       title: "Sign in on this page",
-      note: "Sent only to this page, not to the chat",
+      note: "Typed by the browser tool. Later page snapshots can show it",
       primary: "Fill in",
     };
   }

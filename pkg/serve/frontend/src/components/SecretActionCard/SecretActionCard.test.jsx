@@ -153,7 +153,7 @@ test("a browser card shows the origin, the field mapping and the Enter press", (
   expect(t).toContain("→ field “Password” (password)");
   expect(t).toContain("Then");
   expect(t).toContain("presses Enter");
-  expect(t).toContain("Sent only to this page, not to the chat");
+  expect(t).toContain("Typed by the browser tool. Later page snapshots can show it");
   expect(c.button("Fill in")).toBeDefined();
   expect(t).toContain("subagent · sonnet");
   expect(c.input("username").props.autocomplete).toBe("username");

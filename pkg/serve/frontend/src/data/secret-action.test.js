@@ -47,7 +47,7 @@ test('copy follows the kind', () => {
     title: 'Password for this command', note: 'Sent only to this command, not to the chat', primary: 'Run',
   });
   expect(secretCopy({ kind: 'browser' })).toEqual({
-    title: 'Sign in on this page', note: 'Sent only to this page, not to the chat', primary: 'Fill in',
+    title: 'Sign in on this page', note: 'Typed by the browser tool. Later page snapshots can show it', primary: 'Fill in',
   });
 });
 

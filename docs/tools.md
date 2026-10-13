@@ -36,8 +36,8 @@ Conditionally registered:
 |------|-----------|
 | `web_search` | `brave_api_key` is configured |
 | `ask_user` | The web UI is active (not headless) |
-| `run_with_secret` | The web UI is active. Runs a command in a terminal and types the password the owner enters on a card at each password prompt. The owner sees the exact command first; the value never enters the chat, the transcript or the model, and is redacted from the output. Use `ssh -tt host …` for remote commands |
-| `browser_fill_secret` | The web UI is active and a Playwright MCP server exposes `browser_type` and `browser_evaluate`. Types what the owner enters on a card into fields of the open page, after showing its real origin. Only the fill response is redacted: a later snapshot of the same page can show the field's value |
+| `run_with_secret` | The web UI is active. Runs a command in a terminal and types the password the owner enters on a card at its password prompts. See [Passwords for one action](#passwords-for-one-action) |
+| `browser_fill_secret` | The web UI is active and an MCP server exposes `browser_type` and `browser_evaluate` (Playwright). Types what the owner enters on a card into fields of the open page. See [Passwords for one action](#passwords-for-one-action) for its limits |
 
 In a `moa serve` session the agent also gets `send_file`, which publishes a file
 to the conversation's [Artifacts](./serve.md#files-sent-by-the-agent) as well
@@ -358,3 +358,72 @@ directory.
 The `verify` tool is available even when the session's own directory has no
 `.moa/verify.json` — otherwise it would be missing from exactly the multi-repo
 sessions that need it. Called with nothing to run, it says so.
+
+## Passwords for one action
+
+`run_with_secret` and `browser_fill_secret` let the agent use a password the
+owner types on a card, for one action the card shows. Every request shows a
+card, whatever the permission mode. Only someone using the web UI or the paired
+app can answer it: an owner session cannot. A card waits until it is answered,
+and Stop cancels it.
+
+### Commands (`run_with_secret`)
+
+- The card shows the exact command, its working directory and, for `ssh`, the
+  host. That command runs in a terminal (a PTY), so programs that read the
+  password from the terminal (`sudo`, `ssh`, `security unlock-keychain`) work.
+  For a remote command use `ssh -tt host …` so the remote program gets a
+  terminal too.
+- The value is typed at every password prompt of that one run, with no limit.
+  The run stops without resending it when a prompt comes back after a
+  recognisable authentication failure (`Sorry, try again`, `incorrect`,
+  `denied`…). It is never typed after Stop or after the command has ended.
+  Nothing is kept for the next command.
+- The command runs with moa's own environment, not with variables exported by
+  earlier `bash` calls.
+- Values with line breaks or other control characters are refused.
+- The value does not go to the chat, the transcript, the model or any event.
+  Where the command's output contains it (for example an echo), it shows as
+  `[secret]`.
+- **Limit:** the command receives the password and can do anything with it,
+  such as save it or send it elsewhere. Redaction only catches the exact value
+  in the output, not a transformed copy. Read the command on the card before
+  allowing it.
+
+### Web pages (`browser_fill_secret`)
+
+The page's origin and the fields' real labels shown on the card come from the
+browser. The fill response is redacted. This tool does **not** keep the password
+out of every place, and these limits are known and accepted:
+
+- **Which server receives it.** The tool uses the first MCP server that offers
+  `browser_type` and `browser_evaluate`. Any such server can therefore receive
+  the password and report any origin, including one added for a single
+  Automation API run. Its answers are what the card shows.
+- **Frames.** The origin is checked again just before typing, but against the
+  top-level page, not the frame the field is in, and only once. A field inside
+  an iframe that navigated to another site after the card appeared would still
+  be filled.
+- **Files on disk.** Playwright can write a snapshot file for the fill itself
+  (for example under its `--output-dir`), and that file contains the field's
+  value. moa does not delete or redact it. Images or audio returned by the
+  server are stored or converted before the redaction runs.
+- **Escaping.** A password with characters that Playwright escapes in its own
+  way (for example a backspace) can appear escaped in the fill response, where
+  the redaction does not recognise it.
+- **Later snapshots.** Any later look at the page with the field still filled
+  (`browser_snapshot`, `browser_evaluate`, a screenshot) can show the value in
+  the chat and send it to the model.
+
+### Saving on the iPhone
+
+In the iOS app the card offers **Save on this iPhone**. The value is kept in this
+iPhone's Keychain behind Face ID, only for the paired server, and is not synced.
+The next time the same exact action is requested, **Allow with Face ID** uses it
+in one tap. If the action is different, the card says so and the saved value has
+to be filled with Face ID before allowing. For a command, the same action means
+the same command, directory and host. For a page, it means the same origin,
+field labels and types, and the same submit. Settings › Saved passwords lists
+the saved values and forgets them. Unpairing forgets them all. Each use sends
+the value to the server, just like typing it.
+
