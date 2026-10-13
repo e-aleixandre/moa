@@ -4,6 +4,8 @@ import android.Manifest;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
@@ -72,6 +74,15 @@ public class MainActivity extends BridgeActivity {
                 new ShareInboxBridge(this, credentials));
             bridges.install();
         }
+        // Covers the WebView while an expired tap returns to pairing
+        // (PushNavigator). Added before super.load(), which delivers a
+        // cold-start tap; on top of the layout, in the page's background.
+        View cover = new View(this);
+        cover.setBackgroundColor(getColor(R.color.moa_background));
+        cover.setClickable(true);
+        cover.setVisibility(View.GONE);
+        addContentView(cover, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        PushNavigator.get().setCover(cover);
         super.load();
         if (bridge == null) return;
         WebView bridgeView = bridge.getWebView();

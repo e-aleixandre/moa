@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.View;
 import android.webkit.WebView;
 import java.lang.ref.WeakReference;
 import java.util.HashMap;
@@ -20,14 +21,18 @@ final class PushNavigator {
     static final String EXTRA_V = "com.ealeixandre.moa.app.push.v";
     static final String EXTRA_K = "com.ealeixandre.moa.app.push.k";
     static final String EXTRA_C = "com.ealeixandre.moa.app.push.c";
+    // The local page's "back to pairing" entry, as after an unpair (boot.js).
+    static final String PAIRING_URL = OriginPolicy.LOCAL_ORIGIN + "/?unpaired=1";
 
     private static final PushNavigator SHARED = new PushNavigator();
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final PushTaps taps = new PushTaps(Executors.newSingleThreadExecutor(), main::post);
     private WeakReference<WebView> webView = new WeakReference<>(null);
+    private WeakReference<View> cover = new WeakReference<>(null);
     private String pendingOrigin;
     private String pendingUrl;
+    private boolean pendingPairing;
     private volatile String visibleSession;
     private volatile boolean foreground;
 
@@ -38,7 +43,31 @@ final class PushNavigator {
     private PushNavigator() {}
 
     void setWebView(WebView view) {
-        main.post(() -> webView = new WeakReference<>(view));
+        main.post(() -> {
+            webView = new WeakReference<>(view);
+            if (pendingPairing && view != null) {
+                pendingPairing = false;
+                view.loadUrl(PAIRING_URL);
+            }
+        });
+    }
+
+    // UI thread, before the activity can deliver a tap.
+    void setCover(View view) {
+        cover = new WeakReference<>(view);
+    }
+
+    // UI thread. Lifted only once a local page has loaded and WebView has
+    // drawn it: uncovering at commit showed one more frame of the old page.
+    void localPageFinished(WebView view, String url) {
+        View current = cover.get();
+        if (current == null || current.getVisibility() != View.VISIBLE || !OriginPolicy.isLocal(url)) return;
+        view.postVisualStateCallback(0, new WebView.VisualStateCallback() {
+            @Override
+            public void onComplete(long requestId) {
+                if (OriginPolicy.isLocal(view.getUrl())) setCovered(false);
+            }
+        });
     }
 
     void setForeground(boolean value) {
@@ -84,10 +113,67 @@ final class PushNavigator {
             }
 
             @Override
+            public boolean knownExpired() {
+                return credentials.knownExpired();
+            }
+
+            @Override
+            public boolean credentialExpired() {
+                try {
+                    DeviceCredentialStore.Stored stored = credentials.load();
+                    return stored != null && stored.expiresAtMillis <= System.currentTimeMillis();
+                } catch (DeviceCredentialStore.StoreException e) {
+                    return false;
+                }
+            }
+
+            @Override
             public String pairedOrigin() {
                 return credentials.pairedOrigin();
             }
-        }, this::open);
+        }, new PushTaps.Navigation() {
+            @Override
+            public void open(PushEnvelope.Destination destination, String pairedOrigin) {
+                PushNavigator.this.open(destination, pairedOrigin);
+            }
+
+            @Override
+            public void pair() {
+                showPairing();
+            }
+
+            @Override
+            public void cover() {
+                setCovered(true);
+            }
+
+            @Override
+            public void uncover() {
+                setCovered(false);
+            }
+        });
+    }
+
+    private void setCovered(boolean covered) {
+        View view = cover.get();
+        if (view != null) view.setVisibility(covered ? View.VISIBLE : View.GONE);
+    }
+
+    // UI thread. An expired credential: whatever is on screen, the WebView
+    // goes to the local pairing page, which forgets the server like an
+    // unpair does, and a held deep link is dropped. The credential itself
+    // stays, as on a launch with an expired credential; authorize refuses it
+    // (DeviceAuthBridge), so the page cannot resume into the paired origin.
+    // On a cold start the WebView may not be registered yet: load it then.
+    private void showPairing() {
+        pendingUrl = null;
+        pendingOrigin = null;
+        WebView view = webView.get();
+        if (view == null) {
+            pendingPairing = true;
+            return;
+        }
+        view.loadUrl(PAIRING_URL);
     }
 
     // UI thread. A cold-start tap is held until the paired page has loaded,

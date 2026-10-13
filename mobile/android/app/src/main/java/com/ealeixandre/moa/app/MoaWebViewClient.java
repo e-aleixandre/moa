@@ -104,6 +104,7 @@ final class MoaWebViewClient extends BridgeWebViewClient {
     @Override
     public void onPageFinished(WebView view, String url) {
         super.onPageFinished(view, url);
+        PushNavigator.get().localPageFinished(view, url);
         if (loadFailed) return;
         String paired = credentials.pairedOrigin();
         if (OriginPolicy.matchesPaired(url, paired)) {

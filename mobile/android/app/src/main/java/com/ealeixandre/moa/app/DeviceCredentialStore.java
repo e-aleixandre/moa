@@ -37,13 +37,24 @@ final class DeviceCredentialStore {
         }
     }
 
+    // What the last load or save saw: the origin and its expiry, neither
+    // secret. One immutable value so a reader never mixes two credentials.
+    private static final class Cached {
+        final String origin;
+        final long expiresAtMillis;
+
+        Cached(String origin, long expiresAtMillis) {
+            this.origin = origin;
+            this.expiresAtMillis = expiresAtMillis;
+        }
+    }
+
     private static DeviceCredentialStore shared;
 
     private final KeystoreBox box;
     // Navigation and every bridge call ask for the paired origin; decrypting
     // each time would put a Keystore operation on the UI thread per request.
-    private volatile String cachedOrigin;
-    private volatile boolean originLoaded;
+    private volatile Cached cached;
 
     static synchronized DeviceCredentialStore get(Context context) {
         if (shared == null) shared = new DeviceCredentialStore(context.getApplicationContext());
@@ -62,13 +73,13 @@ final class DeviceCredentialStore {
             throw new StoreException(e);
         }
         if (data == null) {
-            remember(null);
+            remember(null, 0);
             return null;
         }
         try {
             JSONObject object = new JSONObject(new String(data, StandardCharsets.UTF_8));
             Stored stored = new Stored(object.getString("origin"), object.getString("credential"), object.getLong("expires_at_ms"));
-            remember(stored.origin);
+            remember(stored.origin, stored.expiresAtMillis);
             return stored;
         } catch (JSONException e) {
             throw new StoreException(e);
@@ -85,12 +96,12 @@ final class DeviceCredentialStore {
         } catch (JSONException | GeneralSecurityException | IOException e) {
             throw new StoreException(e);
         }
-        remember(stored.origin);
+        remember(stored.origin, stored.expiresAtMillis);
     }
 
     synchronized void delete() throws StoreException {
         // Whatever happens below, nothing may treat the old origin as paired.
-        remember(null);
+        remember(null, 0);
         try {
             box.delete();
         } catch (GeneralSecurityException | IOException e) {
@@ -101,17 +112,25 @@ final class DeviceCredentialStore {
     // The origin the bridges and navigation trust, or null when unpaired or
     // unreadable (fail closed).
     String pairedOrigin() {
-        if (originLoaded) return cachedOrigin;
+        Cached current = cached;
+        if (current != null) return current.origin;
         try {
             load();
         } catch (StoreException e) {
             return null;
         }
-        return cachedOrigin;
+        current = cached;
+        return current == null ? null : current.origin;
     }
 
-    private void remember(String origin) {
-        cachedOrigin = origin;
-        originLoaded = true;
+    // Whether the credential last loaded or saved has expired, from memory
+    // only: safe on the UI thread. False when nothing was loaded yet.
+    boolean knownExpired() {
+        Cached current = cached;
+        return current != null && current.origin != null && current.expiresAtMillis <= System.currentTimeMillis();
+    }
+
+    private void remember(String origin, long expiresAtMillis) {
+        cached = new Cached(origin, expiresAtMillis);
     }
 }
