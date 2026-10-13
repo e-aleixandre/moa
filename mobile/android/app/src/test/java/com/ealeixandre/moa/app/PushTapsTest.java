@@ -2,11 +2,9 @@ package com.ealeixandre.moa.app;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -48,9 +46,11 @@ public class PushTapsTest {
     };
     private final PushEnvelope.Keys keys = PushEnvelope.deriveKeys(new byte[32]);
     private volatile boolean expired;
-    // What the UI thread can know without Keystore: the cached expiry.
-    private volatile boolean knownExpired;
-    private volatile String coveredOn;
+    // The store cannot be read: credentialExpired throws, pairedOrigin is null.
+    private volatile boolean unreadable;
+    // Whether the in-memory cache (knownOrigin/knownValid) holds anything.
+    private volatile boolean cacheKnown = true;
+    private final List<String> originLoadsOn = Collections.synchronizedList(new ArrayList<>());
     private volatile String paired = ORIGIN;
     private volatile String forgotOn;
 
@@ -74,18 +74,26 @@ public class PushTapsTest {
         }
 
         @Override
-        public boolean credentialExpired() {
+        public boolean credentialExpired() throws PushTaps.Unreadable {
+            if (unreadable) throw new PushTaps.Unreadable();
             return expired;
         }
 
+        // The loading getter: records where it ran.
         @Override
-        public boolean knownExpired() {
-            return knownExpired;
+        public String pairedOrigin() {
+            originLoadsOn.add(Thread.currentThread().getName());
+            return unreadable && !cacheKnown ? null : paired;
         }
 
         @Override
-        public String pairedOrigin() {
-            return paired;
+        public String knownOrigin() {
+            return cacheKnown ? paired : null;
+        }
+
+        @Override
+        public boolean knownValid() {
+            return cacheKnown && paired != null && !expired;
         }
     };
 
@@ -98,17 +106,6 @@ public class PushTapsTest {
         @Override
         public void pair() {
             opened.add("pair");
-        }
-
-        @Override
-        public void cover() {
-            coveredOn = Thread.currentThread().getName();
-            opened.add("cover");
-        }
-
-        @Override
-        public void uncover() {
-            opened.add("uncover");
         }
     };
 
@@ -186,50 +183,53 @@ public class PushTapsTest {
         assertEquals(Collections.singletonList("pair"), opened);
     }
 
-    // The page already in the WebView (a session left open before the
-    // credential expired) must not be drawn when the tap brings the app
-    // back: the cover goes up on the calling (UI) thread, inside handle,
-    // before any background work or main-thread step can run.
+    // Re-review bb case 2: a pairing completed after the expired result was
+    // queued (a claim saved a new, valid credential and its forget bumped the
+    // generation) must not be undone by sending the page to ?unpaired=1.
     @Test
-    public void knownExpiredTapCoversOnTheCallingThreadBeforeAnythingElse() throws Exception {
-        knownExpired = true;
+    public void expiredResultDoesNotUndoAPairingCompletedMeanwhile() throws Exception {
         expired = true;
-        CountDownLatch hold = new CountDownLatch(1);
-        background.execute(() -> {
-            try {
-                hold.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        });
-        taps.handle(envelope, source, navigation);
-        assertEquals(Collections.singletonList("cover"), opened);
-        assertEquals(Thread.currentThread().getName(), coveredOn);
-        hold.countDown();
-        background.shutdown();
-        assertTrue(background.awaitTermination(5, TimeUnit.SECONDS));
+        tap();
+        expired = false;
+        lifecycle.end(() -> true);
         drainMain();
-        // Stays covered until the pairing page commits (PushNavigator).
-        assertEquals(Arrays.asList("cover", "pair"), opened);
+        assertEquals(Collections.emptyList(), opened);
     }
 
+    // Re-review bb case 3: unreadable store, nothing cached. The main-thread
+    // step must not call the loading getter (Keystore on the UI thread), and
+    // an unknown expiry ends on pairing, never on content.
     @Test
-    public void validTapIsNeverCovered() throws Exception {
+    public void unreadableUnknownStoreIsNotReadOnMainAndEndsOnPairing() throws Exception {
+        unreadable = true;
+        cacheKnown = false;
+        paired = null;
+        tap();
+        drainMain();
+        assertFalse("the loading getter ran on the main thread",
+            originLoadsOn.contains(Thread.currentThread().getName()));
+        assertEquals(Collections.singletonList("pair"), opened);
+    }
+
+    // Re-review bb case 4: a read error is not proof the credential is
+    // valid. With the cached expiry saying expired, the tap ends on pairing.
+    @Test
+    public void readErrorWithCachedExpiryEndsOnPairingNotContent() throws Exception {
+        expired = true;
+        unreadable = true;
+        tap();
+        drainMain();
+        assertEquals(Collections.singletonList("pair"), opened);
+    }
+
+    // The cached expiry is used when present: valid in memory, unreadable
+    // now, the tap behaves as a valid one (home, nothing opened in the envelope).
+    @Test
+    public void readErrorWithCachedValidCredentialIsNotTreatedAsExpired() throws Exception {
+        unreadable = true;
         tap();
         drainMain();
         assertEquals(Collections.singletonList("home@" + ORIGIN), opened);
-        assertNull(coveredOn);
-    }
-
-    // A stale cache (the credential was replaced right after it was read)
-    // must not leave the WebView hidden: the authoritative check uncovers.
-    @Test
-    public void coverIsLiftedWhenTheCredentialTurnsOutValid() throws Exception {
-        knownExpired = true;
-        tap();
-        paired = "https://other.example";
-        drainMain();
-        assertEquals(Arrays.asList("cover", "uncover"), opened);
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.ealeixandre.moa.app;
 
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.Executor;
 
 // Authenticating a notification tap, off the UI thread. Reading the current
@@ -13,21 +12,29 @@ import java.util.concurrent.Executor;
 // JVM tests can drive it.
 final class PushTaps {
 
+    // The credential store could not be read.
+    static final class Unreadable extends Exception {
+    }
+
     interface Source {
         int generation();
 
         // May forget an expired pairing, waiting on the push lifecycle.
         PushEnvelope.Keys currentKeys();
 
-        // The stored credential is known to have expired (false when
-        // unpaired or unreadable).
-        boolean credentialExpired();
+        // Whether the stored credential has expired (false when unpaired).
+        boolean credentialExpired() throws Unreadable;
 
-        // The same, from cached state only: no Keystore, no lock. Read on
-        // the calling (UI) thread.
-        boolean knownExpired();
-
+        // May load the store: background only.
         String pairedOrigin();
+
+        // From memory only, for the UI thread: the origin last loaded or
+        // saved, null when unpaired or not loaded yet.
+        String knownOrigin();
+
+        // From memory only: the credential last loaded or saved exists and
+        // has not expired.
+        boolean knownValid();
     }
 
     interface Navigation {
@@ -35,12 +42,6 @@ final class PushTaps {
 
         // Shows the local pairing page.
         void pair();
-
-        // Hides whatever page the WebView holds; pairing lifts it once the
-        // local page commits.
-        void cover();
-
-        void uncover();
     }
 
     private final Executor background;
@@ -54,15 +55,7 @@ final class PushTaps {
     // Expiry is checked again at tap time: an envelope that is no longer
     // valid leads home, like the fallback it was shown as. A forget or
     // pairing change after the generation is read drops the tap.
-    //
-    // A tap that is already known to be expired covers the WebView here, on
-    // the UI thread before the activity draws again, so the page left open
-    // before expiry is never shown. The background check stays the one that
-    // decides; if it finds the credential valid after all (replaced since the
-    // cache was read), the cover comes off.
     void handle(Map<String, String> envelope, Source source, Navigation navigation) {
-        boolean covered = source.knownExpired();
-        if (covered) navigation.cover();
         background.execute(() -> {
             int generation = source.generation();
             PushEnvelope.Keys keys = source.currentKeys();
@@ -71,18 +64,35 @@ final class PushTaps {
             // if the forget above ended the generation, since that forget is
             // what this outcome is about. Checked after currentKeys: expiry
             // only moves forward, so a credential valid here was valid there.
-            if (source.credentialExpired()) {
-                main.execute(navigation::pair);
+            if (expired(source)) {
+                main.execute(() -> {
+                    // A pairing completed since the check (a claim saved a
+                    // valid credential) wins. The generation is not compared:
+                    // the expiry's own forget above, or a real unpair, moves
+                    // it, and both still end on pairing.
+                    if (!source.knownValid()) navigation.pair();
+                });
                 return;
             }
             PushEnvelope.Content content = PushEnvelope.open(envelope, keys, System.currentTimeMillis() / 1000);
             PushEnvelope.Destination destination = content == null ? PushEnvelope.Destination.HOME : content.destination;
             String origin = source.pairedOrigin();
+            if (origin == null) return;
+            // Memory only on the main thread: the store is never read there.
             main.execute(() -> {
-                if (covered) navigation.uncover();
-                if (source.generation() != generation || !Objects.equals(origin, source.pairedOrigin())) return;
+                if (source.generation() != generation || !origin.equals(source.knownOrigin())) return;
                 navigation.open(destination, origin);
             });
         });
+    }
+
+    // Fails closed: a read error is no proof of a valid credential. The
+    // expiry last seen in memory decides; with none, pairing.
+    private static boolean expired(Source source) {
+        try {
+            return source.credentialExpired();
+        } catch (Unreadable e) {
+            return !source.knownValid();
+        }
     }
 }

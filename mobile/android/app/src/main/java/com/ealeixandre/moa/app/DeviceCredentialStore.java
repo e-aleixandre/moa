@@ -123,11 +123,18 @@ final class DeviceCredentialStore {
         return current == null ? null : current.origin;
     }
 
-    // Whether the credential last loaded or saved has expired, from memory
-    // only: safe on the UI thread. False when nothing was loaded yet.
-    boolean knownExpired() {
+    // From memory only, safe on the UI thread: the origin last loaded or
+    // saved, null when unpaired or not loaded yet.
+    String knownOrigin() {
         Cached current = cached;
-        return current != null && current.origin != null && current.expiresAtMillis <= System.currentTimeMillis();
+        return current == null ? null : current.origin;
+    }
+
+    // From memory only: the credential last loaded or saved exists and has
+    // not expired. False when unpaired or not loaded yet.
+    boolean knownValid() {
+        Cached current = cached;
+        return current != null && current.origin != null && current.expiresAtMillis > System.currentTimeMillis();
     }
 
     private void remember(String origin, long expiresAtMillis) {
