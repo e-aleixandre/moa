@@ -400,7 +400,10 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	if taskSessionID == "" {
 		taskSessionID = core.NewSteerID()
 	}
-	taskStore := tasks.NewScope(taskRepo, taskSessionID, cfg.CWD).WithTZ(cfg.CreatorTZ)
+	// An owner's conversation may also send tasks to other owners; the tool
+	// still checks the session against owner.json on every send.
+	taskStore := tasks.NewScope(taskRepo, taskSessionID, cfg.CWD).WithTZ(cfg.CreatorTZ).
+		WithOwners(ownerDirectory{}, cfg.OwnerSession)
 	core.RegisterOrLog(toolReg, tasks.NewTool(taskStore))
 
 	// 3b. moa's own documentation, embedded in the binary. Always available:
