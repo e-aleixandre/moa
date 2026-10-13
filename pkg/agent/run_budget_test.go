@@ -282,10 +282,10 @@ func TestRunBudgetResumedChildChargesOnlyNewSpend(t *testing.T) {
 	if childCalls != 2 {
 		t.Errorf("resumed child made %d calls, want 2 (the $2 inherited must not stop it, the new $3 must)", childCalls)
 	}
-	// The parent's $0.01 for the turn that called the tool is charged once its
-	// tools return, so the child sees only its own new spend: 0.02 + 3.
-	if be := budgetError(childErr); be == nil || math.Abs(be.Spent-3.02) > 1e-9 {
-		t.Fatalf("resumed child error = %v, want BudgetExceededError with Spent 3.02 (no inherited $2)", childErr)
+	// The parent's $0.01 for the turn that called the tool is charged before
+	// its tools run, so the child sees it plus its own new spend: 0.01 + 0.02 + 3.
+	if be := budgetError(childErr); be == nil || math.Abs(be.Spent-3.03) > 1e-9 {
+		t.Fatalf("resumed child error = %v, want BudgetExceededError with Spent 3.03 (no inherited $2)", childErr)
 	}
 }
 

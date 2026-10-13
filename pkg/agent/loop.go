@@ -976,13 +976,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// from their signed reasoning state without injecting fake user text.
 			toolCalls := extractToolCalls(assistantMsg)
 			addRunCost(cfg, assistantMsg.Usage)
-			if assistantMsg.Usage != nil {
-				if spent, limit, over := cfg.overBudget(); over {
-					loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
-					inTurn = false
-					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
-					return loopErr
-				}
+			if spent, limit, over := cfg.overBudget(); over {
+				loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
+				inTurn = false
+				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+				return loopErr
 			}
 			if len(toolCalls) == 0 && !hasSubstantiveText(assistantMsg) && truncationRetries < maxTruncationRetries {
 				truncationRetries++
@@ -1076,6 +1074,12 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		emptyContinuations = 0
 		truncationRetries = 0
 
+		// Account for the response before running its tools: a child launched
+		// by them must see it in the shared pool, and a cancelled or stopped
+		// turn must not drop usage that was already paid for.
+		addRunCost(cfg, assistantMsg.Usage)
+		cfg.overBudget()
+
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)
 
@@ -1110,16 +1114,14 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 
 		if len(toolCalls) == 0 {
-			// Accumulate cost and check budget even on the final message so
-			// callers know when a run blew through the limit.
-			addRunCost(cfg, assistantMsg.Usage)
-			if assistantMsg.Usage != nil {
-				if spent, limit, over := cfg.overBudget(); over {
-					loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
-					inTurn = false
-					emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
-					return loopErr
-				}
+			// Check the budget even on the final message so callers know when
+			// a run blew through the limit. Without usage of its own the run
+			// still checks: the pool may have grown with what others spent.
+			if spent, limit, over := cfg.overBudget(); over {
+				loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
+				inTurn = false
+				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
+				return loopErr
 			}
 			inTurn = false
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
@@ -1164,12 +1166,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 
 		// Budget check — after tool execution so conversation state has matching
 		// tool_result messages for every tool_call (no dangling calls).
-		addRunCost(cfg, assistantMsg.Usage)
-		if assistantMsg.Usage != nil {
-			if spent, limit, over := cfg.overBudget(); over {
-				loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
-				return loopErr
-			}
+		if spent, limit, over := cfg.overBudget(); over {
+			loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
+			return loopErr
 		}
 
 		inTurn = false
