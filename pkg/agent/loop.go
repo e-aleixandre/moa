@@ -976,6 +976,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// from their signed reasoning state without injecting fake user text.
 			toolCalls := extractToolCalls(assistantMsg)
 			addRunCost(cfg, assistantMsg.Usage)
+			// Paired before any exit, the budget stop included, so the saved
+			// history never holds a tool call without its result.
+			if len(toolCalls) > 0 {
+				injectErrorToolResults(cfg, toolCalls, "tool call not executed: model output was truncated")
+			}
 			if spent, limit, over := cfg.overBudget(); over {
 				loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
 				inTurn = false
@@ -988,9 +993,6 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				inTurn = false
 				emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventTurnEnd})
 				continue
-			}
-			if len(toolCalls) > 0 {
-				injectErrorToolResults(cfg, toolCalls, "tool call not executed: model output was truncated")
 			}
 			loopErr = fmt.Errorf("model output truncated after reaching max tokens")
 			inTurn = false
