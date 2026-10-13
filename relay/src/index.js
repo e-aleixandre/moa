@@ -27,8 +27,12 @@ const SEND_TTL_FCM = `${SEND_EXPIRATION}s`;
 const PROVIDERS = new Set(['apns', 'fcm']);
 
 const TOKEN_RE = /^[0-9a-f]{64,200}$/;
-// FCM registration tokens are opaque; permissive but bounded.
-const FCM_TOKEN_RE = /^[A-Za-z0-9_:-]{100,4096}$/;
+// FCM registration tokens are opaque (real ones are ~150-200 chars). The upper
+// bound is set so that every artifact derived from an accepted token fits the
+// other limits: a 512-char token gives a ~860-char challenge/handle, within
+// SMALL_MAX for /confirm (c + p + JSON) and the 1024-char handle cap of the
+// moa server. Raise it only together with those limits.
+const FCM_TOKEN_RE = /^[A-Za-z0-9_:-]{100,512}$/;
 const PROJECT_RE = /^[A-Za-z0-9._:-]{1,100}$/;
 const COLLAPSE_RE = /^[A-Za-z0-9_-]{22}$/;
 const KID_RE = /^[A-Za-z0-9_-]{11}$/;
@@ -430,7 +434,12 @@ async function fcmError(response) {
     // Google's status names are plain identifiers; anything else is not echoed.
     reason: typeof error.status === 'string' && /^[A-Z_]{1,40}$/.test(error.status) ? error.status : 'unknown',
     unregistered: details.some((d) => isObject(d) && d.errorCode === 'UNREGISTERED'),
-    badToken: error.status === 'INVALID_ARGUMENT' && JSON.stringify(details).includes('message.token'),
+    // Invalid registration token: either Google's documented typed FcmError, or
+    // a BadRequest naming the message.token field. Other INVALID_ARGUMENT
+    // answers are payload errors and stay 502.
+    badToken: error.status === 'INVALID_ARGUMENT' && details.some((d) => isObject(d)
+      && (d.errorCode === 'INVALID_ARGUMENT'
+        || (Array.isArray(d.fieldViolations) && d.fieldViolations.some((v) => isObject(v) && v.field === 'message.token')))),
   };
 }
 

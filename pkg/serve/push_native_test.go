@@ -315,3 +315,21 @@ func TestNativePushRegistrationProvider(t *testing.T) {
 		}
 	}
 }
+
+// The relay caps FCM tokens so that its handles fit this bound (relay test
+// "longest accepted token flows ..."): keep both in sync.
+func TestNativePushRegistrationHandleBound(t *testing.T) {
+	f := newNativeFixture(t, newMockProvider(simpleResponseHandler("ok")))
+	device := pairedDevice(t, f.handler, f.owner, "phone")
+	good := f.registration(f.relayURL)
+	withHandle := func(n int) string {
+		body := strings.Replace(good, strings.Repeat("H", 80), strings.Repeat("H", n), 1)
+		return strings.Replace(body, `"env":"sandbox"`, `"env":"production","provider":"fcm"`, 1)
+	}
+	for n, want := range map[int]int{1024: http.StatusNoContent, 1025: http.StatusBadRequest} {
+		rec := pairingRequest(f.handler, http.MethodPost, "/api/push/native", withHandle(n), nil, device.Credential)
+		if rec.Code != want {
+			t.Errorf("handle of %d chars = %d, want %d", n, rec.Code, want)
+		}
+	}
+}

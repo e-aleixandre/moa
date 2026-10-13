@@ -202,7 +202,9 @@ reaches APNs.
 
 Selected by `"provider":"fcm"` in `/v1/register`. Differences from `apns`:
 
-- **Token**: the FCM registration token, `^[A-Za-z0-9_:-]{100,4096}$`.
+- **Token**: the FCM registration token, `^[A-Za-z0-9_:-]{100,512}$`.
+  The cap keeps every derived artifact (challenge, handle, `/confirm` body ≤ 1024 bytes,
+  handle ≤ 1024 chars on the moa server) within its limit; real tokens are ~150–200.
   `env` must be `"production"` (FCM has no sandbox); anything else is `400`.
 - **Rate limits**: same budgets (3 challenges / 10 sends per 60 s per
   destination); the destination key is namespaced by provider.
@@ -234,7 +236,7 @@ Selected by `"provider":"fcm"` in `/v1/register`. Differences from `apns`:
   token in isolate memory until about 5 minutes before it expires. Nothing is
   persisted.
 - **Errors** (same table as above, `502` has `"error":"fcm"`):
-  FCM `404` with `errorCode: UNREGISTERED`, or `400 INVALID_ARGUMENT` whose
+  FCM `404` with `errorCode: UNREGISTERED`, or `400 INVALID_ARGUMENT` with the typed `FcmError` `errorCode: INVALID_ARGUMENT`, or whose
   details name `message.token` → `410 unregistered`; FCM `5xx`, network
   failure, OAuth failure, or a missing/invalid `FCM_SERVICE_ACCOUNT` →
   `503 unavailable` (for `fcm` requests only; `apns` is unaffected, and `fcm`

@@ -303,3 +303,35 @@ func TestSendersFanOut(t *testing.T) {
 		t.Fatal("a cancelled delivery goes nowhere")
 	}
 }
+
+func TestNativeSenderFCMRegistrationCleanupWithRealStore(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		status int
+		reply  string
+		kept   bool
+	}{
+		{"unregistered", http.StatusGone, `{"error":"unregistered"}`, false},
+		{"payload error", http.StatusBadGateway, `{"error":"fcm","status":400,"reason":"INVALID_ARGUMENT"}`, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s, relay, _, reg := nativeFixture(t)
+			reg.Env, reg.Provider = "production", "fcm"
+			if err := s.Store().Put(reg); err != nil {
+				t.Fatal(err)
+			}
+			relay.status, relay.reply = c.status, c.reply
+			s.Notify(context.Background(), Notification{Title: "t", Body: "b", SessionID: "s", Kind: KindAsk, Level: LevelUrgent})
+			if _, ok := s.Store().Get(reg.DeviceID); ok != c.kept {
+				t.Fatalf("registration kept = %v, want %v", ok, c.kept)
+			}
+			reloaded, err := NewNativeStore(s.Store().path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := reloaded.Get(reg.DeviceID); ok != c.kept {
+				t.Fatalf("persisted registration kept = %v, want %v", ok, c.kept)
+			}
+		})
+	}
+}

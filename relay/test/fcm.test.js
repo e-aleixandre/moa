@@ -320,3 +320,46 @@ test('rate limit: fcm destination keys are namespaced; fcm 10/60 s', async () =>
   const apnsStyle = b64u(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode('moa-rl-v1\0production\0' + TOKEN))));
   assert.notEqual(registerKeys.REGISTER_LIMITER.keys[0], apnsStyle);
 });
+
+test('fcm: Google documented invalid-registration-token answer maps to 410', async () => {
+  // https://firebase.google.com/docs/cloud-messaging/error-codes
+  const documented = {
+    error: {
+      code: 400,
+      message: 'The registration token is not a valid FCM registration token',
+      status: 'INVALID_ARGUMENT',
+      details: [{ '@type': 'type.googleapis.com/google.firebase.fcm.v1.FcmError', errorCode: 'INVALID_ARGUMENT' }],
+    },
+  };
+  const env = fcmEnv();
+  const res = await handle((await signedSend({ h: await fcmHandle(env) })).req(), env,
+    fcmDeps({ fcm: () => new Response(JSON.stringify(documented), { status: 400 }) }));
+  assert.equal(res.status, 410);
+  assert.deepEqual(await json(res), { error: 'unregistered' });
+});
+
+test('fcm: the longest accepted token flows register -> confirm -> send within every limit', async () => {
+  const HANDLE_MAX = 1024; // pkg/serve/push_native.go
+  const token = 'fcm_' + 'a'.repeat(508);
+  assert.equal(token.length, 512);
+  const env = fcmEnv();
+  const deps = fcmDeps();
+  const regBody = JSON.stringify(fcmReg({ token }));
+  assert.ok(regBody.length <= 1024);
+  assert.equal((await handle(request('/v1/register', { body: regBody }), env, deps)).status, 202);
+  const c = JSON.parse(deps.fcmCalls[0].init.body).message.data.r;
+  const p = b64u(await hmac(K_SEND, 'moa-confirm-v1', enc.encode(c)));
+  const confirmBody = JSON.stringify({ c, p });
+  assert.ok(confirmBody.length <= 1024, `confirm body ${confirmBody.length}B`);
+  const confirmed = await handle(request('/v1/confirm', { body: confirmBody }), env, deps);
+  assert.equal(confirmed.status, 200);
+  const h = (await json(confirmed)).handle;
+  assert.ok(h.length <= HANDLE_MAX, `handle ${h.length} chars`);
+  const sent = await signedSend({ h });
+  assert.ok(sent.bodyStr.length <= 4096, `send body ${sent.bodyStr.length}B`);
+  assert.equal((await handle(sent.req(), env, deps)).status, 200);
+  assert.equal(JSON.parse(deps.fcmCalls.at(-1).init.body).message.token, token);
+
+  const tooLong = JSON.stringify(fcmReg({ token: token + 'a' }));
+  assert.equal((await handle(request('/v1/register', { body: tooLong }), env, deps)).status, 400);
+});
