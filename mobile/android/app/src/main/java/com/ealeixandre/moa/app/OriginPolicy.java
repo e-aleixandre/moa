@@ -133,6 +133,7 @@ public final class OriginPolicy {
                 case "enable":
                 case "disable":
                 case "setVisibleSession":
+                case "openFallback":
                     return caller == Caller.PAIRED;
                 default:
                     return false;

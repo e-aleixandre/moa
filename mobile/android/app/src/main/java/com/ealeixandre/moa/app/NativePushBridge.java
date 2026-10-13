@@ -28,6 +28,11 @@ final class NativePushBridge implements WebBridges.MethodHandler {
             reply.ok(null);
             return;
         }
+        if ("openFallback".equals(method)) {
+            PushNavigator.get().openFallback(options.optInt("token", 0));
+            reply.ok(null);
+            return;
+        }
         worker.execute(() -> {
             try {
                 switch (method) {

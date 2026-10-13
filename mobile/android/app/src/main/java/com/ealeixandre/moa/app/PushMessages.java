@@ -120,19 +120,25 @@ public final class PushMessages {
     }
 
     // Calls window.MoaNavigation in the page. The destination is a JSON
-    // literal built from a validated id, never spliced as code.
-    static String openInPlaceScript(PushEnvelope.Destination destination, String url) {
+    // literal built from a validated id, never spliced as code. The script
+    // never navigates by itself: a false answer goes back to Java, at once
+    // through the evaluateJavascript result, or, when the page answers with
+    // a Promise, later as an openFallback message on the push port carrying
+    // `token`. Java then asks NavigationGate before loading the URL.
+    static String openInPlaceScript(PushEnvelope.Destination destination, int token) {
         String call = "session".equals(destination.kind)
             ? "nav.openSession(" + JSONObject.quote(destination.session) + ")"
             : "nav.openInbox()";
         return "(() => {"
             + " const nav = window.MoaNavigation;"
             + " if (!(nav && nav.version >= 1)) return false;"
-            + " const url = " + JSONObject.quote(url) + ";"
+            + " const port = window." + WebBridges.PUSH_PORT + ";"
+            + " const fallback = () => { if (port) port.postMessage(JSON.stringify("
+            + "{ id: \"openFallback\", method: \"openFallback\", options: { token: " + token + " } })); };"
             + " try {"
             + "  const result = " + call + ";"
             + "  if (result && typeof result.then === \"function\") {"
-            + "   result.then((ok) => { if (!ok) location.assign(url); }, () => location.assign(url));"
+            + "   result.then((ok) => { if (!ok) fallback(); }, fallback);"
             + "   return true;"
             + "  }"
             + "  return !!result;"

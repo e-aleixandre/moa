@@ -31,6 +31,12 @@ final class PushNavigator {
     private NavigationGate gate;
     private String pendingUrl;
     private int pendingGeneration;
+    // The last destination opened in place, until the page says whether it
+    // could show it (openFallback). Only the latest tap's token counts.
+    private int fallbackToken;
+    private String fallbackUrl;
+    private String fallbackOrigin;
+    private int fallbackGeneration;
     private boolean pendingPairing;
     private volatile String visibleSession;
     private volatile boolean foreground;
@@ -214,13 +220,26 @@ final class PushNavigator {
         // being typed is lost. Load the deep link only if the page cannot (an
         // older frontend, a session it does not know).
         // The gate above ran just now, on this thread: nothing changed since.
-        view.evaluateJavascript(PushMessages.openInPlaceScript(destination, url), (String result) -> {
-            if ("true".equals(result)) return;
-            // Later, on its own: the page must still be the paired one (not
-            // pairing, say), and the gate is asked again.
-            WebView current = webView.get();
-            if (current == null || !OriginPolicy.matchesPaired(current.getUrl(), pairedOrigin)) return;
-            if (admit(url, generation)) current.loadUrl(url);
+        int token = ++fallbackToken;
+        fallbackUrl = url;
+        fallbackOrigin = pairedOrigin;
+        fallbackGeneration = generation;
+        view.evaluateJavascript(PushMessages.openInPlaceScript(destination, token), (String result) -> {
+            if (!"true".equals(result)) openFallback(token);
         });
+    }
+
+    // UI thread: the page could not show the destination opened in place,
+    // answered either through the evaluateJavascript result or, after a
+    // Promise, through the push port (NativePushBridge). Loads it instead,
+    // once, if the page is still the paired one (not pairing, say) and the
+    // gate admits it for the tap's own generation.
+    void openFallback(int token) {
+        if (token != fallbackToken || fallbackUrl == null) return;
+        String url = fallbackUrl;
+        fallbackUrl = null;
+        WebView view = webView.get();
+        if (view == null || !OriginPolicy.matchesPaired(view.getUrl(), fallbackOrigin)) return;
+        if (admit(url, fallbackGeneration)) view.loadUrl(url);
     }
 }

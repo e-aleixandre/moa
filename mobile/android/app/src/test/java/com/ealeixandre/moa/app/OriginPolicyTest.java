@@ -62,6 +62,7 @@ public class OriginPolicyTest {
             { "push", "enable", "PAIRED" },
             { "push", "disable", "PAIRED" },
             { "push", "setVisibleSession", "PAIRED" },
+            { "push", "openFallback", "PAIRED" },
             { "share", "status", "LOCAL" },
             { "share", "bindServer", "LOCAL" },
             { "share", "clearServer", "LOCAL" },
@@ -71,7 +72,7 @@ public class OriginPolicyTest {
         String[][] methods = {
             { "auth", "claim" }, { "auth", "authorize" }, { "auth", "reauthorize" }, { "auth", "reset" },
             { "auth", "unpair" }, { "push", "status" }, { "push", "enable" }, { "push", "disable" },
-            { "push", "setVisibleSession" }, { "push", "claim" }, { "share", "peek" },
+            { "push", "setVisibleSession" }, { "push", "openFallback" }, { "push", "claim" }, { "share", "peek" },
             { "share", "status" }, { "share", "bindServer" }, { "share", "clearServer" },
             { "share", "acknowledge" }, { "share", "reset" },
         };

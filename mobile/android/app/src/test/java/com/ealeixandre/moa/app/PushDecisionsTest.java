@@ -194,12 +194,16 @@ public class PushDecisionsTest {
         assertTrue(BackDecision.SCRIPT.contains("window.MoaHandleBack() === true"));
     }
 
+    // The script never navigates itself (re-review e3): a late false goes
+    // back to Java as openFallback with its token. Behaviour is pinned in
+    // mobile/android-contract.test.js, which runs the script.
     @Test
     public void inPlaceNavigationPassesTheIdAsALiteral() {
-        String script = PushMessages.openInPlaceScript(PushEnvelope.Destination.session("sess_1"), "https://moa.example/?session=sess_1");
+        String script = PushMessages.openInPlaceScript(PushEnvelope.Destination.session("sess_1"), 7);
         assertTrue(script.contains("nav.openSession(\"sess_1\")"));
-        assertTrue(script.contains("location.assign(url)"));
-        String inbox = PushMessages.openInPlaceScript(PushEnvelope.Destination.INBOX, "https://moa.example/?inbox=1");
+        assertTrue(script.contains("options: { token: 7 }"));
+        assertFalse(script.contains("location"));
+        String inbox = PushMessages.openInPlaceScript(PushEnvelope.Destination.INBOX, 8);
         assertTrue(inbox.contains("nav.openInbox()"));
     }
 }

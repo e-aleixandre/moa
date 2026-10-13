@@ -281,3 +281,59 @@ describe("Android share-in", () => {
     expect(code(java["MainActivity.java"])).toContain("new ShareInboxBridge(this, credentials)");
   });
 });
+
+// Re-review e3 P2: the script that opens a tap in place must never navigate
+// by itself. A Promise that settles false (or rejects) later hands the
+// decision back to Java on the push port, which asks NavigationGate with the
+// tap's own generation. Runs the exact expression PushMessages returns.
+describe("Android in-place navigation script", () => {
+  const source = code(java["PushMessages.java"]);
+  const method = source.slice(source.indexOf("static String openInPlaceScript"));
+  const expression = method.slice(method.indexOf('return "(() => {"') + "return ".length, method.indexOf(';\n    }'));
+  const build = new Function("call", "token", "JSONObject", "WebBridges", `return ${expression};`);
+
+  function run(navigate, port = []) {
+    const assigned = [];
+    const window = {
+      MoaNavigation: { version: 1, openSession: navigate },
+      moaNativePushPort: { postMessage: (data) => port.push(JSON.parse(data)) },
+    };
+    const script = build('nav.openSession("abc")', 7, { quote: JSON.stringify }, { PUSH_PORT: "moaNativePushPort" });
+    const returned = new Function("window", "location", `return ${script};`)(window, { assign: (url) => assigned.push(url) });
+    return { returned, assigned, port };
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const fallback = [{ id: "openFallback", method: "openFallback", options: { token: 7 } }];
+
+  it("hands a Promise that resolves false back to Java instead of navigating", async () => {
+    const f = run(() => Promise.resolve(false));
+    expect(f.returned).toBe(true);
+    await settle();
+    expect(f.assigned).toEqual([]);
+    expect(f.port).toEqual(fallback);
+  });
+
+  it("hands a rejected Promise back to Java instead of navigating", async () => {
+    const f = run(() => Promise.reject(new Error("refresh failed")));
+    await settle();
+    expect(f.assigned).toEqual([]);
+    expect(f.port).toEqual(fallback);
+  });
+
+  it("leaves a Promise that resolves true alone", async () => {
+    const f = run(() => Promise.resolve(true));
+    await settle();
+    expect(f.assigned).toEqual([]);
+    expect(f.port).toEqual([]);
+  });
+
+  it("answers a synchronous result to Java's own callback", async () => {
+    for (const value of [true, false]) {
+      const f = run(() => value);
+      expect(f.returned).toBe(value);
+      await settle();
+      expect(f.assigned).toEqual([]);
+      expect(f.port).toEqual([]);
+    }
+  });
+});
