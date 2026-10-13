@@ -103,13 +103,19 @@ owner no longer hears it. The owner's own conversation cannot be detached.
 GET    /api/owners                    list
 POST   /api/owners                    {root, name, model?, thinking?, avatar?}
 GET    /api/owners/{id}               owner and its session state
-PATCH  /api/owners/{id}               {name?, avatar?}
+PATCH  /api/owners/{id}               {name?, avatar?, can_send_tasks_to?: [owner id]}
 DELETE /api/owners/{id}               remove owner and its conversation; the book stays
 GET    /api/owners/{id}/book          the book's files, with sizes
 GET    /api/owners/{id}/book/{path}   one file's content, and whether it is editable
 PUT    /api/owners/{id}/book/{path}   replace it — PROJECT.md only, 403 otherwise
 POST   /api/sessions/{id}/owner       {detached: bool} — detach or reattach a session
 ```
+
+`can_send_tasks_to` replaces the owners this one may send tasks to without
+asking you (see [Tasks between owners](./serve.md#tasks-between-owners)); it is
+stored in `owner.json`, returned on every owner, and answers `400` for the
+owner itself or an unknown ID. Deleting an owner removes it from every list.
+An older moa that rewrites `owner.json` (a rename, say) drops the list.
 
 A detached session lists `detached_owner_id` / `detached_owner_name` in place
 of `owner_id` / `owner_name`. Detaching answers `409` for a session that cannot
