@@ -17,6 +17,7 @@
 		B00000000000000000000008 /* NotificationService.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* NotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B00000000000000000000009 /* PushEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* PushEnvelope.swift */; };
 		B0000000000000000000000A /* PushEnvelopeVectorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000A /* PushEnvelopeVectorsTests.swift */; };
+		A0000000000000000000000C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000C /* PrivacyInfo.xcprivacy */; };
 		A0000000000000000000000B /* QRScannerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000B /* QRScannerPlugin.swift */; };
 		A00000000000000000000001 /* SharedInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* SharedInbox.swift */; };
 		A00000000000000000000003 /* MoaBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* MoaBridgeViewController.swift */; };
@@ -108,6 +109,7 @@
 		A10000000000000000000009 /* DeviceAuthBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAuthBridge.swift; sourceTree = "<group>"; };
 		A1000000000000000000000A /* DeviceCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCredentialStore.swift; sourceTree = "<group>"; };
 		A1000000000000000000000B /* QRScannerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerPlugin.swift; sourceTree = "<group>"; };
+		A1000000000000000000000C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A10000000000000000000004 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000005 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -230,6 +232,7 @@
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
 				A10000000000000000000004 /* App.entitlements */,
+				A1000000000000000000000C /* PrivacyInfo.xcprivacy */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 			);
@@ -429,6 +432,7 @@
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
 				B00000000000000000000004 /* Localizable.strings in Resources */,
+				A0000000000000000000000C /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
