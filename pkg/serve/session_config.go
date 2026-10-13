@@ -239,7 +239,11 @@ func (m *Manager) ReconfigureSubagent(sessionID, jobID, modelSpec, thinking stri
 	if thinking == "" {
 		for _, info := range sess.subagents.Snapshot() {
 			if info.JobID == jobID {
+				// The child's level is its current model's effort, not a position.
 				thinking = info.Thinking
+				if current, ok := core.ResolveModel(info.Model); ok {
+					thinking = core.ThinkingPosition(current, thinking)
+				}
 				break
 			}
 		}

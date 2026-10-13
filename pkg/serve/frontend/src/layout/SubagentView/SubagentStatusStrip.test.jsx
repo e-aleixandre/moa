@@ -47,3 +47,13 @@ test('the real child selector resolves raw identity and sends the child thinking
   expect(store.get().sessions.s1.subagents.J1.thinking).toBe('medium');
   expect(store.get().sessions.s1.thinking).toBe('high');
 });
+
+test('the child meter draws Sol max as the top selector position, not as an unknown word', () => {
+  const entries = deriveModelSpecs([
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', provider: 'openai', reasoning_efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  ]);
+  setState({ modelCatalog: { status: 'ready', entries } });
+  const tree = SubagentStatusStrip({ view: { model: 'Sol', modelSpec: 'gpt-6.1-sol', thinking: 'max', contextPercent: -1, accent: 'purple' }, sessionId: 's1', jobId: 'J1' });
+  expect(tree.props.thinking).toBe('max');
+  expect(tree.props.thinkingPosition).toBe('xhigh');
+});

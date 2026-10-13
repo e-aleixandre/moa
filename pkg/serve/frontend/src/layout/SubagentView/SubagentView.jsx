@@ -10,7 +10,7 @@ import { ProviderWaitInfo } from '../LiveBar/ProviderWaitInfo.jsx';
 import { onAPIKey } from '../../data/provider-wait.js';
 import { api } from '../../data/api.js';
 import { addToast } from '../../data/notifications.js';
-import { modelCatalog, ensureModelCatalog, catalogSpec } from '../../data/model-catalog.js';
+import { modelCatalog, ensureModelCatalog, catalogSpec, catalogThinkingPosition } from '../../data/model-catalog.js';
 import "../WorkChrome/WorkChrome.css";
 import "../LiveBar/LiveBar.css";
 import { subagentView, canPromote } from "../../data/subagent-view-model.js";
@@ -270,6 +270,7 @@ export function SubagentStatusStrip({ view, compact = false, sessionId, jobId })
       modelName={view.model}
       modelMark={`var(--${view.accent})`}
       thinking={view.thinking || "off"}
+      thinkingPosition={catalogThinkingPosition(catalog, { model: view.modelSpec, thinking: view.thinking || "off" })}
       onModel={sessionId && jobId ? () => setOpen(true) : undefined}
       showPermission={false}
       showTokens={false}

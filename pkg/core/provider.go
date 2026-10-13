@@ -460,6 +460,29 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 	return level, nil
 }
 
+// ThinkingPosition is the inverse of EffectiveThinkingLevel for the models
+// that shift selector positions onto other efforts (GPT-6 Astra, GPT-6.1 Sol):
+// it turns a persisted or running effort back into the selector position that
+// produced it. Re-feeding an effort as a position would raise it one notch on
+// every pass (high -> xhigh -> max). Other models use the same words for both.
+func ThinkingPosition(model Model, effort string) string {
+	if strings.EqualFold(model.ID, "gpt-6-astra") || strings.EqualFold(model.ID, "gpt-6.1-sol") {
+		switch effort {
+		case "low":
+			return "off"
+		case "medium":
+			return "low"
+		case "high":
+			return "medium"
+		case "xhigh":
+			return "high"
+		case "max":
+			return "xhigh"
+		}
+	}
+	return effort
+}
+
 // AssistantEvent is emitted by providers during streaming.
 //
 // Terminal events: "done" (success) or "error" (failure).

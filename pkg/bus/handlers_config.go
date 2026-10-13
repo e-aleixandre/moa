@@ -47,7 +47,8 @@ func registerConfigHandlers(sctx *SessionContext) {
 		}
 		thinking := cmd.Thinking
 		if thinking == "" {
-			thinking = sctx.Agent.ThinkingLevel()
+			// The running level is the current model's effort, not a position.
+			thinking = core.ThinkingPosition(sctx.Agent.Model(), sctx.Agent.ThinkingLevel())
 		}
 		thinking, err = core.EffectiveThinkingLevel(newModel, thinking)
 		if err != nil {

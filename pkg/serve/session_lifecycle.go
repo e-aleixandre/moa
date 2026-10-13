@@ -1321,6 +1321,11 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 	if cwd == "" {
 		cwd = m.workspaceRoot
 	}
+	// The saved level is the model's effort; SetThinking expects a selector
+	// position and would raise Sol/Astra a notch on every resume.
+	if model, ok := core.ResolveModel(modelID); ok {
+		savedThinking = core.ThinkingPosition(model, savedThinking)
+	}
 
 	// 2. Build with initial state.
 	sess, err := m.buildManagedSession(saved.ID, saved.Title, modelID, cwd, &buildOpts{

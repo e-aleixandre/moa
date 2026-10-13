@@ -1293,10 +1293,9 @@ func resolveChildGuardrails(cfg Config, perCallDuration time.Duration) (maxTurns
 
 func newChildAgent(cfg Config, provider core.Provider, model core.Model, thinkingLevel string, maxRunDuration time.Duration, systemPrompt string, childReg *core.Registry, jobID, resumedFrom string) (*agent.Agent, func(), error) {
 	maxTurns, runDuration := resolveChildGuardrails(cfg, maxRunDuration)
-	effectiveThinking, err := core.EffectiveThinkingLevel(model, thinkingLevel)
-	if err != nil {
-		return nil, nil, err
-	}
+	// thinkingLevel is already the model's effort (resolveThinking mapped the
+	// selector position once); mapping it again would raise Sol/Astra a notch.
+	effectiveThinking := thinkingLevel
 	var onFingerprint func(core.RequestFingerprintFunc)
 	var finish func()
 	if sink := cfg.OnChildRequestFingerprint; sink != nil {
@@ -1631,13 +1630,20 @@ func defaultModel(cfg Config, resumed ResumedTranscript) core.Model {
 // defaultThinking mirrors defaultModel for the thinking level: the resumed
 // transcript's level wins over the parent's, unless it is absent or no longer
 // valid for the model the child will actually run under (an unusable stored
-// level must not break the resume).
+// level must not break the resume). Both sources hold an effort of the model
+// that produced it, so it goes back to a selector position before the caller
+// maps it onto the child's model.
 func defaultThinking(cfg Config, resumed ResumedTranscript, model core.Model) string {
-	parent := currentThinkingLevel(cfg)
+	parent := core.ThinkingPosition(currentModel(cfg), currentThinkingLevel(cfg))
 	level := strings.TrimSpace(resumed.Thinking)
 	if level == "" {
 		return parent
 	}
+	source := model
+	if stored, ok := core.ResolveModel(strings.TrimSpace(resumed.Model)); ok {
+		source = stored
+	}
+	level = core.ThinkingPosition(source, level)
 	if _, err := core.EffectiveThinkingLevel(model, level); err != nil {
 		return parent
 	}
