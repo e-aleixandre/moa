@@ -10,8 +10,8 @@ import "./ToolImages.css";
 // real cost on a phone. It becomes a tile that fetches on tap instead.
 export const THUMB_MAX_BYTES = 1.5 * 1024 * 1024;
 
-// More than this is a gallery, not a glance at what the model looked at; the
-// rest stay in the model's context and out of the ledger.
+// Thumbnails drawn before the rest sit behind a "+N" the user opens: a result
+// with many images neither floods the ledger nor downloads them all unasked.
 const MAX_SHOWN = 4;
 
 function fileName(path) {
@@ -22,15 +22,15 @@ function fileName(path) {
 // What to draw for a tool's images: which ones are fetchable at all, how each
 // is labelled, and whether it earns a thumbnail or only a tile. Pure, so the
 // size rule is checked without a DOM.
-export function toolImageEntries(images, sessionId, path, failed = {}) {
+export function toolImageEntries(images, sessionId, path, failed = {}, showAll = false) {
   const name = fileName(path) || "Image";
   const usable = (images || []).filter((image) => !failed[image.attachment_id] && attachmentImageSrc(image, sessionId));
-  const shown = usable.slice(0, MAX_SHOWN);
+  const shown = showAll ? usable : usable.slice(0, MAX_SHOWN);
   return {
     extra: usable.length - shown.length,
     entries: shown.map((image, index) => ({
       image,
-      label: shown.length > 1 ? `${name} (${index + 1} of ${shown.length})` : name,
+      label: usable.length > 1 ? `${name} (${index + 1} of ${usable.length})` : name,
       kind: image.attachment_size > THUMB_MAX_BYTES ? "tile" : "thumb",
     })),
   };
@@ -68,7 +68,8 @@ function Tile({ image, label, onOpen }) {
 export function ToolImages({ images, sessionId, path }) {
   const [failed, setFailed] = useState({});
   const [open, setOpen] = useState(null);
-  const { entries, extra } = toolImageEntries(images, sessionId, path, failed);
+  const [showAll, setShowAll] = useState(false);
+  const { entries, extra } = toolImageEntries(images, sessionId, path, failed, showAll);
   if (entries.length === 0) return null;
 
   return (
@@ -88,7 +89,11 @@ export function ToolImages({ images, sessionId, path }) {
           />
         );
       })}
-      {extra > 0 && <span class="ti-more">+{extra}</span>}
+      {extra > 0 && (
+        <button type="button" class="ti-more" aria-label={`Show ${extra} more images`} onClick={() => setShowAll(true)}>
+          +{extra}
+        </button>
+      )}
       <ImageLightbox attachment={open} sessionId={sessionId} onClose={() => setOpen(null)} />
     </div>
   );

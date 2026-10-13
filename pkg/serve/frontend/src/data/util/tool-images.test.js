@@ -5,6 +5,7 @@ import { withLiveTools } from '../ws/init.js';
 import { newBuffers, applyNestedEvent } from '../conversation-reducer.js';
 import { projectStream } from '../stream-model.js';
 import { fuseLedgerDetails } from './ledger-details.jsx';
+import { LightboxBody } from '../../components/UserWaypoint/UserWaypoint.jsx';
 import { THUMB_MAX_BYTES, ToolImages, toolImageEntries } from '../../components/ToolImages/ToolImages.jsx';
 
 const REF = { type: 'image', attachment_id: 'att1', mime_type: 'image/png', attachment_size: 42 };
@@ -85,6 +86,28 @@ test('a heavy image is a tile, a small one a thumbnail, an unfetchable one nothi
   expect(toolImageEntries([small], 's1', '/work/shot.png').entries[0].label).toBe('shot.png');
   expect(toolImageEntries([small], '', '/work/shot.png').entries).toEqual([]);
   expect(toolImageEntries([small, heavy], 's1', 'x', { a: true }).entries.map((e) => e.image.attachment_id)).toEqual(['b']);
-  const many = Array.from({ length: 6 }, (_, i) => ({ ...small, attachment_id: `m${i}` }));
-  expect(toolImageEntries(many, 's1', 'x').extra).toBe(2);
+
+});
+
+// Review RED: with six images from one MCP result only four had a button.
+test('images past the fourth stay reachable behind +N, without being fetched unasked', () => {
+  const many = Array.from({ length: 6 }, (_, i) => ({ attachment_id: `att_${i}`, mime_type: 'image/png', attachment_size: 1024 }));
+  const closed = toolImageEntries(many, 's1', '');
+  expect(closed.entries).toHaveLength(4);
+  expect(closed.extra).toBe(2);
+  const open = toolImageEntries(many, 's1', '', {}, true);
+  expect(open.entries).toHaveLength(6);
+  expect(open.extra).toBe(0);
+  expect(open.entries[5].label).toBe('Image (6 of 6)');
+});
+
+// Review RED: a pruned blob (404) left an empty dialog with no explanation.
+test('a lightbox whose image failed says so instead of showing a broken image', () => {
+  const text = (node) => (node == null ? '' : typeof node === 'string' ? node : Array.isArray(node) ? node.map(text).join('') : text(node.props?.children));
+  const hasImg = (node) => node != null && typeof node === 'object' && (Array.isArray(node) ? node.some(hasImg) : node.type === 'img' || hasImg(node.props?.children));
+  const ok = LightboxBody({ src: '/a', label: 'big.jpg', failed: false, onError() {} });
+  expect(hasImg(ok)).toBe(true);
+  const failed = LightboxBody({ src: '/a', label: 'big.jpg', failed: true, onError() {} });
+  expect(hasImg(failed)).toBe(false);
+  expect(text(failed)).toContain('Image unavailable');
 });

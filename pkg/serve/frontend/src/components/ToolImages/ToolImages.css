@@ -34,8 +34,21 @@
 }
 
 .ti-more {
-  color: var(--zl-t3);
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--base);
+  box-shadow: var(--zl-rim);
+  color: var(--zl-t2);
+  font: inherit;
   font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.ti-more:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .ti-tile {

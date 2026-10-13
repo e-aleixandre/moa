@@ -658,6 +658,11 @@
   background: var(--base);
 }
 
+.wp-image-lightbox-error {
+  margin: 0;
+  color: var(--zl-t3);
+}
+
 .wp-image-lightbox-body img {
   display: block;
   max-width: 100%;

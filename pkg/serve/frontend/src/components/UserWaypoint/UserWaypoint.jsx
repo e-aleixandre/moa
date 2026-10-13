@@ -24,8 +24,23 @@ import "./UserWaypoint.css";
 // parent tore the whole thing out on the frame of the close, and the exit
 // never ran. So `open` is the real state here, and the last attachment is
 // held just long enough for the sheet to leave with something to show.
+// The picture, or why there is none. A blob that was pruned answers 404 and an
+// <img> would otherwise sit there as an empty dialog with nothing to read.
+export function LightboxBody({ src, label, failed, onError }) {
+  return (
+    <div class="wp-image-lightbox-body">
+      {failed ? (
+        <p class="wp-image-lightbox-error" role="status">Image unavailable</p>
+      ) : (
+        <img src={src} alt={label} onError={onError} />
+      )}
+    </div>
+  );
+}
+
 export function ImageLightbox({ attachment, sessionId, onClose }) {
   const shown = useRef(attachment);
+  const [failedSrc, setFailedSrc] = useState(null);
   if (attachment) shown.current = attachment;
   const src = attachmentImageSrc(shown.current, sessionId);
   if (!src) return null;
@@ -33,9 +48,7 @@ export function ImageLightbox({ attachment, sessionId, onClose }) {
 
   return (
     <Sheet open={!!attachment} onClose={onClose} title={label} ariaLabel={`Preview ${label}`} class="wp-image-lightbox">
-      <div class="wp-image-lightbox-body">
-        <img src={src} alt={label} />
-      </div>
+      <LightboxBody src={src} label={label} failed={failedSrc === src} onError={() => setFailedSrc(src)} />
     </Sheet>
   );
 }
