@@ -110,7 +110,16 @@ final class ShareClient {
             try {
                 post(sessionId, "resume", EMPTY_OBJECT);
             } catch (ShareException resume) {
-                if (!(resume.kind == ShareException.Kind.SERVER && resume.status == 409)) throw resume;
+                if (resume.kind == ShareException.Kind.SERVER && resume.status == 409) {
+                    // Already active: send below.
+                } else if (resume.kind == ShareException.Kind.OUTCOME_UNKNOWN) {
+                    // Only the resume is in doubt; the share itself was not
+                    // sent, so it can be saved or retried (contract: /resume
+                    // failed = certain failure).
+                    throw new ShareException(ShareException.Kind.UNREACHABLE);
+                } else {
+                    throw resume;
+                }
             }
             post(sessionId, "send", body);
         }

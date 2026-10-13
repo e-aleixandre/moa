@@ -45,8 +45,8 @@
     <string name="share_not_paired_detail">Open moa and pair this phone, then share again. Or save this to place it later.</string>
     <string name="share_unreachable_title">Can\'t reach moa</string>
     <string name="share_unreachable_detail">Check your connection or VPN, then try again.</string>
-    <string name="share_unknown_title">Not sure it arrived</string>
-    <string name="share_unknown_detail">Check the conversation in moa before sending again.</string>
+    <string name="share_unknown_title">It may have been sent</string>
+    <string name="share_unknown_detail">Open moa to check it.</string>
     <string name="share_not_found_title">Conversation not found</string>
     <string name="share_not_found_detail">Choose another conversation, or save this for later.</string>
     <string name="share_server_title">moa returned an error (%1$d)</string>
@@ -57,6 +57,10 @@
     <string name="share_error_too_many_files">Share no more than 8 files at once.</string>
     <string name="share_error_too_large">This share is larger than 32 MB. Choose a smaller file.</string>
     <string name="share_error_text_too_large">The shared text is too large. Share a shorter selection.</string>
+    <string name="share_back">Back</string>
+    <string name="share_text_too_long_title">Too much text</string>
+    <string name="share_text_too_long_detail">Shorten your message or share a shorter selection.</string>
     <string name="share_error_empty">No supported text, link, image, or file arrived.</string>
     <string name="share_error_unreadable">This item could not be read. Try sharing it again.</string>
+    <string name="scanner_prompt">Point the camera at the pairing code</string>
 </resources>

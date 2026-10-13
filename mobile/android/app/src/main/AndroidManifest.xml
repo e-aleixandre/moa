@@ -90,10 +90,14 @@
             android:name="firebase_analytics_collection_enabled"
             android:value="false" />
 
-        <!-- The pairing scanner's Google code scanner module, fetched at install. -->
-        <meta-data
-            android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="barcode_ui" />
+        <!--
+          The pairing scanner (QRScannerPlugin, ZXing). Its library locks this
+          activity to landscape; follow the phone instead.
+        -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            tools:replace="screenOrientation" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

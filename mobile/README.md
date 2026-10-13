@@ -327,10 +327,25 @@ app decrypts them itself, so Google never sees the content.
 | Permission | For |
 |---|---|
 | `INTERNET`, `ACCESS_NETWORK_STATE` | talking to the paired moa |
-| `CAMERA` | scanning the pairing code (Google code scanner) |
+| `CAMERA` | scanning the pairing code (ZXing, runtime prompt) |
 | `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` | voice messages in the WebView |
 | `POST_NOTIFICATIONS` | asked when notifications are turned on (Android 13+) |
 | `VIBRATE` | haptics |
+
+### Pairing scanner
+
+The QR scanner is `QRScannerPlugin` (ZXing, via `zxing-android-embedded`),
+registered under the same plugin name and with the same four calls as iOS's
+`QRScannerPlugin.swift` (`isSupported`, `checkPermissions`,
+`requestPermissions`, `scan` -> `{ barcodes: [{ rawValue }] }`, an empty list
+when the person goes back), so `www/barcode-scanner.js` is shared. It decodes
+on the device; no Google Play services, ML Kit or Firebase code is involved.
+
+`@capacitor-mlkit/barcode-scanning` is still in `package.json` because the iOS
+build uses it until the native iOS scanner lands; `capacitor.config.json`
+lists the Android plugins (`android.includePlugins`) so `cap sync android`
+leaves it out. Once iOS no longer needs it, remove the npm dependency; the
+Android allowlist can then go too.
 
 ### Origins and storage
 
@@ -366,8 +381,13 @@ as long as the sheet. Only `content://` URIs from other apps are read, and the
 provider-reported size is checked before reading. Limits as iOS: 8 files and
 32 MB in total per share, 256 KB of text, 20 shares waiting.
 
-If listing or sending fails (not paired, server error, unreachable), the sheet
-offers **Save for later**, which commits the staging share to the queue. moa
+If listing or sending certainly failed (not paired, server error, unreachable
+before the request left), the sheet offers **Save for later**, which commits
+the staging share, note included, to the queue. If a send may have reached the
+server (the connection broke after the request was written), it says so and
+offers only **Open moa** and **Close**: saving or retrying could deliver it
+twice. The 256 KB text limit applies to exactly what is sent or saved, note
+and separator included. moa
 places it from its own picker through `window.MoaShareInbox` (same API as
 iOS: `status`/`bindServer`/`clearServer` from the local page, `peek` /
 `acknowledge` from the paired origin only), a WebMessage listener like the

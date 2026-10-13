@@ -351,9 +351,13 @@ public class ShareActivity extends AppCompatActivity {
     private void send() {
         ShareLogic.Destination destination = selected();
         if (destination == null || client == null || transaction == null || sending) return;
+        String text = ShareLogic.uploadText(note.getText().toString(), sharedTitle, sharedText, sharedUrl);
+        if (text == null) {
+            showTextTooLong();
+            return;
+        }
         hideKeyboard();
         setSending(true);
-        String text = ShareLogic.message(note.getText().toString(), sharedTitle, sharedText, sharedUrl);
         List<ShareBody.Part> parts = new ArrayList<>();
         for (ShareInbox.StoredFile file : transaction.files()) {
             parts.add(new ShareBody.Part(file.name, file.mime, transaction.fileFor(file), file.size));
@@ -377,10 +381,15 @@ public class ShareActivity extends AppCompatActivity {
 
     private void saveForLater() {
         if (transaction == null) return;
+        String text = ShareLogic.savedText(note.getText().toString(), sharedTitle, sharedText, sharedUrl);
+        if (text == null) {
+            showUnusable(R.string.share_error_text_too_large);
+            return;
+        }
         showLoading();
         worker.execute(() -> {
             try {
-                transaction.commit(sharedTitle, sharedText, sharedUrl);
+                transaction.commit(sharedTitle, text, sharedUrl);
                 ui(() -> showMessage(getString(R.string.share_saved_title), getString(R.string.share_saved_detail),
                     R.string.share_open_moa, this::openMoa, R.string.share_done, this::finish));
             } catch (ShareInbox.InboxException e) {
@@ -452,32 +461,73 @@ public class ShareActivity extends AppCompatActivity {
 
     private void showFailure(ShareClient.ShareException error, boolean whileSending) {
         setSending(false);
-        Runnable retry = whileSending ? this::showPicker : this::loadDestinations;
+        String title;
+        String detail;
         switch (error.kind) {
             case NOT_PAIRED:
-                showMessage(getString(R.string.share_not_paired_title), getString(R.string.share_not_paired_detail),
-                    R.string.share_open_moa, this::openMoa, R.string.share_save, this::saveForLater);
-                return;
+                title = getString(R.string.share_not_paired_title);
+                detail = getString(R.string.share_not_paired_detail);
+                break;
             case UNREACHABLE:
-                showMessage(getString(R.string.share_unreachable_title), getString(R.string.share_unreachable_detail),
-                    R.string.share_retry, retry, R.string.share_save, this::saveForLater);
-                return;
+                title = getString(R.string.share_unreachable_title);
+                detail = getString(R.string.share_unreachable_detail);
+                break;
             case OUTCOME_UNKNOWN:
-                showMessage(getString(R.string.share_unknown_title), getString(R.string.share_unknown_detail),
-                    R.string.share_save, this::saveForLater, R.string.share_close, this::finish);
-                return;
+                title = getString(R.string.share_unknown_title);
+                detail = getString(R.string.share_unknown_detail);
+                break;
             case NOT_FOUND:
-                showMessage(getString(R.string.share_not_found_title), getString(R.string.share_not_found_detail),
-                    R.string.share_choose_another, this::showPicker, R.string.share_save, this::saveForLater);
-                return;
+                title = getString(R.string.share_not_found_title);
+                detail = getString(R.string.share_not_found_detail);
+                break;
             case SERVER:
-                showMessage(getString(R.string.share_server_title, error.status), getString(R.string.share_retry_detail),
-                    R.string.share_retry, retry, R.string.share_save, this::saveForLater);
-                return;
+                title = getString(R.string.share_server_title, error.status);
+                detail = getString(R.string.share_retry_detail);
+                break;
             default:
-                showMessage(getString(R.string.share_generic_title), getString(R.string.share_retry_detail),
-                    R.string.share_retry, retry, R.string.share_save, this::saveForLater);
+                title = getString(R.string.share_generic_title);
+                detail = getString(R.string.share_retry_detail);
         }
+        List<ShareLogic.FailureAction> actions = ShareLogic.failureActions(error.kind);
+        Runnable retry = whileSending ? this::showPicker : this::loadDestinations;
+        showMessage(title, detail, label(actions.get(0)), action(actions.get(0), retry),
+            label(actions.get(1)), action(actions.get(1), retry));
+    }
+
+    private static int label(ShareLogic.FailureAction action) {
+        switch (action) {
+            case OPEN_MOA:
+                return R.string.share_open_moa;
+            case SAVE:
+                return R.string.share_save;
+            case RETRY:
+                return R.string.share_retry;
+            case CHOOSE_ANOTHER:
+                return R.string.share_choose_another;
+            default:
+                return R.string.share_close;
+        }
+    }
+
+    private Runnable action(ShareLogic.FailureAction action, Runnable retry) {
+        switch (action) {
+            case OPEN_MOA:
+                return this::openMoa;
+            case SAVE:
+                return this::saveForLater;
+            case RETRY:
+                return retry;
+            case CHOOSE_ANOTHER:
+                return this::showPicker;
+            default:
+                return this::finish;
+        }
+    }
+
+    // Over the limit with the note: back to the sheet to shorten it.
+    private void showTextTooLong() {
+        showMessage(getString(R.string.share_text_too_long_title), getString(R.string.share_text_too_long_detail),
+            R.string.share_back, this::showPicker, R.string.share_close, this::finish);
     }
 
     private void setSending(boolean value) {

@@ -2,6 +2,7 @@ package com.ealeixandre.moa.app;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -121,6 +122,50 @@ public class PushDecisionsTest {
         assertNull("not json", RelayProtocol.parseHandle("<html>", now));
     }
 
+    // The server issues the device cookie as SameSite=Lax (fix/device-cookie-lax),
+    // so the native first load, a cross-site top-level navigation, carries it.
+    // Lax and Strict are both accepted; every other restriction still applies.
+    @Test
+    public void acceptsTheLaxDeviceCookieWithTheSameRestrictions() {
+        String lax = "__Host-moa_device=v1.dev.123.abc.def; Path=/; Expires=Wed, 01 Jan 2099 00:00:00 GMT; Max-Age=86400; HttpOnly; Secure; SameSite=Lax";
+        assertEquals(lax, SessionCookie.select(Arrays.asList("other=1; Path=/", lax)));
+        assertEquals(lax.replace("SameSite=Lax", "samesite=lax"),
+            SessionCookie.select(Collections.singletonList(lax.replace("SameSite=Lax", "samesite=lax"))));
+        assertNull(SessionCookie.select(Collections.singletonList(lax.replace("; HttpOnly", ""))));
+        assertNull(SessionCookie.select(Collections.singletonList(lax.replace("; Secure", ""))));
+        assertNull(SessionCookie.select(Collections.singletonList(lax.replace("Path=/", "Path=/api"))));
+        assertNull(SessionCookie.select(Collections.singletonList(lax + "; Domain=moa.example")));
+        assertNull(SessionCookie.select(Collections.singletonList(lax.replace("Max-Age=86400", "Max-Age=0"))));
+        assertNull(SessionCookie.select(Collections.singletonList(lax.replace("__Host-moa_device", "moa_device"))));
+    }
+
+    // Review A1: PendingIntent identity ignores extras, so two tags with the
+    // same 32-bit hashCode shared one PendingIntent and UPDATE_CURRENT made a
+    // tap on the first notification open the second one's session.
+    @Test
+    public void tapIntentsOfCollidingTagsStayDistinct() {
+        String first = "col:" + "A".repeat(20) + "Aa";
+        String second = "col:" + "A".repeat(20) + "BB";
+        assertEquals("fixture collides", first.hashCode(), second.hashCode());
+        assertNotNull(PushMessages.tapUri(first));
+        assertNotEquals(PushMessages.tapUri(first), PushMessages.tapUri(second));
+        assertEquals("moa-push:" + first, PushMessages.tapUri(first));
+    }
+
+    // Review A2/A3: an envelope is shown (even as the generic alert) and its
+    // keys are released only while push is on here for the current pairing,
+    // with a credential not known to be expired.
+    @Test
+    public void envelopesAreShownOnlyWhilePushIsOnForAnUnexpiredPairing() {
+        long now = 1_000_000L;
+        String origin = "https://moa.example";
+        assertTrue(PushMessages.receiving(origin, now + 1, origin, now));
+        assertFalse("turned off here (offline disable)", PushMessages.receiving(origin, now + 1, null, now));
+        assertFalse("credential known to be expired", PushMessages.receiving(origin, now, origin, now));
+        assertFalse("unpaired", PushMessages.receiving(null, 0, origin, now));
+        assertFalse("paired elsewhere", PushMessages.receiving("https://other.example", now + 1, origin, now));
+    }
+
     @Test
     public void acceptsOnlyTheHostOnlyHttpOnlySessionCookie() {
         String good = "__Host-moa_device=v1.dev.123.abc.def; Path=/; Expires=Wed, 01 Jan 2099 00:00:00 GMT; Max-Age=86400; HttpOnly; Secure; SameSite=Strict";
@@ -130,7 +175,8 @@ public class PushDecisionsTest {
         assertNull(SessionCookie.select(Collections.singletonList(good.replace("Path=/", "Path=/api"))));
         assertNull(SessionCookie.select(Collections.singletonList(good + "; Domain=moa.example")));
         assertNull(SessionCookie.select(Collections.singletonList(good.replace("Max-Age=86400", "Max-Age=0"))));
-        assertNull(SessionCookie.select(Collections.singletonList(good.replace("SameSite=Strict", "SameSite=Lax"))));
+        assertNull(SessionCookie.select(Collections.singletonList(good.replace("; SameSite=Strict", ""))));
+        assertNull(SessionCookie.select(Collections.singletonList(good.replace("SameSite=Strict", "SameSite=None"))));
         assertNull(SessionCookie.select(Collections.singletonList(good.replace("__Host-moa_device", "moa_device"))));
         assertNull(SessionCookie.select(null));
         assertTrue(SessionCookie.expired().startsWith("__Host-moa_device=;"));

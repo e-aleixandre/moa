@@ -5,9 +5,11 @@ import java.util.Locale;
 
 // Picks the short-lived browser session out of the /api/pulse/device-session
 // response. Same acceptance as iOS installSessionCookie: the exact name,
-// host-only, Path=/, Secure, HttpOnly and not already expired. The raw header
-// is what is handed to CookieManager, so its own attributes (SameSite=Strict)
-// survive unchanged.
+// host-only, Path=/, Secure, HttpOnly, SameSite Strict or Lax, and not already
+// expired. The server issues it Lax (the native first load is a cross-site
+// top-level navigation, which Strict would not carry); Strict is what older
+// servers send. The raw header is what is handed to CookieManager, so its own
+// attributes survive unchanged.
 public final class SessionCookie {
 
     public static final String NAME = "__Host-moa_device";
@@ -32,7 +34,7 @@ public final class SessionCookie {
         if (parts[0].substring(eq + 1).trim().isEmpty()) return false;
         boolean secure = false;
         boolean httpOnly = false;
-        boolean strict = false;
+        boolean sameSite = false;
         boolean rootPath = false;
         long maxAge = 0;
         for (int i = 1; i < parts.length; i++) {
@@ -48,7 +50,7 @@ public final class SessionCookie {
                     httpOnly = true;
                     break;
                 case "samesite":
-                    strict = "strict".equalsIgnoreCase(value);
+                    sameSite = "strict".equalsIgnoreCase(value) || "lax".equalsIgnoreCase(value);
                     break;
                 case "path":
                     rootPath = "/".equals(value);
@@ -66,7 +68,7 @@ public final class SessionCookie {
                     break;
             }
         }
-        return secure && httpOnly && strict && rootPath && maxAge > 0;
+        return secure && httpOnly && sameSite && rootPath && maxAge > 0;
     }
 
     // What clears it: the same name and attributes, already expired.

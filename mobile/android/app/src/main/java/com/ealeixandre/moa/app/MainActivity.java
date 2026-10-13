@@ -36,6 +36,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         credentials = DeviceCredentialStore.get(this);
+        // Before super.onCreate, which builds the bridge with its plugins.
+        registerPlugin(QRScannerPlugin.class);
         super.onCreate(savedInstanceState);
         PushNotifier.ensureChannels(this);
         NativePushRegistration.get(this).setPermissionRequester(this::requestNotificationPermission);

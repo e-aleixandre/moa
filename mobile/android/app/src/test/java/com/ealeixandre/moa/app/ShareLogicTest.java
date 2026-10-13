@@ -142,4 +142,39 @@ public class ShareLogicTest {
         assertEquals(20, ShareLogic.MAX_PENDING);
         assertEquals(5, ShareLogic.textBytes(" é ", "ab", " c "));
     }
+
+    // Review S2: the 262144-byte limit applies to exactly the text sent,
+    // note + separator + shared text, not only to the shared part.
+    @Test
+    public void theLimitIsMeasuredOnTheTextThatIsUploaded() {
+        String note = "n".repeat(ShareLogic.MAX_TEXT_BYTES);
+        assertEquals(null, ShareLogic.uploadText(note, "", "x", ""));
+        String fits = "n".repeat(ShareLogic.MAX_TEXT_BYTES - 2);
+        assertEquals(fits + "\nx", ShareLogic.uploadText(fits, "", "x", ""));
+        assertEquals(null, ShareLogic.uploadText("n".repeat(ShareLogic.MAX_TEXT_BYTES - 1), "", "x", ""));
+    }
+
+    // Review S2: saving keeps the same content as sending would (the note
+    // too), under the same limit.
+    @Test
+    public void savingKeepsTheNoteUnderTheSameLimit() {
+        assertEquals("read this\nshared", ShareLogic.savedText("  read this ", "T", "shared", "https://x.test"));
+        assertEquals("shared", ShareLogic.savedText(" ", "T", "shared", ""));
+        assertEquals(null, ShareLogic.savedText("n".repeat(ShareLogic.MAX_TEXT_BYTES), "", "x", ""));
+    }
+
+    // Review S1 / contract "Uncertain sends": a send that may have reached the
+    // server is never saved or retried; Save for later only when it certainly
+    // did not arrive.
+    @Test
+    public void anUncertainSendOffersNeitherSaveNorRetry() {
+        List<ShareLogic.FailureAction> uncertain = ShareLogic.failureActions(ShareClient.ShareException.Kind.OUTCOME_UNKNOWN);
+        assertFalse(uncertain.contains(ShareLogic.FailureAction.SAVE));
+        assertFalse(uncertain.contains(ShareLogic.FailureAction.RETRY));
+        assertTrue(uncertain.contains(ShareLogic.FailureAction.CLOSE));
+        for (ShareClient.ShareException.Kind kind : ShareClient.ShareException.Kind.values()) {
+            if (kind == ShareClient.ShareException.Kind.OUTCOME_UNKNOWN) continue;
+            assertTrue(kind.name(), ShareLogic.failureActions(kind).contains(ShareLogic.FailureAction.SAVE));
+        }
+    }
 }

@@ -158,7 +158,33 @@ describe("Android permissions and navigation", () => {
     for (const permission of ["INTERNET", "CAMERA", "RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS", "POST_NOTIFICATIONS", "VIBRATE"]) {
       expect(manifest).toContain(`<uses-permission android:name="android.permission.${permission}" />`);
     }
-    expect(manifest).toContain('android:name="com.google.mlkit.vision.DEPENDENCIES"');
+  });
+
+  // The pairing scanner is ZXing (QRScannerPlugin), as iOS uses AVFoundation:
+  // neither ML Kit nor Google's code scanner (play-services-code-scanner)
+  // ships in the Android app. The ML Kit Capacitor plugin stays an npm
+  // dependency for iOS until it drops it; capacitor.config.json keeps it out
+  // of Android.
+  it("ships no ML Kit or Google code scanner", () => {
+    const config = JSON.parse(readFileSync("capacitor.config.json", "utf8"));
+    const settings = readFileSync("android/capacitor.settings.gradle", "utf8");
+    const capacitorBuild = readFileSync("android/app/capacitor.build.gradle", "utf8");
+    const variables = readFileSync("android/variables.gradle", "utf8");
+    expect(config.android.includePlugins).toEqual(["@capacitor/haptics", "@capacitor/share", "@capacitor/status-bar"]);
+    for (const source of [appGradle, settings, capacitorBuild, variables, manifest]) {
+      expect(source.toLowerCase()).not.toMatch(/mlkit|play-services-code-scanner|play-services-vision|barcode_ui/);
+    }
+    expect(appGradle).toContain('implementation "com.journeyapps:zxing-android-embedded:');
+    for (const source of Object.values(java)) {
+      expect(code(source)).not.toMatch(/com\.google\.mlkit|com\.google\.android\.gms\.vision|GmsBarcodeScann/);
+    }
+    const scanner = code(java["QRScannerPlugin.java"]);
+    expect(scanner).toContain('name = "BarcodeScanner"');
+    expect(scanner).toContain("Manifest.permission.CAMERA");
+    for (const method of ["isSupported", "scan"]) expect(scanner).toContain(`public void ${method}(PluginCall call)`);
+    expect(scanner).toContain('put("barcodes", barcodes)');
+    expect(code(java["MainActivity.java"]).indexOf("registerPlugin(QRScannerPlugin.class)"))
+      .toBeLessThan(code(java["MainActivity.java"]).indexOf("super.onCreate"));
   });
 
   it("keeps the main frame on the paired and local origins and minimizes at the root", () => {

@@ -4,6 +4,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.ealeixandre.moa.app.ShareClient.ShareException;
@@ -132,6 +133,16 @@ public class ShareClientTest {
             assertEquals(ShareException.Kind.SERVER, e.kind);
             assertEquals(500, e.status);
         }
+        assertEquals(2, seen.size());
+    }
+
+    @Test
+    public void aResumeLostInTransitIsACertainFailureOfTheShare() {
+        respond(404, "");
+        script.add(new IOException("read timed out"));
+        ShareException.Kind kind = sendFails(client());
+        assertEquals(ShareException.Kind.UNREACHABLE, kind);
+        assertTrue(ShareLogic.failureActions(kind).contains(ShareLogic.FailureAction.SAVE));
         assertEquals(2, seen.size());
     }
 

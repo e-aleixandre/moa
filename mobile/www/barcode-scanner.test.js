@@ -54,42 +54,6 @@ describe("native barcode scanner contract", () => {
     expect(calls).toEqual([{ formats: ["QR_CODE"] }]);
   });
 
-  it("installs the Google scanner module on Android before scanning", async () => {
-    const order = [];
-    let listener;
-    const scanner = {
-      isSupported: async () => ({ supported: true }),
-      isGoogleBarcodeScannerModuleAvailable: async () => ({ available: false }),
-      addListener: async (name, fn) => { order.push(name); listener = fn; return { remove() { order.push("removed"); } }; },
-      installGoogleBarcodeScannerModule: async () => { order.push("install"); setTimeout(() => listener({ state: 4 }), 0); },
-      checkPermissions: async () => ({ camera: "granted" }),
-      scan: async () => { order.push("scan"); return { barcodes: [{ rawValue: "x" }] }; },
-    };
-    const result = await scanPairingCode({
-      Plugins: { [BARCODE_SCANNER_PLUGIN]: scanner },
-      isPluginAvailable: () => true,
-      getPlatform: () => "android",
-    });
-    expect(result).toEqual({ status: "scanned", value: "x" });
-    expect(order).toEqual(["googleBarcodeScannerModuleInstallProgress", "install", "removed", "scan"]);
-  });
-
-  it("falls back to manual entry when the module install fails", async () => {
-    let listener;
-    const scanner = {
-      isSupported: async () => ({ supported: true }),
-      isGoogleBarcodeScannerModuleAvailable: async () => ({ available: false }),
-      addListener: async (_name, fn) => { listener = fn; return { remove() {} }; },
-      installGoogleBarcodeScannerModule: async () => { setTimeout(() => listener({ state: 5 }), 0); },
-      scan: async () => { throw new Error("must not scan"); },
-    };
-    await expect(scanPairingCode({
-      Plugins: { [BARCODE_SCANNER_PLUGIN]: scanner },
-      isPluginAvailable: () => true,
-      getPlatform: () => "android",
-    })).resolves.toEqual({ status: "unavailable" });
-  });
-
   it("reports a real camera absence instead of treating it as registration failure", async () => {
     const scanner = {
       isSupported: async () => ({ supported: false }),

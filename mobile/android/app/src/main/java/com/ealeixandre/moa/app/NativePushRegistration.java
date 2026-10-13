@@ -111,6 +111,11 @@ final class NativePushRegistration {
     private final ExecutorService operations = Executors.newSingleThreadExecutor();
     private final ExecutorService io = Executors.newCachedThreadPool();
     private final AtomicInteger generation = new AtomicInteger();
+    // Held by "is this generation still current?" plus the local writes that
+    // depend on it (S, STATE_*), and by ending a generation plus forgetting,
+    // so a forget cannot land between an operation's check and its writes.
+    // Never held across network or token waits.
+    private final Object lifecycle = new Object();
     private volatile PermissionRequester permissionRequester;
     private Pending pending;
     private long lastRefresh;
@@ -210,10 +215,13 @@ final class NativePushRegistration {
     // check and a waiting challenge is cancelled.
     // Returns false if S could not be deleted; it stays marked and is retried.
     boolean forgetLocal() {
-        generation.incrementAndGet();
+        boolean removed;
+        synchronized (lifecycle) {
+            generation.incrementAndGet();
+            removed = deleteSecret();
+            prefs.edit().remove(STATE_ORIGIN).remove(STATE_TOKEN).remove(STATE_ENV).apply();
+        }
         finishPending(null, new PushException("cancelled"));
-        boolean removed = deleteSecret();
-        prefs.edit().remove(STATE_ORIGIN).remove(STATE_TOKEN).remove(STATE_ENV).apply();
         synchronized (this) {
             lastRefresh = 0;
         }
@@ -222,15 +230,43 @@ final class NativePushRegistration {
         return removed;
     }
 
-    // The keys for opening an envelope now, or null without a readable S.
-    // A message is always judged with the current key, at display and again
-    // at tap time.
+    // The keys for opening an envelope now, or null without a readable S or
+    // while push is not on for a current, unexpired pairing (receiving). A
+    // message is always judged with the current key, at display and again at
+    // tap time.
     PushEnvelope.Keys currentKeys() {
+        DeviceCredentialStore.Stored stored;
+        try {
+            stored = credentials.load();
+        } catch (DeviceCredentialStore.StoreException e) {
+            return null;
+        }
+        if (!receivingFor(stored)) return null;
         try {
             return PushEnvelope.deriveKeys(secretBox.load());
         } catch (GeneralSecurityException | IOException e) {
             return null;
         }
+    }
+
+    // Whether an incoming envelope is shown at all (PushMessages.receiving).
+    // An unreadable credential with push on here still gets the generic
+    // alert, without keys.
+    boolean receiving() {
+        if (prefs.getString(STATE_ORIGIN, null) == null) return false;
+        try {
+            return receivingFor(credentials.load());
+        } catch (DeviceCredentialStore.StoreException e) {
+            return true;
+        }
+    }
+
+    private boolean receivingFor(DeviceCredentialStore.Stored stored) {
+        long now = System.currentTimeMillis();
+        // A credential known to be expired ends push, as in pairedCredential.
+        if (stored != null && stored.expiresAtMillis <= now && hasLocalPushData()) forgetLocal();
+        return PushMessages.receiving(stored == null ? null : stored.origin, stored == null ? 0 : stored.expiresAtMillis,
+            prefs.getString(STATE_ORIGIN, null), now);
     }
 
     // MARK: lifecycle
@@ -303,22 +339,25 @@ final class NativePushRegistration {
 
         byte[] secret;
         boolean isNewSecret = false;
-        try {
-            secret = secretBox.load();
-            if (secret != null && secret.length != 32) throw new GeneralSecurityException("bad secret");
-            if (secret == null) {
-                if (!allowNewSecret) return;
-                secret = new byte[32];
-                new SecureRandom().nextBytes(secret);
-                // Stored before anything is registered (iOS review C3).
-                secretBox.save(secret);
-                isNewSecret = true;
+        synchronized (lifecycle) {
+            ensureCurrent(current, paired);
+            try {
+                secret = secretBox.load();
+                if (secret != null && secret.length != 32) throw new GeneralSecurityException("bad secret");
+                if (secret == null) {
+                    if (!allowNewSecret) return;
+                    secret = new byte[32];
+                    new SecureRandom().nextBytes(secret);
+                    // Stored before anything is registered (iOS review C3).
+                    secretBox.save(secret);
+                    isNewSecret = true;
+                }
+            } catch (GeneralSecurityException | IOException e) {
+                throw new PushException("keychain");
             }
-        } catch (GeneralSecurityException | IOException e) {
-            throw new PushException("keychain");
-        }
-        if (isNewSecret || prefs.getString(STATE_ORIGIN, null) == null) {
-            prefs.edit().putString(STATE_ORIGIN, paired.origin).remove(STATE_TOKEN).remove(STATE_ENV).apply();
+            if (isNewSecret || prefs.getString(STATE_ORIGIN, null) == null) {
+                prefs.edit().putString(STATE_ORIGIN, paired.origin).remove(STATE_TOKEN).remove(STATE_ENV).apply();
+            }
         }
 
         String token = fcmToken();
@@ -338,11 +377,13 @@ final class NativePushRegistration {
         RelayProtocol.Handle handle = relayHandle(relay, token, keys);
         ensureCurrent(current, paired);
         postServerRegistration(paired, relay, handle, secret);
-        ensureCurrent(current, paired);
-        prefs.edit().putString(STATE_ORIGIN, paired.origin).putString(STATE_TOKEN, token).putString(STATE_ENV, env).apply();
-        // The new registration replaced whatever the pending DELETE targeted.
-        if (paired.origin.equals(prefs.getString(PENDING_DELETE, null))) {
-            prefs.edit().remove(PENDING_DELETE).apply();
+        synchronized (lifecycle) {
+            ensureCurrent(current, paired);
+            prefs.edit().putString(STATE_ORIGIN, paired.origin).putString(STATE_TOKEN, token).putString(STATE_ENV, env).apply();
+            // The new registration replaced whatever the pending DELETE targeted.
+            if (paired.origin.equals(prefs.getString(PENDING_DELETE, null))) {
+                prefs.edit().remove(PENDING_DELETE).apply();
+            }
         }
     }
 

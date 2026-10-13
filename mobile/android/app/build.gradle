@@ -53,6 +53,8 @@ dependencies {
     implementation "androidx.activity:activity:$androidxActivityVersion"
     implementation platform("com.google.firebase:firebase-bom:$firebaseBomVersion")
     implementation "com.google.firebase:firebase-messaging"
+    // Pairing QR scanner: ZXing, decoded on the device, no Google services.
+    implementation "com.journeyapps:zxing-android-embedded:$zxingAndroidEmbeddedVersion"
     testImplementation "junit:junit:$junitVersion"
     // android.jar's org.json is a stub in JVM tests; the real one parses.
     testImplementation "org.json:json:$orgJsonVersion"

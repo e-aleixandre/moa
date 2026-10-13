@@ -13,6 +13,11 @@
     "handleApplicationNotifications": false
   },
   "android": {
+    "includePlugins": [
+      "@capacitor/haptics",
+      "@capacitor/share",
+      "@capacitor/status-bar"
+    ],
     "backgroundColor": "#11111b",
     "allowMixedContent": false
   },

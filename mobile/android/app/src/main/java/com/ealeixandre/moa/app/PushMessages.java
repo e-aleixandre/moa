@@ -11,7 +11,8 @@ public final class PushMessages {
     public enum Kind {
         // {"r":c}: a registration challenge. Never shown.
         CHALLENGE,
-        // {v,k,c,col?}: an encrypted envelope. Shown, decrypted or not.
+        // {v,k,c,col?}: an encrypted envelope. Shown, decrypted or not, while
+        // push is on here (receiving).
         ENVELOPE,
         // Anything else did not come from the relay's closed schema.
         IGNORE
@@ -84,6 +85,24 @@ public final class PushMessages {
         // The ciphertext starts with the random nonce: unique per message.
         if (sealed != null && sealed.length() >= 16) return "c:" + sealed.substring(0, 16);
         return "moa";
+    }
+
+    // The tap intent's data: the whole tag. PendingIntent identity ignores
+    // extras, so without it two notifications whose tags share a hashCode
+    // would share one PendingIntent and a tap could open the other one's
+    // session. Tags are URL-safe characters and ':' (tagFor), valid in an
+    // opaque URI as they are.
+    static String tapUri(String tag) {
+        return "moa-push:" + tag;
+    }
+
+    // Whether an envelope may be shown at all, even as the generic alert, and
+    // its keys used: push is on here (stateOrigin, cleared by disable, unpair
+    // and any pairing change) for the stored pairing, whose credential is not
+    // known to be expired. A revocation the server has not told us about yet
+    // cannot be known offline and is not judged here.
+    static boolean receiving(String pairedOrigin, long expiresAtMillis, String stateOrigin, long nowMillis) {
+        return pairedOrigin != null && pairedOrigin.equals(stateOrigin) && expiresAtMillis > nowMillis;
     }
 
     // Same rule as iOS willPresent: no banner for the session already on

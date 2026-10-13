@@ -2,6 +2,7 @@ package com.ealeixandre.moa.app;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -75,6 +76,56 @@ final class ShareLogic {
         String shared = composedText(title, text, url);
         if (!shared.isEmpty()) parts.add(shared);
         return String.join("\n", parts);
+    }
+
+    // The text /send receives (message), or null when it is over
+    // MAX_TEXT_BYTES: the limit applies to exactly what is uploaded, note
+    // and separator included.
+    static String uploadText(String note, String title, String text, String url) {
+        String message = message(note, title, text, url);
+        return fits(message) ? message : null;
+    }
+
+    // The text "Save for later" stores: the note first, then the shared text,
+    // so moa's picker places the same content the sheet would have sent
+    // (title and URL stay in their own fields). Null when what the composer
+    // would get from it is over MAX_TEXT_BYTES.
+    static String savedText(String note, String title, String text, String url) {
+        List<String> parts = new ArrayList<>();
+        String cleanNote = note == null ? "" : note.trim();
+        if (!cleanNote.isEmpty()) parts.add(cleanNote);
+        if (text != null && !text.trim().isEmpty()) parts.add(text);
+        String saved = String.join("\n", parts);
+        return fits(composedText(title, saved, url)) ? saved : null;
+    }
+
+    private static boolean fits(String value) {
+        return value.getBytes(StandardCharsets.UTF_8).length <= MAX_TEXT_BYTES;
+    }
+
+    enum FailureAction {
+        OPEN_MOA,
+        SAVE,
+        RETRY,
+        CHOOSE_ANOTHER,
+        CLOSE
+    }
+
+    // The buttons after a failed list or send, primary first. Save for later
+    // only when the share certainly did not arrive; a send that may have
+    // reached the server is neither saved nor retried, or it could arrive
+    // twice (contract "Uncertain sends").
+    static List<FailureAction> failureActions(ShareClient.ShareException.Kind kind) {
+        switch (kind) {
+            case NOT_PAIRED:
+                return Arrays.asList(FailureAction.OPEN_MOA, FailureAction.SAVE);
+            case OUTCOME_UNKNOWN:
+                return Arrays.asList(FailureAction.OPEN_MOA, FailureAction.CLOSE);
+            case NOT_FOUND:
+                return Arrays.asList(FailureAction.CHOOSE_ANOTHER, FailureAction.SAVE);
+            default:
+                return Arrays.asList(FailureAction.RETRY, FailureAction.SAVE);
+        }
     }
 
     // One line describing the share. manyFiles is the localized "N files"

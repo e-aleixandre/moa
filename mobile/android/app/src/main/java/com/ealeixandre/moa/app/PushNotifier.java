@@ -5,6 +5,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import java.util.Map;
@@ -41,7 +42,11 @@ final class PushNotifier {
 
     static void show(Context context, Map<String, String> data) {
         ensureChannels(context);
-        PushEnvelope.Keys keys = NativePushRegistration.get(context).currentKeys();
+        NativePushRegistration registration = NativePushRegistration.get(context);
+        // Turned off, unpaired or expired here: an envelope still in flight is
+        // dropped, never shown as the generic alert.
+        if (!registration.receiving()) return;
+        PushEnvelope.Keys keys = registration.currentKeys();
         PushEnvelope.Content content = PushEnvelope.open(data, keys, System.currentTimeMillis() / 1000);
         PushNavigator navigator = PushNavigator.get();
         if (PushMessages.suppress(content, navigator.visibleSession(), navigator.isForeground())) return;
@@ -51,7 +56,7 @@ final class PushNotifier {
         String body;
         String group = null;
         if (content == null) {
-            // Whatever cannot be authenticated is the localized fallback,
+            // Push is on, but this cannot be authenticated: the localized fallback,
             // which sounds: losing a question is worse than an extra alert.
             channel = PushMessages.fallbackChannel();
             title = context.getString(R.string.push_fallback_title);
@@ -96,6 +101,7 @@ final class PushNotifier {
     private static PendingIntent tapIntent(Context context, Map<String, String> data, String tag) {
         Intent intent = new Intent(context, MainActivity.class)
             .setAction("com.ealeixandre.moa.app.OPEN_PUSH")
+            .setData(Uri.parse(PushMessages.tapUri(tag)))
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
             .putExtra(PushNavigator.EXTRA_V, data.get("v"))
             .putExtra(PushNavigator.EXTRA_K, data.get("k"))

@@ -15,4 +15,5 @@ ext {
     cordovaAndroidVersion = '14.0.1'
     firebaseBomVersion = '34.19.0'
     orgJsonVersion = '20250517'
+    zxingAndroidEmbeddedVersion = '4.3.0'
 }

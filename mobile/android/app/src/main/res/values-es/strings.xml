@@ -40,8 +40,8 @@
     <string name="share_not_paired_detail">Abre moa y empareja este móvil; luego vuelve a compartir. O guarda esto para colocarlo después.</string>
     <string name="share_unreachable_title">No se puede conectar con moa</string>
     <string name="share_unreachable_detail">Comprueba la conexión o la VPN y vuelve a intentarlo.</string>
-    <string name="share_unknown_title">No está claro que haya llegado</string>
-    <string name="share_unknown_detail">Revisa la conversación en moa antes de volver a enviarlo.</string>
+    <string name="share_unknown_title">Puede que se haya enviado</string>
+    <string name="share_unknown_detail">Abre moa para comprobarlo.</string>
     <string name="share_not_found_title">Conversación no encontrada</string>
     <string name="share_not_found_detail">Elige otra conversación o guarda esto para después.</string>
     <string name="share_server_title">moa devolvió un error (%1$d)</string>
@@ -52,6 +52,10 @@
     <string name="share_error_too_many_files">Comparte como máximo 8 archivos a la vez.</string>
     <string name="share_error_too_large">Lo compartido ocupa más de 32 MB. Elige un archivo más pequeño.</string>
     <string name="share_error_text_too_large">El texto compartido es demasiado largo. Comparte una selección más corta.</string>
+    <string name="share_back">Atrás</string>
+    <string name="share_text_too_long_title">Demasiado texto</string>
+    <string name="share_text_too_long_detail">Acorta tu mensaje o comparte una selección más corta.</string>
     <string name="share_error_empty">No ha llegado texto, enlace, imagen ni archivo compatible.</string>
     <string name="share_error_unreadable">No se ha podido leer. Prueba a compartirlo de nuevo.</string>
+    <string name="scanner_prompt">Apunta la cámara al código de emparejamiento</string>
 </resources>
