@@ -40,6 +40,16 @@ server -- and the app keeps a device credential of its own from then on.
 The same code can also be pasted by hand, because a camera is not always an
 option.
 
+On iOS the scanner is a small local Capacitor plugin
+(`ios/App/App/QRScannerPlugin.swift`) on AVFoundation's
+`AVCaptureMetadataOutput`. It answers the calls the pairing page makes under the
+plugin name `BarcodeScanner` (`isSupported`, `checkPermissions`,
+`requestPermissions`, `scan`), so `www/barcode-scanner.js` does not know which
+implementation is behind it. It replaced Google's ML Kit plugin, which reports
+diagnostics to Google and would have ruled out declaring that the app collects
+no data. The camera cannot be exercised in the simulator: it reports the camera
+as unsupported, so a real scan needs a device.
+
 It loads the interface from that moa rather than bundling it, so a new version
 of moa does **not** need a new build of the app.
 
@@ -72,9 +82,8 @@ the bridge clears its binding and returns to the pairing screen.
 
 ## Building it
 
-Requires a Mac with Xcode and CocoaPods. The barcode scanner package does not
-support Swift Package Manager, so this project deliberately uses the committed
-`Podfile`. From this directory:
+Requires a Mac with Xcode and CocoaPods. The Capacitor plugins come in through
+the committed `Podfile`. From this directory:
 
     npm install
     npm run assets           # icons and splash -- NOT done by cap sync
@@ -271,7 +280,17 @@ Two Keychain access groups keep that boundary:
 
 Build settings: `MOA_PUSH_RELAY_URL` (default `https://moa-push-relay.ealeixandre.workers.dev`, provisional until `push.letmoa.run`; must
 equal the server's `push.relay_url`), `MOA_PUSH_KEYCHAIN_GROUP`,
-`MOA_APP_BUNDLE_IDENTIFIER` and `MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER`. In Xcode, give the
+`MOA_APP_BUNDLE_IDENTIFIER` and `MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER`.
+
+The relays the app will talk to are a list, `MoaPushRelayURLs` in `Info.plist`
+(currently just `$(MOA_PUSH_RELAY_URL)`). The server says which relay it is
+configured for (`push.relay_url`, reported by `GET /api/push/native/status`);
+the app uses that relay only if the URL is exactly one of the entries and is a
+bare `https` origin, otherwise registration fails with `relay_mismatch`. An
+empty or unreadable list fails as `unsupported`. To add a relay such as
+`https://push.letmoa.run` in a later app version, add it to the array: servers
+configured for the old relay keep working, and new ones can use either. Do not
+add an entry the app should not send a push secret to. In Xcode, give the
 `NotificationService` target the same Team and the Keychain Sharing capability
 with the push group; give `App` Push Notifications, Time Sensitive
 Notifications and Keychain Sharing with both groups, private one first.
@@ -279,6 +298,21 @@ Notifications and Keychain Sharing with both groups, private one first.
 
 Test Keychain isolation with a **new** pairing: an existing install keeps its
 credential where it was created, so it cannot reveal a regression.
+
+## Privacy declarations
+
+The app carries `App/PrivacyInfo.xcprivacy`: no tracking, no tracking domains,
+no collected data types, and one required-reason API, `UserDefaults` (reason
+`CA92.1`, state only the app itself reads). The extensions use no required-reason
+API -- the App Group is a file container, not shared `UserDefaults` -- so they
+have no manifest; add one if that changes. `Info.plist` sets
+`ITSAppUsesNonExemptEncryption` to `false`: the container uses HTTPS and Apple's
+CryptoKit only. It declares no `UIBackgroundModes`. The pairing screen links the
+privacy policy (`https://letmoa.run/privacy`), which opens in the system browser.
+
+The minimum iOS version is 15.5. Capacitor 8 itself needs only 15.0; 15.5 was
+raised for ML Kit and has been left as is, because lowering it is a decision
+about which devices to support, not a consequence of the scanner change.
 
 ## Android
 
@@ -341,11 +375,8 @@ registered under the same plugin name and with the same four calls as iOS's
 when the person goes back), so `www/barcode-scanner.js` is shared. It decodes
 on the device; no Google Play services, ML Kit or Firebase code is involved.
 
-`@capacitor-mlkit/barcode-scanning` is still in `package.json` because the iOS
-build uses it until the native iOS scanner lands; `capacitor.config.json`
-lists the Android plugins (`android.includePlugins`) so `cap sync android`
-leaves it out. Once iOS no longer needs it, remove the npm dependency; the
-Android allowlist can then go too.
+The ML Kit npm package is gone; `capacitor.config.json` still lists the Android
+plugins (`android.includePlugins`) so `cap sync android` only picks those up.
 
 ### Origins and storage
 
