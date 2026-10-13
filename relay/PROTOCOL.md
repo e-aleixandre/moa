@@ -1,8 +1,15 @@
 # moa native push — wire protocol v1
 
-Three parties: the **iPhone app** (with its Notification Service Extension), the
-user's own **moa server**, and the **relay** (this Worker). The relay holds the
-APNs key; it never sees notification content and keeps no state.
+Three parties: the **phone app** (iOS with its Notification Service Extension,
+or Android), the user's own **moa server**, and the **relay** (this Worker). The
+relay holds the APNs key and the FCM service account; it never sees
+notification content and keeps no state.
+
+Two push **providers** exist: `apns` (iOS, the default) and `fcm` (Android,
+Firebase Cloud Messaging HTTP v1). Everything below describes `apns` unless a
+section says otherwise; the FCM differences are collected in
+[Provider `fcm`](#provider-fcm). The `provider` field is additive: a client that
+never sends it gets exactly the original behaviour.
 
 Every byte-level rule below is pinned by `test/vectors.json`, which the Go
 server (`pkg/push`), the relay tests and the iOS implementation must all
@@ -61,9 +68,18 @@ json   = {"t":<token>,"e":<env>,"k":b64u(K_send),"x":<expiry>}
 `env` is `"sandbox"` (Xcode builds) or `"production"` (TestFlight/App Store).
 Only the relay that sealed a blob can open it.
 
+For `fcm` the json gains a fifth field, written last and only for `fcm`:
+`{"t":…,"e":"production","k":…,"x":…,"p":"fcm"}`. Absent `p` means `apns`, so
+blobs sealed before FCM existed open identically. `p` is inside the AEAD, so
+the provider of a handle or challenge cannot be changed. A blob with any other
+shape (`p:"apns"`, unknown `p`, token not matching its provider) is
+`401 unauthorized`.
+
 ## 1. Registration (iPhone ↔ relay)
 
-1. `POST /v1/register` with `{"token","env","send_key":b64u(K_send)}`.
+1. `POST /v1/register` with `{"token","env","send_key":b64u(K_send)}` and
+   optionally `"provider":"apns"|"fcm"` (absent = `apns`; any other value is
+   `400`; the schema stays closed).
    The relay returns **no handle**. It sends the token a challenge
    notification and answers `202 {"status":"sent"}`:
 
@@ -82,7 +98,8 @@ Only the relay that sealed a blob can open it.
 
 3. The relay opens `c`, checks its expiry, verifies `p` against the sealed
    `K_send` and answers
-   `200 {"handle":<h>,"expires_at":<unix>,"token":<token>,"env":<env>}`:
+   `200 {"handle":<h>,"expires_at":<unix>,"token":<token>,"env":<env>,"provider":<provider>}`
+   (`provider` is always present, `"apns"` for the original flow):
    the destination `c` was issued for. The app accepts the handle only if
    they are the token and env of the registration it is waiting on; a
    challenge from an earlier registration (another token, still unexpired)
@@ -181,9 +198,54 @@ reaches APNs.
 `/v1/register` and `/v1/confirm` use the same errors. `GET /v1/version` returns
 `{"version":<commit>}`.
 
+## Provider `fcm`
+
+Selected by `"provider":"fcm"` in `/v1/register`. Differences from `apns`:
+
+- **Token**: the FCM registration token, `^[A-Za-z0-9_:-]{100,4096}$`.
+  `env` must be `"production"` (FCM has no sandbox); anything else is `400`.
+- **Rate limits**: same budgets (3 challenges / 10 sends per 60 s per
+  destination); the destination key is namespaced by provider.
+- **Challenge**: a data-only message, no `notification` block:
+
+  ```json
+  {"message":{"token":"<token>","data":{"r":"<c>"},"android":{"priority":"HIGH","ttl":"300s"}}}
+  ```
+
+- **Send**: `/v1/send` is unchanged. The relay routes by the sealed `p` and
+  calls `POST https://fcm.googleapis.com/v1/projects/<project_id>/messages:send`
+  with `Authorization: Bearer <OAuth access token>`:
+
+  ```json
+  {"message":{"token":"<token>","data":{"v":"1","k":"<kid>","c":"<ciphertext>","col":"<collapse, if given>"},"android":{"priority":"HIGH","ttl":"43200s","collapse_key":"<collapse, if given>"}}}
+  ```
+
+  All `data` values are strings. There is **no** `notification` block: Google
+  never sees a title or body; the app decrypts the envelope (`k`, `c` are
+  `envelope.k`, `envelope.c`, `v` is the envelope version) and renders the
+  notification itself. `col` and `collapse_key` are the request's `c`.
+- **Credentials**: the Worker secret `FCM_SERVICE_ACCOUNT` holds the Google
+  service-account JSON (`client_email`, `private_key` PKCS#8 PEM, `project_id`,
+  optional `token_uri`, default `https://oauth2.googleapis.com/token`). The relay
+  signs an RS256 JWT (`iss=client_email`,
+  `scope=https://www.googleapis.com/auth/firebase.messaging`, `aud=token_uri`,
+  `iat`, `exp=iat+3600`), exchanges it with
+  `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` and keeps the access
+  token in isolate memory until about 5 minutes before it expires. Nothing is
+  persisted.
+- **Errors** (same table as above, `502` has `"error":"fcm"`):
+  FCM `404` with `errorCode: UNREGISTERED`, or `400 INVALID_ARGUMENT` whose
+  details name `message.token` → `410 unregistered`; FCM `5xx`, network
+  failure, OAuth failure, or a missing/invalid `FCM_SERVICE_ACCOUNT` →
+  `503 unavailable` (for `fcm` requests only; `apns` is unaffected, and `fcm`
+  does not need any APNs secret); any other answer →
+  `502 {"error":"fcm","status":<n>,"reason":<FCM status, e.g. PERMISSION_DENIED>}`.
+
 ## What a capture of each hop shows
 
 - server → relay: the handle (opaque), time, collapse id (opaque), envelope
   (opaque, fixed size), signature, the server's IP.
 - relay → APNs: token, collapse id, envelope.
+- relay → FCM: token, collapse key, envelope (as strings in `data`), the
+  service account's OAuth token.
 - never in clear: title, body, session id, project, kind, level, destination.

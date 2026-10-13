@@ -1,9 +1,10 @@
 # moa push relay
 
 A stateless Cloudflare Worker that forwards end-to-end encrypted notifications
-from a moa server to the moa iOS app through Apple Push Notification service
-(APNs). It holds the APNs key; it never holds the key that decrypts
-notification content.
+from a moa server to the moa mobile apps through Apple Push Notification service
+(APNs, iOS) or Firebase Cloud Messaging (FCM, Android). It holds the APNs key
+and the FCM service account; it never holds the key that decrypts notification
+content.
 
 The wire contract is [PROTOCOL.md](PROTOCOL.md). Byte vectors shared with the Go
 server and the app are in [test/vectors.json](test/vectors.json).
@@ -16,12 +17,12 @@ Endpoints: `POST /v1/register`, `POST /v1/confirm`, `POST /v1/send`,
 | Data | Seen by the relay | Kept by the relay code |
 |---|---|---|
 | Title, body, session, project, kind, level, destination | no (AES-GCM envelope, fixed 2048-byte plaintext) | — |
-| APNs device token and environment | yes, in memory while handling `/register`, `/confirm` and `/send` | no |
+| APNs device token / FCM registration token and environment | yes, in memory while handling `/register`, `/confirm` and `/send` | no |
 | Your server's IP (`/send`) and the iPhone's IP (`/register`, `/confirm`) | yes | no |
 | Time, frequency, collapse id (opaque grouping pseudonym), key id | yes | no |
 
 - No KV, D1, R2, Durable Objects, queues, services, Tail Workers or Logpush.
-  The only state is the APNs provider token cached in isolate memory and the
+  The only state is the APNs provider token and the FCM OAuth access token cached in isolate memory and the
   Rate Limiting binding counters, keyed by a SHA-256 hash of token and
   environment. `test/config.test.js` enforces this on `wrangler.json`.
 - Workers Logs and invocation logs are explicitly off, `workers.dev` and preview
@@ -106,12 +107,15 @@ APNS_KEY_ID="ABC123DEFG"
 TEAM_ID="DEF123GHIJ"
 APNS_TOPIC="com.example.yourapp"
 KRELAY="<32 random bytes, base64url without padding>"
+FCM_SERVICE_ACCOUNT='<service-account JSON on one line>'
 ```
 
 then `npm run dev`. A valid send or register makes a real request to APNs, so
 use test credentials. Locally it does not get through: `wrangler dev`'s
 runtime connects to APNs over HTTP/1.1, APNs only speaks HTTP/2, and the relay
-answers `503 unavailable`. The deployed Worker reaches APNs over HTTP/2.
+answers `503 unavailable`. The deployed Worker reaches APNs over HTTP/2. FCM
+does work under `wrangler dev` (it speaks HTTP/1.1), so Android registration
+can be tried locally against a real Firebase project.
 
 ## Deploy your own relay
 
@@ -132,6 +136,16 @@ APNs key, so if you build your own app you also run your own relay.
 
    Changing `KRELAY` invalidates every handle: apps re-register on their next
    foreground.
+   For Android push (optional; APNs and FCM are configured independently, and
+   a provider without its secrets answers `503` only for its own requests):
+
+   ```sh
+   npx wrangler secret put FCM_SERVICE_ACCOUNT < service-account.json
+   ```
+
+   The file is the Firebase service-account key with the *Firebase Cloud
+   Messaging API Admin* role (Firebase console → Project settings → Service
+   accounts → Generate new private key). Delete the local copy afterwards.
 3. The `namespace_id` values in `wrangler.json` must be unique within your
    Cloudflare account; change them if they collide.
 4. Deploy on a custom domain (`workers.dev` is disabled on purpose):

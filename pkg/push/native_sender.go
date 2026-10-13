@@ -61,7 +61,17 @@ type NativeRegistration struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 	Secret       string    `json:"secret"` // b64u(S); never logged or returned
 	Env          string    `json:"env"`
+	Provider     string    `json:"provider,omitempty"` // "apns" or "fcm"; empty (stored before FCM) means apns
 	RegisteredAt time.Time `json:"registered_at"`
+}
+
+// ProviderName is the push provider of the registration, never empty. The
+// handle is opaque, so sending does not depend on it.
+func (r NativeRegistration) ProviderName() string {
+	if r.Provider == "" {
+		return "apns"
+	}
+	return r.Provider
 }
 
 // NativeStore persists registrations by device id (push_native.json, 0600).
@@ -395,7 +405,7 @@ func (s *NativeSender) send(parent context.Context, r NativeRegistration, n Noti
 		// The app renews its handle on its next foreground; the device stays.
 		s.record(r, "handle_expired", "")
 	default:
-		slog.Warn("push native: send rejected", "device", r.DeviceID, "status", resp.StatusCode, "error", cutUTF8(reply.Error, 32), "apns_status", reply.Status, "reason", reason)
+		slog.Warn("push native: send rejected", "device", r.DeviceID, "status", resp.StatusCode, "provider", r.ProviderName(), "error", cutUTF8(reply.Error, 32), "relay_status", reply.Status, "reason", reason)
 		s.record(r, "rejected", strings.TrimSpace(fmt.Sprintf("%d %s %s", resp.StatusCode, cutUTF8(reply.Error, 32), reason)))
 	}
 }

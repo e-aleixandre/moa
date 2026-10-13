@@ -74,17 +74,22 @@ func handlePushNativeRegister(mgr *Manager) http.HandlerFunc {
 		}
 		limitBody(w, r, 8<<10)
 		var body struct {
-			RelayURL  string `json:"relay_url"`
-			Handle    string `json:"handle"`
-			ExpiresAt int64  `json:"expires_at"`
-			Secret    string `json:"secret"`
-			Env       string `json:"env"`
+			RelayURL  string  `json:"relay_url"`
+			Handle    string  `json:"handle"`
+			ExpiresAt int64   `json:"expires_at"`
+			Secret    string  `json:"secret"`
+			Env       string  `json:"env"`
+			Provider  *string `json:"provider"`
 		}
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
 			return
+		}
+		provider := "apns" // absent field: clients that predate FCM
+		if body.Provider != nil {
+			provider = *body.Provider
 		}
 		relay, err := push.NormalizeRelayURL(body.RelayURL)
 		if err != nil || relay != mgr.pushNative.RelayURL() {
@@ -97,7 +102,9 @@ func handlePushNativeRegister(mgr *Manager) http.HandlerFunc {
 		expires := time.Unix(body.ExpiresAt, 0)
 		if err != nil || len(secret) != 32 ||
 			len(body.Handle) < 40 || len(body.Handle) > 1024 || !nativeHandlePattern.MatchString(body.Handle) ||
+			(provider != "apns" && provider != "fcm") ||
 			(body.Env != "sandbox" && body.Env != "production") ||
+			(provider == "fcm" && body.Env != "production") ||
 			!expires.After(now) || expires.After(now.Add(nativeHandleMaxAge)) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
 			return
@@ -109,6 +116,7 @@ func handlePushNativeRegister(mgr *Manager) http.HandlerFunc {
 			ExpiresAt:    expires.UTC(),
 			Secret:       body.Secret,
 			Env:          body.Env,
+			Provider:     provider,
 			RegisteredAt: now.UTC(),
 		}
 		// Stored inside the device lifecycle boundary: a revoke racing this
@@ -126,7 +134,7 @@ func handlePushNativeRegister(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "could not store registration", http.StatusInternalServerError)
 			return
 		}
-		slog.Info("push native: device registered", "device", identity.DeviceID, "env", reg.Env)
+		slog.Info("push native: device registered", "device", identity.DeviceID, "env", reg.Env, "provider", reg.Provider)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -158,6 +166,7 @@ func handlePushNativeStatus(mgr *Manager) http.HandlerFunc {
 		if reg, ok := mgr.pushNative.Store().Get(identity.DeviceID); ok && reg.RelayURL == mgr.pushNative.RelayURL() {
 			out["registered"] = true
 			out["env"] = reg.Env
+			out["provider"] = reg.ProviderName()
 			out["expires_at"] = reg.ExpiresAt.Unix()
 		}
 		if last, ok := mgr.pushNative.LastResult(identity.DeviceID); ok {

@@ -16,8 +16,20 @@ const T_FUTURE = 30;
 // Apple: refresh no more than once per 20 min, a token is valid for at most 60.
 const JWT_REFRESH = 40 * 60;
 const APNS_TIMEOUT_MS = 10000;
+const FCM_TIMEOUT_MS = 10000;
+const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
+const FCM_DEFAULT_TOKEN_URI = 'https://oauth2.googleapis.com/token';
+const FCM_TOKEN_LIFETIME = 3600;
+// Renew the OAuth access token this long before it expires.
+const FCM_TOKEN_MARGIN = 300;
+const CHALLENGE_TTL_FCM = `${CHALLENGE_TTL}s`;
+const SEND_TTL_FCM = `${SEND_EXPIRATION}s`;
+const PROVIDERS = new Set(['apns', 'fcm']);
 
 const TOKEN_RE = /^[0-9a-f]{64,200}$/;
+// FCM registration tokens are opaque; permissive but bounded.
+const FCM_TOKEN_RE = /^[A-Za-z0-9_:-]{100,4096}$/;
+const PROJECT_RE = /^[A-Za-z0-9._:-]{1,100}$/;
 const COLLAPSE_RE = /^[A-Za-z0-9_-]{22}$/;
 const KID_RE = /^[A-Za-z0-9_-]{11}$/;
 const CIPHER_RE = /^[A-Za-z0-9_-]{2768}$/;
@@ -168,9 +180,10 @@ function aad(kind) {
 }
 
 // Exported (with an injectable nonce) so tests can reproduce the Go vectors.
-export async function sealBlob(env, kind, { t, e, k, x }, nonce = crypto.getRandomValues(new Uint8Array(12))) {
-  // Field order t, e, k, x is part of the byte vectors.
-  const json = JSON.stringify({ t, e, k, x });
+export async function sealBlob(env, kind, { t, e, k, x, p }, nonce = crypto.getRandomValues(new Uint8Array(12))) {
+  // Field order t, e, k, x is part of the byte vectors; p is appended only for
+  // non-APNs providers so blobs sealed before FCM existed open identically.
+  const json = JSON.stringify(p === undefined || p === 'apns' ? { t, e, k, x } : { t, e, k, x, p });
   const ct = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: nonce, additionalData: aad(kind) },
     await blobKey(env, kind),
@@ -201,8 +214,15 @@ export async function openBlob(env, kind, sealed) {
   } catch {
     throw unauthorized();
   }
-  if (!isObject(p) || Object.keys(p).length !== 4 || !matches(TOKEN_RE, p.t) || !ENVS.has(p.e)
-    || !key32(p.k) || !Number.isSafeInteger(p.x)) throw unauthorized();
+  if (!isObject(p) || !key32(p.k) || !Number.isSafeInteger(p.x)) throw unauthorized();
+  const keys = Object.keys(p).length;
+  if (keys === 4) {
+    if (!matches(TOKEN_RE, p.t) || !ENVS.has(p.e)) throw unauthorized();
+  } else if (keys === 5 && p.p === 'fcm') {
+    if (!matches(FCM_TOKEN_RE, p.t) || p.e !== 'production') throw unauthorized();
+  } else {
+    throw unauthorized();
+  }
   return p;
 }
 
@@ -213,14 +233,16 @@ async function hmacVerify(keyBytes, label, data, mac) {
 }
 
 // Rate-limit key: the destination, hashed so the binding never sees a token.
-async function destinationKey(token, env) {
-  const digest = await crypto.subtle.digest('SHA-256', enc.encode('moa-rl-v1\0' + env + '\0' + token));
+async function destinationKey(token, env, provider) {
+  // APNs keeps its original input; other providers get their own namespace.
+  const prefix = provider === 'fcm' ? 'moa-rl-v1\0fcm\0' : 'moa-rl-v1\0';
+  const digest = await crypto.subtle.digest('SHA-256', enc.encode(prefix + env + '\0' + token));
   return b64u(new Uint8Array(digest));
 }
 
-async function rateLimit(binding, token, apnsEnv) {
+async function rateLimit(binding, token, apnsEnv, provider = 'apns') {
   if (!binding || typeof binding.limit !== 'function') throw unavailable();
-  const { success } = await binding.limit({ key: await destinationKey(token, apnsEnv) });
+  const { success } = await binding.limit({ key: await destinationKey(token, apnsEnv, provider) });
   if (!success) throw fail(429, 'rate_limited');
 }
 
@@ -315,14 +337,155 @@ async function pushAPNs(env, deps, now, dest, payload, expiration, collapse) {
   throw new HttpError(502, { error: 'apns', status: response.status, reason: await apnsReason(response) });
 }
 
+// ---------- FCM ----------
+
+let fcmKeyCache = null;
+let fcmTokenCache = null;
+
+export function resetFCMCache() {
+  fcmKeyCache = null;
+  fcmTokenCache = null;
+}
+
+function parseServiceAccount(raw) {
+  const sa = JSON.parse(raw);
+  if (!isObject(sa) || typeof sa.client_email !== 'string' || typeof sa.private_key !== 'string'
+    || !matches(PROJECT_RE, sa.project_id)) throw new Error('bad service account');
+  let tokenURI = FCM_DEFAULT_TOKEN_URI;
+  if (sa.token_uri !== undefined) {
+    if (typeof sa.token_uri !== 'string' || new URL(sa.token_uri).protocol !== 'https:') throw new Error('bad token_uri');
+    tokenURI = sa.token_uri;
+  }
+  return { email: sa.client_email, privateKey: sa.private_key, projectId: sa.project_id, tokenURI };
+}
+
+// The parsed account and imported key live as long as the secret is unchanged.
+function fcmAccount(env) {
+  const id = env.FCM_SERVICE_ACCOUNT;
+  if (fcmKeyCache && fcmKeyCache.id === id) return fcmKeyCache.account;
+  const account = (async () => {
+    if (typeof id !== 'string' || !id) throw new Error('missing config');
+    const sa = parseServiceAccount(id);
+    const key = await crypto.subtle.importKey('pkcs8', pkcs8(sa.privateKey), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+    return { ...sa, key };
+  })();
+  const entry = { id, account };
+  fcmKeyCache = entry;
+  account.catch(() => {
+    if (fcmKeyCache === entry) fcmKeyCache = null;
+  });
+  return account;
+}
+
+async function fetchFCMToken(env, deps, now) {
+  const a = await fcmAccount(env);
+  const input = b64u(enc.encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' })))
+    + '.' + b64u(enc.encode(JSON.stringify({ iss: a.email, scope: FCM_SCOPE, aud: a.tokenURI, iat: now, exp: now + FCM_TOKEN_LIFETIME })));
+  const sig = new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', a.key, enc.encode(input)));
+  const response = await deps.fetch(a.tokenURI, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: input + '.' + b64u(sig) }).toString(),
+    redirect: 'manual',
+    signal: AbortSignal.timeout(FCM_TIMEOUT_MS),
+  });
+  if (response.status !== 200) {
+    response.body?.cancel().catch(() => {});
+    throw new Error('oauth failed');
+  }
+  const bytes = await readBounded(response.body, 8192);
+  const reply = bytes && JSON.parse(new TextDecoder().decode(bytes));
+  if (!isObject(reply) || typeof reply.access_token !== 'string' || !reply.access_token) throw new Error('oauth failed');
+  const lifetime = Number.isFinite(reply.expires_in) ? Math.min(reply.expires_in, FCM_TOKEN_LIFETIME) : FCM_TOKEN_LIFETIME;
+  return { token: reply.access_token, exp: now + lifetime };
+}
+
+// One OAuth access token per isolate, shared by concurrent requests and kept
+// in memory only until shortly before it expires.
+function fcmAccessToken(env, deps, now) {
+  const c = fcmTokenCache;
+  if (c && c.id === env.FCM_SERVICE_ACCOUNT && now >= c.iat && now < c.exp - FCM_TOKEN_MARGIN) return c.result.then((r) => r.token);
+  const entry = { id: env.FCM_SERVICE_ACCOUNT, iat: now, exp: now + FCM_TOKEN_LIFETIME, result: fetchFCMToken(env, deps, now) };
+  fcmTokenCache = entry;
+  entry.result.then((r) => {
+    entry.exp = r.exp;
+  }, () => {
+    if (fcmTokenCache === entry) fcmTokenCache = null;
+  });
+  return entry.result.then((r) => r.token);
+}
+
+// Maps a FCM error body to what the relay acts on and echoes.
+async function fcmError(response) {
+  let error = {};
+  try {
+    const bytes = await readBounded(response.body, 4096);
+    const parsed = bytes && JSON.parse(new TextDecoder().decode(bytes));
+    if (isObject(parsed) && isObject(parsed.error)) error = parsed.error;
+  } catch {
+    // fall through
+  }
+  const details = Array.isArray(error.details) ? error.details : [];
+  return {
+    // Google's status names are plain identifiers; anything else is not echoed.
+    reason: typeof error.status === 'string' && /^[A-Z_]{1,40}$/.test(error.status) ? error.status : 'unknown',
+    unregistered: details.some((d) => isObject(d) && d.errorCode === 'UNREGISTERED'),
+    badToken: error.status === 'INVALID_ARGUMENT' && JSON.stringify(details).includes('message.token'),
+  };
+}
+
+async function pushFCM(env, deps, now, dest, data, ttl, collapse) {
+  let account;
+  let access;
+  try {
+    account = await fcmAccount(env);
+    access = await fcmAccessToken(env, deps, now);
+  } catch {
+    throw unavailable();
+  }
+  const android = { priority: 'HIGH', ttl };
+  if (collapse !== undefined) android.collapse_key = collapse;
+  let response;
+  try {
+    response = await deps.fetch(`https://fcm.googleapis.com/v1/projects/${account.projectId}/messages:send`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + access },
+      body: JSON.stringify({ message: { token: dest.t, data, android } }),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(FCM_TIMEOUT_MS),
+    });
+  } catch {
+    throw unavailable();
+  }
+  if (response.status === 200) {
+    response.body?.cancel().catch(() => {});
+    return;
+  }
+  if (response.status >= 500) {
+    response.body?.cancel().catch(() => {});
+    throw unavailable();
+  }
+  const err = await fcmError(response);
+  if ((response.status === 404 && err.unregistered) || (response.status === 400 && err.badToken)) throw fail(410, 'unregistered');
+  throw new HttpError(502, { error: 'fcm', status: response.status, reason: err.reason });
+}
+
 // ---------- routes ----------
 
 async function register(request, env, deps) {
-  const body = parseObject(await readBody(request, SMALL_MAX), ['token', 'env', 'send_key']);
-  if (!matches(TOKEN_RE, body.token) || !ENVS.has(body.env) || !key32(body.send_key)) throw badRequest();
-  await rateLimit(env.REGISTER_LIMITER, body.token, body.env);
+  const body = parseObject(await readBody(request, SMALL_MAX), ['token', 'env', 'send_key'], ['provider']);
+  const provider = Object.hasOwn(body, 'provider') ? body.provider : 'apns';
+  if (typeof provider !== 'string' || !PROVIDERS.has(provider)) throw badRequest();
+  const fcm = provider === 'fcm';
+  if (!matches(fcm ? FCM_TOKEN_RE : TOKEN_RE, body.token) || !(fcm ? body.env === 'production' : ENVS.has(body.env))
+    || !key32(body.send_key)) throw badRequest();
+  await rateLimit(env.REGISTER_LIMITER, body.token, body.env, provider);
   const now = deps.now();
-  const c = await sealBlob(env, 'challenge', { t: body.token, e: body.env, k: body.send_key, x: now + CHALLENGE_TTL });
+  const c = await sealBlob(env, 'challenge', { t: body.token, e: body.env, k: body.send_key, x: now + CHALLENGE_TTL, p: provider });
+  if (fcm) {
+    await pushFCM(env, deps, now, { t: body.token }, { r: c }, CHALLENGE_TTL_FCM);
+    return reply({ status: 'sent' }, 202);
+  }
   const payload = { aps: { alert: { 'loc-key': 'PUSH_CHALLENGE_BODY' }, 'interruption-level': 'passive' }, r: c };
   await pushAPNs(env, deps, now, { t: body.token, e: body.env }, payload, CHALLENGE_TTL);
   return reply({ status: 'sent' }, 202);
@@ -337,10 +500,10 @@ async function confirm(request, env, deps) {
   if (now >= blob.x) throw unauthorized();
   if (!(await hmacVerify(key32(blob.k), 'moa-confirm-v1', enc.encode(body.c), p))) throw unauthorized();
   const expiresAt = now + HANDLE_TTL;
-  const handle = await sealBlob(env, 'handle', { t: blob.t, e: blob.e, k: blob.k, x: expiresAt });
+  const handle = await sealBlob(env, 'handle', { t: blob.t, e: blob.e, k: blob.k, x: expiresAt, p: blob.p });
   // The destination the challenge was issued for, so the app can check it is
   // the registration it is waiting on and not an older one still in flight.
-  return reply({ handle, expires_at: expiresAt, token: blob.t, env: blob.e });
+  return reply({ handle, expires_at: expiresAt, token: blob.t, env: blob.e, provider: blob.p ?? 'apns' });
 }
 
 async function send(request, env, deps) {
@@ -361,7 +524,13 @@ async function send(request, env, deps) {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', raw));
   if (!(await hmacVerify(key32(dest.k), 'moa-send-v1', digest, sig))) throw unauthorized();
 
-  await rateLimit(env.SEND_LIMITER, dest.t, dest.e);
+  await rateLimit(env.SEND_LIMITER, dest.t, dest.e, dest.p);
+  if (dest.p === 'fcm') {
+    const data = { v: '1', k: e.k, c: e.c };
+    if (body.c !== undefined) data.col = body.c;
+    await pushFCM(env, deps, now, dest, data, SEND_TTL_FCM, body.c);
+    return reply({ ok: true });
+  }
   const payload = {
     aps: { alert: { 'title-loc-key': 'PUSH_FALLBACK_TITLE', 'loc-key': 'PUSH_FALLBACK_BODY' }, 'mutable-content': 1, sound: 'default' },
     e: { v: 1, k: e.k, c: e.c },

@@ -268,3 +268,50 @@ func TestNativePushDeliversAQuestionEndToEnd(t *testing.T) {
 		t.Fatalf("last result = %+v", last)
 	}
 }
+
+func TestNativePushRegistrationProvider(t *testing.T) {
+	f := newNativeFixture(t, newMockProvider(simpleResponseHandler("ok")))
+	device := pairedDevice(t, f.handler, f.owner, "phone")
+	good := f.registration(f.relayURL)
+	withProvider := func(provider, env string) string {
+		body := strings.Replace(good, `"env":"sandbox"`, `"env":"`+env+`","provider":`+provider, 1)
+		return body
+	}
+	cases := []struct {
+		name         string
+		body         string
+		code         int
+		wantProvider string
+	}{
+		{"absent is apns", good, http.StatusNoContent, "apns"},
+		{"explicit apns", withProvider(`"apns"`, "sandbox"), http.StatusNoContent, "apns"},
+		{"fcm", withProvider(`"fcm"`, "production"), http.StatusNoContent, "fcm"},
+		{"fcm has no sandbox", withProvider(`"fcm"`, "sandbox"), http.StatusBadRequest, ""},
+		{"unknown provider", withProvider(`"webpush"`, "production"), http.StatusBadRequest, ""},
+		{"empty provider", withProvider(`""`, "production"), http.StatusBadRequest, ""},
+		{"wrong type", withProvider(`["fcm"]`, "production"), http.StatusBadRequest, ""},
+		{"case matters", withProvider(`"FCM"`, "production"), http.StatusBadRequest, ""},
+	}
+	for _, c := range cases {
+		if err := f.mgr.pushNative.Forget(device.DeviceID); err != nil {
+			t.Fatal(err)
+		}
+		rec := pairingRequest(f.handler, http.MethodPost, "/api/push/native", c.body, nil, device.Credential)
+		if rec.Code != c.code {
+			t.Errorf("%s: register = %d, want %d: %s", c.name, rec.Code, c.code, rec.Body.String())
+			continue
+		}
+		if c.code != http.StatusNoContent {
+			if _, ok := f.mgr.pushNative.Store().Get(device.DeviceID); ok {
+				t.Errorf("%s: a rejected registration was stored", c.name)
+			}
+			continue
+		}
+		status := pairingRequest(f.handler, http.MethodGet, "/api/push/native/status", "", nil, device.Credential)
+		var got map[string]any
+		_ = json.Unmarshal(status.Body.Bytes(), &got)
+		if got["provider"] != c.wantProvider || got["registered"] != true {
+			t.Errorf("%s: status = %s, want provider %s", c.name, status.Body.String(), c.wantProvider)
+		}
+	}
+}

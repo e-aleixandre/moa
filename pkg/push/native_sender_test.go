@@ -247,6 +247,45 @@ func TestNativeStorePersistsPrivately(t *testing.T) {
 	}
 }
 
+func TestNativeStoreProviderRoundTripAndLegacyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "push_native.json")
+	store, _ := NewNativeStore(path)
+	reg := NativeRegistration{DeviceID: "d", RelayURL: DefaultRelayURL, Handle: "h", ExpiresAt: time.Unix(2000000000, 0).UTC(), Secret: "s", Env: "production", Provider: "fcm"}
+	if err := store.Put(reg); err != nil {
+		t.Fatal(err)
+	}
+	again, err := NewNativeStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := again.Get("d"); !ok || got != reg || got.ProviderName() != "fcm" {
+		t.Fatalf("reloaded %+v", got)
+	}
+
+	// A file written before providers existed has no field and loads as apns,
+	// and an apns registration stored without the field does not gain one.
+	legacy := filepath.Join(t.TempDir(), "push_native.json")
+	old := `[{"device_id":"d","relay_url":"` + DefaultRelayURL + `","handle":"h","expires_at":"2033-05-18T03:33:20Z","secret":"s","env":"sandbox","registered_at":"2026-01-01T00:00:00Z"}]`
+	if err := os.WriteFile(legacy, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := NewNativeStore(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := loaded.Get("d")
+	if !ok || got.Provider != "" || got.ProviderName() != "apns" {
+		t.Fatalf("legacy registration = %+v (found %v)", got, ok)
+	}
+	if err := loaded.Put(got); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(legacy)
+	if strings.Contains(string(raw), "provider") {
+		t.Fatalf("legacy registration gained a provider field: %s", raw)
+	}
+}
+
 type recordingSender struct{ got []Notification }
 
 func (r *recordingSender) Notify(_ context.Context, n Notification) { r.got = append(r.got, n) }
