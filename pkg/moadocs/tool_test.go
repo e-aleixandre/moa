@@ -52,6 +52,6 @@ func TestTool_WrongPageNameListsTheRealOnes(t *testing.T) {
 func TestTool_IsReadOnly(t *testing.T) {
 	// Reading documentation must never be gated behind an approval prompt.
 	if got := NewTool().Effect; got != core.EffectReadOnly {
-		t.Errorf("expected a read-only effect, got %q", got)
+		t.Errorf("expected a read-only effect, got %v", got)
 	}
 }
