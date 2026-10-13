@@ -83,7 +83,15 @@ final class ShareInbox {
     }
 
     private static final String MANIFEST = "manifest.json";
-    private static final long MAX_MANIFEST_BYTES = 4L * ShareLogic.MAX_TEXT_BYTES;
+    // The largest manifest commit() writes for text textFits admits, and
+    // the most read() accepts. Title, text and URL are each at most
+    // MAX_TEXT_BYTES (a field the composition drops is inside one it keeps),
+    // and JSON escaping takes at most six bytes per byte (a control character
+    // becomes a six-character unicode escape); the slack is the id,
+    // timestamp, keys and file rows.
+    private static final int MAX_JSON_ESCAPE = 6;
+    private static final long MANIFEST_SLACK_BYTES = 64L * 1024;
+    private static final long MAX_MANIFEST_BYTES = 3L * MAX_JSON_ESCAPE * ShareLogic.MAX_TEXT_BYTES + MANIFEST_SLACK_BYTES;
     private static final Pattern ID = Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
     // A staging directory older than this belongs to a share sheet that died.
     private static final long STALE_STAGING_MILLIS = 60L * 60 * 1000;

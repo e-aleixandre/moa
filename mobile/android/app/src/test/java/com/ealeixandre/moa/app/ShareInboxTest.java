@@ -184,6 +184,45 @@ public class ShareInboxTest {
         assertEquals(1, inbox.pendingCount());
     }
 
+    // Re-review f2 S2: the manifest bound covers the worst JSON escaping of
+    // text textFits admits. A control character is one UTF-8 byte and six in
+    // JSON; the x's keep trim from removing them.
+    private static String escapedAtLimit(int bytes) {
+        return "x" + String.valueOf((char) 1).repeat(bytes - 2) + "x";
+    }
+
+    @Test
+    public void savesTextThatJsonEscapingSixfoldsAtTheLimit() throws Exception {
+        String text = escapedAtLimit(ShareLogic.MAX_TEXT_BYTES);
+        assertEquals(ShareLogic.MAX_TEXT_BYTES, text.getBytes(StandardCharsets.UTF_8).length);
+        inbox.begin().commit("", text, "");
+        ShareInbox.Envelope envelope = inbox.next();
+        assertEquals(text, envelope.text);
+        assertEquals("", envelope.title);
+        assertEquals("", envelope.url);
+    }
+
+    // The composition drops a title or URL already in the text, so all three
+    // fields can be at the limit and escape sixfold at once.
+    @Test
+    public void savesDuplicatedEscapedFieldsAtTheLimit() throws Exception {
+        String text = escapedAtLimit(ShareLogic.MAX_TEXT_BYTES);
+        assertTrue(ShareLogic.textFits(text, text, text));
+        inbox.begin().commit(text, text, text);
+        ShareInbox.Envelope envelope = inbox.next();
+        assertEquals(text, envelope.title);
+        assertEquals(text, envelope.text);
+        assertEquals(text, envelope.url);
+    }
+
+    @Test
+    public void escapedTextOneByteOverTheLimitIsRefused() throws Exception {
+        String over = escapedAtLimit(ShareLogic.MAX_TEXT_BYTES + 1);
+        assertEquals(Code.TEXT_TOO_LARGE, code(() -> inbox.begin().commit(over, over, over)));
+        assertEquals(Code.TEXT_TOO_LARGE, code(() -> inbox.begin().commit("", over, "")));
+        assertEquals(0, inbox.pendingCount());
+    }
+
     @Test
     public void atMostTwentyWaiting() throws Exception {
         for (int i = 0; i < ShareLogic.MAX_PENDING; i++) inbox.begin().commit("", "share " + i, "");

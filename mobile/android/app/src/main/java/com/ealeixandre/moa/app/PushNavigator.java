@@ -9,6 +9,7 @@ import android.webkit.WebView;
 import java.lang.ref.WeakReference;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Executors;
 
 // What a delivered notification does in the app (iOS PushNavigator).
 // Destinations always come from re-authenticating the envelope with the
@@ -23,6 +24,7 @@ final class PushNavigator {
     private static final PushNavigator SHARED = new PushNavigator();
 
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final PushTaps taps = new PushTaps(Executors.newSingleThreadExecutor(), main::post);
     private WeakReference<WebView> webView = new WeakReference<>(null);
     private String pendingOrigin;
     private String pendingUrl;
@@ -66,13 +68,26 @@ final class PushNavigator {
         return envelope;
     }
 
-    // UI thread. Expiry is checked again at tap time: an envelope that is no
-    // longer valid leads home, like the fallback it was shown as.
+    // UI thread; the authentication runs in PushTaps, off it.
     void handleTap(Context context, Map<String, String> envelope) {
-        PushEnvelope.Keys keys = NativePushRegistration.get(context).currentKeys();
-        PushEnvelope.Content content = PushEnvelope.open(envelope, keys, System.currentTimeMillis() / 1000);
-        open(content == null ? PushEnvelope.Destination.HOME : content.destination,
-            DeviceCredentialStore.get(context).pairedOrigin());
+        NativePushRegistration registration = NativePushRegistration.get(context);
+        DeviceCredentialStore credentials = DeviceCredentialStore.get(context);
+        taps.handle(envelope, new PushTaps.Source() {
+            @Override
+            public int generation() {
+                return registration.generation();
+            }
+
+            @Override
+            public PushEnvelope.Keys currentKeys() {
+                return registration.currentKeys();
+            }
+
+            @Override
+            public String pairedOrigin() {
+                return credentials.pairedOrigin();
+            }
+        }, this::open);
     }
 
     // UI thread. A cold-start tap is held until the paired page has loaded,
