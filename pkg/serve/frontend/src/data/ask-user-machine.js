@@ -147,3 +147,16 @@ export function parseMultiAnswer(answer, options) {
   const { picked, free } = walk(text, 0);
   return { picked, free };
 }
+
+// The server prepends this line to an answer the user did not give (an owner
+// agent or an automation answered on their behalf), so the model never takes
+// it for the user's. See askuser.Responder.Attribution.
+const RESPONDER_LINE = /^\[Answered by (?:the owner agent(?: "([^"\n]*)")?|(an automation)) on the user's behalf, not by the user\]\n?/;
+
+export function splitAskResponder(result) {
+  const text = result == null ? '' : String(result);
+  const match = RESPONDER_LINE.exec(text);
+  if (!match) return { responder: null, body: text };
+  const responder = match[2] ? 'an automation' : match[1] ? `${match[1]} (owner)` : 'the owner';
+  return { responder, body: text.slice(match[0].length) };
+}

@@ -269,6 +269,19 @@ test('an answered ask_user row retains its raw Q&A data without a generic body',
   expect(row.body).toBeUndefined();
 });
 
+test('an ask_user row answered on the user\'s behalf echoes the answer, not the attribution line', () => {
+  const questions = [{ question: 'Deploy?', options: ['Yes', 'No'] }];
+  const result = "[Answered by an automation on the user's behalf, not by the user]\nNo";
+  const row = projectStream(session([
+    tool('ask-1', 'ask_user', { questions }, 'done', result),
+  ]))[0].blocks[0].rows[0];
+
+  expect(row.echo).toBe('No');
+  expect(row.out).toBe('');
+  // The detail panel still gets the whole result, label line included.
+  expect(row.askUser).toEqual({ questions, result });
+});
+
 test('a live ask_user row is hidden while its pending card asks the question', () => {
   const questions = [{ question: 'Which colour theme?', options: ['Dark', 'Light'] }];
   const s = session([tool('ask-1', 'ask_user', { questions }, 'running')], {

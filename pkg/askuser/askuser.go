@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -45,7 +46,75 @@ const MultiSeparator = "; "
 // Prompt is the full batch sent from the agent to the UI.
 type Prompt struct {
 	Questions []Question
-	Response  chan<- []string // one answer per question (exactly once)
+	Response  chan<- Reply // exactly once
+}
+
+// Reply answers a Prompt: one answer per question, and who gave them.
+type Reply struct {
+	Answers   []string
+	Responder Responder
+}
+
+// Responder kinds. The zero Kind means the resolver did not say, which is
+// also what every answer recorded before the field existed reads as.
+const (
+	ResponderUser       = "user"       // the user, from the web UI or a paired app
+	ResponderOwner      = "owner"      // a project owner agent, on the user's behalf
+	ResponderAutomation = "automation" // a caller of the Automation API
+)
+
+// CustomKey is the tool_result Custom key that records the Responder. Custom
+// never reaches the provider, so the record costs the model nothing.
+const CustomKey = "ask_responder"
+
+// Responder identifies who answered an ask_user. It is set by the code path
+// that resolved the prompt, never parsed from the answer text.
+type Responder struct {
+	Kind string `json:"kind"`
+	// ID and Name identify an owner.
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+	// Via is the authenticated channel of a user answer (device:<id>,
+	// network or token), as the server audits it.
+	Via string `json:"via,omitempty"`
+}
+
+// ResponderFromCustom reads the recorded Responder back from a tool_result's
+// Custom value: the struct itself in memory, a JSON object once persisted.
+func ResponderFromCustom(v any) (Responder, bool) {
+	switch r := v.(type) {
+	case Responder:
+		return r, r.Kind != ""
+	case map[string]any:
+		get := func(k string) string { s, _ := r[k].(string); return s }
+		out := Responder{Kind: get("kind"), ID: get("id"), Name: get("name"), Via: get("via")}
+		return out, out.Kind != ""
+	}
+	return Responder{}, false
+}
+
+// Attribution is the line prepended to an answer the user did not give, so
+// the model never reports it as theirs. Empty for the user and for unknown.
+// The web client recognises this exact shape to label the answer card.
+func (r Responder) Attribution() string {
+	switch r.Kind {
+	case ResponderOwner:
+		// The name sits inside the line's quotes: drop what could close them
+		// or break the line, so the label stays one parseable line.
+		name := strings.Map(func(c rune) rune {
+			if c == '"' || c == '[' || c == ']' || c == '\\' || unicode.IsControl(c) {
+				return -1
+			}
+			return c
+		}, r.Name)
+		if name == "" {
+			return "[Answered by the owner agent on the user's behalf, not by the user]"
+		}
+		return "[Answered by the owner agent \"" + name + "\" on the user's behalf, not by the user]"
+	case ResponderAutomation:
+		return "[Answered by an automation on the user's behalf, not by the user]"
+	}
+	return ""
 }
 
 // Bridge connects the ask_user tool to the UI.
@@ -66,7 +135,7 @@ func (b *Bridge) Prompts() <-chan Prompt {
 // NewTool creates the ask_user tool wired to the given bridge.
 func NewTool(b *Bridge) core.Tool {
 	return core.Tool{
-		Name: "ask_user",
+		Name:        "ask_user",
 		Description: `Ask the user one or more questions and wait for their responses. Use this when you need clarification, a decision, or information you cannot determine on your own. You can provide predefined options for each question — the user can pick one or write a custom answer. Do not use this for rhetorical questions or confirmations of actions you can take directly.`,
 		Parameters: json.RawMessage(`{
 			"type": "object",
@@ -104,7 +173,7 @@ func NewTool(b *Bridge) core.Tool {
 				return core.ErrorResult(err.Error()), nil
 			}
 
-			respCh := make(chan []string, 1)
+			respCh := make(chan Reply, 1)
 
 			select {
 			case b.ch <- Prompt{Questions: questions, Response: respCh}:
@@ -113,8 +182,8 @@ func NewTool(b *Bridge) core.Tool {
 			}
 
 			select {
-			case answers := <-respCh:
-				return formatAnswers(questions, answers), nil
+			case reply := <-respCh:
+				return formatAnswers(questions, reply), nil
 			case <-ctx.Done():
 				if ctx.Err() == context.Canceled {
 					return core.ErrorResult("Question not answered: the user stopped this run. The answer will arrive in the next user message."), nil
@@ -175,7 +244,8 @@ func parseQuestions(params map[string]any) ([]Question, error) {
 	return questions, nil
 }
 
-func formatAnswers(questions []Question, answers []string) core.Result {
+func formatAnswers(questions []Question, reply Reply) core.Result {
+	answers := reply.Answers
 	// answers may be shorter than questions (e.g. an aborted prompt resolves
 	// with an empty slice) — never index past its length.
 	answerAt := func(i int) string {
@@ -184,15 +254,24 @@ func formatAnswers(questions []Question, answers []string) core.Result {
 		}
 		return ""
 	}
-	if len(questions) == 1 {
-		return core.TextResult(answerAt(0))
-	}
 	var sb strings.Builder
-	for i, q := range questions {
-		if i > 0 {
-			sb.WriteString("\n")
-		}
-		fmt.Fprintf(&sb, "Q: %s\nA: %s", q.Text, answerAt(i))
+	if line := reply.Responder.Attribution(); line != "" {
+		sb.WriteString(line)
+		sb.WriteString("\n")
 	}
-	return core.TextResult(sb.String())
+	if len(questions) == 1 {
+		sb.WriteString(answerAt(0))
+	} else {
+		for i, q := range questions {
+			if i > 0 {
+				sb.WriteString("\n")
+			}
+			fmt.Fprintf(&sb, "Q: %s\nA: %s", q.Text, answerAt(i))
+		}
+	}
+	result := core.TextResult(sb.String())
+	if reply.Responder.Kind != "" {
+		result.Custom = map[string]any{CustomKey: reply.Responder}
+	}
+	return result
 }

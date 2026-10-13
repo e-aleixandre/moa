@@ -242,7 +242,7 @@ func handleAutomationAskResponse(mgr *Manager) http.HandlerFunc {
 			http.Error(w, msg, http.StatusBadRequest)
 			return
 		}
-		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: body.ID, Answers: body.Answers}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: body.ID, Answers: body.Answers, Responder: askuser.Responder{Kind: askuser.ResponderAutomation}}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

@@ -67,7 +67,7 @@ func TestDangerous_AllowGlobDoesNotBypassTrustGate(t *testing.T) {
 func TestAsk_ApprovesReadOnly(t *testing.T) {
 	g := New(ModeAsk, Config{})
 
-	for _, tool := range []string{"read", "ls", "grep", "find", "send_file"} {
+	for _, tool := range []string{"read", "ls", "grep", "find", "send_file", "history"} {
 		if d := g.Check(context.Background(), tool, nil); d != nil {
 			t.Errorf("ask mode should auto-approve %s", tool)
 		}

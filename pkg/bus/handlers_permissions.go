@@ -115,7 +115,7 @@ func registerPermissionHandlers(sctx *SessionContext) {
 		if sctx.Approvals == nil {
 			return fmt.Errorf("approvals not available")
 		}
-		return sctx.Approvals.ResolveAskUser(cmd.AskID, cmd.Answers)
+		return sctx.Approvals.ResolveAskUser(cmd.AskID, cmd.Answers, cmd.Responder)
 	})
 }
 

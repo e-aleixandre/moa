@@ -319,6 +319,23 @@ func TestBuildChildRegistryExcludesMemory(t *testing.T) {
 	}
 }
 
+// A child never reads its parent's conversation through the history tool,
+// whether it asks for it or inherits the full tool set.
+func TestBuildChildRegistryExcludesHistory(t *testing.T) {
+	parent := core.NewRegistry()
+	_ = parent.Register(core.Tool{Name: "read"})
+	_ = parent.Register(core.Tool{Name: "history"})
+	for _, params := range []map[string]any{{"tools": []any{"read", "history"}}, {}} {
+		reg, errRes := buildChildRegistry(parent, params)
+		if errRes != nil {
+			t.Fatalf("unexpected error: %s", textOf(*errRes))
+		}
+		if _, ok := reg.Get("history"); ok {
+			t.Fatalf("child registry includes history (params %v)", params)
+		}
+	}
+}
+
 func TestBuildChildRegistryCaseInsensitive(t *testing.T) {
 	parent := core.NewRegistry()
 	_ = parent.Register(core.Tool{Name: "read"})

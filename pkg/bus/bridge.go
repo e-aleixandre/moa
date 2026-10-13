@@ -678,6 +678,26 @@ func (sctx *SessionContext) cacheUsage() core.CacheUsageSummary {
 	return core.SummarizeCacheUsage(sctx.displayMessages())
 }
 
+// VisitTranscript calls fn with every original message of the session's
+// active branch, boundaries and the in-flight turn included, in order. It is
+// the read path of the history tool: fn must not retain the pointer.
+func (sctx *SessionContext) VisitTranscript(fn func(*core.AgentMessage)) {
+	if sctx.treeSyncer != nil {
+		sctx.treeSyncer.VisitTranscript(fn)
+		return
+	}
+	sctx.historyMu.RLock()
+	defer sctx.historyMu.RUnlock()
+	if sctx.Tree != nil && sctx.Tree.Len() > 0 {
+		sctx.Tree.VisitTranscript(fn)
+		return
+	}
+	msgs := sctx.Agent.Messages()
+	for i := range msgs {
+		fn(&msgs[i])
+	}
+}
+
 // SnapshotTranscriptPath returns the active transcript branch, including a
 // visible in-flight turn when a TreeSyncer is present. It is a snapshot only:
 // it never mutates the tree or the sync baseline.

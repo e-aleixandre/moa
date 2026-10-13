@@ -66,3 +66,6 @@
 .ask-detail-answer.custom { color: var(--zl-t2); }
 .ask-detail-answer.skipped,
 .ask-detail-answer.missing { color: var(--zl-t4); }
+
+/* Who answered, when it was not the user: an owner agent or an automation. */
+.ask-detail-responder { color: var(--zl-t3); }

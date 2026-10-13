@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/book"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -403,7 +404,7 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 		for i := range skip {
 			skip[i] = "(skipped)"
 		}
-		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: ask.ID, Answers: skip}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: ask.ID, Answers: skip, Responder: ownerResponder(own)}); err != nil {
 			// Only a question already resolved or withdrawn fails here; the
 			// session is then moving on its own and reads the message anyway.
 			return core.ErrorResult(fmt.Sprintf("cannot skip the pending question (ask_id %s) of %s: %v (it may already have been answered); your message is queued and it will read it at its next step", ask.ID, id, err))
@@ -444,6 +445,10 @@ func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.R
 	return core.TextResult(fmt.Sprintf("Started session %s in %s.", sess.ID, cwd))
 }
 
+func ownerResponder(own owner.Owner) askuser.Responder {
+	return askuser.Responder{Kind: askuser.ResponderOwner, ID: own.ID, Name: own.Name}
+}
+
 func ownerPromptCustom(own owner.Owner) map[string]any {
 	return map[string]any{"source": "owner", "owner_id": own.ID, "owner_name": own.Name}
 }
@@ -468,7 +473,7 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 	if sess.Origin != "owner" {
 		return core.ErrorResult("This session is the user's: do not answer for them. Ask the user with ask_user, proposing the answer you would give as the first option.")
 	}
-	if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: askID, Answers: answers}); err != nil {
+	if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: askID, Answers: answers, Responder: ownerResponder(own)}); err != nil {
 		// The user may have answered it in the UI first; the approval manager
 		// forgets a resolved ask, so this is the same error as an unknown one.
 		return core.ErrorResult(fmt.Sprintf("cannot answer %s: %v (it may already have been answered)", askID, err))

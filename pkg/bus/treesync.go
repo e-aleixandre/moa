@@ -167,6 +167,17 @@ func (ts *TreeSyncer) CacheUsage() core.CacheUsageSummary {
 	return acc.Summary()
 }
 
+// VisitTranscript walks the original transcript (see session.Tree.
+// VisitTranscript) and then the in-flight turn, the same tail DisplayMessages
+// appends, without copying either.
+func (ts *TreeSyncer) VisitTranscript(fn func(*core.AgentMessage)) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	ts.tree.VisitTranscript(fn)
+	ts.visitInFlightTail(fn)
+}
+
 // SnapshotPath returns a private copy of the active tree branch plus the
 // unsynced, visible agent-message tail. Unlike syncMessages, this is a pure
 // projection: taking a snapshot while a run is in flight must not make that

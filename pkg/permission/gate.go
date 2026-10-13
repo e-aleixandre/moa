@@ -40,6 +40,7 @@ const permissionFeedbackArgKey = "__permission_feedback"
 // readOnly tools never require approval (even in ask/auto mode).
 var readOnly = map[string]bool{
 	"read": true, "ls": true, "grep": true, "find": true, "send_file": true,
+	"history": true, // reads only this session's own transcript
 }
 
 // PopApprovedFeedback removes and returns a permission feedback note (if any)

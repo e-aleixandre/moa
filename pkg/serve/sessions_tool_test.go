@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
@@ -408,6 +409,14 @@ func TestSessionsToolAnswerResolvesAnAskOnce(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("answer failed: %s", toolText(res))
 	}
+	// The child records that the owner answered, and its model is told so.
+	got := waitAskResponder(t, child)
+	if got.responder.Kind != askuser.ResponderOwner || got.responder.Name != "Winerim" || got.responder.ID == "" {
+		t.Fatalf("recorded responder = %+v, want the owner", got.responder)
+	}
+	if !strings.HasPrefix(got.text, "[Answered by the owner agent \"Winerim\"") || !strings.HasSuffix(got.text, "first") {
+		t.Fatalf("ask_user result = %q", got.text)
+	}
 	// Answering twice must report the conflict rather than silently succeed:
 	// the user may have answered it in the UI first.
 	again := runSessionsTool(t, ownerSess, map[string]any{
@@ -618,6 +627,9 @@ func TestSessionsToolSendSkipsAPendingQuestion(t *testing.T) {
 	}
 	if skippedAt == -1 {
 		t.Fatalf("the next turn does not carry the skipped answer: %+v", msgs)
+	}
+	if text := msgs[skippedAt].Content[0].Text; !strings.HasPrefix(text, "[Answered by the owner agent") {
+		t.Fatalf("the skip is not attributed to the owner: %q", text)
 	}
 	if sends != 1 || sentAt < skippedAt {
 		t.Fatalf("the message reached the next turn %d times (at %d, skip at %d), want once after the skip: %+v", sends, sentAt, skippedAt, msgs)

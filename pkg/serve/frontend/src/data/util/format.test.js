@@ -316,3 +316,9 @@ test('splitting the command respects quotes', () => {
   expect(path('git commit -m "fix; really"')).toBe('git commit -m "fix; really"');
   expect(path("awk '{print $1; print $2}' f")).toBe("awk '{print $1; print $2}' f");
 });
+
+test('a history call is identified by what it searched or the message it opened', () => {
+  expect(toolPath('history', { action: 'search', query: 'puerto canario' })).toBe('puerto canario');
+  expect(toolPath('history', { action: 'search', role: 'ask_user' })).toBe('ask_user');
+  expect(toolPath('history', { action: 'read', id: 'ab12' })).toBe('ab12');
+});

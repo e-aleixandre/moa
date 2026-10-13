@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/permission"
 )
 
@@ -199,7 +200,7 @@ func TestApprovalManager_ClearPending_RemovesAskWithoutInjectingAnswer(t *testin
 	am, b := newTestApprovalManager(t)
 
 	permResp := make(chan permission.Response, 1)
-	askResp := make(chan []string, 1)
+	askResp := make(chan askuser.Reply, 1)
 	am.mu.Lock()
 	am.perms["p1"] = &PendingPermission{ID: "p1", ToolName: "write", RunGen: 1, response: permResp}
 	am.asks["a1"] = &PendingAsk{ID: "a1", Questions: []AskQuestion{{Text: "Name?"}}, RunGen: 1, response: askResp}
@@ -256,8 +257,8 @@ func TestApprovalManager_ClearPending_RemovesAskWithoutInjectingAnswer(t *testin
 func TestApprovalManager_ClearPending_SparesAskFromOtherGeneration(t *testing.T) {
 	am, _ := newTestApprovalManager(t)
 
-	endedResp := make(chan []string, 1)
-	otherResp := make(chan []string, 1)
+	endedResp := make(chan askuser.Reply, 1)
+	otherResp := make(chan askuser.Reply, 1)
 	am.mu.Lock()
 	am.asks["ended"] = &PendingAsk{ID: "ended", Questions: []AskQuestion{{Text: "Done?"}}, RunGen: 2, response: endedResp}
 	am.asks["other"] = &PendingAsk{ID: "other", Questions: []AskQuestion{{Text: "Older?"}}, RunGen: 1, response: otherResp}
@@ -283,7 +284,7 @@ func TestApprovalManager_ClearPending_PublishesEveryPrompt(t *testing.T) {
 		am.perms[id] = &PendingPermission{ID: id, ToolName: "write", RunGen: 1, response: make(chan permission.Response, 1)}
 	}
 	for _, id := range []string{"a1", "a2"} {
-		am.asks[id] = &PendingAsk{ID: id, Questions: []AskQuestion{{Text: "Name?"}}, RunGen: 1, response: make(chan []string, 1)}
+		am.asks[id] = &PendingAsk{ID: id, Questions: []AskQuestion{{Text: "Name?"}}, RunGen: 1, response: make(chan askuser.Reply, 1)}
 	}
 	am.mu.Unlock()
 
@@ -389,7 +390,7 @@ func TestApprovalManager_ClearPending_SparesNewerRun(t *testing.T) {
 func TestApprovalManager_ResolveAskUser(t *testing.T) {
 	am, b := newTestApprovalManager(t)
 
-	respCh := make(chan []string, 1)
+	respCh := make(chan askuser.Reply, 1)
 	am.mu.Lock()
 	am.asks["a1"] = &PendingAsk{
 		ID:        "a1",
@@ -401,15 +402,18 @@ func TestApprovalManager_ResolveAskUser(t *testing.T) {
 	gotResolved := make(chan AskUserResolved, 1)
 	b.Subscribe(func(e AskUserResolved) { gotResolved <- e })
 
-	err := am.ResolveAskUser("a1", []string{"Bob"})
+	err := am.ResolveAskUser("a1", []string{"Bob"}, askuser.Responder{Kind: askuser.ResponderUser})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	select {
-	case answers := <-respCh:
-		if len(answers) != 1 || answers[0] != "Bob" {
+	case reply := <-respCh:
+		if answers := reply.Answers; len(answers) != 1 || answers[0] != "Bob" {
 			t.Fatalf("answers = %v", answers)
+		}
+		if reply.Responder.Kind != askuser.ResponderUser {
+			t.Fatalf("responder = %+v", reply.Responder)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
@@ -429,7 +433,7 @@ func TestApprovalManager_ResolveAskUser(t *testing.T) {
 func TestApprovalManager_ResolveAskUser_WrongAnswerCount(t *testing.T) {
 	am, _ := newTestApprovalManager(t)
 
-	respCh := make(chan []string, 1)
+	respCh := make(chan askuser.Reply, 1)
 	am.mu.Lock()
 	am.asks["a1"] = &PendingAsk{
 		ID:        "a1",
@@ -438,7 +442,7 @@ func TestApprovalManager_ResolveAskUser_WrongAnswerCount(t *testing.T) {
 	}
 	am.mu.Unlock()
 
-	err := am.ResolveAskUser("a1", []string{"only one"})
+	err := am.ResolveAskUser("a1", []string{"only one"}, askuser.Responder{})
 	if err == nil {
 		t.Fatal("expected error for wrong answer count")
 	}
@@ -455,7 +459,7 @@ func TestApprovalManager_PendingInfo(t *testing.T) {
 
 	// Add pending.
 	respPerm := make(chan permission.Response, 1)
-	respAsk := make(chan []string, 1)
+	respAsk := make(chan askuser.Reply, 1)
 	am.mu.Lock()
 	am.perms["p1"] = &PendingPermission{
 		ID: "p1", ToolName: "write", AllowPattern: "write(*)", response: respPerm,

@@ -58,6 +58,9 @@ var excludedTools = map[string]bool{
 	// Directing the project's other sessions is the owner's own job; a child
 	// only ever sees the slice of context its task carried.
 	"sessions": true,
+	// The history tool reads the session it is registered in, which for a
+	// child would be its parent's.
+	"history": true,
 }
 
 type readOnlyFilesKey struct{}

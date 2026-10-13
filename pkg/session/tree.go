@@ -631,6 +631,47 @@ func (t *Tree) VisitDisplayMessages(fn func(*core.AgentMessage)) {
 	}
 }
 
+// VisitTranscript calls fn, in order, with every message of the current path
+// as originally recorded — including what a compaction, trim or fresh start
+// keeps away from the model — and with a session_event at each of those
+// boundaries, where its entry sits. It reads under the tree's lock without
+// materialising the projection: fn must not retain the pointer nor call back
+// into the tree.
+func (t *Tree) VisitTranscript(fn func(*core.AgentMessage)) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if t.leafID == "" {
+		return
+	}
+	for _, idx := range t.pathIndexesLocked(t.leafID) {
+		e := &t.entries[idx]
+		text := ""
+		switch e.Type {
+		case EntryMessage:
+			fn(&e.Message)
+			continue
+		case EntryCompaction:
+			text = fmt.Sprintf("✂ Context compacted (%dK tokens summarized)", e.Compaction.TokensBefore/1000)
+		case EntryTrim:
+			text = TrimMarkerText(e.Trim.TokensRemoved)
+		case EntryFresh:
+			if e.Fresh.IsEmpty() {
+				continue
+			}
+			text = FreshMarkerText
+		default:
+			continue
+		}
+		marker := core.AgentMessage{Message: core.Message{
+			Role:      "session_event",
+			MsgID:     e.ID,
+			Content:   []core.Content{core.TextContent(text)},
+			Timestamp: e.Timestamp.Unix(),
+		}}
+		fn(&marker)
+	}
+}
+
 // DisplayMessagesSince returns the display projection strictly after entryID
 // when entryID is on the current root-to-leaf path. The boolean is false for
 // an empty, unknown, or off-path token; callers must then use a full snapshot.

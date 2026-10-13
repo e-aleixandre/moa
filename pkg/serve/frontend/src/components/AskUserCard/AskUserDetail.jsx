@@ -1,10 +1,12 @@
 import { Check, PenLine } from "lucide-preact";
-import { parseMultiAnswer } from "../../data/ask-user-machine.js";
+import { parseMultiAnswer, splitAskResponder } from "../../data/ask-user-machine.js";
+
+export { splitAskResponder };
 import "./AskUserDetail.css";
 
 export function parseAskAnswers(result, count) {
   if (!result) return [];
-  const text = String(result);
+  const text = splitAskResponder(result).body;
   if (count === 1) {
     const answer = text.trim();
     return answer ? [answer] : [];
@@ -21,9 +23,11 @@ function optionLabel(option) {
 export function AskUserDetail({ questions, result }) {
   const items = Array.isArray(questions) ? questions : [];
   const answers = parseAskAnswers(result, items.length);
+  const { responder } = splitAskResponder(result);
 
   return (
     <div class="ask-detail">
+      {responder && <div class="ask-detail-responder">Answered by {responder}</div>}
       {items.map((item, index) => {
         const question = item?.question || "";
         const options = Array.isArray(item?.options) ? item.options : [];

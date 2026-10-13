@@ -115,6 +115,7 @@ const TOOL_ACTIONS = {
   subagent_status: 'Checking a subagent',
   tasks: 'Updating tasks',
   memory: 'Consulting memory',
+  history: 'Searching the conversation',
   verify: 'Running checks',
   moa_docs: 'Reading the docs',
   ask_user: 'Asking you',

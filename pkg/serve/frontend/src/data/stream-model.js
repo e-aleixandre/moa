@@ -149,6 +149,7 @@ import {
   modelCodename,
 } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
+import { splitAskResponder } from './ask-user-machine.js';
 import { parseFileCardData } from './util/file-card.js';
 import { parseUnifiedDiff } from './util/unified-diff.js';
 
@@ -999,6 +1000,11 @@ const PATH_ARG_TOOLS = new Set(['read', 'write', 'edit', 'multiedit', 'ls', 'sen
 // legible ledger row: arg = first line of task/command, out = summary.
 function toLedgerRow(msg) {
   const name = msg.tool_name || 'tool';
+  // An answer given on the user's behalf starts with a label line for the
+  // model; the row measures and quotes the answer itself.
+  const measured = name.toLowerCase() === 'ask_user' && msg.result
+    ? { ...msg, result: splitAskResponder(msg.result).body }
+    : msg;
   const status = mapStatus(msg.status);
   const preview = toolPreview(name, msg.args, msg.result, msg.status, msg.start_line);
   // Diffs and answered questions have dedicated detail renderers, so neither
@@ -1009,11 +1015,11 @@ function toLedgerRow(msg) {
   const row = {
     tool: toolToken(name),
     arg: { text: toolPath(name, msg.args) },
-    out: deriveOut(msg),
+    out: deriveOut(measured),
     status,
     id: msg.tool_call_id,
   };
-  const echo = deriveEcho(msg);
+  const echo = deriveEcho(measured);
   if (echo) row.echo = echo;
   if (PATH_ARG_TOOLS.has(name.toLowerCase())) row.argTail = true;
   if (msg.detailUrl) row.detailUrl = msg.detailUrl;

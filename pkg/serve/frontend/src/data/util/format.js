@@ -52,6 +52,8 @@ export function toolPath(name, args) {
   // file it touched, never the word `write` the generic fallback picked up.
   if (n === 'book')
     return a.action === 'search' ? (a.query || '') : (a.path || '');
+  if (n === 'history')
+    return a.action === 'search' ? (a.query || a.role || '') : (a.id || '');
   if (n === 'send_file') {
     const p = a.path || '';
     return p.length > 80 ? p.split('/').pop() : p;

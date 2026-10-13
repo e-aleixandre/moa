@@ -96,7 +96,7 @@ type PendingAsk struct {
 	RunGen    uint64
 	// RequestedAt is when the question was asked (see PendingPermission).
 	RequestedAt time.Time
-	response    chan<- []string
+	response    chan<- askuser.Reply
 	resolved    bool
 }
 
@@ -411,8 +411,9 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 	}()
 }
 
-// ResolveAskUser resolves a pending ask_user request.
-func (am *ApprovalManager) ResolveAskUser(id string, answers []string) error {
+// ResolveAskUser resolves a pending ask_user request. responder says who
+// answered; it is recorded with the tool result (zero means unknown).
+func (am *ApprovalManager) ResolveAskUser(id string, answers []string, responder askuser.Responder) error {
 	am.mu.Lock()
 	p, ok := am.asks[id]
 	if !ok {
@@ -434,7 +435,7 @@ func (am *ApprovalManager) ResolveAskUser(id string, answers []string) error {
 
 	// Send response outside lock. Channel is buffered(1).
 	select {
-	case resp <- answers:
+	case resp <- askuser.Reply{Answers: answers, Responder: responder}:
 	default:
 	}
 

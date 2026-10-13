@@ -21,6 +21,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/bootstrap"
@@ -720,7 +721,11 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: body.ID, Answers: body.Answers}); err != nil {
+		responder := askuser.Responder{Kind: askuser.ResponderUser}
+		if identity, ok := requestAuthIdentity(r); ok {
+			responder.Via = identity.auditID()
+		}
+		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: body.ID, Answers: body.Answers, Responder: responder}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

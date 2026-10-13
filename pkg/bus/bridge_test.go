@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/checkpoint"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/permission"
@@ -3416,7 +3417,7 @@ func TestHandler_ResolveAskUser(t *testing.T) {
 	sctx.Approvals = am
 	RegisterHandlers(sctx)
 
-	respCh := make(chan []string, 1)
+	respCh := make(chan askuser.Reply, 1)
 	am.mu.Lock()
 	am.asks["a1"] = &PendingAsk{
 		ID: "a1", Questions: []AskQuestion{{Text: "Name?"}}, response: respCh,
@@ -3425,14 +3426,18 @@ func TestHandler_ResolveAskUser(t *testing.T) {
 
 	if err := b.Execute(ResolveAskUser{
 		AskID: "a1", Answers: []string{"Bob"},
+		Responder: askuser.Responder{Kind: askuser.ResponderOwner, ID: "o1", Name: "Serena"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
-	case answers := <-respCh:
-		if len(answers) != 1 || answers[0] != "Bob" {
+	case reply := <-respCh:
+		if answers := reply.Answers; len(answers) != 1 || answers[0] != "Bob" {
 			t.Fatalf("answers = %v", answers)
+		}
+		if reply.Responder.Kind != askuser.ResponderOwner || reply.Responder.Name != "Serena" {
+			t.Fatalf("responder = %+v, want the owner that answered", reply.Responder)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout")

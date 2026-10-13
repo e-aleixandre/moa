@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/handoff"
 )
@@ -391,6 +392,9 @@ type ResolveAskUser struct {
 	SessionID string
 	AskID     string
 	Answers   []string
+	// Responder says who answered (the user, an owner, an automation). It is
+	// recorded with the tool result; zero means the caller did not say.
+	Responder askuser.Responder
 }
 
 // ReloadPromptSources re-reads AGENTS.md, the skills index and the memory index

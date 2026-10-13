@@ -17,6 +17,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/checkpoint"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/history"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -558,6 +559,17 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		artifactStore = opts.artifactStore
 	}
 	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, artifactStore))
+
+	// The session's own transcript, read-only. Children never inherit it
+	// (see the subagent exclusions): they see only what their task carried.
+	core.RegisterOrLog(bs.ToolReg, history.NewTool(func(fn func(*core.AgentMessage)) error {
+		s := sess
+		if s == nil || s.runtime == nil || s.runtime.Context() == nil {
+			return fmt.Errorf("this session's history is not available")
+		}
+		s.runtime.Context().VisitTranscript(fn)
+		return nil
+	}))
 
 	// The owner's handle on the sessions of its project. It is built here, not
 	// in bootstrap, because it needs the live Manager (same reason as
