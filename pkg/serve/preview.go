@@ -778,7 +778,7 @@ func handlePreviewTarget(c *PreviewController) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "supported": false})
 			return
 		}
-		if r.Method == http.MethodGet {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
 			status := c.Status()
 			out := map[string]any{
 				"enabled":        status.Enabled,
@@ -797,6 +797,11 @@ func handlePreviewTarget(c *PreviewController) http.HandlerFunc {
 				}
 			}
 			writeJSON(w, http.StatusOK, out)
+			return
+		}
+		if r.Method != http.MethodPut {
+			w.Header().Set("Allow", "GET, HEAD, PUT")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		var in struct {

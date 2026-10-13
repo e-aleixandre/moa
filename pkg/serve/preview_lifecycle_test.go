@@ -595,3 +595,43 @@ func TestPreviewTargetAPIClosesTheListenerWhenTheTargetIsRefused(t *testing.T) {
 		t.Fatal("a refused target left a listener behind")
 	}
 }
+
+// HEAD is exempt from the X-Moa-Request check, so it must never mutate: a
+// cross-site HEAD with a JSON body used to deactivate the preview.
+func TestPreviewTargetHeadIsReadOnly(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, "<head></head>")
+	}))
+	defer upstream.Close()
+
+	port := freePort(t)
+	c := NewPreviewController(7401, nil, &memoryPreviewStore{})
+	t.Cleanup(c.Close)
+	handler := handlePreviewTarget(c)
+
+	body := fmt.Sprintf(`{"url":%q,"public_url":"http://127.0.0.1:%d","parent_origin":"http://moa.test"}`, upstream.URL, port)
+	on := httptest.NewRecorder()
+	handler(on, httptest.NewRequest("PUT", "/api/preview/target", strings.NewReader(body)))
+	if on.Code != http.StatusOK || !listening(port) {
+		t.Fatalf("activation = %d %s", on.Code, on.Body)
+	}
+
+	head := httptest.NewRecorder()
+	handler(head, httptest.NewRequest("HEAD", "/api/preview/target", strings.NewReader(`{"enabled":false}`)))
+	if !listening(port) || !c.Status().Enabled {
+		t.Fatal("HEAD with a body deactivated the preview")
+	}
+
+	srv := httptest.NewServer(csrfMiddleware(http.HandlerFunc(handler)))
+	defer srv.Close()
+	req, _ := http.NewRequest("PUT", srv.URL, strings.NewReader(`{"enabled":false}`))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden || !listening(port) {
+		t.Fatalf("PUT without X-Moa-Request = %d, listening=%v", resp.StatusCode, listening(port))
+	}
+}
