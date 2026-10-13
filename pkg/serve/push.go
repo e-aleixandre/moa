@@ -59,6 +59,9 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 			SessionID: sess.ID,
 			Title:     sess.title(),
 			Watched:   sess.presence.watched(),
+			// Checked again when the notification leaves the delivery queue,
+			// so a session reattached to its owner meanwhile announces nothing.
+			StillPending: allowed,
 		}
 	}
 	// A question or permission someone was looking at waits out a grace period;
@@ -139,7 +142,6 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 				case r != nil && r.digest:
 					s := signal(push.KindDigest)
 					s.Project = sess.CWD
-					s.StillPending = allowed // a deleted session announces nothing
 					pol.Handle(s)
 				case r != nil && !r.start.IsZero() && !e.At.IsZero() && e.At.Sub(r.start) < minRunForPush:
 					// quick answer — not worth a buzz

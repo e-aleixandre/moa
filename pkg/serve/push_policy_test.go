@@ -447,3 +447,76 @@ func TestDeletedSessionsQueuedDigestIsNotSent(t *testing.T) {
 		}
 	}
 }
+
+// gatedSender holds every delivery until release is closed, so notifications
+// pile up in the policy's delivery queue behind the busy workers.
+type gatedSender struct {
+	release chan struct{}
+	mu      sync.Mutex
+	sent    []push.Notification
+	started int
+}
+
+func (g *gatedSender) Notify(_ context.Context, n push.Notification) {
+	g.mu.Lock()
+	g.started++
+	g.mu.Unlock()
+	<-g.release
+	g.mu.Lock()
+	g.sent = append(g.sent, n)
+	g.mu.Unlock()
+}
+
+// A detached launched session's Done/Failed push that waits in the delivery
+// queue must not be sent if the session is reattached before its turn: the
+// owner now hears about it, and the push would duplicate that.
+func TestQueuedPushOfAReattachedLaunchedSessionIsDropped(t *testing.T) {
+	old := minRunForPush
+	minRunForPush = 0
+	t.Cleanup(func() { minRunForPush = old })
+
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	g := &gatedSender{release: make(chan struct{})}
+	mgr.pushPolicy = push.NewPolicy(g, push.PolicyConfig{})
+	t.Cleanup(func() { mgr.pushPolicy.Close() })
+	root := t.TempDir()
+	ownerWithSession(t, mgr, root, "Winerim")
+	launched, err := mgr.CreateSession(CreateOpts{CWD: root, Title: "launched by the owner", Origin: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.SetOwnerDetached(launched.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	// Occupy every worker that serves quiet notifications.
+	for i := 0; i < 3; i++ {
+		mgr.pushPolicy.Handle(push.Signal{Kind: push.KindDone, SessionID: fmt.Sprintf("blocker-%d", i)})
+	}
+	pollUntil(t, 5*time.Second, "workers busy", func() bool {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		return g.started == 3
+	})
+
+	b := launched.runtime.Bus
+	publishRunStart(launched, 1, bus.RunOrigin{Explicit: true})
+	b.Drain(5 * time.Second)
+	b.Publish(bus.RunEnded{SessionID: launched.ID, RunGen: 1})
+	b.Drain(5 * time.Second)
+	if _, err := mgr.SetOwnerDetached(launched.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	close(g.release)
+	time.Sleep(100 * time.Millisecond)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.started != 3 {
+		t.Fatalf("%d deliveries started, want only the 3 blockers", g.started)
+	}
+	for _, n := range g.sent {
+		if n.SessionID == launched.ID {
+			t.Fatalf("a reattached launched session still pushed %+v from the queue", n)
+		}
+	}
+}
