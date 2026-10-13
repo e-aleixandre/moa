@@ -96,7 +96,14 @@ final class ShareLogic {
         if (!cleanNote.isEmpty()) parts.add(cleanNote);
         if (text != null && !text.trim().isEmpty()) parts.add(text);
         String saved = String.join("\n", parts);
-        return fits(composedText(title, saved, url)) ? saved : null;
+        return textFits(title, saved, url) ? saved : null;
+    }
+
+    // Whether the text moa's composer gets from a queued share fits
+    // MAX_TEXT_BYTES: measured on the composed text, so a title or URL the
+    // composition drops as a duplicate is not counted twice.
+    static boolean textFits(String title, String text, String url) {
+        return fits(composedText(title, text, url));
     }
 
     private static boolean fits(String value) {
@@ -136,15 +143,6 @@ final class ShareLogic {
         String flat = composedText(title, text, url).trim().replaceAll("\\s+", " ");
         if (flat.codePointCount(0, flat.length()) <= 80) return flat;
         return flat.substring(0, flat.offsetByCodePoints(0, 79)) + "…";
-    }
-
-    // The bytes the queue counts against MAX_TEXT_BYTES, as iOS commit() does.
-    static int textBytes(String title, String text, String url) {
-        int total = 0;
-        for (String value : new String[] {title, text, url}) {
-            if (value != null) total += value.trim().getBytes(StandardCharsets.UTF_8).length;
-        }
-        return total;
     }
 
     // Android has no separate URL extra: a text that is exactly one http(s)

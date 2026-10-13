@@ -198,7 +198,7 @@ public class ShareActivity extends AppCompatActivity {
             if (uris.size() > ShareLogic.MAX_FILES) {
                 throw new ShareInbox.InboxException(ShareInbox.InboxException.Code.TOO_MANY_FILES);
             }
-            if (ShareLogic.textBytes(title, text, url) > ShareLogic.MAX_TEXT_BYTES) {
+            if (!ShareLogic.textFits(title, text, url)) {
                 throw new ShareInbox.InboxException(ShareInbox.InboxException.Code.TEXT_TOO_LARGE);
             }
             if (ShareLogic.composedText(title, text, url).isEmpty() && uris.isEmpty()) {

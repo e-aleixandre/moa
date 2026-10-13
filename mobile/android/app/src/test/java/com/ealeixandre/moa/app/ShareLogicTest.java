@@ -140,7 +140,11 @@ public class ShareLogicTest {
         assertEquals(32L * 1024 * 1024, ShareLogic.MAX_BYTES);
         assertEquals(256 * 1024, ShareLogic.MAX_TEXT_BYTES);
         assertEquals(20, ShareLogic.MAX_PENDING);
-        assertEquals(5, ShareLogic.textBytes(" é ", "ab", " c "));
+        // Measured on the composed text: a title the text already contains
+        // is not counted twice.
+        String text = "é".repeat(ShareLogic.MAX_TEXT_BYTES / 2);
+        assertTrue(ShareLogic.textFits(text, text, ""));
+        assertFalse(ShareLogic.textFits("t", text, ""));
     }
 
     // Review S2: the 262144-byte limit applies to exactly the text sent,

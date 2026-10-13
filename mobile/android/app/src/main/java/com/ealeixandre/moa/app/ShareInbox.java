@@ -83,6 +83,7 @@ final class ShareInbox {
     }
 
     private static final String MANIFEST = "manifest.json";
+    private static final long MAX_MANIFEST_BYTES = 4L * ShareLogic.MAX_TEXT_BYTES;
     private static final Pattern ID = Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
     // A staging directory older than this belongs to a share sheet that died.
     private static final long STALE_STAGING_MILLIS = 60L * 60 * 1000;
@@ -180,7 +181,7 @@ final class ShareInbox {
             String cleanTitle = title == null ? "" : title.trim();
             String cleanText = text == null ? "" : text.trim();
             String cleanUrl = url == null ? "" : url.trim();
-            if (ShareLogic.textBytes(cleanTitle, cleanText, cleanUrl) > ShareLogic.MAX_TEXT_BYTES) {
+            if (!ShareLogic.textFits(cleanTitle, cleanText, cleanUrl)) {
                 throw new InboxException(InboxException.Code.TEXT_TOO_LARGE);
             }
             if (cleanTitle.isEmpty() && cleanText.isEmpty() && cleanUrl.isEmpty() && files.isEmpty()) {
@@ -203,8 +204,11 @@ final class ShareInbox {
                     .put("text", cleanText)
                     .put("url", cleanUrl)
                     .put("files", list);
+                byte[] bytes = manifest.toString().getBytes(StandardCharsets.UTF_8);
+                // Duplicated fields count here: never write what read() refuses.
+                if (bytes.length > MAX_MANIFEST_BYTES) throw new InboxException(InboxException.Code.TEXT_TOO_LARGE);
                 try (FileOutputStream out = new FileOutputStream(new File(staging, MANIFEST))) {
-                    out.write(manifest.toString().getBytes(StandardCharsets.UTF_8));
+                    out.write(bytes);
                     out.getFD().sync();
                 }
             } catch (JSONException e) {
@@ -267,7 +271,7 @@ final class ShareInbox {
 
     private static String readText(File file) throws IOException {
         long length = file.length();
-        if (length > 4L * ShareLogic.MAX_TEXT_BYTES) throw new IOException("manifest too large");
+        if (length > MAX_MANIFEST_BYTES) throw new IOException("manifest too large");
         byte[] data = new byte[(int) length];
         try (InputStream in = new FileInputStream(file)) {
             int offset = 0;

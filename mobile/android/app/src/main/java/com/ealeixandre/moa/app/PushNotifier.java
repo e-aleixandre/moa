@@ -43,6 +43,8 @@ final class PushNotifier {
     static void show(Context context, Map<String, String> data) {
         ensureChannels(context);
         NativePushRegistration registration = NativePushRegistration.get(context);
+        // Before the gate: a forget from here on voids the post below.
+        int generation = registration.generation();
         // Turned off, unpaired or expired here: an envelope still in flight is
         // dropped, never shown as the generic alert.
         if (!registration.receiving()) return;
@@ -80,22 +82,25 @@ final class PushNotifier {
 
         NotificationManagerCompat manager = NotificationManagerCompat.from(context);
         if (!manager.areNotificationsEnabled()) return;
-        try {
-            manager.notify(tag, NOTIFICATION_ID, builder.build());
-            if (group != null && !group.isEmpty()) {
-                // Android bundles a group only under a summary. The summary
-                // never alerts on its own; the child already did.
-                manager.notify("group:" + group, NOTIFICATION_ID, new NotificationCompat.Builder(context, channel)
-                    .setSmallIcon(R.drawable.ic_stat_moa)
-                    .setGroup(group)
-                    .setGroupSummary(true)
-                    .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
-                    .setAutoCancel(true)
-                    .build());
+        String groupKey = group;
+        registration.publish(generation, () -> {
+            try {
+                manager.notify(tag, NOTIFICATION_ID, builder.build());
+                if (groupKey != null && !groupKey.isEmpty()) {
+                    // Android bundles a group only under a summary. The summary
+                    // never alerts on its own; the child already did.
+                    manager.notify("group:" + groupKey, NOTIFICATION_ID, new NotificationCompat.Builder(context, channel)
+                        .setSmallIcon(R.drawable.ic_stat_moa)
+                        .setGroup(groupKey)
+                        .setGroupSummary(true)
+                        .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+                        .setAutoCancel(true)
+                        .build());
+                }
+            } catch (SecurityException ignored) {
+                // POST_NOTIFICATIONS was revoked between the check and the post.
             }
-        } catch (SecurityException ignored) {
-            // POST_NOTIFICATIONS was revoked between the check and the post.
-        }
+        });
     }
 
     private static PendingIntent tapIntent(Context context, Map<String, String> data, String tag) {

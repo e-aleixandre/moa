@@ -164,6 +164,26 @@ public class ShareInboxTest {
         assertEquals(Code.EMPTY, code(() -> inbox.begin().commit(" ", "\n", "")));
     }
 
+    // Review S2: Save for later (ShareActivity.saveForLater: savedText, then
+    // commit) keeps a share whose composed text is exactly the limit, though
+    // its title is also inside the text; one byte more is refused.
+    @Test
+    public void savesAShareWhoseComposedTextIsExactlyTheLimit() throws Exception {
+        String note = "n".repeat(ShareLogic.MAX_TEXT_BYTES - 2);
+        String upload = ShareLogic.uploadText(note, "x", "x", "");
+        assertEquals(ShareLogic.MAX_TEXT_BYTES, upload.getBytes(StandardCharsets.UTF_8).length);
+        String saved = ShareLogic.savedText(note, "x", "x", "");
+        inbox.begin().commit("x", saved, "");
+        assertEquals(1, inbox.pendingCount());
+        ShareInbox.Envelope envelope = inbox.next();
+        assertEquals(upload, ShareLogic.composedText(envelope.title, envelope.text, envelope.url));
+
+        String over = "n".repeat(ShareLogic.MAX_TEXT_BYTES - 1);
+        assertNull(ShareLogic.savedText(over, "x", "x", ""));
+        assertEquals(Code.TEXT_TOO_LARGE, code(() -> inbox.begin().commit("x", over + "\nx", "")));
+        assertEquals(1, inbox.pendingCount());
+    }
+
     @Test
     public void atMostTwentyWaiting() throws Exception {
         for (int i = 0; i < ShareLogic.MAX_PENDING; i++) inbox.begin().commit("", "share " + i, "");

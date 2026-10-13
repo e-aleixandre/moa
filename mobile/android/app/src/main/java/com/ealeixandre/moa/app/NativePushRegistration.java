@@ -24,7 +24,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -110,12 +109,12 @@ final class NativePushRegistration {
     private final SharedPreferences prefs;
     private final ExecutorService operations = Executors.newSingleThreadExecutor();
     private final ExecutorService io = Executors.newCachedThreadPool();
-    private final AtomicInteger generation = new AtomicInteger();
-    // Held by "is this generation still current?" plus the local writes that
-    // depend on it (S, STATE_*), and by ending a generation plus forgetting,
-    // so a forget cannot land between an operation's check and its writes.
-    // Never held across network or token waits.
-    private final Object lifecycle = new Object();
+    // Held by "is this generation still current?" plus the local effects
+    // that depend on it (S, STATE_*, posting a message), and by ending a
+    // generation plus forgetting, so a forget cannot land between an
+    // operation's check and its effects. Never held across network or token
+    // waits.
+    private final PushLifecycle lifecycle = new PushLifecycle();
     private volatile PermissionRequester permissionRequester;
     private Pending pending;
     private long lastRefresh;
@@ -142,7 +141,7 @@ final class NativePushRegistration {
     // this same generation; failing here must not abandon it.
     void enable() throws PushException {
         DeviceCredentialStore.Stored paired = pairedCredential();
-        int current = generation.get();
+        int current = lifecycle.generation();
         if (!firebaseAvailable()) throw new PushException("unsupported");
         if (!requestPermission()) throw new PushException("denied");
         ensureCurrent(current, paired);
@@ -215,19 +214,30 @@ final class NativePushRegistration {
     // check and a waiting challenge is cancelled.
     // Returns false if S could not be deleted; it stays marked and is retried.
     boolean forgetLocal() {
-        boolean removed;
-        synchronized (lifecycle) {
-            generation.incrementAndGet();
-            removed = deleteSecret();
+        boolean removed = lifecycle.end(() -> {
+            boolean deleted = deleteSecret();
             prefs.edit().remove(STATE_ORIGIN).remove(STATE_TOKEN).remove(STATE_ENV).apply();
-        }
+            NotificationManagerCompat.from(context).cancelAll();
+            return deleted;
+        });
         finishPending(null, new PushException("cancelled"));
         synchronized (this) {
             lastRefresh = 0;
         }
-        NotificationManagerCompat.from(context).cancelAll();
         PushNavigator.get().reset();
         return removed;
+    }
+
+    // Taken by PushNotifier before its receiving() gate, for publish.
+    int generation() {
+        return lifecycle.generation();
+    }
+
+    // Posts an incoming message in the same step forgetLocal deletes and
+    // cancels in, only if no forget ended `generation` and push is still on:
+    // a message admitted before a disable never lands after it.
+    void publish(int generation, Runnable post) {
+        lifecycle.publish(generation, () -> prefs.getString(STATE_ORIGIN, null) != null, post);
     }
 
     // The keys for opening an envelope now, or null without a readable S or
@@ -288,7 +298,7 @@ final class NativePushRegistration {
                 if (!force && lastRefresh != 0 && now - lastRefresh < REFRESH_INTERVAL_MILLIS) return;
                 lastRefresh = now;
             }
-            int current = generation.get();
+            int current = lifecycle.generation();
             try {
                 run(() -> {
                     sync(paired, current, false);
@@ -388,7 +398,7 @@ final class NativePushRegistration {
     }
 
     private void ensureCurrent(int current, DeviceCredentialStore.Stored paired) throws PushException {
-        if (generation.get() != current) throw new PushException("cancelled");
+        if (lifecycle.generation() != current) throw new PushException("cancelled");
         DeviceCredentialStore.Stored stored;
         try {
             stored = credentials.load();
@@ -675,10 +685,14 @@ final class NativePushRegistration {
         return true;
     }
 
-    // False while a secret that should be gone may still be readable.
+    // False while a secret that should be gone may still be readable. The
+    // mark is read and acted on under the lifecycle, like the S writes: a
+    // retry that saw an old mark cannot delete an S enabled since.
     private boolean retrySecretDelete() {
-        if (!prefs.getBoolean(SECRET_DELETE_PENDING, false)) return true;
-        return deleteSecret();
+        synchronized (lifecycle) {
+            if (!prefs.getBoolean(SECRET_DELETE_PENDING, false)) return true;
+            return deleteSecret();
+        }
     }
 
     // Android 13+ asks at runtime; below that the app-level switch decides.
