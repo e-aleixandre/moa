@@ -53,3 +53,17 @@ func TestNewRewoundMessageDiskFallbackIsReportedNotPasted(t *testing.T) {
 		t.Fatalf("attachments=%+v unavailable=%v", got.Attachments, got.Unavailable)
 	}
 }
+
+// Text is the user's unless the block says otherwise: wording that merely looks
+// like moa's disk note comes back whole (re-review).
+func TestNewRewoundMessageNeverClassifiesTextByWording(t *testing.T) {
+	for _, text := range []string{
+		`El usuario ha adjuntado el archivo "report.pdf", ¿puedes traducir este aviso?`,
+		"El usuario ha adjuntado el archivo \"report.pdf\"\nThis is pasted text, not an attachment.",
+	} {
+		got := newRewoundMessage(core.NewUserMessage(text))
+		if got.Text != text || len(got.Unavailable) != 0 || len(got.Attachments) != 0 {
+			t.Fatalf("text must survive intact, got %+v", got)
+		}
+	}
+}

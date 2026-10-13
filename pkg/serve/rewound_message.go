@@ -1,11 +1,6 @@
 package serve
 
-import (
-	"strconv"
-	"strings"
-
-	"github.com/e-aleixandre/moa/pkg/core"
-)
+import "github.com/e-aleixandre/moa/pkg/core"
 
 // rewoundMessage is the user message a rewind hands back to the client for the
 // composer: its text and the attachments it carried. Stored attachments are
@@ -34,8 +29,11 @@ func newRewoundMessage(msg core.Message) *rewoundMessage {
 	for _, c := range msg.Content {
 		switch c.Type {
 		case "text":
-			if name, ok := diskAdvisoryName(c.Text); ok {
-				out.Unavailable = append(out.Unavailable, name)
+			// A text block with a Filename and no stored attachment is the note moa wrote for a file
+			// kept on disk (see toDisk). Only that mark identifies it: text
+			// is never classified by its wording.
+			if c.Filename != "" && c.AttachmentID == "" {
+				out.Unavailable = append(out.Unavailable, c.Filename)
 				continue
 			}
 			out.Text += c.Text
@@ -51,22 +49,4 @@ func newRewoundMessage(msg core.Message) *rewoundMessage {
 		}
 	}
 	return out
-}
-
-// diskAdvisoryName recognises the note buildAttachmentContent writes for a file
-// it kept on disk and returns the file's name.
-func diskAdvisoryName(text string) (string, bool) {
-	rest, ok := strings.CutPrefix(text, strings.TrimSuffix(diskAdvisoryFormat, "%q"))
-	if !ok {
-		return "", false
-	}
-	quoted, err := strconv.QuotedPrefix(rest)
-	if err != nil {
-		return "", false
-	}
-	name, err := strconv.Unquote(quoted)
-	if err != nil {
-		return "", false
-	}
-	return name, true
 }
