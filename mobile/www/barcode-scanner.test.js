@@ -5,20 +5,24 @@ import {
 } from "./barcode-scanner.js";
 
 describe("native barcode scanner contract", () => {
-  it("registers the exact plugin name exported by the installed package", () => {
-    const packageEntry = readFileSync(
-      "node_modules/@capacitor-mlkit/barcode-scanning/dist/esm/index.js",
-      "utf8",
-    );
+  it("registers the exact plugin name exported by the local native plugin", () => {
+    const plugin = readFileSync("ios/App/App/QRScannerPlugin.swift", "utf8");
+    const bridge = readFileSync("ios/App/App/MoaBridgeViewController.swift", "utf8");
     const podfile = readFileSync("ios/App/Podfile", "utf8");
     const project = readFileSync("ios/App/App.xcodeproj/project.pbxproj", "utf8");
     const boot = readFileSync("www/boot.js", "utf8");
     const infoPlist = readFileSync("ios/App/App/Info.plist", "utf8");
-    const packagePluginName = packageEntry.match(/registerPlugin\((['"])([^'"]+)\1/)?.[2];
+    const packagePluginName = plugin.match(/let jsName = "([^"]+)"/)?.[1];
 
     expect(packagePluginName).toBe(BARCODE_SCANNER_PLUGIN);
+    for (const method of ["isSupported", "checkPermissions", "requestPermissions", "scan"]) {
+      expect(plugin).toContain(`CAPPluginMethod(name: "${method}"`);
+    }
+    expect(plugin).toContain("metadataObjectTypes = [.qr]");
+    expect(bridge).toContain("registerPluginInstance(QRScannerPlugin())");
+    expect(project).toMatch(/QRScannerPlugin\.swift in Sources/);
     expect(boot).toContain('import { scanPairingCode } from "./barcode-scanner.js"');
-    expect(podfile).toContain("pod 'CapacitorMlkitBarcodeScanning'");
+    expect(podfile.toLowerCase()).not.toContain("mlkit");
     expect(project).toContain("Pods_App.framework in Frameworks");
     expect(project).not.toContain("CapApp-SPM");
     expect(infoPlist).toContain("<key>NSCameraUsageDescription</key>");

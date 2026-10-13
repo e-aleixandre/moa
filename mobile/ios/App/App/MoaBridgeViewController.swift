@@ -41,6 +41,7 @@ final class MoaBridgeViewController: CAPBridgeViewController {
 
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(PairedServerNavigationPlugin())
+        bridge?.registerPluginInstance(QRScannerPlugin())
         shareInboxHandler.webView = webView
         deviceAuthHandler.webView = webView
         nativePushHandler.webView = webView
