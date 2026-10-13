@@ -1021,11 +1021,12 @@ func liveToolInitData(calls []bus.LiveToolCall) []LiveToolInitData {
 			continue
 		}
 		d := LiveToolInitData{
-			ToolCallID: c.ToolCallID,
-			ToolName:   c.ToolName,
-			Args:       boundedLiveToolArgs(c.Args),
-			Status:     c.Phase,
-			Result:     truncateHistoryString(c.Result),
+			ToolCallID:   c.ToolCallID,
+			ToolName:     c.ToolName,
+			Args:         boundedLiveToolArgs(c.Args),
+			Status:       c.Phase,
+			Result:       truncateHistoryString(c.Result),
+			AskResponder: c.AskResponder,
 		}
 		if !c.StartedAt.IsZero() {
 			d.StartedAtMs = c.StartedAt.UnixMilli()

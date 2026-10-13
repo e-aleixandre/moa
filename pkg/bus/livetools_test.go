@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -193,6 +194,33 @@ func TestBridgeEvent_LiveToolKeepsResultOfEndedCall(t *testing.T) {
 	got := sctx.LiveTools()
 	if len(got) != 1 || got[0].Result != "Sent a.md\n{\"file_id\":\"f1\"}" {
 		t.Fatalf("after tool_end: %+v, want the result text kept", got)
+	}
+}
+
+// An ask_user that ended while a sibling still runs keeps who answered it: a
+// reconnect rebuilds its card from this registry, not from history.
+func TestBridgeEvent_LiveToolKeepsAskResponderOfEndedCall(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContext(b, nil)
+
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecStart, ToolCallID: "ask", ToolName: "ask_user"})
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecStart, ToolCallID: "sib", ToolName: "bash"})
+	serena := askuser.Responder{Kind: askuser.ResponderOwner, ID: "o1", Name: "Serena"}
+	result := core.Result{Content: []core.Content{core.TextContent("answer")}, Custom: map[string]any{askuser.CustomKey: serena}}
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolCallID: "ask", ToolName: "ask_user", Result: &result})
+
+	for _, c := range sctx.LiveTools() {
+		switch c.ToolCallID {
+		case "ask":
+			if c.AskResponder == nil || *c.AskResponder != serena {
+				t.Fatalf("ended ask_user responder = %+v, want %+v", c.AskResponder, serena)
+			}
+		case "sib":
+			if c.AskResponder != nil {
+				t.Fatalf("running sibling carries a responder: %+v", c.AskResponder)
+			}
+		}
 	}
 }
 

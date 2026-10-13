@@ -3,6 +3,7 @@ package bus
 import (
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -170,6 +171,9 @@ type LiveToolCall struct {
 	// Result is the text result of a call in a terminal phase: until its batch
 	// is collected it is in no history either.
 	Result string
+	// AskResponder is who answered an ask_user that ended, when recorded:
+	// like Result, it is in no history until the batch is collected.
+	AskResponder *askuser.Responder
 	// StartedAt anchors the client's elapsed timer to the moment the call first
 	// appeared, so a reconnect resumes the count instead of restarting it.
 	StartedAt time.Time

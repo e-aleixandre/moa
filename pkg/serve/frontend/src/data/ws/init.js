@@ -257,6 +257,9 @@ export function liveToolRow(t) {
     status,
     result,
     note: extractToolNote(result, status === 'rejected'),
+    // Who answered an ended ask_user, as recorded: its result reaches history
+    // only with the whole batch.
+    ...(ended && t.ask_responder ? { askResponder: t.ask_responder } : {}),
     // Server-anchored so the row's elapsed timer resumes from the real start
     // instead of restarting at the moment this pane reconnected.
     startedAt: t.started_at_ms || Date.now(),

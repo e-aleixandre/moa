@@ -129,6 +129,8 @@ type LiveToolInitData struct {
 	StartedAtMs int64 `json:"started_at_ms,omitempty"`
 	// Result is the text result of a terminal call, bounded like history.
 	Result string `json:"result,omitempty"`
+	// AskResponder is who answered an ended ask_user (absent when not recorded).
+	AskResponder *askuser.Responder `json:"ask_responder,omitempty"`
 }
 
 // SubagentInitData describes one live subagent job for reconnecting clients

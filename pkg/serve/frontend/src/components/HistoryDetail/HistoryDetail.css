@@ -30,7 +30,14 @@
   display: flex;
   flex-wrap: wrap;
   column-gap: 12px;
+  min-width: 0;
   color: var(--zl-t4);
+}
+
+/* A long owner name or id wraps inside the card instead of being cut. */
+.history-hit-meta > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .history-hit-author { color: var(--zl-t3); }

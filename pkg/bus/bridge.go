@@ -854,6 +854,7 @@ func (sctx *SessionContext) endLiveToolLocked(call LiveToolCall) {
 		if sctx.liveTools[i].ToolCallID == call.ToolCallID {
 			sctx.liveTools[i].Phase = call.Phase
 			sctx.liveTools[i].Result = call.Result
+			sctx.liveTools[i].AskResponder = call.AskResponder
 			return
 		}
 	}
@@ -1421,7 +1422,18 @@ func EndedLiveToolCall(e core.AgentEvent) LiveToolCall {
 	} else if e.IsError {
 		phase = LiveToolPhaseError
 	}
-	return LiveToolCall{ToolCallID: e.ToolCallID, ToolName: e.ToolName, Phase: phase, Result: resultText(e.Result)}
+	return LiveToolCall{ToolCallID: e.ToolCallID, ToolName: e.ToolName, Phase: phase, Result: resultText(e.Result), AskResponder: askResponderOf(e.Result)}
+}
+
+// askResponderOf is who answered an ask_user, as its result records it.
+func askResponderOf(result *core.Result) *askuser.Responder {
+	if result == nil {
+		return nil
+	}
+	if r, ok := askuser.ResponderFromCustom(result.Custom[askuser.CustomKey]); ok {
+		return &r
+	}
+	return nil
 }
 
 // TranslateAgentEvent translates a single core.AgentEvent into 0..n typed bus
@@ -1533,18 +1545,14 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 
 	case core.AgentEventToolExecEnd:
 		ended := ToolExecEnded{
-			SessionID:  sid,
-			RunGen:     gen,
-			ToolCallID: e.ToolCallID,
-			ToolName:   e.ToolName,
-			Result:     resultText(e.Result),
-			IsError:    e.IsError,
-			Rejected:   e.Rejected,
-		}
-		if e.Result != nil {
-			if r, ok := askuser.ResponderFromCustom(e.Result.Custom[askuser.CustomKey]); ok {
-				ended.AskResponder = &r
-			}
+			SessionID:    sid,
+			RunGen:       gen,
+			ToolCallID:   e.ToolCallID,
+			ToolName:     e.ToolName,
+			Result:       resultText(e.Result),
+			IsError:      e.IsError,
+			Rejected:     e.Rejected,
+			AskResponder: askResponderOf(e.Result),
 		}
 		events := []any{ended}
 		// Emit task update on tool_end only (matches serve behavior).

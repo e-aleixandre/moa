@@ -149,3 +149,20 @@ func TestAskResponderReachesTheClientAsRecorded(t *testing.T) {
 		t.Fatalf("tool_end without a responder carries one: %s", data)
 	}
 }
+
+// A reconnect while a sibling of the batch still runs rebuilds the ended
+// ask_user from live_tools: who answered must travel with it.
+func TestLiveToolsSnapshotCarriesTheAskResponder(t *testing.T) {
+	serena := askuser.Responder{Kind: askuser.ResponderOwner, ID: "o1", Name: "Serena"}
+	data, err := json.Marshal(liveToolInitData([]bus.LiveToolCall{
+		{ToolCallID: "ask", ToolName: "ask_user", Phase: bus.LiveToolPhaseDone, Result: "answer", AskResponder: &serena},
+		{ToolCallID: "sib", ToolName: "bash", Phase: bus.LiveToolPhaseRunning},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); !strings.Contains(got, `"tool_call_id":"ask","tool_name":"ask_user","status":"done","result":"answer","ask_responder":{"kind":"owner","id":"o1","name":"Serena"}`) ||
+		strings.Count(got, "ask_responder") != 1 {
+		t.Fatalf("live_tools = %s", got)
+	}
+}
