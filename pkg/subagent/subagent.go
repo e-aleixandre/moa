@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/agent"
@@ -175,7 +174,7 @@ type Config struct {
 	// costUSD is the child's CUMULATIVE cost of the history it ends with, which
 	// for a resumed child includes spend paid in earlier runs (and shrinks if
 	// compaction replaced old messages). runCostUSD is what THIS run spent,
-	// summed from the assistant messages it produced; a ledger must add that,
+	// taken from the child agent's own run ledger; a ledger must add that,
 	// never a difference of cumulative figures.
 	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64)
 
@@ -893,13 +892,9 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	defer j.cancel()
 	defer close(j.done)
 	var finalMsgs []core.AgentMessage
-	var runCostMu sync.Mutex
+	// The run's own spend, read from the agent's synchronous ledger once the
+	// run returns (never from event subscribers, which may lag behind).
 	var runCost float64
-	thisRunCost := func() float64 {
-		runCostMu.Lock()
-		defer runCostMu.Unlock()
-		return runCost
-	}
 	if cfg.BashState != nil {
 		defer cfg.BashState.Drop(j.id)
 	}
@@ -946,7 +941,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 				finishedAt = snap.FinishedAt
 				async = !snap.Sync
 			}
-			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs), thisRunCost())
+			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs), runCost)
 		}
 	}()
 
@@ -969,11 +964,6 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		})
 	}
 	unsub := child.Subscribe(func(e core.AgentEvent) {
-		if e.Type == core.AgentEventMessageEnd && e.Message.Role == "assistant" && e.Message.Usage != nil && e.Pricing != nil {
-			runCostMu.Lock()
-			runCost += e.Pricing.Cost(*e.Message.Usage)
-			runCostMu.Unlock()
-		}
 		if j.isSync() {
 			forwardSyncEvent(e, onUpdate)
 		} else {
@@ -1015,6 +1005,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	}
 
 	msgs, err := runChild(jobCtx, child, task, seedMsgs)
+	runCost = child.RunCost()
 	finalMsgs = msgs
 	jobs.setMessages(j.id, msgs)
 	jobs.setUsage(j.id, childUsage(msgs), childCost(model, msgs), childContextPercent(msgs, child.Model(), child.CompactionEpoch()))

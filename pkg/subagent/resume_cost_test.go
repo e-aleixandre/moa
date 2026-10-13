@@ -139,3 +139,38 @@ func TestResumedChildRunCostSurvivesCompaction(t *testing.T) {
 		t.Errorf("run cost = %v, want 2 (history cost fell to %v after compaction)", run, cumulative)
 	}
 }
+
+// The run's spend comes from the agent's synchronous ledger: a subscriber that
+// lags past the agent's drain timeout must not turn a paid message into $0.
+func TestChildRunCostDoesNotDependOnSlowSubscribers(t *testing.T) {
+	model := core.Model{ID: "default", Provider: "mock", Pricing: &core.Pricing{Input: 1e6}}
+	provider := newMockProvider(usageTextResponse("done", 2))
+	var once sync.Once
+	var mu sync.Mutex
+	var run float64
+	ended := false
+	cfg := Config{
+		DefaultModel:    model,
+		AppCtx:          context.Background(),
+		ParentTools:     core.NewRegistry(),
+		ProviderFactory: func(core.Model) (core.Provider, error) { return provider, nil },
+		OnChildEvent: func(string, any) {
+			once.Do(func() { time.Sleep(2500 * time.Millisecond) })
+		},
+		OnChildEnd: func(_, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, _, runCostUSD float64) {
+			mu.Lock()
+			run, ended = runCostUSD, true
+			mu.Unlock()
+		},
+	}
+	sub := newSubagent(cfg, newJobStore())
+	if res, err := sub.Execute(context.Background(), map[string]any{"task": "go"}, nil); err != nil || res.IsError {
+		t.Fatalf("execute: %v %s", err, textOf(res))
+	}
+	waitFor(t, 5*time.Second, func() bool { mu.Lock(); defer mu.Unlock(); return ended })
+	mu.Lock()
+	defer mu.Unlock()
+	if math.Abs(run-2) > 1e-9 {
+		t.Errorf("run cost = %v, want 2 even with a subscriber slower than the drain timeout", run)
+	}
+}
