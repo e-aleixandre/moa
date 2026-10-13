@@ -15,6 +15,7 @@ import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
 const SESSIONS = {
   launched: { id: 'launched', origin: 'owner', kind: '', ownerId: 'own_1' },
   userInOwner: { id: 'userInOwner', origin: '', kind: '', ownerId: 'own_1' },
+  detached: { id: 'detached', origin: 'owner', kind: '', ownerId: '', detachedOwnerId: 'own_1' },
   owner: { id: 'owner', origin: 'owner', kind: 'owner', ownerId: '' },
 };
 
@@ -66,4 +67,8 @@ test('a user session in an owner codebase still raises its toasts', () => {
 
 test('the owner asking in its own conversation still raises its toasts', () => {
   expect(raiseEveryNotice('owner')).toBe(7);
+});
+
+test('an owner-launched session the user detached raises its toasts', () => {
+  expect(raiseEveryNotice('detached')).toBe(7);
 });

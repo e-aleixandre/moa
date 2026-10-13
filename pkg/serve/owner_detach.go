@@ -10,7 +10,7 @@ import (
 )
 
 // ErrNotDetachable refuses a detach the session cannot take: only a
-// conversation the user opened, in a codebase that has an owner, reports to
+// non-owner conversation, in a codebase that has an owner, reports to
 // one it could be detached from.
 var ErrNotDetachable = errors.New("this session cannot be detached from an owner")
 
@@ -65,15 +65,12 @@ func (m *Manager) SetOwnerDetached(id string, detached bool) (SessionInfo, error
 // detachableError is the one rule both paths apply. It only matters when
 // detaching: reattaching is always allowed, so a marker left on a session
 // whose owner was since deleted can still be cleared.
-func (m *Manager) detachableError(kind, origin, cwd string, detached bool) error {
+func (m *Manager) detachableError(kind, cwd string, detached bool) error {
 	if kind == session.KindOwner {
 		return fmt.Errorf("%w: it is an owner conversation", ErrNotDetachable)
 	}
 	if !detached {
 		return nil
-	}
-	if origin == "owner" {
-		return fmt.Errorf("%w: its owner opened it", ErrNotDetachable)
 	}
 	if m.ownerRefFor(cwd).id == "" {
 		return fmt.Errorf("%w: its codebase has no owner", ErrNotDetachable)
@@ -95,7 +92,7 @@ func (m *Manager) setLiveOwnerDetached(sess *ManagedSession, detached bool) (Ses
 	if sess.closing.Load() {
 		return SessionInfo{}, ErrNotFound
 	}
-	if err := m.detachableError(sess.Kind, sess.Origin, sess.CWD, detached); err != nil {
+	if err := m.detachableError(sess.Kind, sess.CWD, detached); err != nil {
 		return SessionInfo{}, err
 	}
 	sess.ownerDetachMu.Lock()
@@ -130,7 +127,7 @@ func (m *Manager) setSavedOwnerDetached(id string, detached bool) error {
 	if cwd == "" {
 		cwd = m.workspaceRoot
 	}
-	if err := m.detachableError(saved.Kind(), saved.Origin(), cwd, detached); err != nil {
+	if err := m.detachableError(saved.Kind(), cwd, detached); err != nil {
 		return err
 	}
 	if saved.OwnerDetached() == detached {

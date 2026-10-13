@@ -45,13 +45,13 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 	//
 	// A session an owner launched (origin "owner", not the owner's own
 	// conversation) never pushes: its owner hears about it through its
-	// reports. Origin and Kind are assigned after the session is built, so they
+	// reports, unless the user detached it: then nobody else hears it. Origin and Kind are assigned after the session is built, so they
 	// are read here, when an event arrives, not at subscription time.
 	allowed := func() bool {
 		if sess.deleted.Load() {
 			return false
 		}
-		return sess.Origin != "owner" || sess.Kind == session.KindOwner
+		return sess.Origin != "owner" || sess.Kind == session.KindOwner || sess.ownerDetached.Load()
 	}
 	signal := func(kind push.Kind) push.Signal {
 		return push.Signal{

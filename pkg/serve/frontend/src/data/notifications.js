@@ -27,9 +27,9 @@ export function addToast(toast) {
 // addSessionToast raises a toast for an event of a session, and is the one
 // place that decides whether that session speaks to the user at all: a session
 // an owner launched (origin "owner", not the owner's own conversation) reports
-// to its owner instead. Returns null when nothing was raised.
+// to its owner instead, unless the user detached it. Returns null when nothing was raised.
 export function addSessionToast(session, toast) {
-  if (session?.origin === 'owner' && session?.kind !== 'owner') return null;
+  if (session?.origin === 'owner' && session?.kind !== 'owner' && !session?.detachedOwnerId) return null;
   return addToast(toast);
 }
 

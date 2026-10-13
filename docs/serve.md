@@ -349,8 +349,8 @@ which you can edit in place, the folder, and rows for **Tasks** (see
 [Using tasks in the web UI](#using-tasks-in-the-web-ui)), **Usage**, **MCP** and
 **Artifacts**. At its foot:
 
-- **Detach from ‹owner›** / **Reattach to ‹owner›** — only on a session you
-  opened in a project that has an [owner](./owners.md). A detached session
+- **Detach from ‹owner›** / **Reattach to ‹owner›** — on any session in a
+  project that has an [owner](./owners.md), including one the owner launched. A detached session
   sends that owner no reports and is out of its reach; the choice survives a
   restart.
 - **Save for later** — stops the agent; **Reopen session** picks it up again.

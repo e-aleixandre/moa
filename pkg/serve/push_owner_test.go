@@ -91,6 +91,12 @@ func TestPushSkipsSessionsTheOwnerLaunched(t *testing.T) {
 	if got := ask(launched); got != 0 {
 		t.Fatalf("a session the owner launched pushed %d notifications to the user", got)
 	}
+	if _, err := mgr.SetOwnerDetached(launched.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := ask(launched); got != 2 {
+		t.Fatalf("a detached owner-launched session pushed %d notifications, want 2: nobody else hears it", got)
+	}
 	if got := ask(userSess); got != 2 {
 		t.Fatalf("a user session in an owner's codebase pushed %d notifications, want 2", got)
 	}

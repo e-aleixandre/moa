@@ -337,7 +337,8 @@ func TestSessionOwnerRouteRefusesWhatCannotBeDetached(t *testing.T) {
 	}{
 		{"owner conversation", own.SessionID, `{"detached":true}`, http.StatusConflict},
 		{"reattach owner conversation", own.SessionID, `{"detached":false}`, http.StatusConflict},
-		{"opened by the owner", byOwner.ID, `{"detached":true}`, http.StatusConflict},
+		{"opened by the owner", byOwner.ID, `{"detached":true}`, http.StatusOK},
+		{"reattach opened by the owner", byOwner.ID, `{"detached":false}`, http.StatusOK},
 		{"codebase without owner", unowned.ID, `{"detached":true}`, http.StatusConflict},
 		{"missing field", user.ID, `{}`, http.StatusBadRequest},
 		{"unknown session", "nope", `{"detached":true}`, http.StatusNotFound},
@@ -409,4 +410,65 @@ func mustOwner(t *testing.T, mgr *Manager, id string) owner.Owner {
 		t.Fatalf("owner %s: found=%v err=%v", id, found, err)
 	}
 	return own
+}
+
+// A session an owner launched can leave that owner too: it stops reporting,
+// the owner can no longer read or direct it, and it stays detached across a
+// resume by the owner's own tool.
+func TestOwnerLaunchedSessionCanBeDetached(t *testing.T) {
+	shortReportWindow(t, time.Hour)
+	shortOwnerQuiescence(t, 20*time.Millisecond)
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	info, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Title: "audit", Origin: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.ownerObserver == nil {
+		t.Fatal("owner-launched child has no report observer")
+	}
+	if got := postSessionOwner(t, mgr, child.ID, `{"detached":true}`); got.Code != http.StatusOK {
+		t.Fatalf("detach status %d: %s", got.Code, got.Body.String())
+	}
+	if listed := findInfo(t, mgr, child.ID); listed.OwnerID != "" || listed.DetachedOwnerID == "" {
+		t.Fatalf("roster still counts the detached session: %+v", listed)
+	}
+	publishRunStart(child, 1, bus.RunOrigin{Explicit: true})
+	publishRunEnd(child, 1, "report while detached")
+	child.ownerObserver.sync()
+	child.ownerObserver.workers.Wait()
+	if got := outbox(t, mgr, info.CodebaseKey); len(got) != 0 {
+		t.Fatalf("a detached owner-launched session reported: %+v", got)
+	}
+	for _, params := range []map[string]any{
+		{"action": "read", "session_id": child.ID},
+		{"action": "send", "session_id": child.ID, "text": "hello"},
+	} {
+		if res := runSessionsTool(t, ownerSess, params); !res.IsError || !strings.Contains(toolText(res), "detached") {
+			t.Fatalf("%s = %q, want a detached refusal", params["action"], toolText(res))
+		}
+	}
+
+	// Saved and not loaded: the owner's send must not resume-and-reattach it.
+	if err := mgr.CloseSession(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if res := runSessionsTool(t, ownerSess, map[string]any{"action": "send", "session_id": child.ID, "text": "hello"}); !res.IsError {
+		t.Fatalf("send to a saved detached session succeeded: %s", toolText(res))
+	}
+	if _, loaded := mgr.Get(child.ID); loaded {
+		t.Fatal("the owner's refused send still resumed the detached session")
+	}
+	if !findInfo(t, mgr, child.ID).ownerDetached {
+		t.Fatal("detach marker lost")
+	}
+
+	if _, err := mgr.SetOwnerDetached(child.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if res := runSessionsTool(t, ownerSess, map[string]any{"action": "read", "session_id": child.ID}); res.IsError {
+		t.Fatalf("read after reattach: %s", toolText(res))
+	}
 }

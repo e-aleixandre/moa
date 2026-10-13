@@ -19,8 +19,8 @@ index.
 - **Every session in that codebase is a child.** Nothing to link: a session
   whose working directory resolves to the codebase starts with the book's
   index in its prompt, gets a read-only `book` tool, and reports to the owner
-  when its run ends, fails, or stops to ask. You can detach a session you
-  opened yourself (see [Detaching a session](#detaching-a-session)).
+  when its run ends, fails, or stops to ask. You can detach a session
+  (yours or one the owner launched) (see [Detaching a session](#detaching-a-session)).
 - **The owner's conversation is a normal session** with `kind: "owner"`,
   hidden from `GET /api/sessions` unless `?include=owners`. It cannot be
   deleted through the generic session route, and an inbox event reaches it only
@@ -89,13 +89,13 @@ remain available in the owner's LiveBar and Overview, and can be opened directly
 
 ### Detaching a session
 
-A session you opened in an owner's codebase can be detached from the session
+Any session in an owner's codebase can be detached from the session
 panel (**Detach from <owner>**), and reattached the same way. A detached
 session sends that owner no reports, drops out of its row and Overview, and the
 owner's `sessions` tool only sees that it exists: it cannot read, direct or
 answer it. The choice is stored with the session and survives a restart.
-Sessions the owner opened, and the owner's own conversation, cannot be
-detached.
+A detached session the owner launched pushes to you directly, since the
+owner no longer hears it. The owner's own conversation cannot be detached.
 
 ## API
 

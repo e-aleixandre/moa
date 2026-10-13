@@ -101,12 +101,12 @@ function LifecycleActions({ session, inline }) {
     if (inline) return;
     fn();
   };
-  // Only a conversation the user opened can leave its owner; one the owner
-  // opened, or the owner's own, has no such door.
+  // Any conversation of an owner's project can leave it, including one the
+  // owner launched; the owner's own conversation has no such door.
   const detached = !session.ownerId && !!session.detachedOwnerId;
   const ownerName = detached ? session.detachedOwnerName : session.ownerName;
   const canDetach = (session.ownerId || session.detachedOwnerId)
-    && session.origin !== "owner" && session.kind !== "owner";
+    && session.kind !== "owner";
   return (
     <div class="zl-panel-acts">
       {canDetach && (
