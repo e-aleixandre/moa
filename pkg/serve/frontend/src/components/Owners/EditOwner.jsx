@@ -1,7 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
+import { Plus, X } from "lucide-preact";
 import { Field } from "../../primitives/Field/Field.jsx";
 import { Button } from "../../primitives/Button/Button.jsx";
-import { ownerAvatar, storedAvatar } from "./OwnerAvatar.jsx";
+import { useStore } from "../../hooks/useStore.js";
+import { ownersSlice } from "../../data/owners.js";
+import { ownerEditBody, ownerState, sameSendTargets, sendCandidates, sendTargets } from "../../data/owners-model.js";
+import { OwnerAvatarFor, ownerAvatar, storedAvatar } from "./OwnerAvatar.jsx";
 import { OwnerIdentityPicker } from "./OwnerIdentityPicker.jsx";
 
 /* EditOwner — changing an owner's name and face after it exists.
@@ -22,24 +26,87 @@ import { OwnerIdentityPicker } from "./OwnerIdentityPicker.jsx";
    and the editor must open on the face the user is looking at, not on an
    empty object. Saving then writes it, which is the moment a derived face
    becomes a stored one — from creation onwards the name and the face are
-   independent, and renaming never moves the face. */
+   independent, and renaming never moves the face.
+
+   "Can send tasks to" is the owner's one-way permission to send tasks to
+   other owners. It saves with the rest of the form: removing an owner there
+   is a revocation, and one Save is the moment it is decided. */
+
+// SendTo — the owners this one can send tasks to, × to take one out, and
+// "+ Add" opening the others in place (no popover over the panel).
+function SendTo({ owner, owners, ids, onChange, phone }) {
+  const [adding, setAdding] = useState(false);
+  const targets = sendTargets(owner, owners, ids);
+  const candidates = sendCandidates(owner, owners, ids);
+  const size = phone ? 24 : 20;
+  return (
+    <div class="ow-field">
+      <span class="ow-label">Can send tasks to</span>
+      <div class="ow-sendto" role="group" aria-label="Can send tasks to">
+        {targets.map((o) => (
+          <div class="ow-sendto-row" key={o.id}>
+            <OwnerAvatarFor owner={o} state={ownerState(o)} size={size} />
+            <span class="ow-entry-t">{o.name}</span>
+            <button
+              type="button"
+              class="ow-sendto-x"
+              aria-label={`Remove ${o.name}`}
+              title={`Remove ${o.name}`}
+              onClick={() => onChange(ids.filter((id) => id !== o.id))}
+            >
+              <X aria-hidden="true" />
+            </button>
+          </div>
+        ))}
+        {adding && candidates.map((o) => (
+          <button
+            type="button"
+            class="ow-entry ow-sendto-pick"
+            key={o.id}
+            onClick={() => { onChange([...ids, o.id]); setAdding(false); }}
+          >
+            <OwnerAvatarFor owner={o} state={ownerState(o)} size={size} />
+            <span class="ow-entry-t">{o.name}</span>
+            <Plus aria-hidden="true" />
+          </button>
+        ))}
+        {candidates.length > 0 && (
+          <button type="button" class="ow-entry ow-sendto-add" aria-expanded={adding} onClick={() => setAdding(!adding)}>
+            {adding ? <X aria-hidden="true" /> : <Plus aria-hidden="true" />}
+            <span class="ow-entry-t">{adding ? "Cancel" : "Add"}</span>
+          </button>
+        )}
+        {!targets.length && !candidates.length && <p class="ow-hint ow-sendto-none">There are no other owners yet.</p>}
+      </div>
+      {!targets.length && candidates.length > 0 && !adding && (
+        <p class="ow-hint">Add the owners it can send tasks to without asking you.</p>
+      )}
+    </div>
+  );
+}
+
 export function EditOwner({ owner, onSave, onClose, phone }) {
+  const owners = useStore((st) => ownersSlice(st).list);
   const current = ownerAvatar(owner);
+  const savedSendTo = owner.can_send_tasks_to || [];
   const [name, setName] = useState(owner.name);
   const [avatar, setAvatar] = useState(current);
+  const [sendTo, setSendTo] = useState(savedSendTo);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState(null);
   useEffect(() => {
     setName(owner.name);
     setAvatar(ownerAvatar(owner));
+    setSendTo(owner.can_send_tasks_to || []);
     setFailure(null);
-  }, [owner.id, owner.name, owner.avatar?.shape, owner.avatar?.color, owner.avatar?.tone]);
+  }, [owner.id, owner.name, owner.avatar?.shape, owner.avatar?.color, owner.avatar?.tone, savedSendTo.join(",")]);
 
   const cleanName = name.trim();
   const changed = cleanName !== owner.name
     || avatar.shape !== current.shape
     || avatar.color !== current.color
-    || avatar.tone !== current.tone;
+    || avatar.tone !== current.tone
+    || !sameSendTargets(sendTo, savedSendTo);
   return (
     <div class="ow-form">
       <OwnerIdentityPicker
@@ -62,6 +129,7 @@ export function EditOwner({ owner, onSave, onClose, phone }) {
           aria-label="Owner name"
         />
       </label>
+      <SendTo owner={owner} owners={owners} ids={sendTo} onChange={setSendTo} phone={phone} />
       <div class="ow-form-foot">
         {failure && <p class="ow-fail" role="alert">{failure}</p>}
         <Button
@@ -73,10 +141,11 @@ export function EditOwner({ owner, onSave, onClose, phone }) {
             setBusy(true);
             setFailure(null);
             try {
-              await onSave?.({ name: cleanName, avatar: storedAvatar(avatar) });
+              await onSave?.(ownerEditBody(owner, { name: cleanName, avatar: storedAvatar(avatar), sendTo }));
               onClose?.();
             } catch (error) {
-              setFailure(String(error.message || error));
+              // Owners' errors are plain text after the status.
+              setFailure(String(error.message || error).replace(/^\d{3}:\s*/, ""));
             } finally {
               setBusy(false);
             }

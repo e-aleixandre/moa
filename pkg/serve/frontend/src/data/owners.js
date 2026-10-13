@@ -73,8 +73,11 @@ export async function createOwner({ root, name, model, thinking, avatar }) {
 
 // updateOwner reloads both projections because an owner rename can also
 // retitle its standing conversation, which is carried by the session list.
-export async function updateOwner(id, { name, avatar }) {
-  const info = await api('PATCH', `/api/owners/${id}`, { name, avatar });
+export async function updateOwner(id, { name, avatar, can_send_tasks_to }) {
+  const body = { name, avatar };
+  // Only when it changed (ownerEditBody): omitted means unchanged.
+  if (can_send_tasks_to) body.can_send_tasks_to = can_send_tasks_to;
+  const info = await api('PATCH', `/api/owners/${id}`, body);
   await loadOwners();
   await loadSessions();
   return info;

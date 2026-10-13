@@ -322,3 +322,42 @@ export function ownerOfSession(owners = [], sess) {
   if (!sess?.ownerId) return null;
   return owners.find((o) => o.id === sess.ownerId) || null;
 }
+
+// ── Can send tasks to ─────────────────────────────────────────────────────
+// An owner's one-way permission to send tasks to others (owner.json
+// `can_send_tasks_to`, owner ids). An id the roster no longer knows is left
+// out: deleting an owner removes it from every list on the server.
+
+export function sendTargets(owner, owners = [], ids = owner?.can_send_tasks_to || []) {
+  const byId = new Map((owners || []).map((o) => [o?.id, o]));
+  const seen = new Set();
+  const out = [];
+  for (const id of ids || []) {
+    if (seen.has(id) || id === owner?.id || !byId.has(id)) continue;
+    seen.add(id);
+    out.push(byId.get(id));
+  }
+  return out;
+}
+
+// sendCandidates — who "+ Add" offers: every other owner not already there.
+export function sendCandidates(owner, owners = [], ids = []) {
+  const taken = new Set(ids || []);
+  return (owners || [])
+    .filter((o) => o?.id && o.id !== owner?.id && !taken.has(o.id))
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+}
+
+export function sameSendTargets(a = [], b = []) {
+  const x = [...new Set(a || [])].sort();
+  const y = [...new Set(b || [])].sort();
+  return x.length === y.length && x.every((id, i) => id === y[i]);
+}
+
+// ownerEditBody — Edit owner's PATCH. The permission list travels only when
+// it changed: omitted means unchanged, so an older server never sees it.
+export function ownerEditBody(owner, { name, avatar, sendTo }) {
+  const body = { name, avatar };
+  if (sendTo && !sameSendTargets(sendTo, owner?.can_send_tasks_to || [])) body.can_send_tasks_to = [...new Set(sendTo)];
+  return body;
+}

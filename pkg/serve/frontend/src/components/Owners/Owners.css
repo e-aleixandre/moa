@@ -378,6 +378,26 @@
   .ow-entry:hover { background: var(--zl-hi); color: var(--zl-t1); }
 }
 
+/* Edit owner's "Can send tasks to": the owners on the browse list's
+   surface, × on each, "+ Add" opening the others in place. */
+.ow-sendto { display: flex; flex-direction: column; padding: 4px; border-radius: var(--zl-r-md); background: var(--zl-raised); box-shadow: var(--zl-rim); }
+.ow-sendto-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 4px 0 10px; color: var(--zl-t1); font-size: var(--zl-fs-body); }
+.ow-sendto-row > :first-child, .ow-sendto-pick > :first-child { flex: none; }
+.ow-sendto-x {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0;
+  border-radius: var(--zl-r-sm); background: transparent; color: var(--zl-t4); cursor: pointer;
+}
+.ow-sendto-x svg { width: 15px; height: 15px; }
+@media (hover: hover) {
+  .ow-sendto-x:hover { background: var(--zl-hi); color: var(--zl-t1); }
+}
+.ow-sendto-add { color: var(--zl-t3); }
+.ow-sendto-pick { color: var(--zl-t3); }
+.ow-sendto-row + .ow-sendto-pick, .ow-sendto-row + .ow-sendto-add { margin-top: 2px; box-shadow: inset 0 1px 0 var(--zl-line); border-radius: 0 0 var(--zl-r-sm) var(--zl-r-sm); }
+.ow-sendto-none { padding: 8px 10px; }
+.msheet .ow-form .ow-sendto-row { min-height: 48px; }
+.msheet .ow-form .ow-sendto-x { width: 44px; height: 44px; }
+
 .ow-picks { display: flex; flex-direction: column; border-radius: var(--zl-r-md); background: var(--zl-raised); box-shadow: var(--zl-rim); overflow: hidden; }
 .ow-pick {
   display: flex;
