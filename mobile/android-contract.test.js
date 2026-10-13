@@ -1,0 +1,257 @@
+import { describe, expect, it } from "bun:test";
+import { readFileSync, readdirSync } from "node:fs";
+
+// Source contracts for the Android container, in the same style as the iOS
+// ones in www/native-auth.test.js: the properties a refactor could silently
+// lose, checked where a Linux CI can check them. Behaviour (crypto, origin
+// table, navigation, Back) is pinned by the JVM tests in android/app/src/test.
+
+const javaDir = "android/app/src/main/java/com/ealeixandre/moa/app";
+const java = Object.fromEntries(
+  readdirSync(javaDir)
+    .filter((name) => name.endsWith(".java"))
+    .map((name) => [name, readFileSync(`${javaDir}/${name}`, "utf8")]),
+);
+const manifest = readFileSync("android/app/src/main/AndroidManifest.xml", "utf8");
+const extraction = readFileSync("android/app/src/main/res/xml/data_extraction_rules.xml", "utf8");
+const network = readFileSync("android/app/src/main/res/xml/network_security_config.xml", "utf8");
+const appGradle = readFileSync("android/app/build.gradle", "utf8");
+const styles = readFileSync("android/app/src/main/res/values/styles.xml", "utf8");
+const shareLayout = readFileSync("android/app/src/main/res/layout/activity_share.xml", "utf8");
+const rootIgnore = readFileSync("../.gitignore", "utf8");
+
+function code(source) {
+  return source.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+describe("Android native bridges", () => {
+  it("never exposes a Java object to every origin", () => {
+    for (const [name, source] of Object.entries(java)) {
+      expect(`${name}: ${code(source).includes("addJavascriptInterface(")}`).toBe(`${name}: false`);
+      expect(`${name}: ${code(source).includes("@JavascriptInterface")}`).toBe(`${name}: false`);
+    }
+  });
+
+  it("installs the bridges as origin-scoped listeners and document-start scripts, or not at all", () => {
+    const bridges = code(java["WebBridges.java"]);
+    expect(bridges).toContain("WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)");
+    expect(bridges).toContain("WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)");
+    expect(bridges).toContain("Collections.singleton(OriginPolicy.LOCAL_ORIGIN)");
+    expect(bridges).toContain("WebViewCompat.addWebMessageListener(webView, PUSH_PORT, rules");
+    expect(bridges).toContain("if (!isMainFrame");
+    expect(bridges).toContain("OriginPolicy.mayCall(bridge, method, caller)");
+    expect(bridges).not.toMatch(/singleton\("\*"\)|"\*"/);
+    // Same JS API as iOS.
+    for (const method of ["claim", "authorize", "reauthorize", "reset"]) {
+      expect(bridges).toContain(`${method}: (`);
+    }
+    for (const method of ["status", "enable", "disable", "setVisibleSession"]) {
+      expect(bridges).toContain(`${method}: (`);
+    }
+  });
+
+  it("installs the bridges before Capacitor loads the first page", () => {
+    const activity = code(java["MainActivity.java"]);
+    expect(activity.indexOf("bridges.install()")).toBeGreaterThan(-1);
+    expect(activity.indexOf("bridges.install()")).toBeLessThan(activity.indexOf("super.load()"));
+  });
+
+  // Changing WebMessageListeners under a live page breaks that page's port
+  // (QA: the authorize after a first claim never arrived, and the next
+  // message crashed WebView). Re-scoping happens only as a main-frame
+  // navigation starts, or before the first page.
+  it("re-scopes the paired bridges only at a navigation boundary", () => {
+    const callers = Object.entries(java)
+      .filter(([, source]) => code(source).includes("syncPairedOrigin"))
+      .map(([name]) => name)
+      .sort();
+    expect(callers).toEqual(["MainActivity.java", "WebBridges.java"]);
+    expect(code(java["MainActivity.java"])).toContain("bridges::syncPairedOrigin");
+    const client = code(java["MoaWebViewClient.java"]);
+    const override = client.slice(client.indexOf("shouldOverrideUrlLoading"), client.indexOf("static void openExternally"));
+    expect(client.split("beforeNavigation.run()").length - 1).toBe(2);
+    expect(override.split("beforeNavigation.run()").length - 1).toBe(2);
+  });
+
+  it("removes Capacitor's all-origin JavaScript interfaces it does not use", () => {
+    const activity = code(java["MainActivity.java"]);
+    const capacitor = "node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/plugin";
+    for (const [file, name] of [
+      ["CapacitorCookies.java", "CapacitorCookiesAndroidInterface"],
+      ["CapacitorHttp.java", "CapacitorHttpAndroidInterface"],
+    ]) {
+      expect(readFileSync(`${capacitor}/${file}`, "utf8")).toContain(`addJavascriptInterface(this, "${name}")`);
+      expect(activity).toContain(`removeJavascriptInterface("${name}")`);
+    }
+  });
+});
+
+describe("Android device credential", () => {
+  it("lives only in a Keystore-encrypted no-backup file", () => {
+    const store = code(java["DeviceCredentialStore.java"]);
+    const box = code(java["KeystoreBox.java"]);
+    expect(store).toContain("new KeystoreBox(");
+    expect(box).toContain('"AndroidKeyStore"');
+    expect(box).toContain("KeyProperties.BLOCK_MODE_GCM");
+    expect(box).toContain("getNoBackupFilesDir()");
+    for (const source of [store, box, code(java["DeviceAuthBridge.java"])]) {
+      expect(source).not.toContain("getSharedPreferences");
+      expect(source).not.toContain("Log.");
+      expect(source).not.toContain("System.out");
+    }
+  });
+
+  it("travels only over native HTTPS without redirects or the WebView cookie jar", () => {
+    const http = code(java["NativeHttp.java"]);
+    const auth = code(java["DeviceAuthBridge.java"]);
+    expect(http).toContain("setInstanceFollowRedirects(false)");
+    expect(http).toContain("CookieHandler.setDefault(null)");
+    expect(http).toContain('"https".equals(target.getProtocol())');
+    expect(auth).toContain('headers.put("Authorization", "Moa-Device " + credential)');
+    expect(auth).toContain('"/api/pulse/pairings/claim"');
+    expect(auth).toContain('"/api/pulse/device-session"');
+    expect(auth).toContain("CookieManager.getInstance()");
+    expect(auth).toContain("manager.flush()");
+  });
+
+  it("is never backed up or transferred, and nothing goes over cleartext", () => {
+    expect(manifest).toContain('android:allowBackup="false"');
+    expect(manifest).toContain('android:dataExtractionRules="@xml/data_extraction_rules"');
+    expect(manifest).toContain('android:usesCleartextTraffic="false"');
+    expect(network).toContain('cleartextTrafficPermitted="false"');
+    for (const section of ["cloud-backup", "device-transfer"]) {
+      const body = extraction.split(`<${section}>`)[1].split(`</${section}>`)[0];
+      for (const domain of ["root", "file", "database", "sharedpref", "device_root", "device_file", "device_database", "device_sharedpref"]) {
+        expect(body).toContain(`<exclude domain="${domain}" path="." />`);
+      }
+    }
+  });
+});
+
+describe("Android notifications", () => {
+  it("receives data-only FCM in a non-exported service", () => {
+    expect(manifest).toMatch(/<service\s+android:name="\.MoaMessagingService"\s+android:exported="false">/);
+    expect(manifest).toContain("com.google.firebase.MESSAGING_EVENT");
+    expect(manifest).toContain('android:name="firebase_messaging_auto_init_enabled"');
+  });
+
+  it("builds without google-services.json and never commits it", () => {
+    expect(rootIgnore).toContain("mobile/android/app/google-services.json");
+    expect(appGradle).toContain("def servicesJSON = file('google-services.json')");
+    expect(appGradle).toContain("apply plugin: 'com.google.gms.google-services'");
+  });
+
+  it("names its channels in Spanish with an English fallback", () => {
+    const es = readFileSync("android/app/src/main/res/values-es/strings.xml", "utf8");
+    const en = readFileSync("android/app/src/main/res/values/strings.xml", "utf8");
+    expect(es).toContain('<string name="channel_urgent">Preguntas y permisos</string>');
+    expect(es).toContain('<string name="channel_active">Terminadas</string>');
+    expect(es).toContain('<string name="channel_passive">Resúmenes</string>');
+    for (const name of ["channel_urgent", "channel_active", "channel_passive", "push_fallback_body"]) {
+      expect(en).toContain(`<string name="${name}">`);
+    }
+  });
+});
+
+describe("Android permissions and navigation", () => {
+  it("declares what the pairing scanner, voice and notifications request at runtime", () => {
+    for (const permission of ["INTERNET", "CAMERA", "RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS", "POST_NOTIFICATIONS", "VIBRATE"]) {
+      expect(manifest).toContain(`<uses-permission android:name="android.permission.${permission}" />`);
+    }
+    expect(manifest).toContain('android:name="com.google.mlkit.vision.DEPENDENCIES"');
+  });
+
+  it("keeps the main frame on the paired and local origins and minimizes at the root", () => {
+    const client = code(java["MoaWebViewClient.java"]);
+    const activity = code(java["MainActivity.java"]);
+    expect(client).toContain("OriginPolicy.navigation(url, credentials.pairedOrigin())");
+    expect(client).toContain("Intent.CATEGORY_BROWSABLE");
+    expect(activity).toContain("getOnBackPressedDispatcher().addCallback");
+    expect(activity).toContain("moveTaskToBack(true)");
+    expect(activity).not.toContain("finish()");
+    expect(manifest).toContain('android:enableOnBackInvokedCallback="true"');
+    expect(manifest).toContain('android:windowSoftInputMode="adjustResize"');
+  });
+});
+
+describe("Android share-in", () => {
+  const activity = () => code(java["ShareActivity.java"]);
+  const shareSources = ["ShareActivity.java", "ShareClient.java", "ShareBody.java", "ShareInbox.java", "ShareInboxBridge.java", "ShareLogic.java"];
+
+  it("is a sheet over the sharing app for what iOS accepts", () => {
+    const block = manifest.slice(manifest.indexOf('android:name=".ShareActivity"'), manifest.indexOf("</activity>", manifest.indexOf('android:name=".ShareActivity"')));
+    expect(block).toContain('android:exported="true"');
+    expect(block).toContain('android:excludeFromRecents="true"');
+    expect(block).toContain('android:taskAffinity=""');
+    expect(block).toContain('android:theme="@style/Theme.Moa.Share"');
+    expect(block).toContain('<action android:name="android.intent.action.SEND" />');
+    expect(block).toContain('<action android:name="android.intent.action.SEND_MULTIPLE" />');
+    for (const type of ["text/*", "image/*", "application/pdf", "*/*"]) {
+      expect(block).toContain(`<data android:mimeType="${type}" />`);
+    }
+    expect(styles).toContain("<item name=\"android:windowIsTranslucent\">true</item>");
+  });
+
+  it("never puts the credential in an intent, an extra, a log or the WebView", () => {
+    for (const name of shareSources) {
+      const source = code(java[name]);
+      expect(`${name}: ${/\bLog\.|System\.out|System\.err|printStackTrace/.test(source)}`).toBe(`${name}: false`);
+    }
+    const sheet = activity();
+    expect(sheet).not.toContain("putExtra(");
+    expect(sheet).not.toMatch(/\.credential\b/);
+    expect(sheet).toContain("ShareClient.forStored(stored, System.currentTimeMillis())");
+    const client = code(java["ShareClient.java"]);
+    expect(client).toContain('headers.put("Authorization", "Moa-Device " + credential)');
+    expect(client).not.toContain("openConnection");
+    expect(client).toContain("NativeHttp.send(");
+  });
+
+  it("streams the send body with a fixed length instead of building it in memory", () => {
+    const http = code(java["NativeHttp.java"]);
+    expect(http).toContain("connection.setFixedLengthStreamingMode(body.length())");
+    expect(http).toContain("body.writeTo(out)");
+    const body = code(java["ShareBody.java"]);
+    expect(body).toContain("new FileInputStream(part.file)");
+    expect(body).toContain("CHUNK = 3 * 64 * 1024");
+  });
+
+  it("asks for a destination and sends nothing until Send", () => {
+    const sheet = activity();
+    // The only send is the Send button's.
+    expect(sheet.split(".send(destination.sessionId, body)").length - 1).toBe(1);
+    expect(sheet).toContain("sendButton.setOnClickListener(view -> send())");
+    expect(sheet).toContain("boolean enabled = selected() != null && !sending");
+    // Back, Cancel and a tap above the sheet all cancel.
+    expect(sheet).toContain("getOnBackPressedDispatcher().addCallback");
+    expect(sheet).toContain("root.setOnClickListener(view -> cancel())");
+    expect(sheet).toContain("cancelButton.setOnClickListener(view -> cancel())");
+  });
+
+  it("reads only other apps' content URIs, before the grant ends, with the limits checked first", () => {
+    const sheet = activity();
+    expect(sheet).toContain("ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())");
+    expect(sheet).toContain('authority.startsWith(getPackageName() + ".")');
+    expect(sheet).toContain("OpenableColumns.SIZE");
+    expect(sheet).toContain("uris.size() > ShareLogic.MAX_FILES");
+    expect(code(java["ShareInbox.java"])).toContain("getNoBackupFilesDir()");
+  });
+
+  it("keeps every editable field at 16sp or more", () => {
+    expect(styles).toMatch(/<style name="Moa.Share.Field" parent="">[\s\S]*?<item name="android:textSize">16sp<\/item>/);
+    const fields = shareLayout.match(/<EditText[\s\S]*?\/>/g);
+    expect(fields.length).toBe(2);
+    for (const field of fields) expect(field).toContain('style="@style/Moa.Share.Field"');
+  });
+
+  it("exposes MoaShareInbox with the iOS API, scoped like the other bridges", () => {
+    const bridges = code(java["WebBridges.java"]);
+    expect(bridges).toContain('WebViewCompat.addWebMessageListener(webView, SHARE_LOCAL_PORT, local, listener("share", share))');
+    expect(bridges).toContain('WebViewCompat.addWebMessageListener(webView, SHARE_PAIRED_PORT, rules, listener("share", share))');
+    expect(bridges).toContain("WebViewCompat.removeWebMessageListener(webView, SHARE_PAIRED_PORT)");
+    for (const method of ["status", "bindServer", "clearServer", "peek", "acknowledge"]) {
+      expect(bridges).toContain(`${method}: (`);
+    }
+    expect(code(java["MainActivity.java"])).toContain("new ShareInboxBridge(this, credentials)");
+  });
+});

@@ -280,10 +280,121 @@ Notifications and Keychain Sharing with both groups, private one first.
 Test Keychain isolation with a **new** pairing: an existing install keeps its
 credential where it was created, so it cannot reveal a regression.
 
-## Why the iOS project is committed
+## Android
 
-The Android project is disposable Capacitor output. The iOS project is not any
-more: share-in adds an app extension target, target membership, entitlements and
+Same app id (`com.ealeixandre.moa.app`), same startup: the local pairing page
+(`www/`, served by Capacitor at `https://localhost`) until the app is paired,
+then the paired server's own frontend over HTTPS. Requires Android 8 (API 26).
+
+### Building
+
+Android Studio or just the SDK (platform 36) and JDK 21. From this directory:
+
+    npm install
+    npm run assets           # icons and splash, when resources/ changed
+    npx cap sync android
+    cd android && ./gradlew assembleDebug testDebugUnitTest
+
+The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk`; install
+with `adb install -r`. `npm run android` opens the project in Android Studio.
+Debug builds are signed with the SDK's per-machine debug key
+(`~/.android/debug.keystore`), so an APK built on another machine has to be
+uninstalled before installing over it -- and uninstalling forgets the pairing.
+There is no release signing configured yet.
+
+`testDebugUnitTest` runs the JVM tests: the push crypto against every case in
+`relay/test/vectors.json` (read from the repo, not copied), the bridge origin
+table, navigation, notification channels, the relay confirmation and the
+session cookie. `android-contract.test.js` (Bun) pins the security properties
+a refactor could lose.
+
+The relay URL is a build property and must equal the server's
+`push.relay_url`: `./gradlew assembleDebug -PmoaPushRelayUrl=https://...`
+(default `https://moa-push-relay.ealeixandre.workers.dev`).
+
+### Firebase
+
+Notifications use FCM directly from native code (no Capacitor push plugin).
+`android/app/google-services.json` comes from the moa Firebase project
+(Project settings -> Your apps -> Android app `com.ealeixandre.moa.app`) and is
+**not committed**: copy it into place before building. Without it the build
+still succeeds, Firebase is not initialised, and the app reports notifications
+as unsupported; everything else works. The relay sends data-only messages; the
+app decrypts them itself, so Google never sees the content.
+
+### Permissions
+
+| Permission | For |
+|---|---|
+| `INTERNET`, `ACCESS_NETWORK_STATE` | talking to the paired moa |
+| `CAMERA` | scanning the pairing code (Google code scanner) |
+| `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` | voice messages in the WebView |
+| `POST_NOTIFICATIONS` | asked when notifications are turned on (Android 13+) |
+| `VIBRATE` | haptics |
+
+### Origins and storage
+
+- Inside the app: only `https://localhost` and the exact paired HTTPS origin.
+  Anything else opens in the system browser; cleartext is refused everywhere.
+- The native bridges (`MoaNativeAuth`, `MoaNativePush`, `MoaShareInbox`) are WebView message
+  listeners scoped to those two origins, main frame only, with the same method
+  table as iOS. They are never `addJavascriptInterface`; if the WebView lacks
+  message listeners or document-start scripts, the bridges are absent and the
+  app fails closed.
+- The device credential and push secret are encrypted with a non-exportable
+  Android Keystore AES-GCM key in the no-backup directory. Backup and
+  device-to-device transfer exclude everything.
+- Back asks the page (`window.MoaHandleBack()`); when the page does not
+  handle it, the app goes to the background instead of closing.
+
+### Share-in
+
+`ShareActivity` receives `ACTION_SEND` / `ACTION_SEND_MULTIPLE` (text, links,
+images, PDFs, any file) as a dark sheet over the app that shared. The owner
+picks the conversation there: owners first, then recent sessions, from
+`GET /api/share/destinations` with `Authorization: Moa-Device`. An optional
+note goes first, then the shared text/link/title (deduplicated like the web
+share target). Nothing is sent until **Send**; Cancel, Back or a tap above the
+sheet sends and keeps nothing. Send is `POST /api/sessions/{id}/send`; a
+closed conversation (404) is resumed (`/resume`, 409 also fine) and sent once
+more. Attachments are streamed as base64 from disk with a fixed
+Content-Length, never built as one string.
+
+Shared files are copied at once into a staging share under the no-backup
+directory (`no_backup/ShareInbox/.<id>.tmp`): the content URI grant lasts only
+as long as the sheet. Only `content://` URIs from other apps are read, and the
+provider-reported size is checked before reading. Limits as iOS: 8 files and
+32 MB in total per share, 256 KB of text, 20 shares waiting.
+
+If listing or sending fails (not paired, server error, unreachable), the sheet
+offers **Save for later**, which commits the staging share to the queue. moa
+places it from its own picker through `window.MoaShareInbox` (same API as
+iOS: `status`/`bindServer`/`clearServer` from the local page, `peek` /
+`acknowledge` from the paired origin only), a WebMessage listener like the
+other bridges.
+
+Manual check: share a link from Chrome and an image from Photos to moa, pick
+an owner, add a note, Send; the conversation gets one message with the note,
+the link and the image. Pick a closed conversation: it reopens and receives
+it. With the server down, Save for later, then open moa: its picker offers
+the item.
+
+### Notification channels
+
+| Channel | Level | Behaviour |
+|---|---|---|
+| Preguntas y permisos | urgent | heads-up, sound |
+| Terminadas | active | sound |
+| Resúmenes | passive | silent |
+
+Names follow the system language (English otherwise). A message that cannot be
+decrypted is shown as a generic alert on «Terminadas».
+
+## Why the native projects are committed
+
+Both are. Android carries its own Java (bridges, credential storage, push), so
+`android/` is source like `ios/`: update it with `npx cap sync android`, never
+regenerate it with `npx cap add android`. For iOS: share-in adds an app extension target, target membership, entitlements and
 an embedding build phase. None of those can be represented by a Capacitor
 plugin or a podspec; those mechanisms can add code to an existing target, but
 cannot declare a second signed application target.
@@ -305,7 +416,8 @@ rewriter compatible with an evolving undocumented format.
 
 ## What is not committed
 
-`node_modules/`, the generated Android project, iOS build products/user data,
-and the copy of `www/` produced inside the Xcode project. The committed iOS
+`node_modules/`, Gradle/iOS build products and user data, the copies of `www/`
+that `cap sync` writes inside both native projects, and
+`android/app/google-services.json`. The committed iOS
 project is updated in place with `npx cap sync ios`; it is never regenerated
 with `npx cap add ios`.

@@ -1,0 +1,62 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">moa</string>
+    <string name="title_activity_main">moa</string>
+    <string name="package_name">com.ealeixandre.moa.app</string>
+    <string name="custom_url_scheme">com.ealeixandre.moa.app</string>
+
+    <!-- Notification channels, as listed in system settings. -->
+    <string name="channel_urgent">Questions and permissions</string>
+    <string name="channel_active">Finished</string>
+    <string name="channel_passive">Summaries</string>
+
+    <!-- Shown for a notification moa could not decrypt. -->
+    <string name="push_fallback_title">moa</string>
+    <string name="push_fallback_body">You have updates in moa</string>
+
+    <!-- Share sheet (ShareActivity). Same copy as the iOS share extension. -->
+    <string name="share_title">Send to moa</string>
+    <string name="share_send">Send</string>
+    <string name="share_cancel">Cancel</string>
+    <string name="share_note_hint">Add a message (optional)</string>
+    <string name="share_search_hint">Search</string>
+    <string name="share_section_owners">Owners</string>
+    <string name="share_section_recent">Recent</string>
+    <string name="share_no_matches">No matches</string>
+    <string name="share_untitled">Untitled</string>
+    <string name="share_state_open">working</string>
+    <string name="share_state_closed">closed</string>
+    <plurals name="share_files">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
+    <string name="share_sent">Sent to %1$s</string>
+    <string name="share_save">Save for later</string>
+    <string name="share_close">Close</string>
+    <string name="share_retry">Try again</string>
+    <string name="share_open_moa">Open moa</string>
+    <string name="share_done">Done</string>
+    <string name="share_choose_another">Choose another</string>
+    <string name="share_saved_title">Saved to moa</string>
+    <string name="share_saved_detail">Open moa to choose a conversation.</string>
+    <string name="share_empty_title">No conversations yet</string>
+    <string name="share_empty_detail">Start one in moa, or save this to place it later.</string>
+    <string name="share_not_paired_title">Pair moa first</string>
+    <string name="share_not_paired_detail">Open moa and pair this phone, then share again. Or save this to place it later.</string>
+    <string name="share_unreachable_title">Can\'t reach moa</string>
+    <string name="share_unreachable_detail">Check your connection or VPN, then try again.</string>
+    <string name="share_unknown_title">Not sure it arrived</string>
+    <string name="share_unknown_detail">Check the conversation in moa before sending again.</string>
+    <string name="share_not_found_title">Conversation not found</string>
+    <string name="share_not_found_detail">Choose another conversation, or save this for later.</string>
+    <string name="share_server_title">moa returned an error (%1$d)</string>
+    <string name="share_retry_detail">Try again, or save this to place it later.</string>
+    <string name="share_generic_title">Something went wrong</string>
+    <string name="share_unusable_title">Could not use this share</string>
+    <string name="share_error_queue_full">Open moa and place the pending shares, then try again.</string>
+    <string name="share_error_too_many_files">Share no more than 8 files at once.</string>
+    <string name="share_error_too_large">This share is larger than 32 MB. Choose a smaller file.</string>
+    <string name="share_error_text_too_large">The shared text is too large. Share a shorter selection.</string>
+    <string name="share_error_empty">No supported text, link, image, or file arrived.</string>
+    <string name="share_error_unreadable">This item could not be read. Try sharing it again.</string>
+</resources>

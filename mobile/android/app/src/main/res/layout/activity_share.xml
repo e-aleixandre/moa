@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The share sheet. The root is the dimmed area above the sheet: tapping it
+     cancels, like Back. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/share_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/share_sheet"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="bottom"
+        android:layout_marginTop="56dp"
+        android:background="@drawable/share_sheet_background"
+        android:clickable="true"
+        android:focusable="false"
+        android:orientation="vertical">
+
+        <View
+            android:layout_width="36dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/share_handle" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="12dp">
+
+            <Button
+                android:id="@+id/share_cancel"
+                style="@style/Moa.Share.TextButton"
+                android:text="@string/share_cancel" />
+
+            <TextView
+                android:id="@+id/share_heading"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:singleLine="true"
+                android:text="@string/share_title"
+                android:textColor="@color/moa_text"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <FrameLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content">
+
+                <Button
+                    android:id="@+id/share_send"
+                    style="@style/Moa.Share.PrimaryButton"
+                    android:layout_height="40dp"
+                    android:minWidth="76dp"
+                    android:text="@string/share_send" />
+
+                <ProgressBar
+                    android:id="@+id/share_sending"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:indeterminateTint="@color/moa_accent"
+                    android:visibility="gone" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/share_picker"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/share_summary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="10dp"
+                    android:ellipsize="end"
+                    android:maxLines="2"
+                    android:textColor="@color/moa_text_secondary"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/share_note"
+                    style="@style/Moa.Share.Field"
+                    android:gravity="top|start"
+                    android:hint="@string/share_note_hint"
+                    android:importantForAutofill="no"
+                    android:inputType="textMultiLine|textCapSentences"
+                    android:maxLines="5"
+                    android:minLines="2" />
+
+                <EditText
+                    android:id="@+id/share_search"
+                    style="@style/Moa.Share.Field"
+                    android:layout_marginTop="10dp"
+                    android:hint="@string/share_search_hint"
+                    android:imeOptions="actionSearch"
+                    android:importantForAutofill="no"
+                    android:inputType="text"
+                    android:singleLine="true" />
+
+                <ListView
+                    android:id="@+id/share_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginTop="6dp"
+                    android:layout_weight="1"
+                    android:choiceMode="none"
+                    android:clipToPadding="false"
+                    android:divider="@null"
+                    android:paddingBottom="8dp"
+                    android:scrollbarStyle="outsideOverlay" />
+            </LinearLayout>
+
+            <ProgressBar
+                android:id="@+id/share_loading"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="center"
+                android:indeterminateTint="@color/moa_accent" />
+
+            <LinearLayout
+                android:id="@+id/share_message"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingStart="28dp"
+                android:paddingEnd="28dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/share_message_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:textColor="@color/moa_text"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/share_message_detail"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center"
+                    android:maxWidth="340dp"
+                    android:textColor="@color/moa_text_secondary"
+                    android:textSize="15sp" />
+
+                <Button
+                    android:id="@+id/share_message_primary"
+                    style="@style/Moa.Share.PrimaryButton"
+                    android:layout_marginTop="20dp" />
+
+                <Button
+                    android:id="@+id/share_message_secondary"
+                    style="@style/Moa.Share.TextButton"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>

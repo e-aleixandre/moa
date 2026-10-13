@@ -7,10 +7,13 @@
     "sync": "cap sync",
     "assets": "capacitor-assets generate --ios --android",
     "ios": "cap open ios",
-    "add:ios": "cap add ios"
+    "add:ios": "cap add ios",
+    "android": "cap open android",
+    "add:android": "cap add android"
   },
   "dependencies": {
     "@capacitor-mlkit/barcode-scanning": "^8.2.1",
+    "@capacitor/android": "^8.5.3",
     "@capacitor/core": "^8.0.0",
     "@capacitor/haptics": "^8.0.0",
     "@capacitor/ios": "^8.0.0",
@@ -18,8 +21,8 @@
     "@capacitor/status-bar": "^8.0.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.0.0",
-    "@capacitor/assets": "^3.0.5"
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.0.0"
   },
   "allowScripts": {
     "sharp@0.32.6": true

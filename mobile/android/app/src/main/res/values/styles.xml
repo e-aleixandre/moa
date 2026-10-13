@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme. -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+        <!-- moa's background, so nothing flashes white behind the system bars
+             or the keyboard before the page paints. -->
+        <item name="android:windowBackground">@color/moa_background</item>
+    </style>
+
+
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@drawable/splash</item>
+    </style>
+    <!-- The share sheet: a dark bottom sheet over the app that shared. -->
+    <style name="Theme.Moa.Share" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowAnimationStyle">@style/Animation.Moa.Share</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/moa_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="colorAccent">@color/moa_accent</item>
+        <item name="colorControlActivated">@color/moa_accent</item>
+        <item name="android:textColorPrimary">@color/moa_text</item>
+        <item name="android:textColorSecondary">@color/moa_text_secondary</item>
+        <item name="android:textColorHint">@color/moa_text_hint</item>
+    </style>
+
+    <style name="Animation.Moa.Share" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/share_sheet_in</item>
+        <item name="android:activityCloseExitAnimation">@anim/share_sheet_out</item>
+        <item name="android:windowEnterAnimation">@anim/share_sheet_in</item>
+        <item name="android:windowExitAnimation">@anim/share_sheet_out</item>
+    </style>
+
+    <style name="Moa.Share.Field" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:background">@drawable/share_field_background</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <!-- At least 16sp, like every editable field in moa. -->
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/moa_text</item>
+        <item name="android:textColorHint">@color/moa_text_hint</item>
+    </style>
+
+    <style name="Moa.Share.TextButton" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:minWidth">64dp</item>
+        <item name="android:background">?android:attr/selectableItemBackground</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textColor">@color/moa_accent</item>
+    </style>
+
+    <style name="Moa.Share.PrimaryButton" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:minWidth">88dp</item>
+        <item name="android:background">@drawable/share_primary_button</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textColor">@color/moa_accent_ink</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+</resources>

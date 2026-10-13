@@ -13,13 +13,19 @@
     "handleApplicationNotifications": false
   },
   "android": {
-    "backgroundColor": "#11111b"
+    "backgroundColor": "#11111b",
+    "allowMixedContent": false
   },
   "plugins": {
     "StatusBar": {
       "overlaysWebView": true,
       "style": "DARK",
       "backgroundColor": "#00000000"
+    },
+    "SystemBars": {
+      "style": "DARK",
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover"
     }
   }
 }

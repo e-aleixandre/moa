@@ -116,6 +116,78 @@ jobs:
           npm ci
           npm test
 
+  # Only worth the minutes when the app, the relay it talks to, or this
+  # workflow changed. Unknown base (new branch, force push, workflow_call from
+  # another event) runs everything rather than silently skipping.
+  android:
+    name: Android app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect relevant changes
+        id: changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            if git diff --name-only "$BASE" HEAD | grep -qE '^(mobile/|relay/|\.github/workflows/ci\.yml$)'; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              echo "No changes under mobile/ or relay/; skipping."
+            fi
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.changes.outputs.run == 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            mobile/android/**/*.gradle*
+            mobile/android/gradle/wrapper/gradle-wrapper.properties
+
+      - if: steps.changes.outputs.run == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            mobile/package-lock.json
+
+      - if: steps.changes.outputs.run == 'true'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        if: steps.changes.outputs.run == 'true'
+        working-directory: mobile
+        run: npm ci
+
+      - name: JS tests
+        if: steps.changes.outputs.run == 'true'
+        working-directory: mobile
+        run: bun test ./www/*.test.js ./android-contract.test.js ./privacy-contract.test.js ./server-recovery-contract.test.js
+
+      # Copies the web assets into the (ignored) android assets dir so the APK
+      # is complete; the gradle project itself resolves plugins from
+      # node_modules, which npm ci already provides.
+      - name: Capacitor sync
+        if: steps.changes.outputs.run == 'true'
+        working-directory: mobile
+        run: npx cap sync android
+
+      # No google-services.json here: build.gradle skips the plugin without it.
+      - name: Build and unit-test
+        if: steps.changes.outputs.run == 'true'
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleDebug testDebugUnitTest
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

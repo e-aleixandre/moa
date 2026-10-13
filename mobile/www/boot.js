@@ -69,7 +69,8 @@ async function claim(origin, payload) {
 // A label the owner can recognise in the device list, so revoking the right
 // one does not require guessing which credential is which.
 function deviceLabel() {
-  const model = /iPad/.test(navigator.userAgent) ? "iPad" : "iPhone";
+  const agent = navigator.userAgent;
+  const model = /Android/.test(agent) ? "Android" : /iPad/.test(agent) ? "iPad" : "iPhone";
   return `moa app (${model})`;
 }
 

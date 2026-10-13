@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="moa_background">#11111B</color>
+    <!-- The share sheet, from the frontend tokens (tokens.css, zl palette). -->
+    <color name="moa_raised">#1E1E29</color>
+    <color name="moa_line">#12FFFFFF</color>
+    <color name="moa_line_strong">#1FFFFFFF</color>
+    <color name="moa_text">#F4F4F7</color>
+    <color name="moa_text_secondary">#9091A6</color>
+    <color name="moa_text_hint">#66677C</color>
+    <color name="moa_accent">#CBA6F7</color>
+    <color name="moa_accent_ink">#1A1424</color>
+    <color name="moa_accent_dim">#1FCBA6F7</color>
+    <color name="moa_scrim">#99000000</color>
+</resources>

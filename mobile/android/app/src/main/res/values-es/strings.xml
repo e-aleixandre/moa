@@ -1,0 +1,57 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- Notification channels, as listed in system settings. -->
+    <string name="channel_urgent">Preguntas y permisos</string>
+    <string name="channel_active">Terminadas</string>
+    <string name="channel_passive">Resúmenes</string>
+
+    <!-- Shown for a notification moa could not decrypt. -->
+    <string name="push_fallback_title">moa</string>
+    <string name="push_fallback_body">Tienes novedades en moa</string>
+
+    <!-- Share sheet (ShareActivity). -->
+    <string name="share_title">Enviar a moa</string>
+    <string name="share_send">Enviar</string>
+    <string name="share_cancel">Cancelar</string>
+    <string name="share_note_hint">Añade un mensaje (opcional)</string>
+    <string name="share_search_hint">Buscar</string>
+    <string name="share_section_owners">Owners</string>
+    <string name="share_section_recent">Recientes</string>
+    <string name="share_no_matches">Sin resultados</string>
+    <string name="share_untitled">Sin título</string>
+    <string name="share_state_open">activa</string>
+    <string name="share_state_closed">cerrada</string>
+    <plurals name="share_files">
+        <item quantity="one">%d archivo</item>
+        <item quantity="other">%d archivos</item>
+    </plurals>
+    <string name="share_sent">Enviado a %1$s</string>
+    <string name="share_save">Guardar para después</string>
+    <string name="share_close">Cerrar</string>
+    <string name="share_retry">Reintentar</string>
+    <string name="share_open_moa">Abrir moa</string>
+    <string name="share_done">Hecho</string>
+    <string name="share_choose_another">Elegir otra</string>
+    <string name="share_saved_title">Guardado en moa</string>
+    <string name="share_saved_detail">Abre moa para elegir una conversación.</string>
+    <string name="share_empty_title">Aún no hay conversaciones</string>
+    <string name="share_empty_detail">Empieza una en moa o guarda esto para colocarlo después.</string>
+    <string name="share_not_paired_title">Primero empareja moa</string>
+    <string name="share_not_paired_detail">Abre moa y empareja este móvil; luego vuelve a compartir. O guarda esto para colocarlo después.</string>
+    <string name="share_unreachable_title">No se puede conectar con moa</string>
+    <string name="share_unreachable_detail">Comprueba la conexión o la VPN y vuelve a intentarlo.</string>
+    <string name="share_unknown_title">No está claro que haya llegado</string>
+    <string name="share_unknown_detail">Revisa la conversación en moa antes de volver a enviarlo.</string>
+    <string name="share_not_found_title">Conversación no encontrada</string>
+    <string name="share_not_found_detail">Elige otra conversación o guarda esto para después.</string>
+    <string name="share_server_title">moa devolvió un error (%1$d)</string>
+    <string name="share_retry_detail">Vuelve a intentarlo o guarda esto para colocarlo después.</string>
+    <string name="share_generic_title">Algo ha fallado</string>
+    <string name="share_unusable_title">No se puede usar lo compartido</string>
+    <string name="share_error_queue_full">Abre moa y coloca lo que tienes pendiente; luego vuelve a intentarlo.</string>
+    <string name="share_error_too_many_files">Comparte como máximo 8 archivos a la vez.</string>
+    <string name="share_error_too_large">Lo compartido ocupa más de 32 MB. Elige un archivo más pequeño.</string>
+    <string name="share_error_text_too_large">El texto compartido es demasiado largo. Comparte una selección más corta.</string>
+    <string name="share_error_empty">No ha llegado texto, enlace, imagen ni archivo compatible.</string>
+    <string name="share_error_unreadable">No se ha podido leer. Prueba a compartirlo de nuevo.</string>
+</resources>
