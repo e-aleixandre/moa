@@ -308,6 +308,11 @@ func TestSecretRequestHTTPValidation(t *testing.T) {
 		"bad index":       {f.sess.ID, req.ID, `{"action":"allow","values":[{"index":3,"value":"x"}]}`, http.StatusBadRequest},
 		"duplicate index": {f.sess.ID, req.ID, `{"action":"allow","values":[{"index":0,"value":"x"},{"index":0,"value":"y"}]}`, http.StatusBadRequest},
 		"bad action":      {f.sess.ID, req.ID, `{"action":"maybe"}`, http.StatusBadRequest},
+		"newline value":   {f.sess.ID, req.ID, `{"action":"allow","values":[{"index":0,"value":"pw\nsecond"}]}`, http.StatusBadRequest},
+		"CR value":        {f.sess.ID, req.ID, `{"action":"allow","values":[{"index":0,"value":"pw\rx"}]}`, http.StatusBadRequest},
+		"escape value":    {f.sess.ID, req.ID, `{"action":"allow","values":[{"index":0,"value":"pw\u001b[31m"}]}`, http.StatusBadRequest},
+		"DEL value":       {f.sess.ID, req.ID, `{"action":"allow","values":[{"index":0,"value":"pw\u007f"}]}`, http.StatusBadRequest},
+		"tab value":       {f.sess.ID, req.ID, `{"action":"allow","values":[{"index":0,"value":"pw\tx"}]}`, http.StatusBadRequest},
 		"malformed":       {f.sess.ID, req.ID, `{"action":`, http.StatusBadRequest},
 	} {
 		if code := f.post(t, tc.session, tc.id, tc.body); code != tc.want {
@@ -419,5 +424,117 @@ func TestSecretRequestSubagentCarriesLabel(t *testing.T) {
 	f.mgr.Delete(f.sess.ID) //nolint:errcheck
 	if hits := scanTreeFor(t, f.root, []byte(secretTestValue)); len(hits) > 0 {
 		t.Fatalf("value persisted in %v", hits)
+	}
+}
+
+// A card's ID answers only that card: posting session A's request ID to
+// session B's URL must not deliver A's value to B.
+func TestSecretRequestIDDoesNotResolveInAnotherSession(t *testing.T) {
+	f := newSecretFixture(t,
+		secretToolCall(`read -s -p "Password: " p; echo "A ${#p}"`),
+		secretToolCall(`read -s -p "Password: " p; touch ran-b; echo "B ${#p}"`),
+		simpleResponseHandler("done"),
+		simpleResponseHandler("done"),
+	)
+	if _, _, _, err := f.mgr.Send(f.sess.ID, "a", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	reqA := f.awaitRequest(t)
+	sessB, err := f.mgr.CreateSession(CreateOpts{CWD: f.sess.CWD})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.watch(t, sessB)
+	if _, _, _, err := f.mgr.Send(sessB.ID, "b", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	reqB := f.awaitRequest(t)
+	if reqA.ID == reqB.ID {
+		t.Errorf("two sessions share request ID %q", reqA.ID)
+	}
+	if code := f.post(t, sessB.ID, reqA.ID, `{"action":"allow","values":[{"index":0,"value":"`+secretTestValue+`"}]}`); code != http.StatusNotFound {
+		t.Fatalf("A's ID through B's URL = %d, want 404", code)
+	}
+	if !f.sess.runtime.Context().SecretBroker.IsPending(reqA.ID) || !sessB.runtime.Context().SecretBroker.IsPending(reqB.ID) {
+		t.Fatal("a cross-session answer resolved a card")
+	}
+	_ = f.mgr.Cancel(f.sess.ID)
+	_ = f.mgr.Cancel(sessB.ID)
+}
+
+// A delayed answer to a card of a closed run must not approve the command a
+// resumed session asks for later.
+func TestSecretRequestStaleApprovalAfterResume(t *testing.T) {
+	f := newSecretFixture(t,
+		secretToolCall(`read -s -p "Password: " p; echo "A ${#p}"`),
+		secretToolCall(`read -s -p "Password: " p; touch ran-b; echo "UNAPPROVED_B:${#p}"`),
+		simpleResponseHandler("done"),
+		simpleResponseHandler("done"),
+	)
+	id := f.sess.ID
+	if _, _, _, err := f.mgr.Send(id, "a", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	reqA := f.awaitRequest(t)
+	if err := f.mgr.Cancel(id); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 10*time.Second, "run stopped", func() bool { return sessState(f.sess) == StateIdle })
+	if err := f.mgr.CloseSession(id); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := f.mgr.ResumeSession(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.watch(t, resumed)
+	if _, _, _, err := f.mgr.Send(id, "b", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	reqB := f.awaitRequest(t)
+	if code := f.post(t, id, reqA.ID, `{"action":"allow","values":[{"index":0,"value":"`+secretTestValue+`"}]}`); code != http.StatusNotFound {
+		t.Fatalf("stale approval = %d, want 404", code)
+	}
+	if !resumed.runtime.Context().SecretBroker.IsPending(reqB.ID) {
+		t.Fatal("the stale approval resolved the new card")
+	}
+	if _, err := os.Stat(filepath.Join(resumed.CWD, "ran-b")); err == nil {
+		t.Fatal("the new command ran on a stale approval")
+	}
+	_ = f.mgr.Cancel(id)
+}
+
+// L2: the control-byte restriction protects the terminal; a browser field
+// still takes a value with a TAB, as it did before.
+func TestSecretRequestBrowserAcceptsControlBytes(t *testing.T) {
+	f := newSecretFixture(t)
+	broker := f.sess.runtime.Context().SecretBroker
+	if broker == nil {
+		t.Fatal("session has no secret broker")
+	}
+	type result struct {
+		ans secretaction.Answer
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		ans, err := broker.Request(context.Background(), secretaction.Request{
+			Kind: secretaction.KindBrowser, Origin: "https://example.com",
+			Fields: []secretaction.Field{{Label: "Password", Kind: secretaction.FieldPassword}},
+		})
+		done <- result{ans, err}
+	}()
+	req := f.awaitRequest(t)
+	if code := f.post(t, f.sess.ID, req.ID, `{"action":"allow","values":[{"index":0,"value":"pw\tx"}]}`); code != http.StatusNoContent {
+		t.Fatalf("browser value with TAB = %d, want 204", code)
+	}
+	select {
+	case r := <-done:
+		defer r.ans.Wipe()
+		if r.err != nil || !r.ans.Allow || len(r.ans.Values) != 1 || string(r.ans.Values[0]) != "pw\tx" {
+			t.Fatalf("answer = allow %v err %v", r.ans.Allow, r.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("browser request not answered")
 	}
 }

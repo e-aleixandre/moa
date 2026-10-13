@@ -103,6 +103,16 @@ func ReservedToolName(name string) bool {
 	return name == "checkpoint"
 }
 
+// BuiltinOnlyToolName reports whether name belongs to a builtin that the
+// permission gate trusts by name: the secret-action tools show the owner their
+// own card instead of a permission prompt. Scripts and extensions must never
+// supply these names, even where the builtin is not registered (CLI,
+// headless), or their tool would run without either prompt. MCP tools cannot
+// collide: their names always carry the mcp__ prefix.
+func BuiltinOnlyToolName(name string) bool {
+	return name == "run_with_secret" || name == "browser_fill_secret"
+}
+
 // NewRegistry creates an empty tool registry.
 func NewRegistry() *Registry {
 	return &Registry{tools: make(map[string]Tool)}

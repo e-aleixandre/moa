@@ -10,13 +10,19 @@ import (
 const Placeholder = "[secret]"
 
 // Redactor replaces exact values in a stream whose chunks may split a value.
+// Every byte inside any occurrence of any value is covered, overlapping
+// occurrences included, and each run of overlapping occurrences becomes one
+// placeholder: a value that starts inside another cannot leave a tail behind.
 // It holds back the shortest tail that could still become a value, so a value
 // cut between two chunks is redacted once its end arrives. Redaction prevents
 // accidental echoes (a terminal with echo on, an error message); it is not a
 // defence against a command written to exfiltrate what it reads.
 type Redactor struct {
-	values  [][]byte // longest first, so the longest match wins at a position
-	pending []byte   // unemitted input: a possible prefix of a value
+	values  [][]byte
+	pending []byte // unemitted input: a possible prefix of a value
+	// covered is how many leading bytes of pending belong to a run whose
+	// placeholder was already emitted.
+	covered int
 }
 
 // NewRedactor builds a redactor over values (empty ones are ignored). It
@@ -28,7 +34,6 @@ func NewRedactor(values [][]byte) *Redactor {
 			r.values = append(r.values, v)
 		}
 	}
-	sort.SliceStable(r.values, func(i, j int) bool { return len(r.values[i]) > len(r.values[j]) })
 	return r
 }
 
@@ -53,36 +58,82 @@ func (r *Redactor) Flush() []byte {
 	out, _ := r.scan(r.pending, true)
 	Wipe(r.pending)
 	r.pending = r.pending[:0]
+	r.covered = 0
 	return out
 }
 
-// scan redacts buf left to right. Unless final, it stops at the first position
-// whose remainder is a proper prefix of a value and returns that remainder.
+type span struct{ start, end int }
+
+// scan redacts buf. Unless final, it emits only up to the first position
+// whose remainder is a proper prefix of a value (no later byte can be
+// covered by a match starting earlier) and returns the rest.
 func (r *Redactor) scan(buf []byte, final bool) (out, rest []byte) {
-	out = make([]byte, 0, len(buf))
-	i := 0
-	for i < len(buf) {
-		if n := r.matchAt(buf[i:]); n > 0 {
-			out = append(out, Placeholder...)
-			i += n
-			continue
+	hold := len(buf)
+	if !final {
+		for i := range buf {
+			if r.partialAt(buf[i:]) {
+				hold = i
+				break
+			}
 		}
-		if !final && r.partialAt(buf[i:]) {
-			return out, buf[i:]
-		}
-		out = append(out, buf[i])
-		i++
 	}
-	return out, nil
+	carried := r.covered
+	r.covered = 0
+	out = make([]byte, 0, hold)
+	i := 0
+	for _, run := range r.runs(buf, carried) {
+		continued := carried > 0 && run.start == 0
+		if run.start >= hold && !continued {
+			break
+		}
+		// A run that crosses the hold has its placeholder now: the held
+		// bytes it covers must not produce another one later.
+		if run.end > hold {
+			r.covered = run.end - hold
+		}
+		if run.start >= hold {
+			break
+		}
+		out = append(out, buf[i:run.start]...)
+		if !continued {
+			out = append(out, Placeholder...)
+		}
+		i = run.end
+	}
+	if i < hold {
+		out = append(out, buf[i:hold]...)
+	}
+	return out, buf[hold:]
 }
 
-func (r *Redactor) matchAt(b []byte) int {
+// runs returns the maximal groups of overlapping occurrences of any value in
+// buf, plus its first carried bytes (already placeheld), sorted. Occurrences
+// that only touch stay separate.
+func (r *Redactor) runs(buf []byte, carried int) []span {
+	var spans []span
+	if carried > 0 {
+		spans = append(spans, span{0, carried})
+	}
 	for _, v := range r.values {
-		if bytes.HasPrefix(b, v) {
-			return len(v)
+		for from := 0; from < len(buf); {
+			j := bytes.Index(buf[from:], v)
+			if j < 0 {
+				break
+			}
+			spans = append(spans, span{from + j, from + j + len(v)})
+			from += j + 1
 		}
 	}
-	return 0
+	sort.Slice(spans, func(a, b int) bool { return spans[a].start < spans[b].start })
+	var runs []span
+	for _, s := range spans {
+		if n := len(runs); n > 0 && s.start < runs[n-1].end {
+			runs[n-1].end = max(runs[n-1].end, s.end)
+			continue
+		}
+		runs = append(runs, s)
+	}
+	return runs
 }
 
 // partialAt reports whether b (the end of the input) is the beginning of a

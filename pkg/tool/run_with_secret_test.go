@@ -5,6 +5,7 @@ package tool
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +28,13 @@ type secretRun struct {
 // never answer) and returning everything the outside world saw.
 func runSecretTool(t *testing.T, ctx context.Context, cwd string, params map[string]any, values []string) secretRun {
 	t.Helper()
+	return runSecretToolWith(t, ctx, ToolConfig{WorkspaceRoot: cwd, BashTimeout: 30 * time.Second}, params, values, nil)
+}
+
+// runSecretToolWith is runSecretTool with a tool config and a hook on every
+// live update.
+func runSecretToolWith(t *testing.T, ctx context.Context, cfg ToolConfig, params map[string]any, values []string, onText func(string)) secretRun {
+	t.Helper()
 	broker := secretaction.NewBroker("sess-test")
 	var mu sync.Mutex
 	var run secretRun
@@ -47,13 +55,18 @@ func runSecretTool(t *testing.T, ctx context.Context, cwd string, params map[str
 			}
 		}()
 	}, nil)
-	tool := NewRunWithSecret(ToolConfig{WorkspaceRoot: cwd, BashTimeout: 30 * time.Second}, broker)
+	tool := NewRunWithSecret(cfg, broker)
 	res, err := tool.Execute(ctx, params, func(r core.Result) {
 		mu.Lock()
 		for _, c := range r.Content {
 			run.updates = append(run.updates, c.Text)
 		}
 		mu.Unlock()
+		if onText != nil {
+			for _, c := range r.Content {
+				onText(c.Text)
+			}
+		}
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -297,5 +310,152 @@ func TestDefaultPasswordPromptNeedsWholeWord(t *testing.T) {
 		if defaultPasswordPrompt.MatchString(line) {
 			t.Errorf("%q must not look like a password prompt", line)
 		}
+	}
+}
+
+// H4: a value typed into a terminal with echo on comes back with CRLF line
+// endings; redaction must happen on the same normalized text that is emitted.
+func TestRunWithSecretEchoedNewlineValueRedacted(t *testing.T) {
+	const value = "CrlfSentinel\nSecondLine"
+	run := runSecretTool(t, context.Background(), t.TempDir(), map[string]any{
+		"command": `read -p "Password: " p; echo done`, "fields": []any{passwordField()},
+	}, []string{value})
+	assertNoLeak(t, run, value)
+}
+
+// H4: an escape sequence split across two reads must not shield an echoed
+// value from redaction.
+func TestRunWithSecretANSISplitAcrossChunksRedacted(t *testing.T) {
+	const value = "AnsiSentinelPassword"
+	run := runSecretTool(t, context.Background(), t.TempDir(), map[string]any{
+		"command": `read -s -p "Password: " p; echo; printf 'AnsiSentinel\033[3'; sleep 0.3; printf '1mPassword\n'`,
+		"fields":  []any{passwordField()},
+	}, []string{value})
+	assertNoLeak(t, run, value, "AnsiSentinel")
+	if text := secretText(run.result); !strings.Contains(text, secretaction.Placeholder) {
+		t.Fatalf("echo not redacted:\n%s", text)
+	}
+}
+
+// H7: once Stop is pressed, a prompt that appears later gets nothing.
+func TestRunWithSecretStopBeforePromptDeliversNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var once sync.Once
+	run := runSecretToolWith(t, ctx, ToolConfig{WorkspaceRoot: t.TempDir(), BashTimeout: 30 * time.Second}, map[string]any{
+		"command": `trap '' TERM; echo READY; sleep 0.3; read -s -p "Password: " p; echo "DELIVERED_AFTER_STOP:${#p}"`,
+		"fields":  []any{passwordField()},
+	}, []string{"stop-before-prompt-pw"}, func(s string) {
+		if strings.Contains(s, "READY") {
+			once.Do(cancel)
+		}
+	})
+	all := secretText(run.result) + strings.Join(run.updates, "")
+	if strings.Contains(all, "DELIVERED_AFTER_STOP:2") {
+		t.Fatalf("value delivered after Stop:\n%s", all)
+	}
+	if !run.result.IsError || !strings.Contains(secretText(run.result), "cancelled") {
+		t.Fatalf("result = %s", secretText(run.result))
+	}
+}
+
+// H7: the approval covers the command's lifetime; a background child that
+// prompts on the terminal after the command exited gets nothing.
+func TestRunWithSecretPromptAfterLeaderExitNotAnswered(t *testing.T) {
+	run := runSecretTool(t, context.Background(), t.TempDir(), map[string]any{
+		"command": `exec 3</dev/tty; trap '' HUP; (sleep 0.3; read -s -p "Password: " p <&3; echo "CHILD_AFTER_EXIT:${#p}") & exit 0`,
+		"fields":  []any{passwordField()},
+	}, []string{"leader-exit-password-pw"})
+	all := secretText(run.result) + strings.Join(run.updates, "")
+	if strings.Contains(all, "CHILD_AFTER_EXIT:2") || !strings.Contains(all, "No prompt was answered") {
+		t.Fatalf("value delivered after the command exited:\n%s", all)
+	}
+}
+
+// M1: exports from earlier bash calls must not change what the approved
+// command runs.
+func TestRunWithSecretIgnoresPersistedBashEnv(t *testing.T) {
+	dir := t.TempDir()
+	state := NewBashState()
+	state.Update("", dir, append(os.Environ(), "SECRET_TEST_MARK=agent-export"))
+	run := runSecretToolWith(t, context.Background(), ToolConfig{WorkspaceRoot: dir, BashTimeout: 30 * time.Second, BashState: state}, map[string]any{
+		"command": `echo "mark=${SECRET_TEST_MARK:-unset} term=$TERM"`,
+		"fields":  []any{passwordField()},
+	}, []string{"pw"}, nil)
+	if text := secretText(run.result); !strings.Contains(text, "mark=unset term=dumb") {
+		t.Fatalf("persisted bash environment leaked into the command:\n%s", text)
+	}
+}
+
+// M4: a recognised failure is remembered until the prompt returns, however
+// much output follows it.
+func TestRunWithSecretAuthFailureLatchedPastLongOutput(t *testing.T) {
+	const value = "first-wrong-password"
+	run := runSecretTool(t, context.Background(), t.TempDir(), map[string]any{
+		"command": `read -s -p "Password: " p; echo; echo "Sorry, try again."; printf '%9000s\n' ''; read -s -p "Password: " q; echo "SECOND_PASSWORD:${#q}"`,
+		"fields":  []any{passwordField()},
+		"timeout": 20,
+	}, []string{value})
+	text := secretText(run.result)
+	if strings.Contains(text, "SECOND_PASSWORD:2") || !strings.Contains(text, "not resent") {
+		t.Fatalf("password resent after a recognised failure:\n%s", text)
+	}
+}
+
+func TestANSIStripperAcrossChunks(t *testing.T) {
+	in := []byte("\x1b[33m\x1b[2m✓\x1b[22m\x1b[39m ok \x1b]8;;http://x\x07link\x1b]8;;\x1b\\ \x1b(B\x1b[1A\r")
+	for split := 0; split <= len(in); split++ {
+		var s ansiStripper
+		got := string(s.strip(in[:split])) + string(s.strip(in[split:]))
+		if got != "✓ ok link \r" {
+			t.Fatalf("split at %d: got %q", split, got)
+		}
+	}
+}
+
+func TestRunWithSecretAuthFailureSplitAcrossChunks(t *testing.T) {
+	r := newPtyRun(context.Background(), nil, &exec.Cmd{}, []secretPrompt{{kind: secretaction.FieldPassword, re: defaultPasswordPrompt, delivered: true}}, nil, nil)
+	for _, c := range []string{"Sorry, try ag", "ain.\n", strings.Repeat(" ", 9000) + "\n", "Password: "} {
+		r.feed([]byte(c))
+	}
+	if !r.authStopped {
+		t.Fatal("failure message split between reads was not recognised")
+	}
+}
+
+// H4(c): a prompt that ends in the start of one value, followed by the echo
+// of another overlapping it, must not leave either visible.
+func TestRunWithSecretOverlappingValuesRedacted(t *testing.T) {
+	run := runSecretTool(t, context.Background(), t.TempDir(), map[string]any{
+		"command": `read -p "a" p; echo done`,
+		"fields": []any{
+			map[string]any{"label": "Password", "kind": "password", "prompt": "a$"},
+			map[string]any{"label": "Username", "kind": "username"},
+		},
+	}, []string{"bcdef-secret", "abc"})
+	text := secretText(run.result)
+	if !strings.Contains(text, "done") || !strings.Contains(text, secretaction.Placeholder) {
+		t.Fatalf("value not delivered or echo not redacted:\n%s", text)
+	}
+	assertNoLeak(t, run, "def-secret", "bcdef")
+	if updates := strings.Join(run.updates, ""); !strings.Contains(updates, secretaction.Placeholder) {
+		t.Fatalf("live updates do not show the redacted echo: %q", run.updates)
+	}
+}
+
+// M4: delivering a field that was not answered yet must not clear a
+// recognised failure before an answered prompt returns.
+func TestRunWithSecretAuthFailureSurvivesOtherField(t *testing.T) {
+	run := runSecretTool(t, context.Background(), t.TempDir(), map[string]any{
+		"command": `read -s -p "Password: " p; echo; echo "Sorry, try again."; read -p "Username: " u; read -s -p "Password: " q; echo "SECOND_PASSWORD:${#q}"`,
+		"fields":  []any{passwordField(), map[string]any{"label": "Username", "kind": "username"}},
+		"timeout": 20,
+	}, []string{"another-wrong-pw", "alice"})
+	text := secretText(run.result)
+	if strings.Contains(text, "SECOND_PASSWORD:16") || !strings.Contains(text, "not resent") {
+		t.Fatalf("password resent after a recognised failure:\n%s", text)
+	}
+	if !strings.Contains(text, "2 prompts answered") {
+		t.Fatalf("username was not answered before stopping:\n%s", text)
 	}
 }

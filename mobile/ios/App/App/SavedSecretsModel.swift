@@ -74,3 +74,33 @@ enum SavedSecretInput {
         return data.count <= SavedSecretLimits.maxValueBytes ? data : nil
     }
 }
+
+// Replies from the native bridge go only to the document that asked. Every
+// document commit, pairing bind/clear and unpair bumps the generation; work
+// admitted under an older one, or for another origin, is dropped unanswered.
+final class DocumentGeneration {
+    static let shared = DocumentGeneration()
+
+    private let lock = NSLock()
+    private var value = 0
+
+    var current: Int {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+
+    func bump() {
+        lock.lock(); defer { lock.unlock() }
+        value += 1
+    }
+}
+
+struct ReplyFence: Equatable {
+    let generation: Int
+    let origin: String
+
+    // `documentMatchesPairing`: the web view's current URL is on the paired origin.
+    func permits(generation current: Int, boundOrigin: String?, documentMatchesPairing: Bool) -> Bool {
+        generation == current && boundOrigin == origin && documentMatchesPairing
+    }
+}

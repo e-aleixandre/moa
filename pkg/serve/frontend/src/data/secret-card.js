@@ -117,6 +117,8 @@ export function createSecretCard({ request, send, bridge = null, onChange }) {
       // Saved values first: this is where Face ID happens, and a refusal must
       // leave the card as it was (typed values kept, the input shown).
       for (const field of request.fields.filter((f) => savedRows.has(f.index))) {
+        if (!alive) break;
+
         try {
           merged[field.index] = await readSaved(bridge, field, faceIdReason(request));
           used.push(field);
@@ -129,6 +131,13 @@ export function createSecretCard({ request, send, bridge = null, onChange }) {
           });
           return;
         }
+      }
+      // Resolved or unmounted while Face ID was up: the answer belongs to
+      // nobody now, so nothing is sent and what was read is dropped.
+      if (!alive) {
+        for (const key of Object.keys(merged)) delete merged[key];
+        inFlight = false;
+        return;
       }
       const reused = request.fields.filter((f) => state.fromSaved[f.index] && !savedRows.has(f.index));
       const saves = state.saveOn && bridge

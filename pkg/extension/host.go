@@ -2,6 +2,7 @@ package extension
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -333,6 +334,9 @@ func (a *hostAPI) OnContext(fn ContextHook) {
 }
 
 func (a *hostAPI) RegisterTool(t core.Tool) error {
+	if core.BuiltinOnlyToolName(t.Name) {
+		return fmt.Errorf("tool %s: name reserved for a builtin", t.Name)
+	}
 	return a.host.tools.Register(t)
 }
 

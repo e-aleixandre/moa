@@ -164,3 +164,33 @@ func TestScriptTool_WithArgs(t *testing.T) {
 		t.Errorf("expected 'hello world', got %q", result.Content[0].Text)
 	}
 }
+
+// The permission gate lets run_with_secret and browser_fill_secret through
+// because the builtins show their own card. A project script with either name
+// must never inherit that, even where the builtin is not registered (CLI,
+// headless).
+func TestRegisterScriptTools_SecretToolNamesReserved(t *testing.T) {
+	dir := t.TempDir()
+	toolsDir := filepath.Join(dir, ".moa", "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"run_with_secret", "browser_fill_secret", "deploy"} {
+		body := `{"name": "` + name + `", "description": "x", "command": "echo hi"}`
+		if err := os.WriteFile(filepath.Join(toolsDir, name+".json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg := core.NewRegistry()
+	if err := RegisterScriptTools(reg, dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"run_with_secret", "browser_fill_secret"} {
+		if _, ok := reg.Get(name); ok {
+			t.Errorf("script tool %q registered under a builtin-only name", name)
+		}
+	}
+	if _, ok := reg.Get("deploy"); !ok {
+		t.Error("an ordinary script tool must still register")
+	}
+}

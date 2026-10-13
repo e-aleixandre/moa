@@ -12,6 +12,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/memory"
 	"github.com/e-aleixandre/moa/pkg/moadocs"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 	"github.com/e-aleixandre/moa/pkg/skill"
 	"github.com/e-aleixandre/moa/pkg/subagent"
 	"github.com/e-aleixandre/moa/pkg/tasks"
@@ -149,7 +150,14 @@ func actualToolNames(t *testing.T) map[string]bool {
 		t.Fatalf("register subagents: %v", err)
 	}
 
+	if err := reg.Register(tool.NewRunWithSecret(tool.ToolConfig{WorkspaceRoot: workspace}, secretaction.NewBroker("s"))); err != nil {
+		t.Fatalf("register run_with_secret: %v", err)
+	}
+
 	names := make(map[string]bool)
+	// browser_fill_secret is built on top of a Playwright MCP server's own
+	// tools, which this test does not start.
+	names["browser_fill_secret"] = true
 	for _, tl := range reg.All() {
 		if !knownUnregisterable[tl.Name] {
 			names[tl.Name] = true

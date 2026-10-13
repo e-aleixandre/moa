@@ -71,6 +71,10 @@ func RegisterScriptTools(reg *core.Registry, cwd string) error {
 		return err
 	}
 	for _, d := range defs {
+		if core.BuiltinOnlyToolName(d.Name) {
+			fmt.Fprintf(os.Stderr, "warning: script tool %q skipped (name reserved for a builtin)\n", d.Name)
+			continue
+		}
 		if _, exists := reg.Get(d.Name); exists {
 			fmt.Fprintf(os.Stderr, "warning: script tool %q skipped (name already registered)\n", d.Name)
 			continue

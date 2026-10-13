@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -224,5 +225,110 @@ func TestRequesterFromContext(t *testing.T) {
 	}
 	if got := Requester(core.WithAgentID(context.Background(), "sa_7")); got != "subagent · sa_7" {
 		t.Fatalf("subagent requester = %q", got)
+	}
+}
+
+// An approval must name one request of one broker: IDs never repeat across
+// sessions, brokers rebuilt on resume, or restarts, and cannot be guessed.
+func TestBrokerRequestIDsGloballyUniqueAndUnguessable(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		b := NewBroker("same-session")
+		requested := make(chan Request, 1)
+		b.SetHooks(func(r Request) { requested <- r }, nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = b.Request(ctx, Request{Kind: KindCommand, Fields: []Field{{Label: "pw", Kind: FieldPassword}}})
+		}()
+		req := <-requested
+		cancel()
+		<-done
+		if seen[req.ID] {
+			t.Fatalf("request ID %q reused by a new broker", req.ID)
+		}
+		seen[req.ID] = true
+		if len(req.ID) < len("sec_")+32 {
+			t.Fatalf("request ID %q too short to be unguessable", req.ID)
+		}
+	}
+}
+
+// Once Stop has won, an answer arriving at the same moment must not reach
+// the tool: Resolve refuses it and Request never returns an allow.
+func TestBrokerAnswerAfterCancelIsRejected(t *testing.T) {
+	for i := 0; i < 300; i++ {
+		b := NewBroker("s1")
+		requested := make(chan Request, 1)
+		proceed := make(chan struct{})
+		// The hook runs before Request starts waiting: holding it until both
+		// the cancel and the answer are in makes them ready at the same time.
+		b.SetHooks(func(r Request) { requested <- r; <-proceed }, nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		type outcome struct {
+			ans Answer
+			err error
+		}
+		done := make(chan outcome, 1)
+		go func() {
+			ans, err := b.Request(ctx, Request{Kind: KindCommand, Fields: []Field{{Label: "pw", Kind: FieldPassword}}})
+			done <- outcome{ans, err}
+		}()
+		req := <-requested
+		cancel()
+		_ = b.Resolve(req.ID, true, [][]byte{[]byte("late-value")})
+		close(proceed)
+		out := <-done
+		if out.err == nil || out.ans.Allow || len(out.ans.Values) != 0 {
+			t.Fatalf("iteration %d: answer delivered after cancel: allow=%v err=%v", i, out.ans.Allow, out.err)
+		}
+	}
+}
+
+// A shorter value must not be consumed while a longer one it prefixes may
+// still complete in the next chunk.
+func TestRedactorHoldsLongerValueOverShorterPrefix(t *testing.T) {
+	r := NewRedactor([][]byte{[]byte("abc"), []byte("abcdef-secret")})
+	out := append(r.Write([]byte("abc")), r.Write([]byte("def-secret"))...)
+	out = append(out, r.Flush()...)
+	if string(out) != Placeholder {
+		t.Fatalf("got %q, want %q", out, Placeholder)
+	}
+	r = NewRedactor([][]byte{[]byte("abc"), []byte("abcdef-secret")})
+	out = append(r.Write([]byte("abc")), r.Write([]byte(" tail"))...)
+	out = append(out, r.Flush()...)
+	if string(out) != Placeholder+" tail" {
+		t.Fatalf("got %q", out)
+	}
+}
+
+// H4(c): a value starting inside another value's match must not let the rest
+// of either through, wherever the chunks are cut.
+func TestRedactorCoversOverlappingMatches(t *testing.T) {
+	values := func() [][]byte { return [][]byte{[]byte("abc"), []byte("bcdef-secret")} }
+	for _, tc := range []struct{ in, want string }{
+		{"abcdef-secret", Placeholder},
+		{"x abcdef-secret y", "x " + Placeholder + " y"},
+		{"abc bcdef-secret", Placeholder + " " + Placeholder},
+	} {
+		check := func(name string, out []byte) {
+			t.Helper()
+			if bytes.Contains(out, []byte("def-secret")) || string(out) != tc.want {
+				t.Fatalf("%s %q: got %q, want %q", name, tc.in, out, tc.want)
+			}
+		}
+		check("whole", []byte(RedactString(tc.in, values())))
+		for split := 1; split < len(tc.in); split++ {
+			r := NewRedactor(values())
+			out := append(r.Write([]byte(tc.in[:split])), r.Write([]byte(tc.in[split:]))...)
+			check(fmt.Sprintf("split %d", split), append(out, r.Flush()...))
+		}
+		r := NewRedactor(values())
+		var out []byte
+		for i := 0; i < len(tc.in); i++ {
+			out = append(out, r.Write([]byte{tc.in[i]})...)
+		}
+		check("byte by byte", append(out, r.Flush()...))
 	}
 }

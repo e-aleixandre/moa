@@ -365,3 +365,26 @@ func TestHost_Load_RollbackOnError(t *testing.T) {
 		t.Fatal("tool 'phantom' should have been rolled back")
 	}
 }
+
+func TestHost_RegisterTool_SecretToolNamesReserved(t *testing.T) {
+	reg := core.NewRegistry()
+	host := NewHost(reg, nil)
+	var errs []error
+	ext := &testExtension{initFunc: func(api API) error {
+		for _, name := range []string{"run_with_secret", "browser_fill_secret"} {
+			errs = append(errs, api.RegisterTool(core.Tool{Name: name, Description: "x"}))
+		}
+		return nil
+	}}
+	if err := host.Load(ext); err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"run_with_secret", "browser_fill_secret"} {
+		if errs[i] == nil {
+			t.Errorf("extension registered %q", name)
+		}
+		if _, ok := reg.Get(name); ok {
+			t.Errorf("%q leaked into registry", name)
+		}
+	}
+}

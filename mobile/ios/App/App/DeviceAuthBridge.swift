@@ -21,10 +21,12 @@ enum NativeServerBinding {
     }
 
     static func bind(_ origin: String) {
+        DocumentGeneration.shared.bump()
         UserDefaults.standard.set(origin, forKey: key)
     }
 
     static func clear() {
+        DocumentGeneration.shared.bump()
         UserDefaults.standard.removeObject(forKey: key)
     }
 
@@ -300,8 +302,11 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
         // Push keys and notifications go first and regardless of the
         // credential delete below: unpairing must stop decryption offline.
         let pushSecretRemoved = await MainActor.run { NativePushRegistration.shared.forgetLocal() }
+        // Pending saved-password work dies with the pairing.
+        DocumentGeneration.shared.bump()
         // Passwords saved on this iPhone belong to the pairing: unpairing drops all of them.
-        try? SavedSecretsStore().forgetAll()
+        var savedSecretsError: Error?
+        do { try SavedSecretsStore().forgetAll() } catch { savedSecretsError = error }
         let storedOrigin = try? credentialStore.load()?.origin
         let deleteError: Error?
         do {
@@ -316,17 +321,20 @@ final class DeviceAuthMessageHandler: NSObject, WKScriptMessageHandler {
             await clearSessionCookie(origin: url)
         }
         if let deleteError { throw deleteError }
+        // The pairing is gone but saved passwords may remain: report it, unpair can be retried.
+        if savedSecretsError != nil { throw AuthBridgeError.keychain }
         // The push secret may still decrypt: report it, it is retried later.
         if !pushSecretRemoved { throw AuthBridgeError.keychain }
     }
 
-    func unpair() async {
+    // Returns false when local cleanup was incomplete (the unpair itself still ran).
+    @discardableResult
+    func unpair() async -> Bool {
         guard let stored = try? credentialStore.load() else {
-            try? await reset()
-            return
+            return (try? await reset()) != nil
         }
         await revokeCurrentDevice(stored)
-        try? await reset()
+        return (try? await reset()) != nil
     }
 
     private func revokeCurrentDevice(_ stored: StoredDeviceCredential) async {

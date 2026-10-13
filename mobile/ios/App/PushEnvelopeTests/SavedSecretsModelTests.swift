@@ -44,4 +44,20 @@ final class SavedSecretsModelTests: XCTestCase {
         XCTAssertNil(SavedSecretInput.secretValue(""))
         XCTAssertNil(SavedSecretInput.secretValue(String(repeating: "x", count: 4097)))
     }
+
+    func testReplyFenceDropsStaleOrForeignDocuments() {
+        let fence = ReplyFence(generation: 3, origin: "https://a.example")
+        XCTAssertTrue(fence.permits(generation: 3, boundOrigin: "https://a.example", documentMatchesPairing: true))
+        XCTAssertFalse(fence.permits(generation: 4, boundOrigin: "https://a.example", documentMatchesPairing: true))
+        XCTAssertFalse(fence.permits(generation: 3, boundOrigin: "https://b.example", documentMatchesPairing: true))
+        XCTAssertFalse(fence.permits(generation: 3, boundOrigin: nil, documentMatchesPairing: true))
+        XCTAssertFalse(fence.permits(generation: 3, boundOrigin: "https://a.example", documentMatchesPairing: false))
+    }
+
+    func testDocumentGenerationBumps() {
+        let g = DocumentGeneration()
+        let before = g.current
+        g.bump()
+        XCTAssertEqual(g.current, before + 1)
+    }
 }

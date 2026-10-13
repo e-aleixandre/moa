@@ -62,9 +62,18 @@ final class MoaBridgeViewController: CAPBridgeViewController {
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Unpair", style: .destructive) { [weak self] _ in
             Task { [weak self] in
-                await self?.deviceAuthHandler.unpair()
+                let clean = await self?.deviceAuthHandler.unpair() ?? true
                 await MainActor.run {
                     self?.webView?.load(URLRequest(url: URL(string: "capacitor://localhost/?unpaired=1")!))
+                    if !clean {
+                        let notice = UIAlertController(
+                            title: "Unpaired, cleanup incomplete",
+                            message: "Some data saved on this iPhone could not be removed. Unpair again to retry.",
+                            preferredStyle: .alert
+                        )
+                        notice.addAction(UIAlertAction(title: "OK", style: .default))
+                        self?.present(notice, animated: true)
+                    }
                 }
             }
         })
@@ -135,6 +144,12 @@ private final class PairedServerRecoveryController: NSObject, WKNavigationDelega
             return capacitorDelegate
         }
         return super.forwardingTarget(for: aSelector)
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        // A new document: native replies owed to the previous one are dropped.
+        DocumentGeneration.shared.bump()
+        capacitorDelegate?.webView?(webView, didCommit: navigation)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

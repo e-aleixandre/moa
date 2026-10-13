@@ -79,6 +79,12 @@ func handleSecretRequestResponse(mgr *Manager) http.HandlerFunc {
 			http.Error(w, `action must be "allow" or "deny"`, http.StatusBadRequest)
 			return
 		}
+		var kind string
+		for _, p := range broker.Pending() {
+			if p.ID == reqID {
+				kind = p.Kind
+			}
+		}
 		if !broker.IsPending(reqID) {
 			http.Error(w, "unknown secret request", http.StatusNotFound)
 			return
@@ -101,9 +107,26 @@ func handleSecretRequestResponse(mgr *Manager) http.HandlerFunc {
 				return
 			}
 			values[*v.Index] = decoded
+			if kind == secretaction.KindCommand && hasControlByte(decoded) {
+				http.Error(w, "values cannot contain line breaks or control characters", http.StatusBadRequest)
+				return
+			}
 		}
 		writeSecretResolveError(w, broker.Resolve(reqID, true, values))
 	}
+}
+
+// hasControlByte reports a C0 control or DEL. A terminal would act on them (a
+// newline submits a second line, an escape starts a sequence) and transform
+// their echo, which redaction cannot follow; no password needs them. Browser
+// fields are filled as text, so only command requests reject them.
+func hasControlByte(v []byte) bool {
+	for _, c := range v {
+		if c < 0x20 || c == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 func writeSecretResolveError(w http.ResponseWriter, err error) {

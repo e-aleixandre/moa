@@ -38,9 +38,11 @@ final class SavedSecretsStore {
     }
 
     func save(serverID: String, alias: String, label: String, summary: String,
-              fingerprint: String, value: inout Data) throws {
+              fingerprint: String, value: inout Data,
+              stillValid: () -> Bool = { true }) throws {
         defer { zero(&value) }
         let account = SavedSecretKey.account(serverID: serverID, alias: alias)
+        guard stillValid() else { throw SavedSecretsError.cancelled }
         try deleteSecret(account: account)
 
         var cfError: Unmanaged<CFError>?
@@ -70,6 +72,13 @@ final class SavedSecretsStore {
         } catch {
             try? deleteSecret(account: account)
             throw error
+        }
+        // Unpair (or a navigation) may have run its cleanup while this write
+        // was in flight: whatever landed after it must not survive it.
+        if !stillValid() {
+            try? deleteSecret(account: account)
+            try? deleteMetadata(account: account)
+            throw SavedSecretsError.cancelled
         }
     }
 
@@ -128,7 +137,12 @@ final class SavedSecretsStore {
     func forgetAll(serverID: String? = nil) throws {
         var firstError: Error?
         for service in [Self.secretService, Self.metaService] {
-            for account in (try? accounts(service: service)) ?? [] {
+            let found: [String]
+            do { found = try accounts(service: service) } catch {
+                firstError = firstError ?? error
+                continue
+            }
+            for account in found {
                 if let serverID, SavedSecretKey.alias(fromAccount: account, serverID: serverID) == nil { continue }
                 do { try delete(service: service, account: account) } catch { firstError = firstError ?? error }
             }

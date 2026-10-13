@@ -66,19 +66,23 @@ final class SavedSecretsMessageHandler: NSObject, WKScriptMessageHandler {
             return
         }
 
+        let fence = ReplyFence(generation: DocumentGeneration.shared.current, origin: serverID)
+
         // Keychain calls block (use shows Face ID), so they never run on main.
         queue.async { [weak self] in
             guard let self else { return }
+            // Queued behind a navigation or an unpair: do not even start.
+            guard fence.generation == DocumentGeneration.shared.current else { return }
             do {
-                let value = try self.handle(method: method, options: options, serverID: serverID)
-                self.respond(id: id, value: value)
+                let value = try self.handle(method: method, options: options, serverID: serverID, fence: fence)
+                self.respond(id: id, value: value, fence: fence)
             } catch {
-                self.respond(id: id, error: Self.bridgeError(error))
+                self.respond(id: id, error: Self.bridgeError(error), fence: fence)
             }
         }
     }
 
-    private func handle(method: String, options: [String: Any], serverID: String) throws -> Any {
+    private func handle(method: String, options: [String: Any], serverID: String, fence: ReplyFence) throws -> Any {
         typealias L = SavedSecretLimits
         switch method {
         case "status":
@@ -95,7 +99,8 @@ final class SavedSecretsMessageHandler: NSObject, WKScriptMessageHandler {
             else { throw BridgeError.invalid }
             try store.save(
                 serverID: serverID, alias: try alias(options), label: label,
-                summary: summary, fingerprint: try fingerprint(options), value: &value
+                summary: summary, fingerprint: try fingerprint(options), value: &value,
+                stillValid: { fence.generation == DocumentGeneration.shared.current }
             )
             return ["ok": true]
         case "use":
@@ -159,26 +164,36 @@ final class SavedSecretsMessageHandler: NSObject, WKScriptMessageHandler {
         }
     }
 
-    private func respond(id: String, value: Any) {
-        send(["id": id, "ok": true, "value": value])
+    private func respond(id: String, value: Any, fence: ReplyFence? = nil) {
+        send(["id": id, "ok": true, "value": value], fence: fence)
     }
 
     private func respond(id: String, error: BridgeError) {
-        respond(id: id, error: Self.bridgeError(error))
+        respond(id: id, error: Self.bridgeError(error), fence: nil)
     }
 
-    private func respond(id: String, error: Failure) {
-        send(["id": id, "ok": false, "error": error.message, "code": error.code])
+    private func respond(id: String, error: Failure, fence: ReplyFence?) {
+        send(["id": id, "ok": false, "error": error.message, "code": error.code], fence: fence)
     }
 
-    private func send(_ message: [String: Any]) {
+    // `fence` nil is only for refusals produced at admission, which carry no value.
+    private func send(_ message: [String: Any], fence: ReplyFence?) {
         guard
             JSONSerialization.isValidJSONObject(message),
             let data = try? JSONSerialization.data(withJSONObject: message),
             let json = String(data: data, encoding: .utf8)
         else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.webView?.evaluateJavaScript("window.moaSavedSecrets?.__receive(\(json));")
+            guard let webView = self?.webView else { return }
+            if let fence {
+                let onPairedOrigin = webView.url.map(NativeServerBinding.matches) == true
+                guard fence.permits(
+                    generation: DocumentGeneration.shared.current,
+                    boundOrigin: NativeServerBinding.origin,
+                    documentMatchesPairing: onPairedOrigin
+                ) else { return }
+            }
+            webView.evaluateJavaScript("window.moaSavedSecrets?.__receive(\(json));")
         }
     }
 }

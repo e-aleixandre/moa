@@ -10,6 +10,8 @@ package secretaction
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -107,7 +109,6 @@ type Broker struct {
 	sessionID string
 
 	mu         sync.Mutex
-	seq        uint64
 	pending    map[string]*pendingRequest
 	onRequest  func(Request)
 	onResolved func(id string, answered bool)
@@ -115,7 +116,8 @@ type Broker struct {
 
 type pendingRequest struct {
 	req      Request
-	answer   chan Answer // buffered(1): Resolve never blocks
+	ctx      context.Context // the waiting tool's: once done, no answer is taken
+	answer   chan Answer     // buffered(1): Resolve never blocks
 	resolved bool
 }
 
@@ -139,10 +141,13 @@ func (b *Broker) Request(ctx context.Context, req Request) (Answer, error) {
 	if err := ctx.Err(); err != nil {
 		return Answer{}, err
 	}
-	p := &pendingRequest{answer: make(chan Answer, 1)}
+	id, err := newRequestID()
+	if err != nil {
+		return Answer{}, err
+	}
+	p := &pendingRequest{ctx: ctx, answer: make(chan Answer, 1)}
 	b.mu.Lock()
-	b.seq++
-	req.ID = fmt.Sprintf("sec_%d", b.seq)
+	req.ID = id
 	req.SessionID = b.sessionID
 	req.RequestedAt = time.Now()
 	req.Fields = append([]Field(nil), req.Fields...)
@@ -160,6 +165,12 @@ func (b *Broker) Request(ctx context.Context, req Request) (Answer, error) {
 
 	select {
 	case ans := <-p.answer:
+		if err := ctx.Err(); err != nil {
+			// Both were ready and the answer was picked: cancellation still
+			// wins, the tool must not use the values.
+			ans.Wipe()
+			return Answer{}, err
+		}
 		return ans, nil
 	case <-ctx.Done():
 	}
@@ -191,7 +202,8 @@ func (b *Broker) Request(ctx context.Context, req Request) (Answer, error) {
 func (b *Broker) Resolve(id string, allow bool, values [][]byte) error {
 	b.mu.Lock()
 	p, ok := b.pending[id]
-	if !ok || p.resolved {
+	if !ok || p.resolved || p.ctx.Err() != nil {
+		// A cancelled request is about to be removed by its Request.
 		b.mu.Unlock()
 		return ErrUnknownRequest
 	}
@@ -229,6 +241,17 @@ func (b *Broker) Resolve(id string, allow bool, values [][]byte) error {
 	return nil
 }
 
+// newRequestID returns an ID no other request of any session, broker or
+// process will have: an approval names exactly one card, never a later one
+// that happens to reuse a counter.
+func newRequestID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("secret request id: %w", err)
+	}
+	return "sec_" + hex.EncodeToString(b[:]), nil
+}
+
 // Pending lists the open requests, oldest first.
 func (b *Broker) Pending() []Request {
 	b.mu.Lock()
@@ -246,7 +269,7 @@ func (b *Broker) IsPending(id string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	p, ok := b.pending[id]
-	return ok && !p.resolved
+	return ok && !p.resolved && p.ctx.Err() == nil
 }
 
 // Requester names who asks: "main" or "subagent · <job id>". Subagents run
