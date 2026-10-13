@@ -253,9 +253,11 @@ export function SubagentStatusStrip({ view, compact = false, sessionId, jobId })
   const catalog = useStore(modelCatalog);
   useEffect(() => { if (open) ensureModelCatalog(); }, [open]);
   const specs = catalog.entries || [];
-  const configure = async (model, thinking = view.thinking) => {
+  // thinking is a selector position. A model-only change omits it: view.thinking
+  // is the running effort, and the server carries the position across itself.
+  const configure = async (model, thinking) => {
     try {
-      const result = await api('PATCH', `/api/sessions/${sessionId}/subagents/${jobId}`, { model, thinking });
+      const result = await api('PATCH', `/api/sessions/${sessionId}/subagents/${jobId}`, thinking ? { model, thinking } : { model });
       const session = store.get().sessions[sessionId];
       const sub = session?.subagents?.[jobId];
       if (sub) updateSession(sessionId, { subagents: { ...session.subagents, [jobId]: { ...sub, model: result.model, thinking: result.thinking } } });

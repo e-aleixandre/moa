@@ -43,7 +43,7 @@ test('the real child selector resolves raw identity and sends the child thinking
   expect(selector).toBeDefined();
   expect(selector.props.selected).toBe('anthropic/claude-opus-5-5');
   await selector.props.onSelect('openai/gpt-6.1-sol');
-  expect(requests).toEqual([{ url: '/api/sessions/s1/subagents/J1', method: 'PATCH', payload: { model: 'openai/gpt-6.1-sol', thinking: 'low' } }]);
+  expect(requests).toEqual([{ url: '/api/sessions/s1/subagents/J1', method: 'PATCH', payload: { model: 'openai/gpt-6.1-sol' } }]);
   expect(store.get().sessions.s1.subagents.J1.thinking).toBe('medium');
   expect(store.get().sessions.s1.thinking).toBe('high');
 });
@@ -56,4 +56,29 @@ test('the child meter draws Sol max as the top selector position, not as an unkn
   const tree = SubagentStatusStrip({ view: { model: 'Sol', modelSpec: 'gpt-6.1-sol', thinking: 'max', contextPercent: -1, accent: 'purple' }, sessionId: 's1', jobId: 'J1' });
   expect(tree.props.thinking).toBe('max');
   expect(tree.props.thinkingPosition).toBe('xhigh');
+});
+
+test('a model-only change leaves the child effort to the server instead of resending it as a position', async () => {
+  const efforts = ['low', 'medium', 'high', 'xhigh', 'max'];
+  const entries = deriveModelSpecs([
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', provider: 'openai', reasoning_efforts: efforts },
+    { id: 'gpt-6-astra', name: 'GPT-6 Astra', provider: 'openai', reasoning_efforts: efforts },
+  ]);
+  setState({ modelCatalog: { status: 'ready', entries }, sessions: { s1: {
+    id: 's1', model: 'Claude Opus 5.5', thinking: 'high', messages: [],
+    subagents: { J1: { jobId: 'J1', model: 'gpt-6.1-sol', thinking: 'xhigh', status: 'running', messages: [] } },
+  } } });
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push(JSON.parse(options.body));
+    return Response.json({ model: 'gpt-6-astra', thinking: 'xhigh', application: 'applies-next' });
+  };
+  const tree = SubagentStatusStrip({ view: { model: 'Sol', modelSpec: 'gpt-6.1-sol', thinking: 'xhigh', contextPercent: -1, accent: 'purple' }, sessionId: 's1', jobId: 'J1' });
+  const selector = find(tree, ModelSelector);
+  await selector.props.onSelect('openai/gpt-6-astra');
+  await selector.props.onThinkingChange('medium');
+  expect(requests).toEqual([
+    { model: 'openai/gpt-6-astra' },
+    { model: 'gpt-6.1-sol', thinking: 'medium' },
+  ]);
 });
