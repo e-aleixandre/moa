@@ -356,3 +356,34 @@ test("the search footer counts sessions and actions apart, not one opaque total"
   expect(foot).toMatch(/^2 sessions · \d+ actions?$/);
   setState({ sessions: {}, owners: { list: [], loaded: true } });
 });
+
+test("while sharing, owners are listed without a query and a closed one is resumed and receives the share in its composer", async () => {
+  const { setState, store, SHARE_CLOSED } = await import("../../data/store.js");
+  const now = Date.now();
+  const share = { id: "share-1", status: "ready", title: "", text: "", url: "https://example.test/a", files: [] };
+  setState({
+    sessions: {
+      u1: { id: "u1", title: "My own work", cwd: "/home/u/dev/app", state: "idle", updated: now - 2000 },
+      o1: { id: "o1", title: "Winerim", kind: "owner", cwd: "/home/u/dev/winerim", state: "saved", updated: now },
+    },
+    owners: { list: [{ id: "ow1", name: "Winerim", root: "/home/u/dev/winerim", session_id: "o1", session_state: "saved", closed: true, updated: now }], loaded: true },
+    share,
+  });
+  const resumed = [];
+  mock.module("../../data/session-actions.js", () => ({
+    ...realSessionActions,
+    resumeSession: (id) => { resumed.push(id); return Promise.resolve(); },
+  }));
+  await mount({ initialStep: "search", share });
+  // No query: the owner is a row of its own, once, ahead of the older session.
+  const rows = rowTexts();
+  expect(rows.filter((r) => r.includes("Winerim"))).toHaveLength(1);
+  expect(rows[0]).toContain("Winerim");
+
+  await press("Enter");
+  expect(resumed).toEqual(["o1"]);
+  const drop = store.get().composerDrops.o1;
+  expect(drop.text).toBe("https://example.test/a");
+  expect(store.get().share.status).toBe("idle");
+  setState({ sessions: {}, owners: { list: [], loaded: true }, share: SHARE_CLOSED, composerDrops: {} });
+});

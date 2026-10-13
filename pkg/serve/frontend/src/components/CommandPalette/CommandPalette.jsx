@@ -447,26 +447,24 @@ export function CommandPalette({
     // Project owners live in their own slice: their conversation is filtered
     // out above, so each owner appears once, as a row of its own. They join
     // the same list by recency, and are searchable by name or project.
-    if (!sharing) {
-      for (const own of state.owners?.list || []) {
-        if (!own.session_id) continue;
-        const place = projectLabel(own.root || "");
-        if (q) {
-          if (!sessionSearchMatch(query, { title: own.name, path: place, cwd: own.root })) continue;
-        } else if (!isRecentSession(own)) continue;
-        sessRows.push({
-          kind: "owner",
-          id: own.session_id,
-          owner: own,
-          title: own.name,
-          cwdLabel: place,
-          when: relativeWhen(own.updated),
-          updated: own.updated || 0,
-          saved: own.session_state === "saved",
-        });
-      }
-      sessRows.sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0));
+    for (const own of state.owners?.list || []) {
+      if (!own.session_id) continue;
+      const place = projectLabel(own.root || "");
+      if (q) {
+        if (!sessionSearchMatch(query, { title: own.name, path: place, cwd: own.root })) continue;
+      } else if (!isRecentSession(own)) continue;
+      sessRows.push({
+        kind: "owner",
+        id: own.session_id,
+        owner: own,
+        title: own.name,
+        cwdLabel: place,
+        when: relativeWhen(own.updated),
+        updated: own.updated || 0,
+        saved: own.session_state === "saved",
+      });
     }
+    sessRows.sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0));
     const cappedSessions = q ? sessRows : sessRows.slice(0, CAP_NO_QUERY);
     if (cappedSessions.length) {
       out.push({ kind: "group", label: q ? "Sessions" : "Recent" });

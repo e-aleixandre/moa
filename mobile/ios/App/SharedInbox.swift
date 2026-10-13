@@ -139,9 +139,16 @@ final class SharedInboxTransaction {
     }
 
     deinit {
-        if !committed {
-            try? FileManager.default.removeItem(at: staging)
-        }
+        discard()
+    }
+
+    var stagedFiles: [(file: SharedInboxFile, url: URL)] {
+        files.map { ($0, staging.appendingPathComponent($0.storedName)) }
+    }
+
+    func discard() {
+        guard !committed else { return }
+        try? FileManager.default.removeItem(at: staging)
     }
 
     func addFile(at source: URL, name suggestedName: String?, mime: String?) throws {

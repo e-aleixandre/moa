@@ -22,6 +22,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>MoaAppGroup</key>
 	<string>$(MOA_APP_GROUP_IDENTIFIER)</string>
+	<key>MoaDeviceAuthService</key>
+	<string>$(MOA_APP_BUNDLE_IDENTIFIER).device-auth</string>
+	<key>MoaKeychainPrivateGroup</key>
+	<string>$(AppIdentifierPrefix)$(MOA_APP_BUNDLE_IDENTIFIER)</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>

@@ -7,10 +7,55 @@ final class ShareViewController: UIViewController {
         var sharedURL = ""
     }
 
-    private let titleLabel = UILabel()
-    private let detailLabel = UILabel()
-    private let doneButton = UIButton(type: .system)
+    private typealias MessageAction = (String, () -> Void)
+
+    private enum Section {
+        case compose, owners, recent, empty
+    }
+
+    private let navigationBar = UINavigationBar()
+    private let barItem = UINavigationItem(title: "Send to moa")
+    private lazy var cancelItem = UIBarButtonItem(
+        barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped))
+    private lazy var sendItem = UIBarButtonItem(
+        title: "Send", style: .done, target: self, action: #selector(sendTapped))
+    private let spinnerItem = UIBarButtonItem(customView: UIActivityIndicatorView(style: .medium))
+    private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+    private let searchBar = UISearchBar()
+    private let composeCell = UITableViewCell()
+    private let summaryLabel = UILabel()
+    private let messageField = UITextView()
+    private let placeholder = UILabel()
+    private let messageStack = UIStackView()
+    private let spinner = UIActivityIndicatorView(style: .large)
+
     private var transaction: SharedInboxTransaction?
+    private var sharedTitle = ""
+    private var sharedText = ""
+    private var sharedURL = ""
+    private var client: ShareClient?
+    private var destinations: [ShareDestination] = []
+    private var selectedID: String?
+    private var query = ""
+    private var sending = false
+
+    private var visibleSections: [Section] {
+        let rows = ShareDestinations.filter(destinations, query: query)
+        var sections: [Section] = [.compose]
+        if rows.contains(where: { $0.kind == .owner }) { sections.append(.owners) }
+        if rows.contains(where: { $0.kind == .session }) { sections.append(.recent) }
+        if rows.isEmpty { sections.append(.empty) }
+        return sections
+    }
+
+    private func rows(in section: Section) -> [ShareDestination] {
+        let rows = ShareDestinations.filter(destinations, query: query)
+        switch section {
+        case .owners: return rows.filter { $0.kind == .owner }
+        case .recent: return rows.filter { $0.kind == .session }
+        default: return []
+        }
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -19,32 +64,152 @@ final class ShareViewController: UIViewController {
     }
 
     private func configureView() {
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = .systemGroupedBackground
+
+        barItem.leftBarButtonItem = cancelItem
+        barItem.rightBarButtonItem = sendItem
+        sendItem.isEnabled = false
+        navigationBar.items = [barItem]
+        navigationBar.delegate = self
+        navigationBar.translatesAutoresizingMaskIntoConstraints = false
+
+        let fieldFont = UIFont.systemFont(ofSize: max(16, UIFont.preferredFont(forTextStyle: .body).pointSize))
+        summaryLabel.font = .preferredFont(forTextStyle: .footnote)
+        summaryLabel.textColor = .secondaryLabel
+        summaryLabel.numberOfLines = 2
+        messageField.font = fieldFont
+        messageField.backgroundColor = .clear
+        messageField.isScrollEnabled = false
+        messageField.delegate = self
+        placeholder.text = "Add a message (optional)"
+        placeholder.font = fieldFont
+        placeholder.textColor = .placeholderText
+        placeholder.translatesAutoresizingMaskIntoConstraints = false
+        messageField.addSubview(placeholder)
+        let compose = UIStackView(arrangedSubviews: [summaryLabel, messageField])
+        compose.axis = .vertical
+        compose.spacing = 8
+        compose.translatesAutoresizingMaskIntoConstraints = false
+        composeCell.contentView.addSubview(compose)
+        composeCell.selectionStyle = .none
+
+        searchBar.placeholder = "Search"
+        searchBar.searchTextField.font = fieldFont
+        searchBar.autocapitalizationType = .none
+        searchBar.delegate = self
+        searchBar.sizeToFit()
+
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.keyboardDismissMode = .interactive
+        tableView.tableHeaderView = searchBar
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.isHidden = true
+
+        messageStack.axis = .vertical
+        messageStack.alignment = .center
+        messageStack.spacing = 14
+        messageStack.translatesAutoresizingMaskIntoConstraints = false
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(tableView)
+        view.addSubview(navigationBar)
+        view.addSubview(messageStack)
+        view.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            navigationBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            navigationBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            navigationBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.topAnchor.constraint(equalTo: navigationBar.bottomAnchor),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            compose.topAnchor.constraint(equalTo: composeCell.contentView.layoutMarginsGuide.topAnchor),
+            compose.bottomAnchor.constraint(equalTo: composeCell.contentView.layoutMarginsGuide.bottomAnchor),
+            compose.leadingAnchor.constraint(equalTo: composeCell.contentView.layoutMarginsGuide.leadingAnchor),
+            compose.trailingAnchor.constraint(equalTo: composeCell.contentView.layoutMarginsGuide.trailingAnchor),
+            messageField.heightAnchor.constraint(greaterThanOrEqualToConstant: 72),
+            placeholder.topAnchor.constraint(equalTo: messageField.topAnchor, constant: 8),
+            placeholder.leadingAnchor.constraint(equalTo: messageField.leadingAnchor, constant: 5),
+            messageStack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 28),
+            messageStack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -28),
+            messageStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            messageStack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+        showLoading()
+    }
+
+    // MARK: States
+
+    private func showLoading() {
+        clearMessage()
+        tableView.isHidden = true
+        spinner.startAnimating()
+        barItem.rightBarButtonItem = sendItem
+        sendItem.isEnabled = false
+    }
+
+    private func showPicker() {
+        clearMessage()
+        spinner.stopAnimating()
+        barItem.rightBarButtonItem = sendItem
+        tableView.isHidden = false
+        tableView.reloadData()
+        updateSendEnabled()
+    }
+
+    private func clearMessage() {
+        messageStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    }
+
+    // `actions`: the first one is the primary button.
+    private func showMessage(_ title: String, _ detail: String, _ actions: [MessageAction]) {
+        clearMessage()
+        spinner.stopAnimating()
+        tableView.isHidden = true
+        barItem.rightBarButtonItem = nil
+        let titleLabel = UILabel()
         titleLabel.font = .preferredFont(forTextStyle: .headline)
-        titleLabel.text = "Saving to moa…"
+        titleLabel.text = title
+        titleLabel.textAlignment = .center
+        titleLabel.numberOfLines = 0
+        let detailLabel = UILabel()
         detailLabel.font = .preferredFont(forTextStyle: .body)
         detailLabel.textColor = .secondaryLabel
+        detailLabel.text = detail
         detailLabel.numberOfLines = 0
         detailLabel.textAlignment = .center
-        doneButton.setTitle("Cancel", for: .normal)
-        doneButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
-        doneButton.addTarget(self, action: #selector(finish), for: .touchUpInside)
-
-        let stack = UIStackView(arrangedSubviews: [titleLabel, detailLabel, doneButton])
-        stack.axis = .vertical
-        stack.alignment = .center
-        stack.spacing = 18
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 28),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -28),
-            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            detailLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 330),
-            doneButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
-        ])
+        messageStack.addArrangedSubview(titleLabel)
+        messageStack.addArrangedSubview(detailLabel)
+        detailLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 330).isActive = true
+        for (index, action) in actions.enumerated() {
+            var configuration: UIButton.Configuration = index == 0 ? .filled() : .plain()
+            configuration.title = action.0
+            let button = UIButton(configuration: configuration, primaryAction: UIAction { _ in action.1() })
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            messageStack.addArrangedSubview(button)
+        }
     }
+
+    private func setSending(_ value: Bool) {
+        sending = value
+        tableView.isUserInteractionEnabled = !value
+        cancelItem.isEnabled = !value
+        if value {
+            (spinnerItem.customView as? UIActivityIndicatorView)?.startAnimating()
+            barItem.rightBarButtonItem = spinnerItem
+        } else {
+            barItem.rightBarButtonItem = sendItem
+        }
+    }
+
+    private func updateSendEnabled() {
+        sendItem.isEnabled = selectedID != nil && !sending
+    }
+
+    // MARK: Capture
 
     private func captureShare() {
         do {
@@ -65,21 +230,19 @@ final class ShareViewController: UIViewController {
                 self.show(error: error)
                 return
             }
-            do {
-                guard let transaction = self.transaction else {
-                    throw SharedInboxError.corrupt
-                }
-                _ = try transaction.commit(
-                    title: title,
-                    text: state.textParts.joined(separator: "\n"),
-                    url: state.sharedURL
-                )
-                self.titleLabel.text = "Saved to moa"
-                self.detailLabel.text = "Open moa to choose a conversation."
-                self.doneButton.setTitle("Done", for: .normal)
-            } catch {
-                self.show(error: error)
+            self.sharedTitle = title
+            self.sharedText = state.textParts.joined(separator: "\n")
+            self.sharedURL = state.sharedURL
+            let files = self.transaction?.stagedFiles ?? []
+            let hasText = !ShareText.composed(title: title, text: self.sharedText, url: self.sharedURL).isEmpty
+            guard hasText || !files.isEmpty else {
+                self.show(error: SharedInboxError.empty)
+                return
             }
+            self.summaryLabel.text = ShareText.summary(
+                fileNames: files.map { $0.file.name },
+                title: title, text: self.sharedText, url: self.sharedURL)
+            self.loadDestinations()
         }
     }
 
@@ -215,12 +378,169 @@ final class ShareViewController: UIViewController {
     }
 
     private func show(error: Error) {
-        titleLabel.text = "Could not save this share"
-        detailLabel.text = error.localizedDescription
-        doneButton.setTitle("Close", for: .normal)
+        showMessage("Could not use this share", error.localizedDescription, [("Close", { [weak self] in self?.close() })])
     }
 
-    @objc private func finish() {
-        extensionContext?.completeRequest(returningItems: nil)
+    // MARK: Destinations
+
+    private func loadDestinations() {
+        showLoading()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                // A keychain failure reads the same as no pairing to the user.
+                guard let client = try? ShareCredential.load() else { throw ShareError.notPaired }
+                self.client = client
+                self.destinations = try await client.destinations()
+                if self.destinations.isEmpty {
+                    self.showMessage(
+                        "No conversations yet",
+                        "Start one in moa, or save this to place it later.",
+                        [("Save for later", { [weak self] in self?.saveForLater() }),
+                         ("Close", { [weak self] in self?.close() })])
+                } else {
+                    self.showPicker()
+                }
+            } catch {
+                self.showFailure(error, whileSending: false)
+            }
+        }
     }
+
+    private func showFailure(_ error: Error, whileSending: Bool) {
+        setSending(false)
+        let save: MessageAction = ("Save for later", { [weak self] in self?.saveForLater() })
+        let close: MessageAction = ("Close", { [weak self] in self?.close() })
+        let retry: MessageAction = ("Try again", { [weak self] in
+            guard let self else { return }
+            if whileSending { self.showPicker() } else { self.loadDestinations() }
+        })
+        switch error as? ShareError {
+        case .notPaired:
+            showMessage("moa isn't paired", "Open moa and pair this iPhone, then share again. Or save this to place it later.", [save, close])
+        case .unreachable:
+            showMessage("Can't reach moa", "Check your connection or VPN, then try again.", [retry, save])
+        case .outcomeUnknown:
+            showMessage("Not sure it arrived", "Check the conversation in moa before sending again.", [save, close])
+        case .notFound:
+            showMessage("Conversation not found", "Choose another conversation, or save this for later.", [("Choose another", { [weak self] in self?.showPicker() }), save])
+        case .server(let status):
+            showMessage("moa returned an error (\(status))", "Try again, or save this to place it later.", [retry, save])
+        default:
+            showMessage("Something went wrong", "Try again, or save this to place it later.", [retry, save])
+        }
+    }
+
+    // MARK: Actions
+
+    @objc private func sendTapped() {
+        guard let destination = destinations.first(where: { $0.sessionID == selectedID }),
+              let client, let transaction else { return }
+        view.endEditing(true)
+        setSending(true)
+        let text = ShareText.message(
+            note: messageField.text ?? "", title: sharedTitle, text: sharedText, url: sharedURL)
+        let attachments = transaction.stagedFiles.map {
+            ShareAttachment(name: $0.file.name, mime: $0.file.mime, url: $0.url)
+        }
+        let body = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        Task { @MainActor [weak self] in
+            defer { try? FileManager.default.removeItem(at: body) }
+            do {
+                try await Task.detached {
+                    try ShareBodyWriter.write(text: text, attachments: attachments, to: body)
+                }.value
+                try await client.send(to: destination.sessionID, bodyFile: body)
+                self?.transaction?.discard()
+                self?.extensionContext?.completeRequest(returningItems: nil)
+            } catch {
+                self?.showFailure(error, whileSending: true)
+            }
+        }
+    }
+
+    private func saveForLater() {
+        do {
+            guard let transaction else { throw SharedInboxError.corrupt }
+            _ = try transaction.commit(title: sharedTitle, text: sharedText, url: sharedURL)
+            showMessage("Saved to moa", "Open moa to choose a conversation.", [("Done", { [weak self] in
+                self?.extensionContext?.completeRequest(returningItems: nil)
+            })])
+        } catch {
+            show(error: error)
+        }
+    }
+
+    @objc private func cancelTapped() { close() }
+
+    private func close() {
+        transaction?.discard()
+        extensionContext?.cancelRequest(withError: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
+    }
+}
+
+extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
+    func numberOfSections(in tableView: UITableView) -> Int { visibleSections.count }
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        switch visibleSections[section] {
+        case .compose, .empty: return 1
+        case .owners, .recent: return rows(in: visibleSections[section]).count
+        }
+    }
+
+    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        switch visibleSections[section] {
+        case .owners: return "Owners"
+        case .recent: return "Recent"
+        default: return nil
+        }
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let section = visibleSections[indexPath.section]
+        if section == .compose { return composeCell }
+        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
+        var content = UIListContentConfiguration.subtitleCell()
+        if section == .empty {
+            content.text = "No matches"
+            content.textProperties.color = .secondaryLabel
+            cell.selectionStyle = .none
+        } else {
+            let destination = rows(in: section)[indexPath.row]
+            content.text = destination.displayTitle
+            content.secondaryText = destination.subtitle
+            content.secondaryTextProperties.color = .secondaryLabel
+            cell.accessoryType = destination.sessionID == selectedID ? .checkmark : .none
+        }
+        cell.contentConfiguration = content
+        return cell
+    }
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let section = visibleSections[indexPath.section]
+        guard section == .owners || section == .recent else { return }
+        selectedID = rows(in: section)[indexPath.row].sessionID
+        tableView.reloadData()
+        updateSendEnabled()
+    }
+}
+
+extension ShareViewController: UITextViewDelegate {
+    func textViewDidChange(_ textView: UITextView) {
+        placeholder.isHidden = !textView.text.isEmpty
+        tableView.performBatchUpdates(nil)
+    }
+}
+
+extension ShareViewController: UISearchBarDelegate, UINavigationBarDelegate {
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        query = searchText
+        tableView.reloadData()
+    }
+
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) { searchBar.resignFirstResponder() }
+
+    func position(for bar: UIBarPositioning) -> UIBarPosition { .topAttached }
 }

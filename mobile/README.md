@@ -105,13 +105,31 @@ because it is the source, not because anything reads it.
 ## iOS share-in
 
 The iOS app contains a `ShareExtension` target. It accepts links, text, images,
-PDFs and general files, copies the share into an App Group, and closes only
-after showing whether the copy succeeded. The extension deliberately does not
-try to launch its containing app through responder-chain tricks, which Apple
-does not support for share extensions; it tells the user to open moa instead.
-Opening moa then presents the same conversation picker used by the web share
-target. Choosing a conversation puts the text and files in its composer; it
-never sends automatically.
+PDFs and general files. The share sheet lists the paired server's destinations
+(`GET /api/share/destinations`: **Owners**, then the 50 most recent
+conversations, searchable), takes an optional message, and sends only when the
+user taps **Send** (`/send`, preceded by `/resume` when the conversation is
+closed). Nothing is sent or queued before that tap; **Cancel** leaves nothing
+behind. Files are streamed to a temporary file as base64 and uploaded from disk,
+because an extension has roughly 120 MB of memory.
+
+If the server cannot be listed or reached, or the iPhone is not paired, the
+sheet says what to do and offers **Save for later**. That copies the share into
+an App Group queue; opening moa then presents the same conversation picker used
+by the web share target. Choosing a conversation puts the text and files in its
+composer; it never sends automatically. A send whose outcome is unknown (for
+example a timeout after the upload) is never retried: the sheet says to check the
+conversation first.
+
+The extension reads the device credential, read-only, from the **app's private
+keychain access group** (`$(AppIdentifierPrefix)$(MOA_APP_BUNDLE_IDENTIFIER)`),
+never the push group that `NotificationService` uses. Inside the extension
+`PRODUCT_BUNDLE_IDENTIFIER` is the extension's own, so the app's id is the
+project setting `MOA_APP_BUNDLE_IDENTIFIER`, also used for the app target, and
+the extension looks the credential up under the app's service name
+(`MoaDeviceAuthService`). A fork must change that setting together with the
+other bundle identifiers. The extension requests only the server origin stored
+with the credential and refuses redirects, like the app.
 
 The App Group is the durable boundary between processes. This matters in two
 cases: iOS may terminate the extension immediately after it closes, and the app
@@ -181,10 +199,14 @@ intact. Review that explicitly after a Capacitor major upgrade.
 Use a physical device for the final check (the simulator does not reproduce all
 share providers):
 
-1. With moa paired and showing its server frontend, share a Safari URL to
-   **moa**. The extension must say **Saved to moa** and **Open moa to choose a
-   conversation**. Open moa, choose a conversation, and verify the URL is in the
-   composer but has not been sent.
+1. With moa paired, share a Safari URL to **moa**. The sheet must list your
+   owners under **Owners** and recent conversations under **Recent**, with
+   **Send** disabled. Choose an owner, type a message, tap **Send**: the sheet
+   closes and the conversation receives your message and the link. Cancel
+   instead and confirm nothing arrived and `ShareInbox` holds no new entry.
+   Choose a closed conversation: moa reopens it and delivers the message.
+   Turn the server off (or Tailscale), share again: the sheet says it cannot
+   reach moa; tap **Save for later**, open moa and place it from the picker.
 2. Repeat from Photos with one image and from Files with a PDF and another file
    type. Verify each becomes an attachment chip and can be sent normally.
 3. Share while moa is terminated, then launch it. The destination picker must
@@ -241,13 +263,14 @@ Two Keychain access groups keep that boundary:
 
 - `$(AppIdentifierPrefix)com.ealeixandre.moa.app` -- the app's own group,
   listed **first** in `App.entitlements` and named on every credential query.
-  Only the app has it.
+  Only the app and `ShareExtension` have it (the extension reads the device
+  credential to list and send; `NotificationService` cannot).
 - `$(AppIdentifierPrefix)$(MOA_PUSH_KEYCHAIN_GROUP)` -- the push secret,
   shared by the app and `NotificationService`, never by `ShareExtension`.
 
 Build settings: `MOA_PUSH_RELAY_URL` (default `https://moa-push-relay.ealeixandre.workers.dev`, provisional until `push.letmoa.run`; must
-equal the server's `push.relay_url`), `MOA_PUSH_KEYCHAIN_GROUP` and
-`MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER`. In Xcode, give the
+equal the server's `push.relay_url`), `MOA_PUSH_KEYCHAIN_GROUP`,
+`MOA_APP_BUNDLE_IDENTIFIER` and `MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER`. In Xcode, give the
 `NotificationService` target the same Team and the Keychain Sharing capability
 with the push group; give `App` Push Notifications, Time Sensitive
 Notifications and Keychain Sharing with both groups, private one first.

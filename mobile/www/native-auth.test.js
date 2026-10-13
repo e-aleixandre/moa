@@ -74,4 +74,37 @@ describe("native device authentication", () => {
     expect(auth).toContain("try? await reset()");
     expect(auth).not.toContain("print(");
   });
+
+  it("gives the share extension the app's private keychain group, never the push group", () => {
+    const share = readFileSync("ios/App/ShareExtension/ShareExtension.entitlements", "utf8");
+    const shareInfo = readFileSync("ios/App/ShareExtension/Info.plist", "utf8");
+    const nse = readFileSync("ios/App/NotificationService/NotificationService.entitlements", "utf8");
+    const app = readFileSync("ios/App/App/App.entitlements", "utf8");
+    const groups = (plist) => plist.match(/<key>keychain-access-groups<\/key>\s*<array>([\s\S]*?)<\/array>/)?.[1]
+      .match(/<string>[^<]+<\/string>/g) ?? [];
+    // PRODUCT_BUNDLE_IDENTIFIER inside the extension is the extension's own, so the
+    // app's id comes from a project-level setting.
+    expect(groups(share)).toEqual(["<string>$(AppIdentifierPrefix)$(MOA_APP_BUNDLE_IDENTIFIER)</string>"]);
+    expect(share).not.toContain("MOA_PUSH_KEYCHAIN_GROUP");
+    expect(shareInfo).not.toContain("MoaKeychainPushGroup");
+    expect(shareInfo).toContain("<string>$(AppIdentifierPrefix)$(MOA_APP_BUNDLE_IDENTIFIER)</string>");
+    // The extension must look up the app's service name, not its own bundle id.
+    expect(shareInfo).toContain("<string>$(MOA_APP_BUNDLE_IDENTIFIER).device-auth</string>");
+    // The notification extension still cannot see the device credential.
+    expect(groups(nse)).toEqual(["<string>$(AppIdentifierPrefix)$(MOA_PUSH_KEYCHAIN_GROUP)</string>"]);
+    expect(groups(app)).toContain("<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>");
+
+    const project = readFileSync("ios/App/App.xcodeproj/project.pbxproj", "utf8");
+    expect(project).toContain('PRODUCT_BUNDLE_IDENTIFIER = "$(MOA_APP_BUNDLE_IDENTIFIER)";');
+  });
+
+  it("only reads the device credential from the share extension", () => {
+    const dir = "ios/App/ShareExtension/";
+    const sources = ["ShareClient.swift", "ShareViewController.swift", "ShareLogic.swift", "ShareBodyWriter.swift"]
+      .map((name) => readFileSync(dir + name, "utf8")).join("\n");
+    expect(sources).toContain("store.load()");
+    expect(sources).not.toMatch(/\.save\(|\.delete\(\)|SecItemAdd|SecItemDelete|SecItemUpdate/);
+    expect(sources).toContain("completionHandler(nil)");
+    expect(sources).toContain("URLSessionConfiguration.ephemeral");
+  });
 });

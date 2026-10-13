@@ -38,6 +38,21 @@
 		C00000000000000000000003 /* SavedSecretsBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000003 /* SavedSecretsBridge.swift */; };
 		C00000000000000000000004 /* SavedSecretsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* SavedSecretsModel.swift */; };
 		C00000000000000000000005 /* SavedSecretsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000004 /* SavedSecretsModelTests.swift */; };
+		13EDA98D3F2E938E41E7E279 /* ShareBodyWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6D4BE125E99C1D9ED870A6 /* ShareBodyWriterTests.swift */; };
+		15E9EBC3AC9167AA4D91552B /* ShareLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EECAF3668F257616C41EFCE /* ShareLogicTests.swift */; };
+		22213DFB6377CC21253A9024 /* ShareLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B67DE86FE13020C452D6AE7 /* ShareLogic.swift */; };
+		44C255A6F33E0D85C0F4F6A4 /* ShareClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85ED8ED7EA7506088AA492C7 /* ShareClient.swift */; };
+		496A587F473E45471402D4D4 /* ShareClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039A9BF7103BA0E1B896C1A7 /* ShareClientTests.swift */; };
+		6B5316F8E6B55E7ABBDBC8E0 /* KeychainGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5344804AC6CEE00CA033EE88 /* KeychainGroups.swift */; };
+		6BF25F7D409C331766EFD0ED /* DeviceCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* DeviceCredentialStore.swift */; };
+		9793AE35C5F3186239D34C6F /* KeychainGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5344804AC6CEE00CA033EE88 /* KeychainGroups.swift */; };
+		9FED83D042197EC31BFFC98E /* ShareLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B67DE86FE13020C452D6AE7 /* ShareLogic.swift */; };
+		AF7FEE3A43CD9083174EC13B /* ShareBodyWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCEDE19112EAB7BC9752AFA4 /* ShareBodyWriter.swift */; };
+		BE63FF265E650AB7A9C18D2A /* DeviceCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* DeviceCredentialStore.swift */; };
+		C066628DF3CDB37524D7B8E2 /* ShareBodyWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCEDE19112EAB7BC9752AFA4 /* ShareBodyWriter.swift */; };
+		C122D9E488203AB248FB037F /* KeychainGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5344804AC6CEE00CA033EE88 /* KeychainGroups.swift */; };
+		E300B133E0542D795A3E4AD9 /* KeychainGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5344804AC6CEE00CA033EE88 /* KeychainGroups.swift */; };
+		FE630B072FD282F42EE8ABDE /* ShareClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85ED8ED7EA7506088AA492C7 /* ShareClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -111,6 +126,13 @@
 		C10000000000000000000002 /* SavedSecretsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsStore.swift; sourceTree = "<group>"; };
 		C10000000000000000000003 /* SavedSecretsBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsBridge.swift; sourceTree = "<group>"; };
 		C10000000000000000000004 /* SavedSecretsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsModelTests.swift; sourceTree = "<group>"; };
+		039A9BF7103BA0E1B896C1A7 /* ShareClientTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareClientTests.swift; sourceTree = "<group>"; };
+		0EECAF3668F257616C41EFCE /* ShareLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareLogicTests.swift; sourceTree = "<group>"; };
+		5344804AC6CEE00CA033EE88 /* KeychainGroups.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeychainGroups.swift; sourceTree = "<group>"; };
+		5B67DE86FE13020C452D6AE7 /* ShareLogic.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareLogic.swift; sourceTree = "<group>"; };
+		85ED8ED7EA7506088AA492C7 /* ShareClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareClient.swift; sourceTree = "<group>"; };
+		BA6D4BE125E99C1D9ED870A6 /* ShareBodyWriterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareBodyWriterTests.swift; sourceTree = "<group>"; };
+		FCEDE19112EAB7BC9752AFA4 /* ShareBodyWriter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareBodyWriter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -213,6 +235,9 @@
 				A10000000000000000000005 /* ShareViewController.swift */,
 				A10000000000000000000006 /* Info.plist */,
 				A10000000000000000000008 /* ShareExtension.entitlements */,
+				5B67DE86FE13020C452D6AE7 /* ShareLogic.swift */,
+				FCEDE19112EAB7BC9752AFA4 /* ShareBodyWriter.swift */,
+				85ED8ED7EA7506088AA492C7 /* ShareClient.swift */,
 			);
 			path = ShareExtension;
 			sourceTree = "<group>";
@@ -241,6 +266,9 @@
 			children = (
 				B1000000000000000000000A /* PushEnvelopeVectorsTests.swift */,
 				C10000000000000000000004 /* SavedSecretsModelTests.swift */,
+				0EECAF3668F257616C41EFCE /* ShareLogicTests.swift */,
+				BA6D4BE125E99C1D9ED870A6 /* ShareBodyWriterTests.swift */,
+				039A9BF7103BA0E1B896C1A7 /* ShareClientTests.swift */,
 			);
 			path = PushEnvelopeTests;
 			sourceTree = "<group>";
@@ -456,6 +484,11 @@
 			files = (
 				A00000000000000000000004 /* SharedInbox.swift in Sources */,
 				A00000000000000000000005 /* ShareViewController.swift in Sources */,
+				22213DFB6377CC21253A9024 /* ShareLogic.swift in Sources */,
+				C066628DF3CDB37524D7B8E2 /* ShareBodyWriter.swift in Sources */,
+				44C255A6F33E0D85C0F4F6A4 /* ShareClient.swift in Sources */,
+				6B5316F8E6B55E7ABBDBC8E0 /* KeychainGroups.swift in Sources */,
+				6BF25F7D409C331766EFD0ED /* DeviceCredentialStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -475,6 +508,7 @@
 				B00000000000000000000001 /* PushEnvelope.swift in Sources */,
 				B00000000000000000000002 /* NativePushRegistration.swift in Sources */,
 				B00000000000000000000003 /* NativePushBridge.swift in Sources */,
+				9793AE35C5F3186239D34C6F /* KeychainGroups.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -484,6 +518,7 @@
 			files = (
 				B00000000000000000000005 /* PushEnvelope.swift in Sources */,
 				B00000000000000000000006 /* NotificationService.swift in Sources */,
+				E300B133E0542D795A3E4AD9 /* KeychainGroups.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -495,6 +530,14 @@
 				B0000000000000000000000A /* PushEnvelopeVectorsTests.swift in Sources */,
 				C00000000000000000000004 /* SavedSecretsModel.swift in Sources */,
 				C00000000000000000000005 /* SavedSecretsModelTests.swift in Sources */,
+				C122D9E488203AB248FB037F /* KeychainGroups.swift in Sources */,
+				9FED83D042197EC31BFFC98E /* ShareLogic.swift in Sources */,
+				AF7FEE3A43CD9083174EC13B /* ShareBodyWriter.swift in Sources */,
+				FE630B072FD282F42EE8ABDE /* ShareClient.swift in Sources */,
+				BE63FF265E650AB7A9C18D2A /* DeviceCredentialStore.swift in Sources */,
+				15E9EBC3AC9167AA4D91552B /* ShareLogicTests.swift in Sources */,
+				13EDA98D3F2E938E41E7E279 /* ShareBodyWriterTests.swift in Sources */,
+				496A587F473E45471402D4D4 /* ShareClientTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -547,6 +590,7 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				MOA_APP_GROUP_IDENTIFIER = group.com.ealeixandre.moa;
+				MOA_APP_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app;
 				MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.ShareExtension;
 				MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.NotificationService;
 				MOA_PUSH_KEYCHAIN_GROUP = com.ealeixandre.moa.push;
@@ -609,6 +653,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				MOA_APP_GROUP_IDENTIFIER = group.com.ealeixandre.moa;
+				MOA_APP_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app;
 				MOA_SHARE_EXTENSION_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.ShareExtension;
 				MOA_NOTIFICATION_SERVICE_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app.NotificationService;
 				MOA_PUSH_KEYCHAIN_GROUP = com.ealeixandre.moa.push;
@@ -677,7 +722,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
-				PRODUCT_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MOA_APP_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.0;
@@ -700,7 +745,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ealeixandre.moa.app;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MOA_APP_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_VERSION = 5.0;
