@@ -273,10 +273,10 @@ func main() {
 				JobID: jobID, Usage: usage, CostUSD: costUSD, ContextPercent: contextPct,
 			})
 		},
-		OnSubagentEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, priorCostUSD float64) {
+		OnSubagentEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64) {
 			preBus.Publish(bus.SubagentEnded{
 				JobID: jobID, Task: task, Async: async, Status: status,
-				Result: result, Error: resultErr, FinishedAt: finishedAt, Usage: usage, CostUSD: costUSD, PriorCostUSD: priorCostUSD,
+				Result: result, Error: resultErr, FinishedAt: finishedAt, Usage: usage, CostUSD: costUSD, RunCostUSD: &runCostUSD,
 			})
 		},
 		OnBashJobStart: func(job tool.BashJobInfo) {

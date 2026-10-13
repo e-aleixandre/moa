@@ -2407,7 +2407,7 @@ func TestSubagentWaitSuppressesAsyncComplete(t *testing.T) {
 			completeN++
 			mu.Unlock()
 		},
-		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, priorCostUSD float64) {
+		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64) {
 			ended <- terminalOutcome{status: status, result: result, err: resultErr}
 		},
 	}
@@ -2482,7 +2482,7 @@ func TestSubagentWaitNoWaiterStillNotifies(t *testing.T) {
 			completeN++
 			mu.Unlock()
 		},
-		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, priorCostUSD float64) {
+		OnChildEnd: func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64) {
 			ended <- struct {
 				status string
 				result string

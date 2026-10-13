@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,14 +51,14 @@ func TestResumedChildReportsOnlyNewSpendToLedgers(t *testing.T) {
 			defer mu.Unlock()
 			return store, nil
 		},
-		OnChildEnd: func(jobID, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, costUSD, priorCostUSD float64) {
+		OnChildEnd: func(jobID, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, costUSD, runCostUSD float64) {
 			mu.Lock()
 			if firstID == "" {
 				firstID = jobID
 				store = ResumedTranscript{Messages: jobs.messages(jobID)}
 			}
 			cumulative = costUSD
-			ledger += costUSD - priorCostUSD
+			ledger += runCostUSD
 			mu.Unlock()
 		},
 	}
@@ -87,5 +88,54 @@ func TestResumedChildReportsOnlyNewSpendToLedgers(t *testing.T) {
 	}
 	if math.Abs(ledger-5) > 1e-9 {
 		t.Errorf("sum of ledger costs across both runs = %v, want 5 (real spend), not 8", ledger)
+	}
+}
+
+// Compaction rewrites a resumed child's history, so the cost of the final
+// history can fall below what was inherited. The run's own spend must still be
+// exact, and never negative.
+func TestResumedChildRunCostSurvivesCompaction(t *testing.T) {
+	model := core.Model{ID: "default", Provider: "mock", MaxInput: 200000, Pricing: &core.Pricing{Input: 1e3}}
+	big := strings.Repeat("old context ", 4000)
+	var seed []core.AgentMessage
+	for i := range 6 {
+		assistant := core.Message{Role: "assistant", Content: []core.Content{core.TextContent(big)},
+			StopReason: "end_turn", Model: "default", Provider: "mock"}
+		if i == 1 {
+			assistant.Usage = &core.Usage{Input: 60000} // the whole inherited bill: $60
+		}
+		seed = append(seed, core.WrapMessage(core.NewUserMessage(big)), core.WrapMessage(assistant))
+	}
+	provider := newMockProvider(textResponse("summary of old work"), usageTextResponse("done", 2000), usageTextResponse("done", 2000))
+
+	var mu sync.Mutex
+	var cumulative, run float64
+	var ended bool
+	cfg := Config{
+		DefaultModel:       model,
+		AppCtx:             context.Background(),
+		ParentTools:        core.NewRegistry(),
+		ProviderFactory:    func(core.Model) (core.Provider, error) { return provider, nil },
+		InheritedCompactAt: func() int { return 50000 },
+		TranscriptLoader:   func(string) (ResumedTranscript, error) { return ResumedTranscript{Messages: seed}, nil },
+		OnChildEnd: func(_, _ string, _ bool, _, _, _ string, _ time.Time, _ *core.Usage, costUSD, runCostUSD float64) {
+			mu.Lock()
+			cumulative, run, ended = costUSD, runCostUSD, true
+			mu.Unlock()
+		},
+	}
+	sub := newSubagent(cfg, newJobStore())
+	res, err := sub.Execute(context.Background(), map[string]any{"task": "go", "resume": "sa-old"}, nil)
+	if err != nil || res.IsError {
+		t.Fatalf("resume: %v %s", err, textOf(res))
+	}
+	waitFor(t, 2*time.Second, func() bool { mu.Lock(); defer mu.Unlock(); return ended })
+	mu.Lock()
+	defer mu.Unlock()
+	if cumulative >= 60 {
+		t.Fatalf("compaction did not rewrite the history (cumulative=%v); the setup no longer exercises it", cumulative)
+	}
+	if math.Abs(run-2) > 1e-9 {
+		t.Errorf("run cost = %v, want 2 (history cost fell to %v after compaction)", run, cumulative)
 	}
 }

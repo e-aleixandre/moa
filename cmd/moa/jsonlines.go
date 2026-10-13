@@ -121,8 +121,8 @@ func (w *jsonLineWriter) subscribeAll(b bus.EventBus, done chan bus.RunEnded) {
 			// A subagent's message events provide its model breakdown; its
 			// terminal cost is authoritative for the overall ledger. In
 			// particular, never add SubagentUsage, which is a running aggregate.
-			// A resumed child's cost_usd is cumulative; only the part added by
-			// this run enters the ledger.
+			// A resumed child's cost_usd covers its whole history; only what this
+			// run spent enters the ledger.
 			w.costUSD += e.NewCostUSD()
 			end := map[string]any{
 				"type":        "subagent_end",
@@ -130,8 +130,8 @@ func (w *jsonLineWriter) subscribeAll(b bus.EventBus, done chan bus.RunEnded) {
 				"status":      e.Status,
 				"cost_usd":    roundUSD(e.CostUSD),
 			}
-			if e.PriorCostUSD > 0 {
-				end["prior_cost_usd"] = roundUSD(e.PriorCostUSD)
+			if e.RunCostUSD != nil && roundUSD(*e.RunCostUSD) != roundUSD(e.CostUSD) {
+				end["run_cost_usd"] = roundUSD(*e.RunCostUSD)
 			}
 			w.emit(end)
 

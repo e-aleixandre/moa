@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/agent"
@@ -171,11 +172,12 @@ type Config struct {
 	// OnChildEnd is called once when a child agent (sync or async) finishes.
 	// Result/Error are the terminal child outcome, not the one-time model
 	// delivery claim used by subagent_wait and async notifications.
-	// costUSD is the child's CUMULATIVE cost, including what a resumed child had
-	// already accrued before this run; priorCostUSD is that inherited part (0 for
-	// a fresh child), priced with the same model. A ledger must add only
-	// costUSD-priorCostUSD, or every resume re-charges the old spend.
-	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, priorCostUSD float64)
+	// costUSD is the child's CUMULATIVE cost of the history it ends with, which
+	// for a resumed child includes spend paid in earlier runs (and shrinks if
+	// compaction replaced old messages). runCostUSD is what THIS run spent,
+	// summed from the assistant messages it produced; a ledger must add that,
+	// never a difference of cumulative figures.
+	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, runCostUSD float64)
 
 	// Title generation is deliberately asynchronous: starting work must never
 	// wait on a convenience model call. Resumed children keep their saved title.
@@ -891,6 +893,13 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 	defer j.cancel()
 	defer close(j.done)
 	var finalMsgs []core.AgentMessage
+	var runCostMu sync.Mutex
+	var runCost float64
+	thisRunCost := func() float64 {
+		runCostMu.Lock()
+		defer runCostMu.Unlock()
+		return runCost
+	}
 	if cfg.BashState != nil {
 		defer cfg.BashState.Drop(j.id)
 	}
@@ -937,7 +946,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 				finishedAt = snap.FinishedAt
 				async = !snap.Sync
 			}
-			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs), childCost(model, seedMsgs))
+			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs), thisRunCost())
 		}
 	}()
 
@@ -960,6 +969,11 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		})
 	}
 	unsub := child.Subscribe(func(e core.AgentEvent) {
+		if e.Type == core.AgentEventMessageEnd && e.Message.Role == "assistant" && e.Message.Usage != nil && e.Pricing != nil {
+			runCostMu.Lock()
+			runCost += e.Pricing.Cost(*e.Message.Usage)
+			runCostMu.Unlock()
+		}
 		if j.isSync() {
 			forwardSyncEvent(e, onUpdate)
 		} else {

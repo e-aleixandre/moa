@@ -211,11 +211,13 @@ func TestSessionCost_ResumedSubagentCountsOnlyNewSpend(t *testing.T) {
 	sctx := newTestSessionContextWithState(b, &fakeAgent{})
 	RegisterHandlers(sctx)
 
-	b.Publish(SubagentEnded{SessionID: "test-session", JobID: "J1", CostUSD: 3})
-	b.Publish(SubagentEnded{SessionID: "test-session", JobID: "J1", CostUSD: 5, PriorCostUSD: 3})
+	b.Publish(SubagentEnded{SessionID: "test-session", JobID: "J1", CostUSD: 3, RunCostUSD: ptr(3.0)})
+	b.Publish(SubagentEnded{SessionID: "test-session", JobID: "J1", CostUSD: 5, RunCostUSD: ptr(2.0)})
 	b.Drain(time.Second)
 
 	if total := querySessionCost(t, b); !approxEqual(total, 5) {
 		t.Fatalf("session cost = %v, want 5 (real spend)", total)
 	}
 }
+
+func ptr(v float64) *float64 { return &v }
