@@ -650,10 +650,14 @@ func TestPendingReportsSurviveARestart(t *testing.T) {
 	// swapping the actor under a live owner's callbacks.
 	mgr.Shutdown()
 	restarted := newRestartableManager(t, ctx, sessionDir)
-	ownerSess, err := restarted.ResumeSession(info.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The coordinator recovers the owner and resumes it by itself; an explicit
+	// Resume here would race that recovery and fail with ErrBusy, so only observe.
+	var ownerSess *ManagedSession
+	pollUntil(t, 5*time.Second, "the owner session being recovered", func() bool {
+		var ok bool
+		ownerSess, ok = restarted.Get(info.SessionID)
+		return ok
+	})
 
 	got := waitForOwnerReports(t, ownerSess, 1)[0]
 	if !strings.Contains(got, "survived the restart") {
