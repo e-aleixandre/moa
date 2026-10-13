@@ -768,7 +768,10 @@ final class PushNavigator {
             return true // the paired page is already on screen
         }
         do {
-            let result = try await webView.callAsyncJavaScript(script, arguments: arguments, in: nil, contentWorld: .page)
+            // The Objective-C import of the same API: with SDK 27 the Swift
+            // overlay spelling links libswiftWebKit, which iOS 18 lacks, and
+            // the app aborts at launch there.
+            let result = try await webView.__callAsyncJavaScript(script, arguments: arguments, inFrame: nil, in: .page)
             return (result as? Bool) == true
         } catch {
             return false
