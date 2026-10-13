@@ -1,21 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { Check, ChevronDown, Clock3, Plus, Search, Trash2 } from "lucide-preact";
+import { Check, ChevronDown, Clock3, Plus, Search, Trash2, X } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { hasBlockingOverlay } from "../../data/overlays.js";
 import { addToast } from "../../data/notifications.js";
 import {
   createTask, deleteTaskAt, deliverNotice, knownTasks, loadTask, loadTaskProjects, patchTask, selectSessionDirectory,
-  addDraftWait, peekDraft, stashDraft, takeDraft, tasksSlice, watchTask,
+  addDraftWait, peekDraft, resolveHandoff, stashDraft, takeDraft, tasksSlice, watchTask,
 } from "../../data/tasks.js";
 import {
   completeNotifies, conflictCurrent, createBody, depCandidates, nameTaskRefs, needsDeliverChoice, deleteNotifies, deletePath, draftDirty, editorActions, editorDraft,
   errorText, isAgentTask, isOpen, isRequest, isTypingTarget, listenerOf, latestUndelivered, movePatch, noticeLine, placeLabel, projectLabelOf,
   projectOptions, rebaseDraft, recipientFor, relAge, reopenPatch, savePatch, sessionName, sessionNoticeState, taskProjectName, completePatch,
+  awaitingPermission, canMove, canReopen, closePatch, handoffActions, handoffOrphan, handoffSide, hasThread, isCantDo, isHandoff,
 } from "../../data/tasks-model.js";
 import {
-  CheckRing, CloseIcon, CompletionFlow, DeliverChoice, Keycap, MOD_ENTER, MoveList, OpenSessionButton, useEscape, useNotifyGesture,
+  CheckRing, CloseIcon, CompleteNote, CompletionFlow, DeliverChoice, Keycap, MOD_ENTER, MoveList, OpenSessionButton, OwnerMark, useEscape, useNotifyGesture,
 } from "./parts.jsx";
-import { ownersSlice } from "../../data/owners.js";
+import { loadOwners, ownersSlice } from "../../data/owners.js";
+import { Thread, ThreadComposer, useThread } from "./Thread.jsx";
 import { isScheduled, schedEyebrow, targetFromDest } from "../../data/schedule-model.js";
 import { SchedDetail, WhenEditor } from "./Scheduled.jsx";
 
@@ -102,7 +104,9 @@ export function TaskDetail({
 }) {
   const slice = useStore(tasksSlice);
   const sessions = useStore(selectSessionDirectory);
-  const owners = useStore((st) => ownersSlice(st).list);
+  const ownersState = useStore(ownersSlice);
+  const owners = ownersState.list;
+  const ownersLoaded = ownersState.loaded;
   const rec = isNew ? null : (slice.details[taskId] || slice.list.find((t) => t.id === taskId) || null);
 
   useEffect(() => (isNew ? undefined : watchTask(taskId)), [taskId, isNew]);
@@ -118,9 +122,10 @@ export function TaskDetail({
   const [menu, setMenu] = useState(!!init.menu);
   const [dep, setDep] = useState(false);
   const [sub, setSub] = useState("");
-  const [mode, setMode] = useState(null); // null | 'completing'
+  const [mode, setMode] = useState(null); // null | 'completing' | 'done' | 'cant_do' (closing a task between owners)
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
+  const [stale, setStale] = useState(false);
   const gesture = useNotifyGesture();
 
   // Follow the task while nothing is being edited: another tab, the CLI or
@@ -139,15 +144,20 @@ export function TaskDetail({
   const fail = (title, error) => failed(title, error, lookup);
   const recipient = task ? recipientFor(task, sessions) : null;
   const done = !!task && task.status === "done";
+  const handoff = isHandoff(task);
+  const movable = isNew || canMove(task);
+  const thread = useThread(taskId, !isNew && hasThread(task));
 
   const startDone = () => {
-    if (!task || !isOpen(task) || busy) return;
+    if (!task || !isOpen(task) || busy || awaitingPermission(task)) return;
+    if (handoff) { setMode("done"); return; }
     if (isRequest(task) || completeNotifies(task)) { setMode("completing"); return; }
     patchTask(task.id, completePatch(task)).catch((error) => fail("Could not complete the task", error));
   };
   // A page on the phone (one sheet at a time), for a new task too: its
   // draft waits in the stash, as it does for "Waits for".
   const openMove = () => {
+    if (!movable) return;
     if (!onPushMove) { setMenu(true); return; }
     stashDraft(draftKey, { base, draft, dest });
     onPushMove();
@@ -226,6 +236,31 @@ export function TaskDetail({
     });
   };
 
+  const answer = (action) => {
+    if (busy) return;
+    setBusy(true);
+    resolveHandoff(task, action)
+      .then(() => { setStale(false); if (action === "allow") loadOwners(); })
+      .catch((error) => {
+        if (error?.status === 409) setStale(true);
+        else fail("Could not answer the request", error);
+      })
+      .finally(() => setBusy(false));
+  };
+
+  const close = async (outcome, note, choice) => {
+    setBusy(true);
+    try {
+      await patchTask(task.id, closePatch(task, { outcome, note, choice }));
+      setMode(null);
+    } catch (error) {
+      if (error?.status === 409) loadTask(task.id);
+      fail(outcome === "cant_do" ? "Could not close the task" : "Could not complete the task", error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = () => {
     const run = (choice) => deleteTaskAt(deletePath(task, choice), task.id)
       .then(() => onClose?.())
@@ -270,6 +305,11 @@ export function TaskDetail({
   const listener = isNew ? '' : listenerOf(task);
   const openable = !!listener && !!sessions[listener] && listener !== hereSessionId && !!onOpenSession;
   const moveTask = isNew ? { place: dest.place, project_key: dest.key, assignee_session_id: dest.sessionId } : task;
+  const from = handoff ? handoffSide(task, "from", owners) : null;
+  const to = handoff ? handoffSide(task, "to", owners) : null;
+  const orphan = handoffOrphan(task, owners, ownersLoaded);
+  const asking = awaitingPermission(task);
+  const deleteButton = <button type="button" class="tk-icon" aria-label="Delete task" onClick={remove}><Trash2 size={15} aria-hidden="true" /></button>;
 
   let foot;
   if (gesture.pending) {
@@ -316,32 +356,99 @@ export function TaskDetail({
     );
   } else if (mode === "completing") {
     foot = <CompletionFlow task={task} sessions={sessions} phone={phone} onDone={() => setMode(null)} onCancel={() => setMode(null)} />;
+  } else if (handoff && (mode === "done" || mode === "cant_do")) {
+    // Closing a task between owners: the sender hears it with the note.
+    // Can't do needs the reason; the receiving owner, when saved, is asked
+    // wake or hold like any agent's task.
+    const cant = mode === "cant_do";
+    foot = (
+      <CompleteNote
+        key={mode}
+        who={from.name}
+        savedName={to.name}
+        saved={!orphan && needsDeliverChoice(recipient)}
+        label={cant ? "Can't do" : "Done"}
+        required={cant}
+        placeholder={cant ? `Tell ${from.name} why it can't be done` : `Tell ${from.name} the result (optional)`}
+        phone={phone}
+        busy={busy}
+        onCancel={() => setMode(null)}
+        onDone={(note, choice) => close(mode, note, choice)}
+      />
+    );
   } else if (done) {
+    const at = task.completed_at ? ` ${relAge(task.completed_at) === "now" ? "just now" : `${relAge(task.completed_at)} ago`}` : "";
     foot = (
       <>
-        <span class="tk-foot-fact">Done{task.completed_at ? ` ${relAge(task.completed_at) === "now" ? "just now" : `${relAge(task.completed_at)} ago`}` : ""}</span>
+        <span class="tk-foot-fact">{isCantDo(task) ? (task.handoff?.state === "declined" ? "Declined" : "Can't do") : "Done"}{at}</span>
         <span class="tk-grow" />
-        <button type="button" class="zl-ask-btn" onClick={() => patchTask(task.id, reopenPatch(task)).catch((error) => fail("Could not reopen the task", error))}>Reopen</button>
+        {canReopen(task) && (
+          <button type="button" class="zl-ask-btn" onClick={() => patchTask(task.id, reopenPatch(task)).catch((error) => fail("Could not reopen the task", error))}>Reopen</button>
+        )}
+      </>
+    );
+  } else if (asking) {
+    const acts = handoffActions(task, owners, ownersLoaded);
+    const primary = acts.filter((a) => a.action !== "decline");
+    foot = (
+      <>
+        <div class="tk-choice-q">
+          {to.gone && ownersLoaded ? <span>Nobody will receive this</span> : <span>Send this to <b>{to.name}</b>?</span>}
+        </div>
+        {primary.length > 0 && (
+          <div class="tk-handoff-acts">
+            {primary.map((a) => (
+              <button key={a.action} type="button" class={`zl-ask-btn${a.action === "send" ? " is-primary" : ""}`} disabled={busy} onClick={() => answer(a.action)}>
+                {a.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div class="tk-foot-row">
+          {deleteButton}
+          <span class="tk-grow" />
+          <button type="button" class="zl-ask-btn" disabled={busy} onClick={() => answer("decline")}>Decline</button>
+        </div>
+      </>
+    );
+  } else if (orphan) {
+    foot = (
+      <>
+        {deleteButton}
+        <span class="tk-foot-fact tk-foot-gone">Nobody will receive this</span>
+        <span class="tk-grow" />
+        <button type="button" class="zl-ask-btn" onClick={() => setMode("cant_do")}>
+          <X size={15} strokeWidth={2.4} aria-hidden="true" />Can't do
+        </button>
       </>
     );
   } else {
     foot = (
       <>
-        <button type="button" class="tk-icon" aria-label="Delete task" onClick={remove}><Trash2 size={15} aria-hidden="true" /></button>
+        {deleteButton}
         <span class="tk-grow" />
-        <button type="button" class="zl-ask-btn" onClick={openMove}>Move{!phone && <Keycap>M</Keycap>}</button>
+        {movable && <button type="button" class="zl-ask-btn" onClick={openMove}>Move{!phone && <Keycap>M</Keycap>}</button>}
+        {handoff && (
+          <button type="button" class="zl-ask-btn" onClick={() => setMode("cant_do")}>
+            <X size={15} strokeWidth={2.4} aria-hidden="true" />Can't do
+          </button>
+        )}
         <button type="button" class="zl-ask-btn is-primary" onClick={startDone}>
           <Check size={15} strokeWidth={2.4} aria-hidden="true" />Done{!phone && <Keycap>{MOD_ENTER}</Keycap>}
         </button>
       </>
     );
   }
-  const stacked = !!gesture.pending || mode === "completing";
+  // The thread's composer sits over the foot's actions while nothing else
+  // (an edit, a completion, a delivery choice) holds the foot.
+  const composing = !isNew && !!thread && !gesture.pending && !actions.length && !mode;
+  const stacked = !!gesture.pending || mode === "completing" || (handoff && !!mode) || asking || composing;
 
   return (
     <div class={`tk-detail tk-root${phone ? " is-phone" : ""}`}>
       <div class="tk-detail-body">
         {conflict && <p class="tk-conflict" role="status">Changed elsewhere. This is the latest version, with your edits kept.</p>}
+        {stale && <p class="tk-conflict" role="status">Already answered elsewhere. This is where it stands now.</p>}
         <textarea
           class={`tk-field tk-title${done ? " is-done" : ""}`}
           rows={1}
@@ -407,7 +514,37 @@ export function TaskDetail({
               />
             </div>
           )}
-          <div class="tk-prop">
+          {handoff && (
+            <div class="tk-prop">
+              <dt>From</dt>
+              <dd class="tk-where">
+                <span class="tk-sess">
+                  <OwnerMark side={from} size={18} />
+                  <span class="tk-prop-v">{from.name}</span>
+                </span>
+                {from.owner?.session_id && from.owner.session_id !== hereSessionId && onOpenSession && (
+                  <OpenSessionButton sessions={sessions} id={from.owner.session_id} phone={phone} onOpen={onOpenSession} />
+                )}
+              </dd>
+            </div>
+          )}
+          {handoff && (
+            <div class="tk-prop">
+              <dt>{task.place === "agent" ? "Sent to" : "Where"}</dt>
+              <dd class="tk-where">
+                {task.place === "agent" ? (
+                  <span class="tk-sess">
+                    <OwnerMark side={to} size={18} />
+                    <span class={`tk-prop-v${orphan ? " tk-gone" : ""}`}>{to.name}</span>
+                  </span>
+                ) : (
+                  <span class="tk-prop-v">You</span>
+                )}
+                {task.place === "agent" && openable && <OpenSessionButton sessions={sessions} id={listener} phone={phone} onOpen={onOpenSession} />}
+              </dd>
+            </div>
+          )}
+          {!handoff && (<div class="tk-prop">
             <dt>Where</dt>
             <dd class="tk-anchor tk-where">
               <button type="button" class="tk-prop-btn" aria-expanded={menu} aria-haspopup="menu" onClick={() => (menu ? setMenu(false) : openMove())}>
@@ -430,8 +567,8 @@ export function TaskDetail({
                 </div>
               )}
             </dd>
-          </div>
-          {!isNew && isRequest(task) && (
+          </div>)}
+          {!isNew && isRequest(task) && !handoff && (
             <div class="tk-prop">
               <dt>Asked by</dt>
               <dd class="tk-where">
@@ -463,7 +600,10 @@ export function TaskDetail({
         )}
 
         {done && task.completion_note && (
-          <div class="tk-sent"><span class="tk-sent-k">Your note</span><p>{task.completion_note}</p></div>
+          <div class={`tk-sent${isCantDo(task) ? " is-cant" : ""}`}>
+            <span class="tk-sent-k">{handoff ? (isCantDo(task) ? "Can't do" : "Result") : "Your note"}</span>
+            <p>{task.completion_note}</p>
+          </div>
         )}
 
         <section class="tk-block" aria-label="Subtasks">
@@ -529,9 +669,14 @@ export function TaskDetail({
             </>
           )}
         </section>
+
+        {thread && <Thread task={task} thread={thread} owners={owners} sessions={sessions} />}
       </div>
 
-      <div class={`tk-foot${stacked ? " is-stack" : ""}`}>{foot}</div>
+      <div class={`tk-foot${stacked ? " is-stack" : ""}`}>
+        {composing && <ThreadComposer key={task.id} task={task} owners={owners} sessions={sessions} phone={phone} />}
+        {composing && !asking ? <div class="tk-foot-row">{foot}</div> : foot}
+      </div>
     </div>
   );
 }

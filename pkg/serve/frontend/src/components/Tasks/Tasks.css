@@ -477,3 +477,55 @@ button.tk-group:hover { color: var(--zl-t2); }
 .sch-later-anchor { position: relative; }
 .sch-later-pop { bottom: calc(100% + 8px); }
 .sch-prop-dd:not(:has(.is-under)) { flex-wrap: nowrap; }
+
+/* ── Tasks between owners, and a task's thread ─────────────────────────── */
+/* «from <owner>»: the sender's face and name, quieter than the title. */
+.tk-from { flex: none; display: inline-flex; align-items: center; gap: 5px; max-width: 200px; color: var(--zl-t3); }
+.tk-from > :first-child { flex: none; }
+.tk-from-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-row-meta > .tk-from { overflow: visible; }
+/* Can't do is closed, not done: no green, a cross instead of the check. */
+.tk-meta-cant { flex: none; color: var(--zl-t2); font-weight: 500; }
+.tk-check.is-done.is-cant { border-color: var(--zl-t4); background: var(--zl-t4); color: var(--zl-canvas); }
+.tk-meta-comments { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.tk-meta-comments svg { flex: none; }
+.tk-sent.is-cant .tk-sent-k { color: var(--zl-t2); font-weight: 500; }
+.tk-gone { color: var(--zl-t3); text-decoration: line-through; text-decoration-color: var(--zl-t4); }
+.tk-foot-gone { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A request waiting for permission: Send and Always allow, one per line
+   (the pair's names make the second one long), Decline beside Delete. */
+.tk-handoff-acts { display: flex; flex-direction: column; gap: 6px; }
+.tk-handoff-acts .zl-ask-btn { justify-content: center; min-width: 0; }
+.tk-foot .tk-choice-q { font-size: var(--zl-fs-meta); }
+
+/* Activity: what opened the task, then the comments in order. */
+.tk-activity { margin-top: 24px; }
+.tk-activity .tk-block-h { margin-bottom: 4px; }
+.tk-c-av {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--zl-raised); box-shadow: var(--zl-rim); color: var(--zl-t3);
+}
+.tk-c-av svg { width: 12px; height: 12px; }
+.tk-c-av.is-small { width: 18px; height: 18px; }
+.tk-c-av.is-small svg { width: 10px; height: 10px; }
+.tk-c-face { flex: none; display: inline-flex; }
+.tk-mark { display: flex; align-items: center; gap: 10px; min-height: 34px; font-size: var(--zl-fs-meta); color: var(--zl-t3); }
+.tk-mark > :first-child { margin: 0 2px; }
+.tk-mark-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-mark-t b { font-weight: 500; color: var(--zl-t2); }
+.tk-mark .tk-c-at::before { content: "·"; margin-right: 6px; color: var(--zl-t4); opacity: 0.7; }
+.tk-c { display: flex; gap: 10px; padding: 10px 0 8px; border-top: 1px solid var(--zl-line); }
+.tk-c-main { flex: 1; min-width: 0; }
+.tk-c-head { display: flex; align-items: baseline; gap: 8px; min-height: 22px; line-height: 22px; }
+.tk-c-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--zl-t1); }
+.tk-c-at { flex: none; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.tk-c-body { margin: 2px 0 0; color: var(--zl-t2); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The composer: the note field's surface, Send under it once there is text. */
+.tk-composer { display: flex; flex-direction: column; gap: 8px; padding: 9px 12px; border-radius: var(--zl-r-md); background: var(--zl-canvas); box-shadow: var(--zl-rim-2); }
+.tk-composer:focus-within { box-shadow: 0 0 0 1.5px var(--zl-accent-line); }
+.tk-composer-f { max-height: 180px; overflow-y: auto; }
+.tk-composer-acts { display: flex; align-items: center; gap: 8px; }
+.tk-foot .tk-composer-acts .zl-ask-btn { height: 30px; padding: 0 10px 0 12px; }
+.tk-detail.is-phone .tk-foot .tk-composer-acts .zl-ask-btn { height: 40px; padding: 0 16px; }

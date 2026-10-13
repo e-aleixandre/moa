@@ -9,7 +9,7 @@
 
 import { api } from './api.js';
 import { store, setState, TASKS_INITIAL } from './store.js';
-import { sessionRecords } from './tasks-model.js';
+import { conflictCurrent, sessionRecords } from './tasks-model.js';
 
 export { TASKS_INITIAL };
 
@@ -89,6 +89,7 @@ function storeTask(rec) {
 
 const watchedSessions = new Map();
 const watchedTasks = new Map();
+const watchedThreads = new Map();
 
 function watch(map, key, load) {
   map.set(key, (map.get(key) || 0) + 1);
@@ -109,6 +110,13 @@ export function watchTask(id) {
   return watch(watchedTasks, id, loadTask);
 }
 
+// A comment does not move the task's revision, so the thread is read again
+// on every tasks_changed while its detail shows.
+export function watchThread(id) {
+  if (!id) return () => {};
+  return watch(watchedThreads, id, loadThread);
+}
+
 let refreshTimer = null;
 export function refreshTasks() {
   clearTimeout(refreshTimer);
@@ -116,6 +124,7 @@ export function refreshTasks() {
     loadTasks();
     for (const id of watchedSessions.keys()) loadSessionTasks(id);
     for (const id of watchedTasks.keys()) loadTask(id);
+    for (const id of watchedThreads.keys()) loadThread(id);
   }, 120);
 }
 
@@ -208,6 +217,51 @@ export function deleteTaskAt(path, id) {
     });
     refreshTasks();
   });
+}
+
+// ── Threads and tasks between owners ────────────────────────────────────
+
+export function threadOf(slice, id) {
+  return (slice.threads || {})[id] || null;
+}
+
+export function loadThread(id) {
+  if (!id) return Promise.resolve(null);
+  return api('GET', `/api/tasks/${id}/comments`)
+    .then((res) => {
+      const comments = Array.isArray(res?.comments) ? res.comments : [];
+      patch((t) => ({ threads: { ...(t.threads || {}), [id]: { comments, loaded: true } } }));
+      return comments;
+    })
+    .catch(() => null);
+}
+
+export function postComment(id, body) {
+  return api('POST', `/api/tasks/${id}/comments`, { body }).then((c) => {
+    if (c?.id) {
+      patch((t) => {
+        const cur = (t.threads || {})[id]?.comments || [];
+        const comments = cur.some((x) => x.id === c.id) ? cur : [...cur, c];
+        return { threads: { ...(t.threads || {}), [id]: { comments, loaded: true } } };
+      });
+    }
+    refreshTasks();
+    return c;
+  });
+}
+
+// resolveHandoff answers a request to send a task to another owner. A stale
+// revision (409) stores the task as it is now before rejecting, so the
+// detail shows the current answer instead of the one it read.
+export function resolveHandoff(task, action) {
+  return api('POST', `/api/tasks/${task.id}/handoff`, { action, revision: task.revision })
+    .then(after)
+    .catch((error) => {
+      const current = conflictCurrent(error);
+      if (current) storeTask(current);
+      refreshTasks();
+      throw error;
+    });
 }
 
 // ── Scheduled tasks ──────────────────────────────────────────────────────

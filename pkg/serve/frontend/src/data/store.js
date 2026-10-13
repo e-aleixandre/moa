@@ -54,6 +54,9 @@ export const TASKS_INITIAL = Object.freeze({
   projects: [],
   bySession: {},
   details: {},
+  // A task's thread (GET /api/tasks/{id}/comments) while its detail shows:
+  // { [id]: { comments, loaded } }.
+  threads: {},
   newSince: 0,
 });
 

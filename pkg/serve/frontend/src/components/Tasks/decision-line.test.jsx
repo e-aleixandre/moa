@@ -159,3 +159,60 @@ test("Done with a note to a live session is a single Done with no choice", () =>
   buttons(tree).find((b) => b.label.startsWith("Done")).node.props.onClick();
   expect(done).toEqual([["", null]]);
 });
+
+// ── Tasks between owners ─────────────────────────────────────────────────
+
+test("Can't do stays disabled until there is a reason", () => {
+  const done = [];
+  calls = 0;
+  pick = () => undefined;
+  const empty = expand(CompleteNote({ who: "moa", label: "Can't do", required: true, onCancel() {}, onDone: (note) => done.push(note) }));
+  const btn = (tree) => buttons(tree).find((b) => b.label.startsWith("Can't do")).node;
+  expect(btn(empty).props.disabled).toBe(true);
+  calls = 0;
+  pick = (i) => (i === 0 ? "pve01 has no RAM" : undefined);
+  const filled = expand(CompleteNote({ who: "moa", label: "Can't do", required: true, onCancel() {}, onDone: (note) => done.push(note) }));
+  expect(btn(filled).props.disabled).toBe(false);
+  btn(filled).props.onClick();
+  expect(done).toEqual(["pve01 has no RAM"]);
+});
+
+const OWNERS = [{ id: "own_moa", name: "moa", session_id: "s_moa" }, { id: "own_infra", name: "Infra", session_id: "s_infra" }];
+const HANDOFF = { from_owner_id: "own_moa", from_owner_name: "moa", to_owner_id: "own_infra", to_owner_name: "Infra" };
+
+function renderDetail(task, owners = OWNERS) {
+  const previous = store.get();
+  setState({ tasks: { ...TASKS_INITIAL, details: { [task.id]: task } }, sessions: SESSIONS, owners: { ...previous.owners, list: owners, loaded: true } });
+  calls = 0;
+  pick = () => undefined;
+  try {
+    return TaskDetail({ taskId: task.id, onPushMove() {} });
+  } finally {
+    setState(previous);
+  }
+}
+
+test("a request waiting for permission answers Send, Always allow or Decline, and never moves", () => {
+  const tree = renderDetail({ ...TASK, id: 7, requester_session_id: "s_moa", handoff: { ...HANDOFF, state: "awaiting_permission" } });
+  const labels = buttons(tree).map((b) => b.label);
+  expect(labels).toEqual(expect.arrayContaining(["Send to Infra", "Always allow moa → Infra", "Decline"]));
+  expect(labels.some((l) => l.startsWith("Move"))).toBe(false);
+  expect(labels.some((l) => l.startsWith("Done"))).toBe(false);
+  expect(flat(tree).some((n) => n.type === "button" && n.props.class === "tk-prop-btn")).toBe(false);
+});
+
+test("a sent task closes as Done or Can't do and has no Move", () => {
+  const tree = renderDetail({ ...TASK, id: 8, place: "agent", assignee_session_id: "s_infra", requester_session_id: "s_moa", handoff: { ...HANDOFF, state: "sent" } });
+  const labels = buttons(tree).map((b) => b.label.replace(/Alt\+↵|⌘↵/, ""));
+  expect(labels).toEqual(expect.arrayContaining(["Can't do", "Done"]));
+  expect(labels.some((l) => l.startsWith("Move"))).toBe(false);
+});
+
+test("sent to an owner that is gone: nobody will receive it, Can't do or delete", () => {
+  const tree = renderDetail({ ...TASK, id: 9, place: "agent", assignee_session_id: "s_infra", requester_session_id: "s_moa", handoff: { ...HANDOFF, state: "sent" } }, [OWNERS[0]]);
+  expect(text(tree)).toContain("Nobody will receive this");
+  const labels = buttons(tree).map((b) => b.label.replace(/Alt\+↵|⌘↵/, ""));
+  expect(labels).toContain("Can't do");
+  expect(labels).not.toContain("Done");
+  expect(flat(tree).some((n) => n.type === "button" && n.props["aria-label"] === "Delete task")).toBe(true);
+});

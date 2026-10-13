@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Link2, Plus, Search } from "lucide-preact";
+import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Link2, MessageSquare, Plus, Search, X } from "lucide-preact";
 import { Kbd } from "../../primitives/Kbd/Kbd.jsx";
 import { formatShortcut } from "../../data/util/shortcut.js";
 import { addToast } from "../../data/notifications.js";
+import { useStore } from "../../hooks/useStore.js";
 import { loadTask, patchTask, isNewRequest } from "../../data/tasks.js";
 import {
-  completeNotifies, completePatch, deliverOptions, errorText, isHere, isOpen, isRequest, needsDeliverChoice, noticeStateWords,
-  projectLabelOf, recipientFor, relAge, sessionName, startNotifyGesture, taskProjectName,
+  canCheck, canMove, closeReady, completeNotifies, completePatch, deliverOptions, errorText, isCantDo, isHere, isOpen, isRequest,
+  needsDeliverChoice, noticeStateWords, projectLabelOf, recipientFor, relAge, rowFrom, sessionName, startNotifyGesture, taskProjectName,
 } from "../../data/tasks-model.js";
 import { moveIndex, moveSearch } from "../../data/tasks-move.js";
 import { isTargetHere } from "../../data/schedule-model.js";
@@ -47,19 +48,32 @@ export function CloseIcon() {
   );
 }
 
-export function CheckRing({ title, status, onToggle, big, disabled }) {
+export function CheckRing({ title, status, onToggle, big, disabled, cant }) {
   const done = status === "done";
   return (
     <button
       type="button"
-      class={`tk-check${done ? " is-done" : ""}${status === "in_progress" ? " is-working" : ""}${big ? " is-big" : ""}`}
+      class={`tk-check${done ? " is-done" : ""}${cant ? " is-cant" : ""}${status === "in_progress" ? " is-working" : ""}${big ? " is-big" : ""}`}
       aria-label={done ? `Reopen ${title}` : `Complete ${title}`}
       disabled={disabled}
       onClick={(e) => { e.stopPropagation(); onToggle(); }}
     >
-      <Check size={10} strokeWidth={3.2} aria-hidden="true" />
+      {cant ? <X size={10} strokeWidth={3.2} aria-hidden="true" /> : <Check size={10} strokeWidth={3.2} aria-hidden="true" />}
     </button>
   );
+}
+
+// OwnerMark — an owner's face, for a task between owners: the live owner
+// when it still exists, otherwise a face drawn from the name the task kept.
+export function OwnerMark({ side, size = 16 }) {
+  const owner = side?.owner || { name: side?.name || "" };
+  return <OwnerAvatarFor owner={owner} state={side?.owner?.session_id ? ownerState(side.owner) : "idle"} size={size} />;
+}
+
+// FromChip — «from <owner>» on a task another owner sent.
+export function FromChip({ from, size = 14 }) {
+  if (!from) return null;
+  return <span class="tk-from"><OwnerMark side={from} size={size} /><span class="tk-from-t">from {from.name}</span></span>;
 }
 
 // useEscape — while a transient piece of a gesture is showing, Escape backs
@@ -141,8 +155,14 @@ export function useNotifyGesture() {
 // CompleteNote — Done with an optional note. When the session that hears it
 // is saved, Done itself becomes the two answers (DeliverChoice's labels), so
 // the note and the wake/hold choice are one line of decision, not two.
-export function CompleteNote({ who, saved = false, onCancel, onDone, inline, phone, preset = "", busy }) {
+// Closing a task between owners passes its own label (Done or Can't do), and
+// Can't do requires the note: its answers stay disabled until there is one.
+export function CompleteNote({
+  who, saved = false, onCancel, onDone, inline, phone, preset = "", busy,
+  label = "Done", required = false, placeholder, savedName,
+}) {
   const [note, setNote] = useState(preset);
+  const blocked = busy || (required && !closeReady("cant_do", note));
   const ref = useRef(null);
   useEffect(() => { ref.current?.focus({ preventScroll: true }); }, []);
   useEscape(true, onCancel);
@@ -152,21 +172,21 @@ export function CompleteNote({ who, saved = false, onCancel, onDone, inline, pho
         ref={ref}
         class="tk-field tk-note-field"
         rows={2}
-        placeholder={who ? `Note for ${who} (optional)` : "Note (optional)"}
+        placeholder={placeholder || (who ? `Note for ${who} (optional)` : "Note (optional)")}
         aria-label="Note"
         value={note}
         onInput={(e) => setNote(e.currentTarget.value)}
         onKeyDown={(e) => {
           // A saved session has no default answer, so ⌘↵ does nothing there.
-          if (e.key === "Enter" && (e.metaKey || e.altKey || e.ctrlKey) && !saved) { e.preventDefault(); onDone(note, null); }
+          if (e.key === "Enter" && (e.metaKey || e.altKey || e.ctrlKey) && !saved && !blocked) { e.preventDefault(); onDone(note, null); }
         }}
       />
       {saved ? (
         <>
-          <div class="tk-choice-q"><span><b>{who}</b> is saved</span></div>
+          <div class="tk-choice-q"><span><b>{savedName || who}</b> is saved</span></div>
           <div class="tk-choice-acts">
-            {deliverOptions("Done", { state: "saved" }).map((o) => (
-              <button key={o.choice} type="button" class="zl-ask-btn" disabled={busy} onClick={() => onDone(note, o.choice)}>{o.label}</button>
+            {deliverOptions(label, { state: "saved" }).map((o) => (
+              <button key={o.choice} type="button" class="zl-ask-btn" disabled={blocked} onClick={() => onDone(note, o.choice)}>{o.label}</button>
             ))}
           </div>
           <div class="tk-note-acts">
@@ -176,8 +196,8 @@ export function CompleteNote({ who, saved = false, onCancel, onDone, inline, pho
       ) : (
         <div class="tk-note-acts">
           <button type="button" class="zl-ask-btn is-quiet" onClick={onCancel}>Cancel</button>
-          <button type="button" class="zl-ask-btn is-primary" disabled={busy} onClick={() => onDone(note, null)}>
-            Done{!phone && <Keycap>{MOD_ENTER}</Keycap>}
+          <button type="button" class="zl-ask-btn is-primary" disabled={blocked} onClick={() => onDone(note, null)}>
+            {label}{!phone && <Keycap>{MOD_ENTER}</Keycap>}
           </button>
         </div>
       )}
@@ -274,17 +294,23 @@ function AutoRun({ run }) {
 
 // ── Rows ─────────────────────────────────────────────────────────────────
 
-function rowMeta({ task, context, sessions, lookup }) {
+function rowMeta({ task, context, sessions, lookup, owners }) {
   const meta = [];
+  const from = rowFrom(task, owners);
+  if (from) meta.push(<FromChip from={from} />);
+  if (isCantDo(task)) meta.push(<span class="tk-meta-cant">Can't do</span>);
   if (task.status === "in_progress") meta.push(<span class="tk-word-working">Working</span>);
   const waiting = (task.waits_for || []).map(lookup).find((b) => b && isOpen(b));
   if (waiting && isOpen(task)) meta.push(<span class="tk-meta-wait"><Link2 size={12} aria-hidden="true" />Waits for {waiting.title}</span>);
   const notice = noticeStateWords(task.notice_state);
   if (notice) meta.push(<span class="tk-meta-notice">{notice}</span>);
   if (task.status === "done" && task.completion_note) meta.push(<span class="tk-meta-note">“{task.completion_note}”</span>);
-  if (isRequest(task) && context !== "session") meta.push(<span class="tk-meta-from">{sessionName(sessions, task.requester_session_id)}</span>);
+  if (isRequest(task) && !from && context !== "session") meta.push(<span class="tk-meta-from">{sessionName(sessions, task.requester_session_id)}</span>);
   if (context !== "session" && task.place === "you" && task.project_key) meta.push(<span>{taskProjectName(task)}</span>);
   if (task.subtasks?.length) meta.push(<span class="tk-data">{task.subtasks.filter((s) => s.done).length}/{task.subtasks.length}</span>);
+  if (task.comment_count > 0) {
+    meta.push(<span class="tk-meta-comments" aria-label={`${task.comment_count} comment${task.comment_count === 1 ? "" : "s"}`}><MessageSquare size={12} aria-hidden="true" /><span class="tk-data">{task.comment_count}</span></span>);
+  }
   return meta;
 }
 
@@ -292,8 +318,8 @@ function Meta({ items }) {
   return <span class="tk-row-meta">{items.map((m, i) => <>{i > 0 && <span class="tk-sep">·</span>}{m}</>)}</span>;
 }
 
-export function TaskRow({ task, selected, onSelect, phone, context, sessions, lookup, newSince, completing, onCheck, completion, draggable, onDragStart, onDragEnd, dragging }) {
-  const meta = rowMeta({ task, context, sessions, lookup });
+export function TaskRow({ task, selected, onSelect, phone, context, sessions, lookup, owners, newSince, completing, onCheck, completion, draggable, onDragStart, onDragEnd, dragging }) {
+  const meta = rowMeta({ task, context, sessions, lookup, owners });
   const age = relAge(task.status === "done" ? task.completed_at || task.updated_at : task.created_at);
   return (
     <div
@@ -309,7 +335,14 @@ export function TaskRow({ task, selected, onSelect, phone, context, sessions, lo
     >
       <div class="tk-row-line">
         {isNewRequest(task, newSince) && <span class="tk-new" aria-label="New" />}
-        <CheckRing title={task.title} status={task.status} onToggle={() => onCheck(task)} big={phone && context !== "session"} />
+        <CheckRing
+          title={task.title}
+          status={task.status}
+          cant={isCantDo(task)}
+          disabled={!canCheck(task)}
+          onToggle={() => onCheck(task)}
+          big={phone && context !== "session"}
+        />
         <span class="tk-row-main">
           <span class="tk-row-title">{task.title}</span>
           {phone && meta.length > 0 && <Meta items={meta} />}
@@ -353,6 +386,7 @@ function GroupHead({ g, open, onToggle, dragging, onDrop }) {
 // the row itself (CompletionFlow), and drag-and-drop onto a group head moves.
 export function TaskGroups({ groups, selected, onSelect, phone, context, sessions, lookup, newSince, completingId, setCompletingId, onCheck, onAdd, onDropTask, doneOpen, setDoneOpen, draggable }) {
   const [dragging, setDragging] = useState(null);
+  const owners = useStore((st) => ownersSlice(st).list);
   const visible = groups.filter((g) => g.rows.length || g.add);
   if (!visible.length) return null;
   return (
@@ -378,6 +412,7 @@ export function TaskGroups({ groups, selected, onSelect, phone, context, session
                 context={context}
                 sessions={sessions}
                 lookup={lookup}
+                owners={owners}
                 newSince={newSince}
                 completing={completingId === t.id}
                 completion={completingId === t.id && (
@@ -391,7 +426,7 @@ export function TaskGroups({ groups, selected, onSelect, phone, context, session
                   />
                 )}
                 onCheck={onCheck}
-                draggable={draggable}
+                draggable={draggable && canMove(t)}
                 dragging={dragging === t.id}
                 onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(t.id)); e.dataTransfer.effectAllowed = "move"; setDragging(t.id); }}
                 onDragEnd={() => setDragging(null)}

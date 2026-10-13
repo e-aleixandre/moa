@@ -534,3 +534,132 @@ export function nameTaskRefs(text, lookup) {
     return t?.title ? `“${t.title}”` : ref;
   });
 }
+
+// ── Between owners ────────────────────────────────────────────────────────
+// A task one owner sent another carries `handoff` (docs/serve.md, Tasks):
+//   awaiting_permission — in You as a request: the owner sends it, allows the
+//                         pair for good, or declines;
+//   sent                — the receiving owner's task;
+//   declined            — closed, as Can't do.
+// Closed, `outcome` says whether it was done or could not be done.
+
+export const isHandoff = (t) => !!t?.handoff;
+export const awaitingPermission = (t) => isOpen(t) && t?.handoff?.state === 'awaiting_permission';
+export const isCantDo = (t) => !!t && t.status === 'done' && t.handoff?.outcome === 'cant_do';
+
+// hasThread — the tasks with a thread: those between owners and the
+// requests an agent made of you. Any other task answers 400 to comments.
+export function hasThread(t) {
+  return isHandoff(t) || isRequest(t);
+}
+
+// A task between owners stays with the owner it was sent to: it never moves.
+export function canMove(t) {
+  return !isHandoff(t);
+}
+
+// A declined request is closed for good; any other done task reopens.
+export function canReopen(t) {
+  return !!t && t.status === 'done' && t.handoff?.state !== 'declined';
+}
+
+// The ring of a request still waiting for permission does not complete it:
+// its answer is Send, Always allow or Decline.
+export function canCheck(t) {
+  return !awaitingPermission(t) && (isOpen(t) || canReopen(t));
+}
+
+export function ownerById(owners, id) {
+  if (!id) return null;
+  return (owners || []).find((o) => o?.id === id) || null;
+}
+
+// handoffSide — one end of a handoff as the UI draws it: the live owner when
+// it still exists (its face and current name), otherwise the name the task
+// kept.
+export function handoffSide(task, side, owners) {
+  const h = task?.handoff;
+  if (!h) return null;
+  const id = side === 'to' ? h.to_owner_id : h.from_owner_id;
+  const stored = side === 'to' ? h.to_owner_name : h.from_owner_name;
+  const owner = ownerById(owners, id);
+  return { id: id || '', name: owner?.name || stored || 'Deleted owner', owner, gone: !owner };
+}
+
+// handoffOrphan — a task sent to an owner that no longer exists: nobody will
+// receive it, so it can only be closed as Can't do (which tells the sender)
+// or deleted. Only claimed once the owners roster has loaded.
+export function handoffOrphan(task, owners, loaded = true) {
+  if (!loaded || !isOpen(task) || !isHandoff(task)) return false;
+  return !ownerById(owners, task.handoff.to_owner_id);
+}
+
+// handoffActions — the request's three answers, in order. Without the
+// receiving owner there is nobody to send to; without the sender there is
+// nobody to allow.
+export function handoffActions(task, owners, loaded = true) {
+  if (!awaitingPermission(task)) return [];
+  const from = handoffSide(task, 'from', owners);
+  const to = handoffSide(task, 'to', owners);
+  const out = [];
+  if (!loaded || !to.gone) {
+    out.push({ action: 'send', label: `Send to ${to.name}` });
+    if (!loaded || !from.gone) out.push({ action: 'allow', label: `Always allow ${from.name} → ${to.name}` });
+  }
+  out.push({ action: 'decline', label: 'Decline' });
+  return out;
+}
+
+export function handoffBody(task, action) {
+  return { action, revision: task.revision };
+}
+
+// closeReady — Can't do needs the reason; Done takes a note or nothing.
+export function closeReady(outcome, note) {
+  return outcome !== 'cant_do' || !!String(note || '').trim();
+}
+
+// closePatch — closing a task between owners from the UI, with its outcome.
+export function closePatch(task, { outcome = 'done', note = '', choice = null } = {}) {
+  const body = { revision: task.revision, status: 'done', outcome };
+  const text = String(note || '').trim();
+  if (text) body.completion_note = text;
+  return Object.assign(body, deliverFields(choice));
+}
+
+// rowFrom — the chip a task between owners wears in a row and in its detail.
+export function rowFrom(task, owners) {
+  return isHandoff(task) ? handoffSide(task, 'from', owners) : null;
+}
+
+// commentAuthor — who wrote a comment, as the thread names them. The human
+// is You. In a task between owners an agent writes as its owner: found by
+// the owner's session, then by the name the comment kept against the two
+// ends of the handoff; an owner since deleted keeps that name. A request's
+// agent is named after its session.
+export function commentAuthor(comment, task, { owners = [], sessions = {} } = {}) {
+  if (comment?.author_kind === 'human') return { kind: 'human', name: 'You', owner: null };
+  const sid = comment?.author_session_id || '';
+  const bySession = sid ? (owners || []).find((o) => o?.session_id === sid) : null;
+  if (bySession) return { kind: 'owner', name: bySession.name, owner: bySession };
+  const stored = comment?.author_name || '';
+  const h = task?.handoff;
+  if (stored && h) {
+    const id = stored === h.from_owner_name ? h.from_owner_id : stored === h.to_owner_name ? h.to_owner_id : '';
+    const owner = ownerById(owners, id);
+    return { kind: 'owner', name: owner?.name || stored, owner: owner || { name: stored } };
+  }
+  if (stored) return { kind: 'owner', name: stored, owner: { name: stored } };
+  return { kind: 'session', name: sessionName(sessions, sid) || 'Agent', owner: null };
+}
+
+// threadPlaceholder — the composer says who will read what is written.
+export function threadPlaceholder(task, { owners = [], sessions = {} } = {}) {
+  if (isHandoff(task)) {
+    const from = handoffSide(task, 'from', owners).name;
+    if (task.handoff.state !== 'sent' || handoffOrphan(task, owners, owners.length > 0)) return `Reply to ${from}…`;
+    return `Reply to ${from} and ${handoffSide(task, 'to', owners).name}…`;
+  }
+  if (isRequest(task)) return `Reply to ${sessionName(sessions, task.requester_session_id)}…`;
+  return 'Write a comment…';
+}
