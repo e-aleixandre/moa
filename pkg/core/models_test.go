@@ -203,7 +203,7 @@ func TestHaiku55Pricing(t *testing.T) {
 	if !ok || model.Provider != "anthropic" || model.Pricing == nil {
 		t.Fatalf("claude-haiku-5-5 = %+v, %v", model, ok)
 	}
-	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 {
+	if model.MaxInput != 1_000_000 || model.MaxOutput != 128_000 {
 		t.Fatalf("Haiku 5.5 limits = %d/%d", model.MaxInput, model.MaxOutput)
 	}
 	// The haiku alias still follows Haiku 4.5.
@@ -911,5 +911,17 @@ func TestSuggestModelAlias(t *testing.T) {
 		if got := SuggestModelAlias(spec); got != want {
 			t.Errorf("SuggestModelAlias(%q) = %q, want %q", spec, got, want)
 		}
+	}
+}
+
+// The official Haiku 5.5 guide caps max_tokens at 128,000, not 128Ki.
+func TestReviewHaikuOfficialOutputLimit(t *testing.T) {
+	model, ok := ResolveModel("claude-haiku-5-5")
+	if !ok {
+		t.Fatal("claude-haiku-5-5 must resolve")
+	}
+	requested := 200_000
+	if got := ResolveMaxOutputTokens(model, &requested); got != 128_000 {
+		t.Fatalf("max output for requested=200000 = %d, want 128000", got)
 	}
 }

@@ -52,7 +52,7 @@ var knownModels = map[string]Model{
 	},
 	"claude-haiku-5-5": {
 		ID: "claude-haiku-5-5", Provider: "anthropic", API: "anthropic-messages",
-		Name: "Claude Haiku 5.5", MaxInput: 1_000_000, MaxOutput: 131072,
+		Name: "Claude Haiku 5.5", MaxInput: 1_000_000, MaxOutput: 128_000,
 		// Priced by prompt length: a request whose prompt (input + cache reads
 		// + cache writes) is over 100,000 tokens pays the higher rates on all
 		// of its tokens. Threshold is inclusive, so 100,001 is the first long
