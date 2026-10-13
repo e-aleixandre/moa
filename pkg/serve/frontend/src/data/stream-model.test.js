@@ -1998,3 +1998,16 @@ test('a message that follows a tool is flagged midTurn: its parent is not a comp
   const waypoints = blocks.filter((block) => block.kind === 'waypoint');
   expect(waypoints.map((block) => block.midTurn === true)).toEqual([false, false, true]);
 });
+
+test('consecutive steers after a tool are all midTurn', () => {
+  const blocks = projectStream(session([
+    user('first'), assistant('done'), user('go'), tool('t1', 'bash', { command: 'ls' }), user('steer one'), user('steer two'),
+  ]));
+  const waypoints = blocks.filter((block) => block.kind === 'waypoint');
+  expect(waypoints.map((block) => block.midTurn === true)).toEqual([false, false, true, true]);
+});
+
+test('consecutive messages after a complete answer are not midTurn', () => {
+  const blocks = projectStream(session([user('first'), assistant('done'), user('rejected'), user('next')]));
+  expect(blocks.filter((block) => block.kind === 'waypoint').map((block) => block.midTurn === true)).toEqual([false, false, false]);
+});

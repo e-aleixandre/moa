@@ -200,16 +200,43 @@ func (t *Tree) Branch(entryID string) error {
 	return nil
 }
 
+// cleanLandingLocked reports whether a leaf at id leaves the conversation at a
+// finished point: the root, or an entry that is a valid target once consecutive
+// user messages above it are skipped. Steers delivered together are appended
+// one after another, so a user parent alone says nothing about whether the
+// turn above it was finished. Caller must hold at least a read lock.
+func (t *Tree) cleanLandingLocked(id string) bool {
+	if id == "" {
+		return true
+	}
+	if t.validBranchTargetLocked(id) != nil {
+		return false
+	}
+	for id != "" {
+		e, ok := t.index[id]
+		if !ok {
+			return false
+		}
+		entry := t.entries[e]
+		if entry.Type != EntryMessage || entry.Message.Role != "user" {
+			return t.validBranchTargetLocked(id) == nil
+		}
+		id = entry.ParentID
+	}
+	return true
+}
+
 // BranchBefore moves the leaf to just before a user message, so the message can
 // be edited and sent again as a sibling. It returns the new leaf, which is ""
 // when nothing precedes the message (the branch becomes empty; the old one stays
 // in the tree).
 //
-// A message sent while moa was working has a tool_result as its parent, and no
-// branch may end there. Landing then falls back to the nearest earlier entry
-// that is a valid target and not itself a user message: the last complete moa
-// answer (or a boundary). A user message is skipped on the way up so the
-// re-sent message never ends up right after another unanswered one.
+// A message sent while moa was working has a tool_result above it (directly,
+// or through other steers delivered with it), and no branch may end there.
+// Landing then falls back to the nearest earlier entry that is a valid target
+// and not itself a user message: the last complete moa answer (or a boundary).
+// A user message is skipped on the way up so the re-sent message never ends up
+// right after another unanswered one.
 func (t *Tree) BranchBefore(entryID string) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -224,21 +251,15 @@ func (t *Tree) BranchBefore(entryID string) (string, error) {
 	}
 
 	target := e.ParentID
-	first := true
-	for target != "" {
-		pi, ok := t.index[target]
-		if !ok {
-			return "", fmt.Errorf("tree: entry %s has a missing parent %s", entryID, target)
-		}
-		pe := t.entries[pi]
-		if t.validBranchTargetLocked(target) == nil {
+	if !t.cleanLandingLocked(target) {
+		for target != "" {
+			pe := t.entries[t.index[target]]
 			isUser := pe.Type == EntryMessage && pe.Message.Role == "user"
-			if first || !isUser {
+			if !isUser && t.validBranchTargetLocked(target) == nil {
 				break
 			}
+			target = pe.ParentID
 		}
-		first = false
-		target = pe.ParentID
 	}
 	t.leafID = target
 	t.rev++

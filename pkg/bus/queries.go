@@ -353,4 +353,8 @@ type BranchPoint struct {
 	Timestamp     int64  `json:"timestamp"`
 	BranchCount   int    `json:"branch_count"` // number of children
 	IsCurrentPath bool   `json:"is_current_path"`
+	// Source is the provenance of an injected user message (owner,
+	// subagent_parent…); empty for what the user typed. Injected messages are
+	// not the user's text to edit.
+	Source string `json:"source,omitempty"`
 }

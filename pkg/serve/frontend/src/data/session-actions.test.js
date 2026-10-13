@@ -1883,3 +1883,14 @@ test('rewindToMessage without edit keeps today\'s call exactly', async () => {
   expect(calls[0].body).toEqual({ entry_id: 'm1' });
   expect(st.get().composerDrops.sess).toBeUndefined();
 });
+
+test('files that live only on disk are reported as not coming back, never pasted', async () => {
+  const { rewindToMessage } = await import('./session-actions.js');
+  const { store: st } = await import('./store.js');
+  setState({ composerDrops: {} });
+  rewindFetch({ message: { text: 'please review', attachments: [], unavailable: ['shot.png'] } });
+  await rewindToMessage('sess', 'u2', { edit: true });
+  expect(st.get().composerDrops.sess.text).toBe('please review');
+  const toast = getToasts().find((t) => /could not come back/i.test(t.title));
+  expect(toast?.detail).toContain('shot.png');
+});

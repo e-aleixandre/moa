@@ -11,10 +11,17 @@
 export function normalizeBranchPoint(raw) {
   const ts = typeof raw.timestamp === 'number' ? raw.timestamp : 0;
   const timestampMs = ts > 1e12 ? ts : ts * 1000;
+  const role = raw.role === 'assistant' ? 'assistant' : 'user';
+  const source = typeof raw.source === 'string' ? raw.source : '';
   return {
     entryId: raw.entry_id,
     label: raw.label || '',
-    role: raw.role === 'assistant' ? 'assistant' : 'user',
+    role,
+    source,
+    // Only what the user typed comes back to the composer; a message the owner
+    // or the parent agent injected keeps the inclusive branch, as in the
+    // transcript.
+    editable: role === 'user' && source === '',
     timestampMs,
     branchCount: raw.branch_count || 0,
     isCurrentPath: !!raw.is_current_path,
@@ -58,7 +65,7 @@ export function currentPathTipId(points) {
 // tip: rewinding it goes to just before it, which is the way to take back the
 // message the provider just rejected.
 export function isJumpable(point, tipId) {
-  return point.role === 'user' || point.entryId !== tipId;
+  return point.editable === true || point.entryId !== tipId;
 }
 
 // formatRelativeTime renders a coarse "Xm ago" / "Xh ago" / "Xd ago" string

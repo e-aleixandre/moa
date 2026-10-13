@@ -1013,3 +1013,43 @@ func TestBranchBefore_RejectsWhatIsNotAUserMessage(t *testing.T) {
 		t.Fatal("a rejected rewind must not move the leaf")
 	}
 }
+
+// Steers delivered together are appended consecutively; the second one's parent
+// is the first, not a finished answer. Rewinding it must still go back past the
+// unfinished work (independent review, finding 3).
+func TestBranchBefore_BatchedSteersGoBackToLastCompleteAnswer(t *testing.T) {
+	for _, earlierAnswer := range []bool{false, true} {
+		tree := NewTree()
+		tree.Append(userEntry("first"))
+		want := ""
+		if earlierAnswer {
+			want = tree.Append(assistantEntry("complete answer"))
+			tree.Append(userEntry("next task"))
+		}
+		tree.Append(assistantToolCallEntry("call"))
+		tree.Append(toolResultEntry("call", "bash", "done"))
+		tree.Append(userEntry("steer one"))
+		second := tree.Append(userEntry("steer two"))
+		tree.Append(assistantEntry("final answer"))
+
+		got, err := tree.BranchBefore(second)
+		if err != nil || got != want {
+			t.Fatalf("earlierAnswer=%v: leaf %q err %v, want %q", earlierAnswer, got, err, want)
+		}
+	}
+}
+
+// Consecutive user messages after a COMPLETE answer (a rejected prompt, then
+// another) keep the plain rule: just before the message.
+func TestBranchBefore_ConsecutiveUsersAfterAnAnswerStayPut(t *testing.T) {
+	tree := NewTree()
+	tree.Append(userEntry("u1"))
+	tree.Append(assistantEntry("a1"))
+	rejected := tree.Append(userEntry("rejected"))
+	next := tree.Append(userEntry("next"))
+
+	got, err := tree.BranchBefore(next)
+	if err != nil || got != rejected {
+		t.Fatalf("leaf %q err %v, want %q", got, err, rejected)
+	}
+}

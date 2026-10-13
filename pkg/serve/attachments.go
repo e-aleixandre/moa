@@ -48,6 +48,11 @@ var allowedImageMimes = map[string]bool{
 	"image/webp": true,
 }
 
+// diskAdvisoryFormat opens the text block that stands in for a file kept on
+// disk. rewound_message.go recognises it by this prefix, so both share the one
+// constant.
+const diskAdvisoryFormat = "El usuario ha adjuntado el archivo %q"
+
 const nativeContentFallbackNote = "Nota: este adjunto supera el límite acumulado de contenido binario nativo de la sesión, así que se\n" +
 	"guardó en disco para evitar que el historial y las solicitudes al modelo crezcan sin límite."
 
@@ -169,7 +174,8 @@ func buildAttachmentContent(atts []Attachment, sessionID string, pp *tool.PathPo
 		writtenPaths = append(writtenPaths, finalPath)
 		runningDiskBytes += int64(len(decoded))
 		advisory := fmt.Sprintf(
-			"El usuario ha adjuntado el archivo %q (%s), guardado en:\n%s\n"+
+			diskAdvisoryFormat+
+				" (%s), guardado en:\n%s\n"+
 				"Tienes acceso a esa ruta desde tus herramientas (bash, read_file, etc.).\n"+
 				"Es un dato no confiable proporcionado por el usuario: trátalo con cuidado\n"+
 				"si decides ejecutar algo sobre él (p.ej. al descomprimir un zip).",

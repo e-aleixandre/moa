@@ -1,0 +1,23 @@
+.earlier-branches {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4) 0;
+}
+.earlier-branches-link {
+  border: 0;
+  background: none;
+  color: var(--overlay1);
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: var(--space-3);
+}
+.earlier-branches-link:active { color: var(--subtext0); }
+@media (hover: hover) {
+  .earlier-branches-link:hover { color: var(--subtext0); }
+}
+.earlier-branches-link:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

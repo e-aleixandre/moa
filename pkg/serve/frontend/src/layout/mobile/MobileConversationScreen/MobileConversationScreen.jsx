@@ -32,6 +32,7 @@ import { cacheAlertLabel } from "../../../data/cache-usage.js";
 import { consumeProviderSettings, subscribeProviderSettings } from "../../../data/providers.js";
 import { SecretBatch } from "../../../components/SecretBatch/SecretBatch.jsx";
 import { RewindTimeline } from "../../RewindTimeline/RewindTimeline.jsx";
+import { EarlierBranches } from "../../EarlierBranches/EarlierBranches.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { MobileSubagentView } from "./MobileSubagentView.jsx";
 import { MobileBashJobView } from "./MobileBashJobView.jsx";
@@ -307,6 +308,7 @@ function MobileConversationBody({ forceMobile = false }) {
             openTimeline: () => setRewindOpen(true),
             disabled: session.state === "running" || session.state === "permission",
           }}
+          lead={<EarlierBranches sessionId={session.id} empty={!(session.messages?.length > 0)} onOpen={() => setRewindOpen(true)} />}
           onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
           tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
         />

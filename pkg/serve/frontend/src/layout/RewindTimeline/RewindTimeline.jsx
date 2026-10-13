@@ -66,13 +66,13 @@ export function RewindTimeline({ open, onClose, sessionId, disabled }) {
     // One of your own messages goes back to just before it and returns to the
     // composer, exactly as from the transcript; an assistant turn is the branch
     // point itself.
-    const jump = point.role === "user"
+    const jump = point.editable
       ? rewindBeforeMessage(sessionId, point.entryId)
       : branchTo(sessionId, point.entryId);
     jump
       .then(() => onClose?.())
       .catch((e) => {
-        if (point.role === "user") addToast({ title: "Could not rewind", detail: String(e.message || e), type: "error" });
+        if (point.editable) addToast({ title: "Could not rewind", detail: String(e.message || e), type: "error" });
         setJumpingId(null);
       });
   }, [sessionId, tipId, jumpingId, onClose]);
@@ -133,7 +133,7 @@ export function RewindTimeline({ open, onClose, sessionId, disabled }) {
                     class="rw-item-btn"
                     disabled={!jumpable || jumping}
                     onClick={() => onJump(point)}
-                    aria-label={`${point.label || "(no message)"} — ${point.role === "user" ? "rewind to before this message and edit it" : isTip ? "you are here" : "jump to rewind here"}`}
+                    aria-label={`${point.label || "(no message)"} — ${point.editable ? "rewind to before this message and edit it" : isTip ? "you are here" : "jump to rewind here"}`}
                   >
                     <span class="rw-node" aria-hidden="true">
                       {point.branchCount > 0 ? <GitBranch size={10} /> : null}
@@ -148,10 +148,10 @@ export function RewindTimeline({ open, onClose, sessionId, disabled }) {
                         {isTip && <span class="rw-here">you are here</span>}
                       </span>
                     </span>
-                    {jumpable && (!isTip || point.role === "user") && (
+                    {jumpable && (!isTip || point.editable) && (
                       <span class="rw-jump">
                         <RewindIcon size={11} aria-hidden="true" />
-                        {jumping ? "rewinding…" : point.role === "user" ? "edit" : "jump"}
+                        {jumping ? "rewinding…" : point.editable ? "edit" : "jump"}
                       </span>
                     )}
                   </button>

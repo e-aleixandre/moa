@@ -1187,7 +1187,9 @@ export async function rewindBeforeMessage(id, entryId) {
   const res = await branchTo(id, entryId, { before: true });
   const message = res?.message;
   if (!message) return;
-  const { files, missing } = await rewoundFiles(id, message.attachments);
+  const { files, missing: lost } = await rewoundFiles(id, message.attachments);
+  // `unavailable` are files the server knows it kept only on disk.
+  const missing = [...lost, ...(Array.isArray(message.unavailable) ? message.unavailable : [])];
   placeRewoundMessage(id, { text: message.text, files });
   if (missing.length > 0) {
     addToast({

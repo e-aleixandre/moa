@@ -669,6 +669,7 @@ func registerTreeHandlers(sctx *SessionContext) {
 			if err := sctx.Tree.ValidBranchTarget(e.ID); err != nil {
 				continue
 			}
+			source, _ := e.Message.Custom["source"].(string)
 			label := firstLine(messageText(e.Message))
 			children := sctx.Tree.Children(e.ID)
 			points = append(points, BranchPoint{
@@ -678,6 +679,7 @@ func registerTreeHandlers(sctx *SessionContext) {
 				Timestamp:     e.Timestamp.Unix(),
 				BranchCount:   len(children),
 				IsCurrentPath: currentIDs[e.ID],
+				Source:        source,
 			})
 		}
 		return points, nil

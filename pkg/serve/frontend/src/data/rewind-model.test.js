@@ -11,7 +11,7 @@ test('normalizeBranchPoint maps snake_case to camelCase and coerces seconds to m
     timestamp: 1700000000, branch_count: 2, is_current_path: true,
   });
   expect(p).toEqual({
-    entryId: 'e1', label: 'hi', role: 'assistant',
+    entryId: 'e1', label: 'hi', role: 'assistant', source: '', editable: false,
     timestampMs: 1700000000000, branchCount: 2, isCurrentPath: true,
   });
 });
@@ -56,12 +56,12 @@ test('currentPathTipId returns null when nothing is on the current path', () => 
 
 test('isJumpable rejects an assistant tip and accepts everything else', () => {
   const tip = 'c';
-  expect(isJumpable({ entryId: 'c', role: 'assistant' }, tip)).toBe(false);
-  expect(isJumpable({ entryId: 'a', role: 'assistant' }, tip)).toBe(true);
+  expect(isJumpable({ entryId: 'c', role: 'assistant', editable: false }, tip)).toBe(false);
+  expect(isJumpable({ entryId: 'a', role: 'assistant', editable: false }, tip)).toBe(true);
 });
 
 test('isJumpable accepts a user message even as the tip: rewinding goes before it', () => {
-  expect(isJumpable({ entryId: 'c', role: 'user' }, 'c')).toBe(true);
+  expect(isJumpable({ entryId: 'c', role: 'user', editable: true }, 'c')).toBe(true);
 });
 
 test('formatRelativeTime renders coarse buckets', () => {
@@ -75,4 +75,17 @@ test('formatRelativeTime renders coarse buckets', () => {
 test('formatRelativeTime tolerates an invalid timestamp', () => {
   expect(formatRelativeTime(0)).toBe('');
   expect(formatRelativeTime(NaN)).toBe('');
+});
+
+test('a point carries its source and only the user\'s own messages are editable', () => {
+  expect(normalizeBranchPoint({ entry_id: 'a', role: 'user' }).editable).toBe(true);
+  const owner = normalizeBranchPoint({ entry_id: 'b', role: 'user', source: 'owner' });
+  expect(owner.source).toBe('owner');
+  expect(owner.editable).toBe(false);
+  expect(normalizeBranchPoint({ entry_id: 'c', role: 'user', source: 'subagent_parent' }).editable).toBe(false);
+  expect(normalizeBranchPoint({ entry_id: 'd', role: 'assistant' }).editable).toBe(false);
+});
+
+test('an injected user point as the tip is not jumpable: there is nothing to edit', () => {
+  expect(isJumpable(normalizeBranchPoint({ entry_id: 'c', role: 'user', source: 'owner' }), 'c')).toBe(false);
 });

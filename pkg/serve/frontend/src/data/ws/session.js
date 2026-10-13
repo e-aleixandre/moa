@@ -319,11 +319,11 @@ export function handleWsCommand(id, data) {
       if (fresh.length > 0) updateSession(id, { messages: [...sess.messages, ...fresh] });
     }
   } else if (data.command === 'branch') {
-    // Branch switched — reload messages from new branch path.
-    if (data.messages) {
-      resetOlderHistory(id);
-      updateSession(id, { messages: normalizeHistory(data.messages), historyTruncated: !!data.history_truncated });
-    }
+    // Branch switched — reload messages from new branch path. The server omits
+    // `messages` when the branch is empty (rewinding the first message), so
+    // absent means empty, never "unchanged".
+    resetOlderHistory(id);
+    updateSession(id, { messages: normalizeHistory(data.messages || []), historyTruncated: !!data.history_truncated });
   }
 }
 

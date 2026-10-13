@@ -8,6 +8,7 @@ import { BashJobView } from "../BashJobView/BashJobView.jsx";
 import { Composer } from "../Composer/Composer.jsx";
 import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
+import { EarlierBranches } from "../EarlierBranches/EarlierBranches.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
 import { ModelSelector, PermissionPrompt, SecretActionPrompt, AskUserPrompt, McpBanner, Sheet, ArtifactsEntry } from "../../components/index.js";
 import { PickerPopover } from "../../components/ModelSelector/ModelSelector.jsx";
@@ -293,6 +294,7 @@ export function ConversationScreen() {
                 openTimeline: () => setRewindOpen(true),
                 disabled: settingsBusy,
               }}
+              lead={<EarlierBranches sessionId={session.id} empty={!(session.messages?.length > 0)} onOpen={() => setRewindOpen(true)} />}
               onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
               tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
             />

@@ -385,3 +385,31 @@ func TestQuery_GetBranchMessage(t *testing.T) {
 		t.Fatal("an assistant entry must be rejected")
 	}
 }
+
+// The timeline must know which user points are the owner's or the parent
+// agent's: they are not the user's own text to edit (review finding 4).
+func TestQuery_GetBranchPoints_CarriesSourceOfInjectedMessages(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	tree := session.NewTree()
+	own := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.WrapMessage(core.Message{Role: "user", Content: []core.Content{core.TextContent("mine")}})})
+	owner := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{
+		Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("task")}},
+		Custom:  map[string]any{"source": "owner"},
+	}})
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	points, err := QueryTyped[GetBranchPoints, []BranchPoint](b, GetBranchPoints{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, p := range points {
+		got[p.EntryID] = p.Source
+	}
+	if got[own] != "" || got[owner] != "owner" {
+		t.Fatalf("sources = %v", got)
+	}
+}
