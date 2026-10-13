@@ -202,3 +202,20 @@ func TestSessionCost_ResetOnClear(t *testing.T) {
 		t.Fatalf("session cost after clear = %v, want 0", total)
 	}
 }
+
+// A resumed subagent reports its cumulative cost; only what this run added may
+// enter the session total, or every resume re-charges the earlier spend.
+func TestSessionCost_ResumedSubagentCountsOnlyNewSpend(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	RegisterHandlers(sctx)
+
+	b.Publish(SubagentEnded{SessionID: "test-session", JobID: "J1", CostUSD: 3})
+	b.Publish(SubagentEnded{SessionID: "test-session", JobID: "J1", CostUSD: 5, PriorCostUSD: 3})
+	b.Drain(time.Second)
+
+	if total := querySessionCost(t, b); !approxEqual(total, 5) {
+		t.Fatalf("session cost = %v, want 5 (real spend)", total)
+	}
+}

@@ -449,11 +449,12 @@ func registerRunReactors(sctx *SessionContext) {
 		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: e.Cost})
 	})
 	b.Subscribe(func(e SubagentEnded) {
-		if e.CostUSD == 0 {
+		delta := e.NewCostUSD()
+		if delta == 0 {
 			return
 		}
-		total := sctx.addSessionCost(e.CostUSD)
-		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: e.CostUSD})
+		total := sctx.addSessionCost(delta)
+		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: delta})
 	})
 	// A background summary is charged once, here, at the rates that wrote it:
 	// never through RunEnded (its run may have ended long before) nor through

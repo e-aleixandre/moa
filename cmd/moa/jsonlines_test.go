@@ -420,6 +420,33 @@ func TestJSONLineWriter_SubagentUsageAndNoDoubleCounting(t *testing.T) {
 	}
 }
 
+func TestJSONLineWriter_ResumedSubagentCountsOnlyNewSpend(t *testing.T) {
+	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
+		jw := newJSONLineWriter()
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b,
+			bus.SubagentEnded{JobID: "child-1", Status: "completed", CostUSD: 3},
+			bus.SubagentEnded{JobID: "child-1", Status: "completed", CostUSD: 5, PriorCostUSD: 3},
+			bus.AgentEnded{},
+			bus.RunEnded{},
+		)
+	})
+	var summary map[string]any
+	for _, l := range lines {
+		if l["type"] == "summary" {
+			summary = l
+		}
+	}
+	if got := summary["cost_usd"]; got != 5.0 {
+		t.Errorf("summary cost = %v, want 5 (real spend, not 8)", got)
+	}
+	if lines[1]["cost_usd"] != 5.0 || lines[1]["prior_cost_usd"] != 3.0 {
+		t.Errorf("resumed subagent_end must stay cumulative and expose the inherited part: %#v", lines[1])
+	}
+}
+
 func TestJSONLineWriter_ProgressSkipsErrorTools(t *testing.T) {
 	lines := captureJSONLines(t, func() {
 		b := bus.NewLocalBus()

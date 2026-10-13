@@ -171,7 +171,11 @@ type Config struct {
 	// OnChildEnd is called once when a child agent (sync or async) finishes.
 	// Result/Error are the terminal child outcome, not the one-time model
 	// delivery claim used by subagent_wait and async notifications.
-	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD float64)
+	// costUSD is the child's CUMULATIVE cost, including what a resumed child had
+	// already accrued before this run; priorCostUSD is that inherited part (0 for
+	// a fresh child), priced with the same model. A ledger must add only
+	// costUSD-priorCostUSD, or every resume re-charges the old spend.
+	OnChildEnd func(jobID, task string, async bool, status, result, resultErr string, finishedAt time.Time, usage *core.Usage, costUSD, priorCostUSD float64)
 
 	// Title generation is deliberately asynchronous: starting work must never
 	// wait on a convenience model call. Resumed children keep their saved title.
@@ -933,7 +937,7 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 				finishedAt = snap.FinishedAt
 				async = !snap.Sync
 			}
-			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs))
+			cfg.OnChildEnd(j.id, task, async, status, result, resultErr, finishedAt, childUsage(finalMsgs), childCost(model, finalMsgs), childCost(model, seedMsgs))
 		}
 	}()
 

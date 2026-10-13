@@ -681,7 +681,15 @@ type SubagentEnded struct {
 	// FinishedAt anchors a durable UI outcome at the actual child completion.
 	FinishedAt time.Time
 	Usage      *core.Usage
-	CostUSD    float64
+	// CostUSD is the child's cumulative cost. A resumed child replays its saved
+	// transcript, so this includes PriorCostUSD, already paid in earlier runs.
+	CostUSD      float64
+	PriorCostUSD float64
+}
+
+// NewCostUSD is the spend this run added: what a ledger should accumulate.
+func (e SubagentEnded) NewCostUSD() float64 {
+	return max(0, e.CostUSD-e.PriorCostUSD)
 }
 
 // ---------------------------------------------------------------------------

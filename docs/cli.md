@@ -30,7 +30,9 @@ have to reconstruct spending from session files:
 - `message_usage` — one line per completed assistant message, with `role`
   (`main` or `subagent`), `subagent_id` for a child, `provider`, `model`, the
   token fields (`input`, `output`, `cache_read`, `cache_write`) and `cost_usd`.
-- `subagent_end` — the child's terminal `cost_usd`.
+- `subagent_end` — the child's terminal `cost_usd`. A resumed child's figure is
+  cumulative, so it also carries `prior_cost_usd` (what it had already cost
+  before this run); only the difference enters the `summary` total.
 - `summary` — the run total `cost_usd`, the aggregate `usage`, and `by_model`
   entries split by provider, model and role, each with its `messages` count,
   tokens and cost.
@@ -41,7 +43,7 @@ have to reconstruct spending from session files:
 ```
 
 The main run's cost comes from the run's own total and children's from their
-terminal cost, so no dollar is counted twice. Costs are rounded to the
+terminal cost minus any inherited prior cost, so no dollar is counted twice. Costs are rounded to the
 micro-dollar, well below any provider's billing granularity.
 
 ## Version subcommand
