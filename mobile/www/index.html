@@ -75,6 +75,15 @@
     color: #cdd6f4;
   }
   .pending-share.on { display: block; }
+  .legal { text-align: center; }
+  .legal a {
+    display: inline-block;
+    /* Padding keeps the tap target near the 44pt guideline without making the link loud. */
+    padding: 12px 16px;
+    color: #a6adc8;
+    font-size: 14px;
+    text-decoration: underline;
+  }
 </style>
 </head>
 <body>
@@ -104,6 +113,12 @@
     </div>
 
     <p class="error" id="error" role="alert"></p>
+
+    <!-- target=_blank: the container hands it to the system browser instead of
+         navigating this page away. -->
+    <p class="legal">
+      <a href="https://letmoa.run/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
+    </p>
   </main>
 
   <main class="screen startup" id="startup" hidden>

@@ -18,3 +18,26 @@ test("iOS declares camera use when the pairing scanner requests it", () => {
   expect(barcodeScanner).toContain("scanner.requestPermissions()");
   expect(usageDescription("NSCameraUsageDescription")).toBe("Scan a moa pairing code.");
 });
+
+const pairingPage = await Bun.file("www/index.html").text();
+const appManifest = await Bun.file("ios/App/App/PrivacyInfo.xcprivacy").text();
+const pbxproj = await Bun.file("ios/App/App.xcodeproj/project.pbxproj").text();
+const podfile = await Bun.file("ios/App/Podfile").text();
+const packageJSON = await Bun.file("package.json").text();
+
+test("the pairing screen links the privacy policy without leaving the app page", () => {
+  expect(pairingPage).toMatch(/<a href="https:\/\/letmoa\.run\/privacy" target="_blank"/);
+});
+
+test("the build declares its privacy posture", () => {
+  expect(appPlist).toMatch(/<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/);
+  expect(appPlist).not.toContain("UIBackgroundModes");
+  expect(appManifest).toMatch(/<key>NSPrivacyTracking<\/key>\s*<false\/>/);
+  expect(appManifest).toMatch(/<key>NSPrivacyCollectedDataTypes<\/key>\s*<array\/>/);
+  expect(appManifest).toContain("<string>CA92.1</string>");
+  expect(pbxproj).toContain("PrivacyInfo.xcprivacy in Resources");
+});
+
+test("no third-party analytics SDK ships in the container", () => {
+  expect(`${podfile}\n${packageJSON}`.toLowerCase()).not.toMatch(/mlkit|firebase|google/);
+});
