@@ -314,6 +314,38 @@ The minimum iOS version is 15.5. Capacitor 8 itself needs only 15.0; 15.5 was
 raised for ML Kit and has been left as is, because lowering it is a decision
 about which devices to support, not a consequence of the scanner change.
 
+## Releasing to the App Store
+
+Store builds are signed and uploaded from the maintainer's Mac, not from CI
+(`.github/workflows/ios.yml` is kept coherent but is not the release path).
+Every signing secret lives in one dedicated keychain on that Mac, never in the
+login keychain, the repository, a chat or a file left on disk:
+
+- the Apple Distribution certificate and its private key;
+- the App Store Connect API key (`.p8`), stored as a generic password item
+  (service `moa-asc-api-key`, account = the key ID), imported once from the
+  file it was downloaded as, after which that file is deleted (Trash included).
+
+The keychain's password is held by the maintainer, who unlocks it for a
+release; whoever runs the build never needs it. For each release:
+
+1. The maintainer unlocks the signing keychain.
+2. Archive the `App` scheme in Release with manual signing: the Apple
+   Distribution identity from that keychain and one App Store provisioning
+   profile per target (App, NotificationService, ShareExtension). Raise the
+   build number above the last upload.
+3. Export with method `app-store-connect`, mapping each bundle id to its
+   profile.
+4. Read the API key from the keychain into a temporary file with mode 0600,
+   upload the `.ipa` with it, and delete that file when the upload ends,
+   whether it succeeded or not.
+5. Lock the keychain again.
+
+A build goes to TestFlight first and is checked on a real device (pairing,
+push in the production APNs environment) before it is submitted for review.
+Exporting the `.p12` out of the keychain (for an offline backup) is a decision
+for the maintainer, not part of a release.
+
 ## Android
 
 Same app id (`com.ealeixandre.moa.app`), same startup: the local pairing page
