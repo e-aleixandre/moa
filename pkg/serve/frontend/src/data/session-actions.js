@@ -14,6 +14,7 @@ import { loadEvents } from './events.js'; // wake-on-event
 import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 import { closeSessionPanelForSession } from './session-panel.js';
 import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.js';
+import { rewoundFiles, placeRewoundMessage } from './rewind-edit.js';
 import { deviceZone } from './schedule-model.js';
 import { normalizeErrorDetail, sameErrorDetail } from './provider-error.js';
 import { claimProviderToast, loadProviderStatus } from './providers.js';
@@ -1173,8 +1174,29 @@ export async function fetchBranchPoints(id) {
 // branchTo rewinds the conversation to entryId, starting a new branch from that
 // point. The server publishes a CommandExecuted event that reloads the message
 // list over the WebSocket, so callers don't need to apply the result manually.
-export async function branchTo(id, entryId) {
-  return api('POST', `/api/sessions/${id}/branch`, { entry_id: entryId });
+export async function branchTo(id, entryId, { before = false } = {}) {
+  return api('POST', `/api/sessions/${id}/branch`, before ? { entry_id: entryId, before: true } : { entry_id: entryId });
+}
+
+// rewindBeforeMessage — Rewind on one of YOUR messages: the conversation goes
+// back to just before it (the previous answer stays) and the message returns to
+// the composer, text and attachments, to be edited and sent again. Nothing is
+// deleted; the old branch stays in the timeline. Throws when the server refuses
+// (busy, not a user message), leaving the composer untouched.
+export async function rewindBeforeMessage(id, entryId) {
+  const res = await branchTo(id, entryId, { before: true });
+  const message = res?.message;
+  if (!message) return;
+  const { files, missing } = await rewoundFiles(id, message.attachments);
+  placeRewoundMessage(id, { text: message.text, files });
+  if (missing.length > 0) {
+    addToast({
+      sessionId: id,
+      title: 'Some attachments could not come back',
+      detail: `${missing.join(', ')} ${missing.length > 1 ? 'are' : 'is'} no longer available — attach again if needed.`,
+      type: 'info',
+    });
+  }
 }
 
 // rewindToMessage — branch to one message straight from the transcript, the
@@ -1182,8 +1204,14 @@ export async function branchTo(id, entryId) {
 // it exists here so both screens share one failure story instead of writing
 // their own. The message list refreshes itself off the WS 'branch' command, so
 // there is nothing to do on success.
-export function rewindToMessage(id, msgId) {
-  return branchTo(id, msgId).catch((e) =>
+//
+// With `edit` (your own messages) it is rewindBeforeMessage: back to just before
+// the message, which returns to the composer. Without it (the owner's or the
+// parent agent's messages, which are not yours to edit) the branch keeps the
+// message, as before.
+export function rewindToMessage(id, msgId, { edit = false } = {}) {
+  const run = edit ? rewindBeforeMessage(id, msgId) : branchTo(id, msgId);
+  return run.catch((e) =>
     addToast({
       title: 'Could not rewind',
       detail: String(e.message || e),

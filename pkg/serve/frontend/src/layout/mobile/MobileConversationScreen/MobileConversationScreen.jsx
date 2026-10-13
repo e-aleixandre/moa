@@ -303,7 +303,7 @@ function MobileConversationBody({ forceMobile = false }) {
           // (assistant turns too, and existing branches) is still one link away
           // inside the confirmation — this is its only door on mobile.
           rewind={{
-            to: (msgId) => rewindToMessage(session.id, msgId),
+            to: (msgId, options) => rewindToMessage(session.id, msgId, options),
             openTimeline: () => setRewindOpen(true),
             disabled: session.state === "running" || session.state === "permission",
           }}

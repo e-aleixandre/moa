@@ -54,10 +54,14 @@ test('currentPathTipId returns null when nothing is on the current path', () => 
   expect(currentPathTipId([{ entryId: 'a', isCurrentPath: false }])).toBe(null);
 });
 
-test('isJumpable rejects the tip and accepts everything else', () => {
+test('isJumpable rejects an assistant tip and accepts everything else', () => {
   const tip = 'c';
-  expect(isJumpable({ entryId: 'c' }, tip)).toBe(false);
-  expect(isJumpable({ entryId: 'a' }, tip)).toBe(true);
+  expect(isJumpable({ entryId: 'c', role: 'assistant' }, tip)).toBe(false);
+  expect(isJumpable({ entryId: 'a', role: 'assistant' }, tip)).toBe(true);
+});
+
+test('isJumpable accepts a user message even as the tip: rewinding goes before it', () => {
+  expect(isJumpable({ entryId: 'c', role: 'user' }, 'c')).toBe(true);
 });
 
 test('formatRelativeTime renders coarse buckets', () => {

@@ -289,7 +289,7 @@ export function ConversationScreen() {
               session={session}
               blocks={blocks}
               rewind={{
-                to: (msgId) => rewindToMessage(session.id, msgId),
+                to: (msgId, options) => rewindToMessage(session.id, msgId, options),
                 openTimeline: () => setRewindOpen(true),
                 disabled: settingsBusy,
               }}

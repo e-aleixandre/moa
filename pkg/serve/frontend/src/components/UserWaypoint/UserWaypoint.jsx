@@ -77,19 +77,28 @@ export function ImageLightbox({ attachment, sessionId, onClose }) {
 // mark can only target YOUR messages, while the timeline also lists assistant
 // turns and shows which points already have branches. On mobile that link is
 // the only way back to it, since the status line no longer carries Rewind.
-function RewindConfirm({ open, preview, onConfirm, onOpenTimeline, onClose }) {
+function RewindConfirm({ open, preview, edit, midTurn, onConfirm, onOpenTimeline, onClose }) {
   return (
     <Sheet open={open} onClose={onClose} title="Rewind here?" ariaLabel="Confirm rewind">
       <div class="wp-rewind-confirm">
-        <p class="wp-rewind-lead">The conversation goes back to this message:</p>
+        <p class="wp-rewind-lead">
+          {edit
+            ? "The conversation goes back to just before this message, and it returns to the composer:"
+            : "The conversation goes back to this message:"}
+        </p>
         <blockquote class="wp-rewind-quote">{preview}</blockquote>
+        {edit && midTurn && (
+          <p class="wp-rewind-note wp-rewind-midturn">
+            Also goes back past moa's unfinished work in that turn.
+          </p>
+        )}
         <p class="wp-rewind-note">
           Nothing is deleted — rewinding starts a new branch, and the current one stays
           reachable from the full timeline.
         </p>
         <div class="wp-rewind-acts">
           <button type="button" class="wp-rewind-go" onClick={onConfirm}>
-            <RewindIcon size={13} aria-hidden="true" /> Rewind here
+            <RewindIcon size={13} aria-hidden="true" /> {edit ? "Rewind and edit" : "Rewind here"}
           </button>
           <button type="button" class="wp-rewind-cancel" onClick={onClose}>
             Cancel
@@ -127,6 +136,10 @@ export function UserWaypoint({
   // the message's spine instead of the raw block.
   reference,
   onRewind,
+  // Rewinding this message returns it to the composer (your own messages), and
+  // whether it was sent mid-turn (so the way back also drops unfinished work).
+  rewindEdit = false,
+  rewindMidTurn = false,
   onOpenTimeline,
   rewindDisabled = false,
   // Plain text of this message, for the confirmation to quote back. Passed in
@@ -239,6 +252,8 @@ export function UserWaypoint({
       <RewindConfirm
           open={confirmRewind}
           preview={rewindPreview}
+          edit={rewindEdit}
+          midTurn={rewindMidTurn}
           onConfirm={() => {
             setConfirmRewind(false);
             onRewind();

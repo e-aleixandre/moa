@@ -51,12 +51,14 @@ export function currentPathTipId(points) {
   return tip;
 }
 
-// isJumpable tells whether a point can be rewound to: it must not be the
-// current tip (rewinding there would be a no-op) — everything else, including
-// earlier points on the current path, is a valid jump target since it starts
-// a new branch.
+// isJumpable tells whether a point can be rewound to: an assistant turn must
+// not be the current tip (rewinding there would be a no-op) — everything else,
+// including earlier points on the current path, is a valid jump target since it
+// starts a new branch. One of your own messages is always a target, even as the
+// tip: rewinding it goes to just before it, which is the way to take back the
+// message the provider just rejected.
 export function isJumpable(point, tipId) {
-  return point.entryId !== tipId;
+  return point.role === 'user' || point.entryId !== tipId;
 }
 
 // formatRelativeTime renders a coarse "Xm ago" / "Xh ago" / "Xd ago" string

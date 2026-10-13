@@ -1990,3 +1990,11 @@ test('a finished history row opens what it retrieved, not the raw text, and repo
   expect(row.body).toBeUndefined();
   expect(row.out).toBe('2 matches');
 });
+
+test('a message that follows a tool is flagged midTurn: its parent is not a complete answer', () => {
+  const blocks = projectStream(session([
+    user('first'), assistant('done'), user('go'), tool('t1', 'bash', { command: 'ls' }), user('actually, stop'),
+  ]));
+  const waypoints = blocks.filter((block) => block.kind === 'waypoint');
+  expect(waypoints.map((block) => block.midTurn === true)).toEqual([false, false, true]);
+});

@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from "preact/hooks";
 import { GitBranch, Rewind as RewindIcon } from "lucide-preact";
 import { Sheet } from "../../components/Sheet/Sheet.jsx";
 import { Spinner } from "../../primitives/index.js";
-import { fetchBranchPoints, branchTo } from "../../data/session-actions.js";
+import { fetchBranchPoints, branchTo, rewindBeforeMessage } from "../../data/session-actions.js";
+import { addToast } from "../../data/notifications.js";
 import { registerOverlay } from "../../data/overlays.js";
 import {
   normalizeBranchPoints, rewindSummary, currentPathTipId, isJumpable,
@@ -62,9 +63,18 @@ export function RewindTimeline({ open, onClose, sessionId, disabled }) {
   const onJump = useCallback((point) => {
     if (!isJumpable(point, tipId) || jumpingId) return;
     setJumpingId(point.entryId);
-    branchTo(sessionId, point.entryId)
+    // One of your own messages goes back to just before it and returns to the
+    // composer, exactly as from the transcript; an assistant turn is the branch
+    // point itself.
+    const jump = point.role === "user"
+      ? rewindBeforeMessage(sessionId, point.entryId)
+      : branchTo(sessionId, point.entryId);
+    jump
       .then(() => onClose?.())
-      .catch(() => setJumpingId(null));
+      .catch((e) => {
+        if (point.role === "user") addToast({ title: "Could not rewind", detail: String(e.message || e), type: "error" });
+        setJumpingId(null);
+      });
   }, [sessionId, tipId, jumpingId, onClose]);
 
   const { pointCount, branchCount } = rewindSummary(points);
@@ -123,7 +133,7 @@ export function RewindTimeline({ open, onClose, sessionId, disabled }) {
                     class="rw-item-btn"
                     disabled={!jumpable || jumping}
                     onClick={() => onJump(point)}
-                    aria-label={`${point.label || "(no message)"} — ${isTip ? "you are here" : "jump to rewind here"}`}
+                    aria-label={`${point.label || "(no message)"} — ${point.role === "user" ? "rewind to before this message and edit it" : isTip ? "you are here" : "jump to rewind here"}`}
                   >
                     <span class="rw-node" aria-hidden="true">
                       {point.branchCount > 0 ? <GitBranch size={10} /> : null}
@@ -138,10 +148,10 @@ export function RewindTimeline({ open, onClose, sessionId, disabled }) {
                         {isTip && <span class="rw-here">you are here</span>}
                       </span>
                     </span>
-                    {jumpable && !isTip && (
+                    {jumpable && (!isTip || point.role === "user") && (
                       <span class="rw-jump">
                         <RewindIcon size={11} aria-hidden="true" />
-                        {jumping ? "rewinding…" : "jump"}
+                        {jumping ? "rewinding…" : point.role === "user" ? "edit" : "jump"}
                       </span>
                     )}
                   </button>
@@ -152,7 +162,7 @@ export function RewindTimeline({ open, onClose, sessionId, disabled }) {
         )}
 
         <div class="rw-foot">
-          Nothing is deleted — rewinding starts a new branch.
+          Nothing is deleted — rewinding starts a new branch. Your messages come back to the composer.
         </div>
       </div>
     </Sheet>

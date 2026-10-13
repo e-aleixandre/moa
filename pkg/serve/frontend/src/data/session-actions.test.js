@@ -1819,3 +1819,67 @@ test('recallQueuedSteers restores a steer that arrived after the queue snapshot'
   });
   expect(store.get().sessions.s1.pendingSteers).toBeNull();
 });
+
+// --- Rewind of your own message: back to just before it, into the composer ---
+
+const rewindMsg = { text: 'secret one', attachments: [{ type: 'image', attachment_id: 'att-1', filename: 'shot.png', mime_type: 'image/png' }] };
+
+function rewindFetch({ branchStatus = 200, message = rewindMsg, blobStatus = 200 } = {}) {
+  const calls = [];
+  globalThis.fetch = (path, opts) => {
+    calls.push({ path, body: opts?.body ? JSON.parse(opts.body) : null });
+    if (String(path).endsWith('/branch')) {
+      return Promise.resolve(branchStatus === 200
+        ? new Response(JSON.stringify({ ok: true, message }), { status: 200 })
+        : new Response('cannot branch while agent is busy (running)', { status: branchStatus }));
+    }
+    return Promise.resolve(new Response(new Blob(['img']), { status: blobStatus }));
+  };
+  return calls;
+}
+
+test('rewindToMessage in edit mode branches before the message and fills the composer', async () => {
+  const { rewindToMessage } = await import('./session-actions.js');
+  const { store: st } = await import('./store.js');
+  setState({ composerDrops: {} });
+  const calls = rewindFetch();
+  await rewindToMessage('sess', 'u2', { edit: true });
+  expect(calls[0].path).toBe('/api/sessions/sess/branch');
+  expect(calls[0].body).toEqual({ entry_id: 'u2', before: true });
+  const drop = st.get().composerDrops.sess;
+  expect(drop.text).toBe('secret one');
+  expect(drop.files.map((f) => f.name)).toEqual(['shot.png']);
+});
+
+test('a missing blob still returns the text and names what could not come back', async () => {
+  const { rewindToMessage } = await import('./session-actions.js');
+  const { store: st } = await import('./store.js');
+  setState({ composerDrops: {} });
+  rewindFetch({ blobStatus: 404 });
+  await rewindToMessage('sess', 'u2', { edit: true });
+  const drop = st.get().composerDrops.sess;
+  expect(drop.text).toBe('secret one');
+  expect(drop.files).toEqual([]);
+  const toast = getToasts().find((t) => /could not come back|not restored/i.test(t.title + (t.detail || '')));
+  expect(toast?.detail).toContain('shot.png');
+});
+
+test('a rejected rewind (busy) leaves the composer alone and says why', async () => {
+  const { rewindToMessage } = await import('./session-actions.js');
+  const { store: st } = await import('./store.js');
+  setState({ composerDrops: {} });
+  rewindFetch({ branchStatus: 400 });
+  await rewindToMessage('sess', 'u2', { edit: true });
+  expect(st.get().composerDrops.sess).toBeUndefined();
+  expect(getToasts().some((t) => t.title === 'Could not rewind')).toBe(true);
+});
+
+test('rewindToMessage without edit keeps today\'s call exactly', async () => {
+  const { rewindToMessage } = await import('./session-actions.js');
+  const { store: st } = await import('./store.js');
+  setState({ composerDrops: {} });
+  const calls = rewindFetch();
+  await rewindToMessage('sess', 'm1');
+  expect(calls[0].body).toEqual({ entry_id: 'm1' });
+  expect(st.get().composerDrops.sess).toBeUndefined();
+});

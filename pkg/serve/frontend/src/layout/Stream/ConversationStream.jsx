@@ -168,6 +168,9 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       // without the block (and every older transcript) are untouched.
       const parsed = parsePreviewReference(block.text);
       const text = parsed ? parsed.comment : block.text;
+      // Your own messages rewind to just before them and come back to the
+      // composer; the owner's and the parent agent's are not yours to edit.
+      const rewindEditable = !block.fromOwner && !block.fromParent;
       return (
         <UserWaypoint
           time={block.time}
@@ -179,7 +182,9 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
           reference={parsed?.reference}
           // The waypoint's own rewind mark, offered only when the block carries
           // the message id the branch API needs (see stream-model.js).
-          onRewind={rewind && block.msgId ? () => rewind.to(block.msgId) : undefined}
+          onRewind={rewind && block.msgId ? () => rewind.to(block.msgId, { edit: rewindEditable }) : undefined}
+          rewindEdit={rewindEditable}
+          rewindMidTurn={!!block.midTurn}
           onOpenTimeline={rewind?.openTimeline}
           rewindDisabled={rewind?.disabled}
           rewindPreview={text || block.text}

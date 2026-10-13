@@ -621,6 +621,10 @@ export function projectStream(session) {
         text: joinText(msg.content),
       };
       if (attachments.length > 0) wp.attachments = attachments;
+      // Sent while moa was working: what precedes it is a tool, not a finished
+      // answer. Rewinding it has to go back past that unfinished work.
+      const before = i > 0 ? messages[i - 1] : null;
+      if (before && (before._type === 'tool_start' || before.role === 'tool_result')) wp.midTurn = true;
       // A task injected by the parent is a genuine child user-role message,
       // but it is not authored by the owner steering this child from the UI.
       // Its explicit backend provenance survives resumes and reconnects.
