@@ -411,15 +411,8 @@ func registerGoalReactor(sctx *SessionContext) {
 				stopGoal(sctx, "reached time limit")
 				return
 			}
-			// Cap the next iteration at the remaining budget so the loop's total
-			// spend stays under the ceiling (the agent resets per-run cost each
-			// run). spent < TotalBudget here — the equal-or-over case stopped above.
-			if info.TotalBudget > 0 {
-				remaining := info.TotalBudget - sctx.Goal.Spent()
-				if err := sctx.Agent.SetMaxBudget(remaining); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: goal budget cap: %v\n", err)
-				}
-			}
+			// The relaunched run is capped at the goal's remaining budget when
+			// it starts (capRunAtGoalRemaining), like any run under the goal.
 			feedback := strings.TrimSpace(verdict.Feedback)
 			if feedback == "" {
 				feedback = "The objective is not yet satisfied. Re-check it against your STATE.md and the actual diff, then continue."

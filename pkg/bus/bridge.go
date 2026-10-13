@@ -2,6 +2,8 @@ package bus
 
 import (
 	"context"
+	"log/slog"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -963,6 +965,7 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 	if sctx.Goal != nil {
 		if act := sctx.Goal.Activation(); act != 0 {
 			ctx = context.WithValue(ctx, goalActivationKey{}, act)
+			sctx.capRunAtGoalRemaining()
 		}
 	}
 	sctx.RunGenAtomic.Store(sctx.runGen)
@@ -976,6 +979,24 @@ func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
 	sctx.runStats = runStats{gen: sctx.runGen}
 	sctx.runStatsMu.Unlock()
 	return ctx, sctx.runGen
+}
+
+// capRunAtGoalRemaining limits a run that starts under an active goal to what
+// the goal has left at that moment, whoever launched it: the driver's next
+// iteration, or a user prompt while the goal is paused or verifying. Spend that
+// lands later (a late summary, an earlier run's async child) does not narrow
+// it; the goal stops at its next RunEnded instead.
+func (sctx *SessionContext) capRunAtGoalRemaining() {
+	total := sctx.Goal.Info().TotalBudget
+	if total <= 0 {
+		return
+	}
+	// 0 would mean unlimited: an exhausted goal stops the run at its first
+	// checkpoint instead.
+	remaining := max(total-sctx.Goal.Spent(), math.SmallestNonzeroFloat64)
+	if err := sctx.Agent.SetMaxBudget(remaining); err != nil {
+		slog.Warn("goal budget cap", "session", sctx.SessionID, "error", err)
+	}
 }
 
 // RunStartedAt returns the authoritative start anchor for the current run.
