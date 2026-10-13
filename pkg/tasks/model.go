@@ -83,7 +83,13 @@ type Record struct {
 	ParentTaskID int64 `json:"parent_task_id,omitempty"`
 	OccurrenceID int64 `json:"occurrence_id,omitempty"`
 
+	// Handoff is set on a task one owner sent to another; CommentCount is
+	// the length of its thread (tasks between owners and agents' requests).
+	Handoff      *Handoff `json:"handoff,omitempty"`
+	CommentCount int      `json:"comment_count,omitempty"`
+
 	template bool
+	handoff  bool
 }
 
 // Task is the flat projection of a session checklist. Its JSON is what

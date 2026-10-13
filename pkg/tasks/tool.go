@@ -12,29 +12,30 @@ import (
 
 // NewTool returns the tasks tool for one session. Who is asking is the
 // scope's identity, injected at bootstrap; the arguments cannot name another
-// session or project.
+// session or project. The one exception is send, offered only to an owner's
+// conversation, which names another owner (never its session).
 func NewTool(scope *Scope) core.Tool {
+	actions := `"create", "ask", "list", "get", "update", "done", "claim", "comment"`
+	description := toolDescription
+	if scope.ownerSession {
+		actions += `, "send"`
+		description += toolOwnerDescription
+	}
 	return core.Tool{
-		Name:  "tasks",
-		Label: "Tasks",
-		Description: "Your task checklist, your requests to the owner, and your project's shared backlog. " +
-			"create adds to your checklist; ask files a request to the owner without blocking you (ask_user does block); " +
-			"claim takes a pending backlog task of your project; list before creating to avoid duplicates. " +
-			"create with when schedules the task to run later or repeat, in this session only; only when the user asks to schedule, otherwise omit when. when is plain text such as " +
-			"\"in 20m\", \"tomorrow at 09:00\", \"monday at 09:00\", \"2026-10-05 15:30\" or \"every weekday at 08:30\" " +
-			"(use 09:00-style hours: a bare \"at 9\" is ambiguous and nothing is scheduled). Each run arrives in this session as a new task. " +
-			"You only ever see your own checklist and requests plus the project's backlog and the tasks you scheduled.",
+		Name:        "tasks",
+		Label:       "Tasks",
+		Description: description,
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"action": {
 					"type": "string",
-					"enum": ["create", "ask", "list", "get", "update", "done", "claim"],
+					"enum": [` + actions + `],
 					"description": "Action to perform"
 				},
 				"id": {
 					"type": "integer",
-					"description": "Task ID (required for update/done/get/claim)"
+					"description": "Task ID (required for update/done/get/claim/comment)"
 				},
 				"title": {
 					"type": "string",
@@ -53,6 +54,19 @@ func NewTool(scope *Scope) core.Tool {
 					"enum": ["this session", "", null],
 					"description": "Optional. Omit it, or leave it empty or null, unless the user asks to schedule the task: it is always this session"
 				},
+				"body": {
+					"type": "string",
+					"description": "Comment text (required for comment)"
+				},
+				"outcome": {
+					"type": "string",
+					"enum": ["done", "cant_do"],
+					"description": "For done on a task another owner sent you: done (default) or cant_do"
+				},
+				"note": {
+					"type": "string",
+					"description": "For done: the result, or the reason for cant_do. Required on a task another owner sent you"
+				},` + toParam(scope.ownerSession) + `
 				"status": {
 					"type": "string",
 					"enum": ["pending", "in_progress"],
@@ -101,6 +115,10 @@ func NewTool(scope *Scope) core.Tool {
 				res, err = toolUpdate(ctx, repo, actor, params)
 			case "done":
 				res, err = toolDone(ctx, repo, actor, params)
+			case "comment":
+				res, err = toolComment(ctx, repo, actor, params)
+			case "send":
+				res, err = toolSend(ctx, scope, params)
 			case "claim":
 				res, err = toolClaim(ctx, repo, actor, params)
 			case "list":
@@ -116,6 +134,29 @@ func NewTool(scope *Scope) core.Tool {
 			return res, nil
 		},
 	}
+}
+
+const toolDescription = "Your task checklist, your requests to the owner, and your project's shared backlog. " +
+	"create adds to your checklist; ask files a request to the owner without blocking you (ask_user does block); " +
+	"claim takes a pending backlog task of your project; list before creating to avoid duplicates. " +
+	"create with when schedules the task to run later or repeat, in this session only; only when the user asks to schedule, otherwise omit when. when is plain text such as " +
+	"\"in 20m\", \"tomorrow at 09:00\", \"monday at 09:00\", \"2026-10-05 15:30\" or \"every weekday at 08:30\" " +
+	"(use 09:00-style hours: a bare \"at 9\" is ambiguous and nothing is scheduled). Each run arrives in this session as a new task. " +
+	"comment writes in the thread of a task between owners or of your request; a task another owner sent you is closed with done, an outcome and a note. " +
+	"You only ever see your own checklist and requests plus the project's backlog and the tasks you scheduled."
+
+const toolOwnerDescription = " send gives a task to another project's owner (to, title, description, subtasks); " +
+	"without the user's permission it waits for them first. list shows what you sent under Sent."
+
+func toParam(owner bool) string {
+	if !owner {
+		return ""
+	}
+	return `
+				"to": {
+					"type": "string",
+					"description": "For send: the other owner's name"
+				},`
 }
 
 func toolErrorText(err error) string {
@@ -261,7 +302,9 @@ func toolDone(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 	if err != nil {
 		return core.Result{}, err
 	}
-	if _, err := repo.AgentDone(ctx, actor, id); err != nil {
+	outcome, _ := params["outcome"].(string)
+	note, _ := params["note"].(string)
+	if _, err := repo.AgentClose(ctx, actor, id, outcome, note); err != nil {
 		return core.Result{}, err
 	}
 	view, err := repo.AgentList(ctx, actor)
@@ -274,6 +317,70 @@ func toolDone(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 		msg += "\n\nAll tasks complete!"
 	}
 	return core.TextResult(msg), nil
+}
+
+func toolComment(ctx context.Context, repo *Repo, actor Actor, params map[string]any) (core.Result, error) {
+	id, err := idParam(params, "comment")
+	if err != nil {
+		return core.Result{}, err
+	}
+	body, _ := params["body"].(string)
+	if _, err := repo.AgentComment(ctx, actor, id, body); err != nil {
+		return core.Result{}, err
+	}
+	return core.TextResult(fmt.Sprintf("Commented on task #%d. The other side hears it; you will hear their answer.", id)), nil
+}
+
+// toolSend is the only action that names another owner. Who sends is the
+// scope's session, checked against the directory on every call: only an
+// owner's own conversation sends, and the permission is read fresh.
+func toolSend(ctx context.Context, scope *Scope, params map[string]any) (core.Result, error) {
+	if !scope.ownerSession || scope.owners == nil {
+		return core.Result{}, invalid("only a project owner can send tasks to another owner")
+	}
+	from, ok, err := scope.owners.OwnerOf(scope.sessionID)
+	if err != nil {
+		return core.Result{}, err
+	}
+	if !ok {
+		return core.Result{}, invalid("only a project owner can send tasks to another owner")
+	}
+	name, _ := params["to"].(string)
+	if strings.TrimSpace(name) == "" {
+		return core.Result{}, invalid("to is required for send: the other owner's name")
+	}
+	to, ok, err := scope.owners.Find(strings.TrimSpace(name))
+	if err != nil {
+		return core.Result{}, err
+	}
+	if !ok {
+		return core.Result{}, invalid("there is no owner named %q", name)
+	}
+	if to.ID == from.ID {
+		return core.Result{}, invalid("an owner cannot send a task to itself")
+	}
+	allowed, err := scope.owners.CanSend(from.ID, to.ID)
+	if err != nil {
+		return core.Result{}, err
+	}
+	in := AgentInput{}
+	in.Title, _ = params["title"].(string)
+	in.Description, _ = params["description"].(string)
+	if subs, err := parseSubtasks(params["subtasks"]); err != nil {
+		return core.Result{}, err
+	} else if subs != nil {
+		in.Subtasks = *subs
+	}
+	rec, err := scope.repo.SendHandoff(ctx, from, to, allowed, in)
+	if err != nil {
+		return core.Result{}, err
+	}
+	if allowed {
+		return core.TextResult(fmt.Sprintf("Sent task #%d to %s: %s. Its answer and its closing note arrive as notices; it is under Sent in list.",
+			rec.ID, to.Name, rec.Title)), nil
+	}
+	return core.TextResult(fmt.Sprintf("You have no permission to send tasks to %s, so task #%d waits for the user: they send it, always allow it, or decline it. "+
+		"Keep working; you will hear the answer.", to.Name, rec.ID)), nil
 }
 
 func toolClaim(ctx context.Context, repo *Repo, actor Actor, params map[string]any) (core.Result, error) {
@@ -344,7 +451,7 @@ func toolList(ctx context.Context, repo *Repo, actor Actor) (core.Result, error)
 	if err != nil {
 		return core.Result{}, err
 	}
-	if len(view.Checklist)+len(view.Requests)+len(view.Backlog)+len(view.Scheduled) == 0 {
+	if len(view.Checklist)+len(view.Requests)+len(view.Backlog)+len(view.Scheduled)+len(view.Sent) == 0 {
 		return core.TextResult("No tasks yet."), nil
 	}
 	var sb strings.Builder
@@ -367,6 +474,12 @@ func toolList(ctx context.Context, repo *Repo, actor Actor) (core.Result, error)
 			writeTask(&sb, t)
 		}
 	}
+	if len(view.Sent) > 0 {
+		sb.WriteString("\n\nSent to other owners:")
+		for _, t := range view.Sent {
+			fmt.Fprintf(&sb, "\n- #%d → %s: %s — %s", t.ID, t.To, t.Title, handoffStatus(t))
+		}
+	}
 	if len(view.Scheduled) > 0 {
 		sb.WriteString("\n\nYour scheduled tasks (each run arrives here as a new task):")
 		for _, t := range view.Scheduled {
@@ -374,6 +487,22 @@ func toolList(ctx context.Context, repo *Repo, actor Actor) (core.Result, error)
 		}
 	}
 	return core.TextResult(strings.TrimSpace(sb.String())), nil
+}
+
+func handoffStatus(t AgentTask) string {
+	switch {
+	case t.HandoffState == HandoffAwaiting:
+		return "waiting for the user's permission"
+	case t.HandoffState == HandoffDeclined:
+		return "declined by the user"
+	case t.Status == StatusDone && t.Outcome == OutcomeCantDo:
+		return "can't do"
+	case t.Status == StatusDone:
+		return "done"
+	case t.Status == StatusInProgress:
+		return "in progress"
+	}
+	return "open"
 }
 
 func toolGet(ctx context.Context, repo *Repo, actor Actor, params map[string]any) (core.Result, error) {
@@ -387,6 +516,12 @@ func toolGet(ctx context.Context, repo *Repo, actor Actor, params map[string]any
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Task #%d: %s\nStatus: %s\nPlace: %s", t.ID, t.Title, t.Status, t.Place)
+	if t.From != "" {
+		fmt.Fprintf(&sb, "\nFrom: %s, the owner of another project", t.From)
+	}
+	if t.To != "" {
+		fmt.Fprintf(&sb, "\nSent to: %s (%s)", t.To, handoffStatus(t))
+	}
 	if t.Description != "" {
 		fmt.Fprintf(&sb, "\nDescription: %s", t.Description)
 	}
@@ -411,6 +546,12 @@ func toolGet(ctx context.Context, repo *Repo, actor Actor, params map[string]any
 	}
 	if t.CompletionNote != "" {
 		fmt.Fprintf(&sb, "\nNote: %s", t.CompletionNote)
+	}
+	if len(t.Thread) > 0 {
+		sb.WriteString("\nThread:")
+		for _, c := range t.Thread {
+			fmt.Fprintf(&sb, "\n  %s: %s", c.Author, c.Body)
+		}
 	}
 	return core.TextResult(sb.String()), nil
 }

@@ -14,9 +14,10 @@ type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// The last four columns come from the scheduling tables: whether the task is
+// Four columns come from the scheduling tables: whether the task is
 // a template (and which session created it), and the occurrence a run's child
-// belongs to. Every read of a task knows what it is, so no path can treat a
+// belongs to; the last two say whether it is a task between owners and how
+// long its thread is. Every read of a task knows what it is, so no path can treat a
 // template or a scheduled child as an ordinary task by forgetting a join.
 const taskCols = `id, title, description, status, place, project_key, project_cwd,
 	requester_session_id, assignee_session_id, completion_note,
@@ -24,7 +25,9 @@ const taskCols = `id, title, description, status, place, project_key, project_cw
 	EXISTS(SELECT 1 FROM task_schedules s WHERE s.task_id = tasks.id),
 	(SELECT s.created_by_session_id FROM task_schedules s WHERE s.task_id = tasks.id),
 	(SELECT o.id FROM task_occurrences o WHERE o.child_task_id = tasks.id),
-	(SELECT o.schedule_task_id FROM task_occurrences o WHERE o.child_task_id = tasks.id)`
+	(SELECT o.schedule_task_id FROM task_occurrences o WHERE o.child_task_id = tasks.id),
+	EXISTS(SELECT 1 FROM task_handoffs h WHERE h.task_id = tasks.id),
+	(SELECT COUNT(*) FROM task_comments c WHERE c.task_id = tasks.id)`
 
 func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 	var (
@@ -36,14 +39,15 @@ func scanRecord(sc interface{ Scan(...any) error }) (Record, error) {
 		template                    bool
 		creator                     sql.NullString
 		occID, parentID             sql.NullInt64
+		handoff                     bool
 	)
 	if err := sc.Scan(&r.ID, &r.Title, &r.Description, &r.Status, &place, &projKey, &projCWD,
 		&requester, &assignee, &r.CompletionNote,
 		&r.CreatedAt, &r.UpdatedAt, &completedAt, &archivedAt, &r.Revision,
-		&template, &creator, &occID, &parentID); err != nil {
+		&template, &creator, &occID, &parentID, &handoff, &r.CommentCount); err != nil {
 		return Record{}, err
 	}
-	r.template, r.CreatedBySessionID = template, creator.String
+	r.template, r.CreatedBySessionID, r.handoff = template, creator.String, handoff
 	r.OccurrenceID, r.ParentTaskID = occID.Int64, parentID.Int64
 	r.Place = Place(place)
 	r.ProjectKey, r.ProjectCWD = projKey.String, projCWD.String
@@ -77,6 +81,9 @@ func loadRecords(ctx context.Context, q querier, where string, args ...any) ([]R
 		return nil, err
 	}
 	if err := attachRelations(ctx, q, recs); err != nil {
+		return nil, err
+	}
+	if err := attachHandoffs(ctx, q, recs); err != nil {
 		return nil, err
 	}
 	return recs, attachSchedules(ctx, q, recs)

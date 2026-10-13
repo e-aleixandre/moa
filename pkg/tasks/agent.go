@@ -30,6 +30,23 @@ type AgentTask struct {
 	TZ            string `json:"tz,omitempty"`
 	Next          int64  `json:"next,omitempty"`
 	ScheduleState string `json:"schedule_state,omitempty"`
+
+	// A task between owners: who sent it (to its recipient) or to whom (to
+	// its sender), where it stands, and (on get) its thread. Names only:
+	// never a session or a project.
+	From         string        `json:"from,omitempty"`
+	To           string        `json:"to,omitempty"`
+	HandoffState string        `json:"handoff_state,omitempty"`
+	Outcome      string        `json:"outcome,omitempty"`
+	Thread       []ThreadEntry `json:"thread,omitempty"`
+}
+
+// ThreadEntry is one comment as an agent reads it: the author is "you",
+// "the user" or the other owner's name.
+type ThreadEntry struct {
+	Author string `json:"author"`
+	Body   string `json:"body"`
+	At     int64  `json:"at"`
 }
 
 // AgentView is the default listing of an agent.
@@ -40,6 +57,8 @@ type AgentView struct {
 	// Scheduled are the templates this session created for itself. They are
 	// not on its checklist: each run arrives as its own task.
 	Scheduled []AgentTask `json:"scheduled,omitempty"`
+	// Sent are the tasks this owner sent to other owners, whatever their state.
+	Sent []AgentTask `json:"sent,omitempty"`
 }
 
 // AgentInput creates a checklist task or a request.
@@ -67,7 +86,9 @@ func (a Actor) reads(t *Record) bool {
 	}
 	switch t.Place {
 	case PlaceAgent:
-		return t.AssigneeSessionID == a.SessionID
+		// The owner that sent a task to another reads it (its state, note
+		// and thread) on the recipient's checklist.
+		return t.AssigneeSessionID == a.SessionID || t.handoff && t.RequesterSessionID == a.SessionID
 	case PlaceYou:
 		// A template is readable by the session that scheduled it for itself.
 		if t.template {
@@ -90,9 +111,11 @@ func (a Actor) edits(t *Record) bool {
 	}
 	switch t.Place {
 	case PlaceAgent:
-		return true
+		return t.AssigneeSessionID == a.SessionID
 	case PlaceYou:
-		return t.Status != StatusDone
+		// A task sent to another owner is the user's to answer, and then the
+		// recipient's: its sender only comments.
+		return t.Status != StatusDone && !t.handoff
 	}
 	return false
 }
@@ -139,6 +162,14 @@ func (a Actor) project(ctx context.Context, q querier, recs []Record) ([]AgentTa
 			CompletionNote: t.CompletionNote, Subtasks: t.Subtasks,
 			When: t.When, TZ: t.TZ, Next: t.Next, ScheduleState: t.ScheduleState,
 		}
+		if h := t.Handoff; h != nil {
+			at.HandoffState, at.Outcome = h.State, h.Outcome
+			if t.RequesterSessionID == a.SessionID {
+				at.To = h.ToOwnerName
+			} else {
+				at.From = h.FromOwnerName
+			}
+		}
 		for _, id := range t.WaitsFor {
 			w := known[id]
 			switch {
@@ -159,8 +190,8 @@ func (a Actor) project(ctx context.Context, q querier, recs []Record) ([]AgentTa
 }
 
 // AgentList returns the agent's checklist (done ones included until they are
-// archived), its own requests to the owner, and the pending backlog of its
-// project. Nothing else.
+// archived), its own requests to the owner, the tasks it sent to other owners,
+// and the pending backlog of its project. Nothing else.
 func (r *Repo) AgentList(ctx context.Context, a Actor) (AgentView, error) {
 	view := AgentView{Checklist: []AgentTask{}, Requests: []AgentTask{}, Backlog: []AgentTask{}}
 	if a.SessionID == "" {
@@ -186,7 +217,12 @@ func (r *Repo) AgentList(ctx context.Context, a Actor) (AgentView, error) {
 	if view.Checklist, err = load("place = 'agent' AND assignee_session_id = ? AND archived_at IS NULL", a.SessionID); err != nil {
 		return view, err
 	}
-	if view.Requests, err = load("place = 'you' AND requester_session_id = ? AND archived_at IS NULL", a.SessionID); err != nil {
+	if view.Requests, err = load(`place = 'you' AND requester_session_id = ? AND archived_at IS NULL
+		AND id NOT IN (SELECT task_id FROM task_handoffs)`, a.SessionID); err != nil {
+		return view, err
+	}
+	if view.Sent, err = load(`requester_session_id = ? AND archived_at IS NULL
+		AND id IN (SELECT task_id FROM task_handoffs)`, a.SessionID); err != nil {
 		return view, err
 	}
 	if a.ProjectKey != "" {
@@ -221,6 +257,11 @@ func (r *Repo) AgentGet(ctx context.Context, a Actor, id int64) (AgentTask, erro
 	pr, err := a.project(ctx, rd, []Record{rec})
 	if err != nil {
 		return AgentTask{}, err
+	}
+	if hasThread(&rec) {
+		if pr[0].Thread, err = agentThread(ctx, rd, a, id); err != nil {
+			return AgentTask{}, err
+		}
 	}
 	return pr[0], nil
 }
@@ -380,31 +421,9 @@ func hiddenWaits(ctx context.Context, q querier, a Actor, id int64) ([]int64, er
 
 // AgentDone completes a task of the agent's own checklist. Not a backlog
 // task it merely sees, and never a request to the owner: only the owner
-// answers those.
+// answers those. A task from another owner needs AgentClose's note.
 func (r *Repo) AgentDone(ctx context.Context, a Actor, id int64) (AgentTask, error) {
-	var out AgentTask
-	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
-		cur, err := getRecord(ctx, tx, id)
-		if err != nil {
-			return false, err
-		}
-		if !a.reads(&cur) {
-			return false, notAvailable(id)
-		}
-		if cur.Place != PlaceAgent {
-			return false, ErrForbidden
-		}
-		changed := cur.Status != StatusDone
-		if changed {
-			r.applyStatus(&cur, StatusDone)
-			if err := r.saveTask(ctx, tx, cur, cur.Revision); err != nil {
-				return false, err
-			}
-		}
-		out, err = r.agentSnapshot(ctx, tx, a, id)
-		return changed, err
-	})
-	return out, err
+	return r.AgentClose(ctx, a, id, "", "")
 }
 
 // AgentClaim takes a pending backlog task of the agent's own project. It is
@@ -536,8 +555,12 @@ func (r *Repo) CompleteForSession(ctx context.Context, sessionID string, id int6
 		if cur.Status == StatusDone {
 			return false, nil
 		}
+		before := cur
 		r.applyStatus(&cur, StatusDone)
-		return true, r.saveTask(ctx, tx, cur, cur.Revision)
+		if err := r.saveTask(ctx, tx, cur, cur.Revision); err != nil {
+			return false, err
+		}
+		return true, r.userClosesHandoff(ctx, tx, before, cur, nil)
 	})
 }
 

@@ -309,7 +309,7 @@ func openWriter(path string) (db *sql.DB, tooNew bool, err error) {
 			return nil, false, err
 		}
 		db.SetMaxOpenConns(1)
-		tooNew, err = migrate(db)
+		tooNew, err = migrateWith(db, path, migrations, compatMigrations)
 		if err == nil {
 			return db, tooNew, nil
 		}
@@ -321,9 +321,71 @@ func openWriter(path string) (db *sql.DB, tooNew bool, err error) {
 	return nil, false, err
 }
 
-// migrate brings the schema to the latest version. A database from a newer
-// moa is left untouched and reported.
-func migrate(db *sql.DB) (tooNew bool, err error) {
+// compatMigrations are migrations an older moa can live with: tables it never
+// reads, columns with defaults, CHECKs widened. They are counted in
+// tasks_compat.version, not in user_version, so a binary that does not know
+// them still opens the database for writing and simply ignores them. A change
+// that an older binary would read or write wrongly — a rename, a narrower
+// CHECK, a column whose meaning changes — does not belong here: it goes to
+// migrations and raises user_version.
+var compatMigrations = []string{
+	// 1: tasks between owners. A handoff row turns a task into one owner's
+	// task for another; comments are its thread (and that of an agent's
+	// request). Both cascade with the task, so an older binary deleting a
+	// task leaves nothing behind. The outbox is rebuilt only to widen the
+	// kinds it accepts: same columns, same order, same rowids.
+	`CREATE TABLE task_handoffs (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  from_owner_id TEXT NOT NULL, from_owner_name TEXT NOT NULL, from_session_id TEXT NOT NULL,
+  to_owner_id TEXT NOT NULL, to_owner_name TEXT NOT NULL, to_session_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('awaiting_permission','sent','declined')),
+  outcome TEXT CHECK(outcome IS NULL OR outcome IN ('done','cant_do')),
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX task_handoffs_from ON task_handoffs(from_session_id);
+CREATE INDEX task_handoffs_to ON task_handoffs(to_session_id);
+CREATE TABLE task_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  author_kind TEXT NOT NULL CHECK(author_kind IN ('human','session')),
+  author_session_id TEXT,
+  author_name TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL CHECK(length(trim(body)) > 0),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX task_comments_task ON task_comments(task_id, id);
+CREATE TABLE task_notifications_new (
+  id TEXT PRIMARY KEY,
+  task_id INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('assigned','updated','request_done','agent_done','agent_deleted',
+    'handoff','comment','handoff_closed','handoff_declined')),
+  recipient_session_id TEXT NOT NULL,
+  deliver TEXT NOT NULL CHECK(deliver IN ('wake','hold')),
+  method TEXT NOT NULL CHECK(method IN ('run','append')),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('pending','held','sent','delivered','failed')),
+  reason TEXT NOT NULL DEFAULT '',
+  steer_id TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, delivered_at INTEGER
+);
+INSERT INTO task_notifications_new(rowid, id, task_id, kind, recipient_session_id, deliver, method, title, body,
+  state, reason, steer_id, created_at, updated_at, delivered_at)
+  SELECT rowid, id, task_id, kind, recipient_session_id, deliver, method, title, body,
+  state, reason, steer_id, created_at, updated_at, delivered_at FROM task_notifications ORDER BY rowid;
+DROP TABLE task_notifications;
+ALTER TABLE task_notifications_new RENAME TO task_notifications;
+CREATE INDEX task_notifications_task ON task_notifications(task_id, created_at);
+CREATE INDEX task_notifications_open ON task_notifications(state, created_at);`,
+}
+
+// migrateWith brings the schema to the latest version: base migrations count
+// in user_version, compat ones in tasks_compat. A database from a newer moa
+// (user_version beyond base) is left untouched and reported; a newer compat
+// level is simply ignored. Everything runs in one immediate transaction, so
+// two processes never apply a migration twice. path, when set, is where an
+// existing database is backed up before its first pending compat migration.
+func migrateWith(db *sql.DB, path string, migrations, compat []string) (tooNew bool, err error) {
 	ctx := context.Background()
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -337,8 +399,25 @@ func migrate(db *sql.DB) (tooNew bool, err error) {
 	if version > len(migrations) {
 		return true, nil
 	}
-	if version == len(migrations) {
+	level := 0
+	var hasCompat bool
+	if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tasks_compat')").Scan(&hasCompat); err != nil {
+		return false, err
+	}
+	if hasCompat {
+		if err := tx.QueryRow("SELECT version FROM tasks_compat WHERE id = 1").Scan(&level); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
+	}
+	if version == len(migrations) && level >= len(compat) {
 		return false, nil
+	}
+	if level < len(compat) && version >= 1 && path != "" {
+		// Under this transaction's lock, before it writes: the copy is the
+		// database exactly as the older binary left it.
+		if err := backupBeforeCompat(ctx, path, level+1); err != nil {
+			return false, fmt.Errorf("tasks backup before compat migration %d: %w", level+1, err)
+		}
 	}
 	for i := version; i < len(migrations); i++ {
 		if _, err := tx.Exec(migrations[i]); err != nil {
@@ -346,10 +425,58 @@ func migrate(db *sql.DB) (tooNew bool, err error) {
 		}
 	}
 	// PRAGMA does not accept bound parameters.
-	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
-		return false, err
+	if version < len(migrations) {
+		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
+			return false, err
+		}
+	}
+	if level < len(compat) {
+		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS tasks_compat (id INTEGER PRIMARY KEY CHECK(id = 1), version INTEGER NOT NULL)`); err != nil {
+			return false, err
+		}
+		for i := level; i < len(compat); i++ {
+			if _, err := tx.Exec(compat[i]); err != nil {
+				return false, fmt.Errorf("tasks compat migration %d: %w", i+1, err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO tasks_compat(id, version) VALUES (1, ?)
+			ON CONFLICT(id) DO UPDATE SET version = excluded.version`, len(compat)); err != nil {
+			return false, err
+		}
 	}
 	return false, tx.Commit()
+}
+
+// backupBeforeCompat copies the database to <path>.pre-compat<n>.bak, once:
+// an existing non-empty backup is never overwritten. It reads through its own
+// connection; the caller's transaction holds the write lock but has not
+// written, so the copy is the last committed state.
+func backupBeforeCompat(ctx context.Context, path string, n int) error {
+	bak := fmt.Sprintf("%s.pre-compat%d.bak", path, n)
+	f, err := os.OpenFile(bak, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	switch {
+	case errors.Is(err, os.ErrExist):
+		if st, statErr := os.Stat(bak); statErr == nil && st.Size() > 0 {
+			return nil
+		}
+		// An empty file is a backup that never finished: VACUUM INTO fills it.
+	case err != nil:
+		return err
+	default:
+		_ = f.Close()
+	}
+	u := url.URL{Scheme: "file", Path: path}
+	u.RawQuery = url.Values{"_pragma": {"busy_timeout(5000)"}}.Encode()
+	src, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+	if _, err := src.ExecContext(ctx, "VACUUM INTO ?", bak); err != nil {
+		_ = os.Remove(bak)
+		return err
+	}
+	return os.Chmod(bak, 0o600)
 }
 
 func isBusy(err error) bool {

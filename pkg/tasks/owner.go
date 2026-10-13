@@ -46,6 +46,9 @@ type Patch struct {
 	ProjectCWD        *string
 	AssigneeSessionID *string
 	CompletionNote    *string
+	// Outcome closes a task between owners as done or cant_do (which needs
+	// a note). Only such a task accepts it.
+	Outcome *string
 
 	Subtasks *[]SubtaskInput
 	WaitsFor *[]int64
@@ -234,6 +237,9 @@ func (r *Repo) Update(ctx context.Context, id, revision int64, p Patch) (Record,
 			}
 		}
 		if err := r.saveTask(ctx, tx, cur, revision); err != nil {
+			return false, err
+		}
+		if err := r.userClosesHandoff(ctx, tx, before, cur, p.Outcome); err != nil {
 			return false, err
 		}
 		if p.Subtasks != nil {

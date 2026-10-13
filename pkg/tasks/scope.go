@@ -18,6 +18,9 @@ type Scope struct {
 	cwd       string
 	tz        string
 
+	owners       OwnerDirectory
+	ownerSession bool
+
 	keyOnce sync.Once
 	key     string
 
@@ -34,6 +37,14 @@ func NewScope(repo *Repo, sessionID, cwd string) *Scope {
 // unknown). Set once at construction, before the scope is shared.
 func (s *Scope) WithTZ(tz string) *Scope {
 	s.tz = tz
+	return s
+}
+
+// WithOwners gives the scope the owner directory, and says whether the
+// session was built as a project owner's conversation: only then is send
+// offered, and it is still checked against the directory on every call.
+func (s *Scope) WithOwners(dir OwnerDirectory, ownerSession bool) *Scope {
+	s.owners, s.ownerSession = dir, ownerSession
 	return s
 }
 
