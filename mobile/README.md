@@ -377,7 +377,9 @@ repo or the command line:
     ./gradlew assembleRelease
 
 The APK is `android/app/build/outputs/apk/release/app-release.apk`. Without
-`MOA_ANDROID_KEYSTORE`, `assembleRelease` produces an unsigned APK. The release
+`MOA_ANDROID_KEYSTORE`, `assembleRelease` produces an unsigned APK; with it,
+the password and the alias are required and the build fails if either is
+missing. The release
 key differs from any debug key, so a debug install has to be removed before
 installing a release APK over it.
 

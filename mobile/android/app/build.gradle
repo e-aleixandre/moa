@@ -57,14 +57,23 @@ android {
     // lives in the repo and nothing reaches the command line. Without
     // MOA_ANDROID_KEYSTORE the release APK is built unsigned, as before.
     def releaseKeystore = System.getenv('MOA_ANDROID_KEYSTORE')
+    // Once signing is requested, every part must be given: no default alias.
+    // The message names the variable, never its value.
+    def requiredSigningEnv = { String name ->
+        def value = System.getenv(name)
+        if (!value) {
+            throw new GradleException("MOA_ANDROID_KEYSTORE is set but ${name} is missing")
+        }
+        value
+    }
     signingConfigs {
         if (releaseKeystore) {
             release {
                 storeFile file(releaseKeystore)
-                storePassword System.getenv('MOA_ANDROID_KEYSTORE_PASSWORD')
-                keyAlias System.getenv('MOA_ANDROID_KEY_ALIAS') ?: 'moa-release'
+                storePassword requiredSigningEnv('MOA_ANDROID_KEYSTORE_PASSWORD')
+                keyAlias requiredSigningEnv('MOA_ANDROID_KEY_ALIAS')
                 // PKCS12 keystores have a single password for store and key.
-                keyPassword System.getenv('MOA_ANDROID_KEYSTORE_PASSWORD')
+                keyPassword requiredSigningEnv('MOA_ANDROID_KEYSTORE_PASSWORD')
             }
         }
     }

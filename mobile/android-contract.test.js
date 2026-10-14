@@ -303,9 +303,15 @@ describe("Android release build", () => {
 
   it("signs only from the environment and keeps no key material in the repo", () => {
     expect(build).toContain("def releaseKeystore = System.getenv('MOA_ANDROID_KEYSTORE')");
-    expect(build).toContain("storePassword System.getenv('MOA_ANDROID_KEYSTORE_PASSWORD')");
+    expect(build).toContain("storePassword requiredSigningEnv('MOA_ANDROID_KEYSTORE_PASSWORD')");
+    expect(build).toContain("keyAlias requiredSigningEnv('MOA_ANDROID_KEY_ALIAS')");
+    expect(build).toContain("keyPassword requiredSigningEnv('MOA_ANDROID_KEYSTORE_PASSWORD')");
+    // A missing part fails the build by name instead of falling back.
+    expect(build).toMatch(/def requiredSigningEnv = \{ String name ->\s+def value = System\.getenv\(name\)\s+if \(!value\) \{\s+throw new GradleException\("MOA_ANDROID_KEYSTORE is set but \$\{name\} is missing"\)/);
+    expect(build).not.toMatch(/(?:keyAlias|keyPassword|storePassword)[^\n]*\?:/);
+    expect(build).not.toContain("'moa-release'");
     expect(build).toMatch(/if \(releaseKeystore\) \{\s+signingConfig signingConfigs\.release/);
-    expect(build).not.toMatch(/findProperty\('[^']*(?:[Pp]assword|[Kk]eystore)/);
+    expect(build).not.toMatch(/findProperty\('[^']*(?:[Pp]assword|[Kk]eystore|[Aa]lias)/);
   });
 });
 
