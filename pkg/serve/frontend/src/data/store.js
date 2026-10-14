@@ -57,6 +57,10 @@ export const TASKS_INITIAL = Object.freeze({
   // A task's thread (GET /api/tasks/{id}/comments) while its detail shows:
   // { [id]: { comments, loaded } }.
   threads: {},
+  // The reply typed in a task's thread and not yet sent: { [id]: text }. It
+  // lives here, not in the composer, because the composer unmounts whenever
+  // the foot shows something else (an edit, a closing note).
+  threadDrafts: {},
   newSince: 0,
 });
 

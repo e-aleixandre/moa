@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { User } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { addToast } from "../../data/notifications.js";
-import { postComment, tasksSlice, threadOf, watchThread } from "../../data/tasks.js";
+import { postComment, setThreadDraft, tasksSlice, threadDraftOf, threadOf, watchThread } from "../../data/tasks.js";
 import { commentAuthor, errorText, handoffSide, relAge, sessionName, threadPlaceholder } from "../../data/tasks-model.js";
 import { Keycap, MOD_ENTER, OwnerMark } from "./parts.jsx";
 import { TasksGlyph } from "./TasksGlyph.jsx";
@@ -98,7 +98,7 @@ function autosize(el) {
 // ThreadComposer — a comment goes out at once to whoever the task's thread
 // reaches (the server decides). Send shows once there is something to send.
 export function ThreadComposer({ task, owners, sessions, phone }) {
-  const [text, setText] = useState("");
+  const text = useStore((st) => threadDraftOf(tasksSlice(st), task.id));
   const [busy, setBusy] = useState(false);
   const field = useRef(null);
   const placeholder = threadPlaceholder(task, { owners, sessions });
@@ -107,7 +107,7 @@ export function ThreadComposer({ task, owners, sessions, phone }) {
     if (!body || busy) return;
     setBusy(true);
     postComment(task.id, body)
-      .then(() => { setText(""); requestAnimationFrame(() => autosize(field.current)); })
+      .then(() => { setThreadDraft(task.id, ""); requestAnimationFrame(() => autosize(field.current)); })
       .catch((error) => addToast({ title: "Could not send the comment", detail: errorText(error), type: "error" }))
       .finally(() => setBusy(false));
   };
@@ -120,7 +120,7 @@ export function ThreadComposer({ task, owners, sessions, phone }) {
         placeholder={placeholder}
         aria-label={placeholder}
         value={text}
-        onInput={(e) => { setText(e.currentTarget.value); autosize(e.currentTarget); }}
+        onInput={(e) => { setThreadDraft(task.id, e.currentTarget.value); autosize(e.currentTarget); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.altKey)) { e.preventDefault(); e.stopPropagation(); send(); }
         }}

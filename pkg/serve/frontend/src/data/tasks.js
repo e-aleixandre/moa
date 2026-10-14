@@ -250,6 +250,14 @@ export function postComment(id, body) {
   });
 }
 
+export function threadDraftOf(slice, id) {
+  return (slice.threadDrafts || {})[id] || '';
+}
+
+export function setThreadDraft(id, text) {
+  patch((t) => ({ threadDrafts: { ...(t.threadDrafts || {}), [id]: text } }));
+}
+
 // resolveHandoff answers a request to send a task to another owner. A stale
 // revision (409) stores the task as it is now before rejecting, so the
 // detail shows the current answer instead of the one it read.

@@ -95,3 +95,11 @@ test("R6: a projected handoff names owners without ids and is not taken for an o
 const HANDOFF = { id: 7, title: "t", place: "you", status: "pending", revision: 1, requester_session_id: "s-moa",
   handoff: { state: "sent", from_owner_id: "own_moa", from_owner_name: "moa", to_owner_id: "own_infra", to_owner_name: "Infra" } };
 const field = (tree) => flat(tree).find((n) => n.type === "textarea");
+
+test("R7: an unsent reply is still there when the composer mounts again", () => {
+  setState({ tasks: { ...TASKS_INITIAL } });
+  const props = { task: HANDOFF, owners: [], sessions: {}, phone: false };
+  field(expand(ThreadComposer(props))).props.onInput({ currentTarget: { value: "Keep this", scrollHeight: 10, style: {} } });
+  expect(field(expand(ThreadComposer(props))).props.value).toBe("Keep this");
+  expect(field(expand(ThreadComposer({ ...props, task: { ...HANDOFF, id: 8 } }))).props.value).toBe("");
+});
