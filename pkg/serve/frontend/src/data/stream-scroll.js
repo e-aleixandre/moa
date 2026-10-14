@@ -15,7 +15,7 @@ export function capturePrependForSession(currentSessionId, sessionId, el) {
 // Shared transcript scroll intent for desktop and mobile. The content element
 // is observed rather than the scroller: async image loads and expanding cards
 // change its height, while the scroller's border box stays the same.
-export function useStreamScroll({ session, sessionId, pendingAskId, followSignals, onScrollEl }) {
+export function useStreamScroll({ session, sessionId, pendingPromptKey: promptKey, followSignals, onScrollEl }) {
   const containerRef = useRef(null);
   const contentRef = useRef(null);
   const prependAnchor = useRef(null);
@@ -169,11 +169,11 @@ export function useStreamScroll({ session, sessionId, pendingAskId, followSignal
   }, [scrollToBottomNow, followTail]);
 
   useEffect(() => {
-    if (!pendingAskId) return;
+    if (!promptKey) return;
     stickToBottom.current = true;
     setShowNewBtn(false);
     scrollToBottomNow();
-  }, [pendingAskId, scrollToBottomNow]);
+  }, [promptKey, scrollToBottomNow]);
 
   const scrollToBottom = useCallback(() => {
     stickToBottom.current = true;

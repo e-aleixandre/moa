@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useLayoutEffect } from "preac
 import { createPortal } from "preact/compat";
 import { ChatHead } from "../ChatHead/ChatHead.jsx";
 import { Stream } from "../Stream/Stream.jsx";
+import { pendingPromptsTail } from "../Stream/pending-prompts.jsx";
 import { LiveBar } from "../LiveBar/LiveBar.jsx";
 import { SubagentView } from "../SubagentView/SubagentView.jsx";
 import { BashJobView } from "../BashJobView/BashJobView.jsx";
@@ -10,7 +11,7 @@ import { StatusStrip } from "../StatusStrip/StatusStrip.jsx";
 import { RewindTimeline } from "../RewindTimeline/RewindTimeline.jsx";
 import { EarlierBranches } from "../EarlierBranches/EarlierBranches.jsx";
 import { SecretBatch } from "../../components/SecretBatch/SecretBatch.jsx";
-import { ModelSelector, PermissionPrompt, SecretActionPrompt, AskUserPrompt, McpBanner, Sheet, ArtifactsEntry } from "../../components/index.js";
+import { ModelSelector, PermissionPrompt, McpBanner, Sheet, ArtifactsEntry } from "../../components/index.js";
 import { PickerPopover } from "../../components/ModelSelector/ModelSelector.jsx";
 import { usePermissionMenu } from "../../components/PermissionControl/PermissionControl.jsx";
 import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
@@ -296,13 +297,12 @@ export function ConversationScreen() {
               }}
               lead={<EarlierBranches sessionId={session.id} empty={!(session.messages?.length > 0)} onOpen={() => setRewindOpen(true)} />}
               onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
-              tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
+              tail={pendingPromptsTail(session)}
             />
-            {(session.untrustedMcp || session.pendingPerm || session.pendingSecrets?.length > 0) && (
+            {(session.untrustedMcp || session.pendingPerm) && (
               <div class="conversation-blocking">
                 {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
                 {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
-                {session.pendingSecrets?.length > 0 && <SecretActionPrompt key={session.id} session={session} />}
               </div>
             )}
             {/* The dock: live bar, composer and status line are ONE instrument,
