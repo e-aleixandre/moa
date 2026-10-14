@@ -267,7 +267,7 @@ the same markdown that lives in `docs/` here, so either place works:
 | [Tools](docs/tools.md) | Built-in tools, custom tools, subagents, and verification |
 | [Automation](docs/automation.md) | Inbound HTTP API for webhooks, cron and CI, with callbacks |
 | [Project owners](docs/owners.md) | A standing agent per codebase that keeps its book and directs its sessions |
-| [Native app](docs/mobile.md) | The iOS and Android app: pairing, notifications, sharing and saved passwords |
+| [Native app](docs/mobile.md) | The iOS and Android app: pairing, notifications, sharing and, on iOS, saved passwords |
 | [Pulse](docs/pulse.md) | The iOS voice companion and the Serve contract behind it |
 | [Recipe: Linear](docs/recipes/linear.md) | Assign a Linear issue to Moa and get the result back as a comment |
 | [Architecture](docs/architecture.md) | Package map, event bus, and runtime design |

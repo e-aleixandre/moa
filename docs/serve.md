@@ -39,7 +39,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Share a file or link from another app into a conversation (installed web app, and the [native iOS and Android apps](./mobile.md))
 - [Rewind](#rewind): go back to any of your messages and edit it, without losing the branch you leave
 - [Provider sign-ins](#provider-sign-ins) managed from Settings, also from a paired phone
-- A native [iOS and Android app](./mobile.md) with push notifications and passwords saved behind Face ID
+- A native [iOS and Android app](./mobile.md) with push notifications and passwords saved behind Face ID on iOS
 - Stage short-lived secrets for the agent without putting their values in chat
 - [Project owners](./owners.md): a standing agent per codebase, shown at the top of the session list
 - Pair a Pulse device by scanning a **QR code** (or manual code) from **Settings → Devices → Pair a device…** or the palette's **Pair Pulse…** (`POST /api/pulse/pairings`)
@@ -757,8 +757,10 @@ saved session. Consequences worth knowing:
 
 **Settings → Providers** shows Anthropic, OpenAI and Grok (xAI) with their
 state (*Ready*, *Sign-in expired*, *API key rejected*, *Managed by environment*…)
-and lets you sign in, replace or remove an API key, or switch between a
-subscription and an API key, without a terminal. What you change applies to
+and lets you sign in, replace an API key, or switch between a
+subscription and an API key, without a terminal. The only key you can remove
+here is the Anthropic key kept beside a plan sign-in; a provider's main key is
+replaced, not removed. What you change applies to
 every session on its next request. Switching between a subscription and an API
 key says who will bill you before it replaces anything. A provider whose key
 comes from an environment variable is shown but not editable here. A phone you
@@ -778,8 +780,10 @@ credential, as before. Removing the key removes the fallback.
 **No key to fall back on.** When a plan limit has been reached and there is
 none, moa waits instead of failing: the live bar says *Waiting for 5h quota*
 or *Waiting for weekly quota*, with the announced reset and next attempt when
-the provider gives them. **Stop** ends the wait; changing the model continues
-right away on the new one. A restart keeps the turn and a note about the wait
+the provider gives them. **Stop** ends the wait; changing the model
+continues right away on the new one, except for a continuation already bound to
+its model (after `max_tokens` or `pause_turn`), where you Stop and then
+continue with the new model. A restart keeps the turn and a note about the wait
 but does not resume it by itself. A subagent's own time limit pauses while it
 waits.
 
@@ -829,10 +833,11 @@ paired-device operations.
 A paired Pulse device represents the owner on Serve's **generic API**:
 it can read sessions, conversations and activity and use the same generic
 actions as the web client. This is deliberate: Pulse is a client of Moa, not a
-separate restricted product surface. The exceptions are pairing administration:
-only the network/token owner can create pairings, list paired devices or revoke
-a device. An already paired device cannot extend its own authority. A paired
-device can manage [provider sign-ins](#provider-sign-ins), like the browser.
+separate restricted product surface. A paired device has the same administrative reach as the browser: it can create
+pairings, list paired devices, revoke devices and manage [provider
+sign-ins](#provider-sign-ins). It cannot use a pairing claim to turn a captured
+pairing code into a new credential, and a device can be revoked at any time
+from the Devices page.
 
 Inbound automation (webhooks, cron, CI) uses a **separate** shared secret,
 `--automation-token` / `MOA_AUTOMATION_TOKEN`, presented as
@@ -1122,7 +1127,10 @@ holds the APNs key (iOS) or the Firebase credentials (Android)
 ([`relay/`](../relay/README.md)). The content is end-to-end encrypted with a
 key the iPhone generated: the relay sees an opaque handle, a fixed-size sealed
 envelope, an opaque grouping id and the time, never the title, the session,
-the project or the kind. Only the server the iPhone paired with can send to it.
+the project or the kind. The relay holds the APNs and Firebase credentials, so its operator could send
+a generic alert; it cannot decrypt the content or pass anything off as coming
+from your server, because only the server the iPhone paired with has the key
+that seals it.
 
 The app registers itself with `POST /api/push/native`, removes itself with
 `DELETE /api/push/native` and reads `GET /api/push/native/status`; the three

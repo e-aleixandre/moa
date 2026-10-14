@@ -11,21 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Passwords for one action.** `run_with_secret` runs a command in a terminal
   and types the password you enter on a card at its prompts (`sudo`, `ssh`…);
-  `browser_fill_secret` fills fields of a page the agent opened. The value
-  never reaches the chat, the transcript or the model, and every request shows
-  the exact action. In the iOS app a value can be saved behind Face ID for the
+  `browser_fill_secret` fills fields of a page the agent opened. The value does
+  not go to the chat, the transcript or the model, and the fill's own output is
+  redacted; on the web this is best effort, since a later page snapshot taken
+  while the field is still filled can show it. Every request shows the exact
+  action. In the iOS app a value can be saved behind Face ID for the
   same exact action (**Settings → Saved passwords** manages them). See
   [Passwords for one action](docs/tools.md#passwords-for-one-action).
 - **Android app**, with the same pairing, web UI and encrypted push as iOS,
-  Back-button support and a share sheet. It is installed from an APK and is not
-  on Google Play. See [Native app](docs/mobile.md).
+  Back-button support and a share sheet. It is not on Google Play; for now it is
+  built from source, and an APK is offered only when a release includes one.
+  See [Native app](docs/mobile.md).
 - **Share into moa from iOS and Android.** The share sheet lists your owners and
   recent conversations, takes a note and sends only when you tap **Send**; if
-  moa cannot be reached it offers **Save for later**, and a send whose outcome
-  is unknown is never retried automatically. The iOS app also scans pairing
+  moa cannot be reached it offers **Save for later**, and on iOS a send whose
+  outcome is unknown is never retried automatically. The iOS app also scans pairing
   codes with the system camera and accepts a list of allowed push relays.
-- **Native push for iOS** through the end-to-end encrypted relay (Android uses
-  Firebase Cloud Messaging through the same relay).
+- **Native push for iOS** through the end-to-end encrypted relay. The Android
+  app is built to receive push through Firebase Cloud Messaging via the same
+  relay; that works once the relay in use has been set up for it.
 - **Provider sign-ins in Settings.** Sign in to Anthropic, OpenAI or Grok,
   replace an API key or switch between a subscription and a key from
   **Settings → Providers**, in the browser or from a paired phone. See
@@ -35,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flagged by `api` in the status line, and returns to the plan on its own.
   Without a key, a confirmed plan limit is a visible, cancellable wait
   (*Waiting for 5h quota* / *Waiting for weekly quota*); changing the model
-  continues right away.
+  usually continues right away, except for a continuation already bound to its
+  model, which needs Stop and continue.
 - **`history` tool.** The agent can search, read and look around the original
   messages of its own session, including those a compaction or a trim hid from
   it. It is read-only and does not change what the model is sent. A
@@ -78,8 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closing and reopening a conversation. A resumed subagent is priced from what
   it produced in that run, and the `-output json` `subagent_end` line can carry
   `run_cost_usd`.
-- Compaction no longer blocks the run: the summary is computed in the background
-  and adopted at the next request boundary. If the configured `compact_model`
+- Compaction no longer blocks the run in main sessions: the summary is computed
+  in the background and adopted at the next request boundary (subagents still
+  compact in the foreground). If the configured `compact_model`
   fails, the summary is retried once with the session's model; your setting is
   untouched.
 - Sonnet 5.5's cache-read price is $0.10 per million tokens; Opus 5.5, Sonnet

@@ -175,7 +175,8 @@ on the next request — while `prepare` costs a request. Both apply only to
 `/prepare-compact` is the manual form of the same turn. Subagents are excluded
 under every setting.
 
-An automatic compaction does not stop the run. Once the context crosses the
+In a main session, an automatic compaction does not stop the run (a subagent
+compacts in the foreground, waiting for the summary). Once the context crosses the
 threshold, the summary of the older part is computed in the background while
 requests keep leaving with the full context; it is adopted, together with
 everything appended meanwhile, at the next ordinary request boundary or when the

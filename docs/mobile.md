@@ -5,14 +5,15 @@ Moa has a native app for iOS and Android. It is the web UI of your own
 interface from the server you pair it with, so updating moa updates what the app
 shows. The shell adds what a browser tab or an installed web app cannot give a
 phone: the whole screen on iOS, push notifications with the content encrypted
-end to end, a share sheet, a camera scanner for pairing and passwords kept
+end to end, a share sheet, a camera scanner for pairing and, on iOS, passwords kept
 behind Face ID. It is not [Pulse](./pulse.md), the voice companion, which is a
 separate app.
 
 How to build and sign the apps is in [`mobile/README.md`](../mobile/README.md).
 Requirements: iOS 15.5 or later; Android 8 (API 26) or later. The Android app is
-an APK you install yourself: it is not on Google Play and does not update
-itself.
+built from source for now (see `mobile/README.md`); it is not on Google Play
+and does not update itself. An APK is available only when a release includes
+one.
 
 ## Pairing
 
@@ -50,9 +51,11 @@ behind.
 - If moa cannot be reached or the app is not paired, the sheet offers **Save for
   later**. The next time you open moa, the same conversation picker appears;
   choosing one puts the text and files in its composer **without sending**.
-- If a send may have reached the server but the answer never came back, the sheet
-  says so and tells you to check the conversation instead of retrying, so
-  nothing is delivered twice.
+- If a send may have reached the server but the answer never came back, the iOS
+  sheet says so and tells you to check the conversation instead of retrying.
+  Android does the same when the connection broke after the request was
+  written, but a server error answer can still offer Retry, so look at the
+  conversation before resending.
 
 ## Saved passwords (iOS)
 
@@ -68,7 +71,9 @@ lists them and forgets any of them; unpairing forgets all of them.
   conversation); when the page has nothing to go back to, the app goes to the
   background instead of closing.
 - The pairing scanner decodes on the device, with no Google service involved.
-  Notifications are delivered through Firebase Cloud Messaging, but they carry
-  only the encrypted envelope; the app decrypts it itself.
+  Notifications are meant to be delivered through Firebase Cloud Messaging, and
+  carry only the encrypted envelope; the app decrypts it itself. They work only
+  if the push relay you use has Android set up; otherwise the app reports
+  notifications as unavailable.
 - Reinstalling over a build signed with a different key requires uninstalling
   first, which forgets the pairing.
