@@ -29,8 +29,26 @@ android {
             systemProperty 'moa.repoRoot', rootProject.file('../..').absolutePath
         }
     }
+    // Release signing comes only from the environment, so no path or secret
+    // lives in the repo and nothing reaches the command line. Without
+    // MOA_ANDROID_KEYSTORE the release APK is built unsigned, as before.
+    def releaseKeystore = System.getenv('MOA_ANDROID_KEYSTORE')
+    signingConfigs {
+        if (releaseKeystore) {
+            release {
+                storeFile file(releaseKeystore)
+                storePassword System.getenv('MOA_ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('MOA_ANDROID_KEY_ALIAS') ?: 'moa-release'
+                // PKCS12 keystores have a single password for store and key.
+                keyPassword System.getenv('MOA_ANDROID_KEYSTORE_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseKeystore) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

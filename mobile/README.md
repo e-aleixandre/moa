@@ -366,7 +366,19 @@ with `adb install -r`. `npm run android` opens the project in Android Studio.
 Debug builds are signed with the SDK's per-machine debug key
 (`~/.android/debug.keystore`), so an APK built on another machine has to be
 uninstalled before installing over it -- and uninstalling forgets the pairing.
-There is no release signing configured yet.
+
+A signed release APK reads its key only from the environment, never from the
+repo or the command line:
+
+    MOA_ANDROID_KEYSTORE=/path/to/release.jks \
+    MOA_ANDROID_KEYSTORE_PASSWORD=... \
+    MOA_ANDROID_KEY_ALIAS=moa-release \
+    ./gradlew assembleRelease
+
+The APK is `android/app/build/outputs/apk/release/app-release.apk`. Without
+`MOA_ANDROID_KEYSTORE`, `assembleRelease` produces an unsigned APK. The release
+key differs from any debug key, so a debug install has to be removed before
+installing a release APK over it.
 
 `testDebugUnitTest` runs the JVM tests: the push crypto against every case in
 `relay/test/vectors.json` (read from the repo, not copied), the bridge origin
