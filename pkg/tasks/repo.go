@@ -3,11 +3,13 @@ package tasks
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -162,7 +164,10 @@ type Repo struct {
 	w      *sql.DB // exactly one connection: this process's writer
 	r      *sql.DB // readers
 	tooNew bool
-	closed bool
+	// noCompat is why the database is open in its pre-compat state: the
+	// backup before upgrading failed. Reads work, writes are refused.
+	noCompat error
+	closed   bool
 
 	changed chan struct{} // nudges Watch after a local commit
 
@@ -283,16 +288,20 @@ func (r *Repo) ensure(create bool) (w, rd *sql.DB, tooNew bool, err error) {
 		_ = f.Close()
 	}
 	wdb, tooNew, err := openWriter(r.path)
+	var noCompat error
+	if bf := (*backupFailure)(nil); errors.As(err, &bf) {
+		noCompat, err = err, nil
+	}
 	if err != nil {
 		return nil, nil, false, err
 	}
-	rdb, err := sql.Open("sqlite", dsn(r.path, false))
+	rdb, err := openReader(r.path, noCompat != nil)
 	if err != nil {
 		_ = wdb.Close()
 		return nil, nil, false, err
 	}
 	rdb.SetMaxOpenConns(4)
-	r.w, r.r, r.tooNew = wdb, rdb, tooNew
+	r.w, r.r, r.tooNew, r.noCompat = wdb, rdb, tooNew, noCompat
 	return r.w, r.r, r.tooNew, nil
 }
 
@@ -312,6 +321,11 @@ func openWriter(path string) (db *sql.DB, tooNew bool, err error) {
 		tooNew, err = migrateWith(db, path, migrations, compatMigrations)
 		if err == nil {
 			return db, tooNew, nil
+		}
+		if bf := (*backupFailure)(nil); errors.As(err, &bf) {
+			// Nothing was migrated: the database stays as the older binary
+			// left it, open for reading only.
+			return db, false, err
 		}
 		_ = db.Close()
 		if !isBusy(err) {
@@ -416,7 +430,12 @@ func migrateWith(db *sql.DB, path string, migrations, compat []string) (tooNew b
 		// Under this transaction's lock, before it writes: the copy is the
 		// database exactly as the older binary left it.
 		if err := backupBeforeCompat(ctx, path, level+1); err != nil {
-			return false, fmt.Errorf("tasks backup before compat migration %d: %w", level+1, err)
+			err = fmt.Errorf("tasks backup before compat migration %d: %w", level+1, err)
+			if version == len(migrations) {
+				// Only the compat level is pending: the data is readable as it is.
+				return false, &backupFailure{err}
+			}
+			return false, err
 		}
 	}
 	for i := version; i < len(migrations); i++ {
@@ -549,6 +568,61 @@ func syncPath(p string) error {
 	return f.Sync()
 }
 
+// backupFailure marks a migration refused only because the backup before it
+// could not be made.
+type backupFailure struct{ error }
+
+func (b *backupFailure) Unwrap() error { return b.error }
+
+// compatTempTables stand in, on a connection to a database without the compat
+// tables, for the ones the queries mention: they are empty, so a read sees a
+// task as one nobody sent and with no thread, exactly as the older binary does.
+const compatTempTables = `PRAGMA query_only = 0;
+CREATE TEMP TABLE task_handoffs (task_id INTEGER PRIMARY KEY, from_owner_id TEXT, from_owner_name TEXT, from_session_id TEXT,
+  to_owner_id TEXT, to_owner_name TEXT, to_session_id TEXT, state TEXT, outcome TEXT, created_at INTEGER, updated_at INTEGER);
+CREATE TEMP TABLE task_comments (id INTEGER PRIMARY KEY, task_id INTEGER, author_kind TEXT, author_session_id TEXT,
+  author_name TEXT, body TEXT, created_at INTEGER);
+PRAGMA query_only = 1;`
+
+// openReader opens the read pool. With noCompat each connection first gets
+// the empty stand-in tables, so every read query works unchanged.
+func openReader(path string, noCompat bool) (*sql.DB, error) {
+	if !noCompat {
+		return sql.Open("sqlite", dsn(path, false))
+	}
+	probe, err := sql.Open("sqlite", dsn(path, false))
+	if err != nil {
+		return nil, err
+	}
+	drv := probe.Driver()
+	_ = probe.Close()
+	return sql.OpenDB(tempTablesConnector{drv: drv, dsn: dsn(path, false)}), nil
+}
+
+type tempTablesConnector struct {
+	drv driver.Driver
+	dsn string
+}
+
+func (c tempTablesConnector) Driver() driver.Driver { return c.drv }
+
+func (c tempTablesConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := c.drv.Open(c.dsn)
+	if err != nil {
+		return nil, err
+	}
+	ex, ok := conn.(driver.ExecerContext)
+	if !ok {
+		_ = conn.Close()
+		return nil, errors.New("sqlite connection cannot exec")
+	}
+	if _, err := ex.ExecContext(ctx, compatTempTables, nil); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
 func isBusy(err error) bool {
 	var se *sqlite.Error
 	if !errors.As(err, &se) {
@@ -572,6 +646,12 @@ func (r *Repo) write(ctx context.Context, fn func(tx *sql.Tx) (changed bool, err
 	}
 	if tooNew {
 		return ErrSchemaTooNew
+	}
+	r.mu.Lock()
+	noCompat := r.noCompat
+	r.mu.Unlock()
+	if noCompat != nil {
+		return fmt.Errorf("%w: tasks are read-only: %s", ErrUnavailable, strings.TrimPrefix(noCompat.Error(), "tasks "))
 	}
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
