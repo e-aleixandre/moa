@@ -10,6 +10,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/history"
 	"github.com/e-aleixandre/moa/pkg/memory"
 	"github.com/e-aleixandre/moa/pkg/moadocs"
 	"github.com/e-aleixandre/moa/pkg/secretaction"
@@ -138,6 +139,9 @@ func actualToolNames(t *testing.T) map[string]bool {
 	}
 	if err := reg.Register(askuser.NewTool(askuser.NewBridge())); err != nil {
 		t.Fatalf("register ask_user: %v", err)
+	}
+	if err := reg.Register(history.NewTool(nil)); err != nil {
+		t.Fatalf("register history: %v", err)
 	}
 	if err := reg.Register(moadocs.NewTool()); err != nil {
 		t.Fatalf("register moa_docs: %v", err)
