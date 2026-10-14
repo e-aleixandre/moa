@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/e-aleixandre/moa/internal/testenv"
 	"github.com/e-aleixandre/moa/pkg/session"
 )
 
@@ -15,7 +16,7 @@ import (
 // send is within budget. It never reaches the network and never writes to the
 // session directory.
 //
-//	MOA_VOICE_LIVE_SESSIONS_DIR=~/.config/moa/sessions \
+//	MOA_VOICE_LIVE_SESSIONS_DIR=/tmp/copied-sessions \
 //	MOA_VOICE_LIVE_SESSION_ID=<id> go test ./pkg/serve/ -run RealSession -v
 //
 // MOA_VOICE_LIVE_DUMP=<path> additionally writes the exact tail as JSON, so it
@@ -25,6 +26,7 @@ func TestVoiceLiveInputFitsARealSession(t *testing.T) {
 	if dir == "" || id == "" {
 		t.Skip("set MOA_VOICE_LIVE_SESSIONS_DIR and MOA_VOICE_LIVE_SESSION_ID to run against a real session")
 	}
+	testenv.AssertNotProtected(t, dir)
 	// Read-only on purpose: FindSessionReadOnly neither initialises state nor
 	// migrates a legacy file, so pointing this at a live config cannot alter it.
 	saved, _, err := session.FindSessionReadOnly(dir, id)
@@ -66,6 +68,7 @@ func TestVoiceLiveInputFitsARealSession(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		testenv.AssertNotProtected(t, dump)
 		if err := os.WriteFile(dump, encoded, 0o600); err != nil {
 			t.Fatal(err)
 		}

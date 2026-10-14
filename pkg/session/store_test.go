@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/internal/testenv"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -461,6 +462,7 @@ func BenchmarkEncodeSessionFile(b *testing.B) {
 	if path == "" {
 		b.Skip("set MOA_SESSION_BENCH_FILE to a copied session JSON file")
 	}
+	testenv.AssertNotProtected(b, path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		b.Fatal(err)

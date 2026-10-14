@@ -3,7 +3,30 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"sync/atomic"
 )
+
+// configPathGuard is nil in production. Test binaries install one through
+// internal/testenv so that resolving a path inside the developer's real config
+// directory fails loudly before anything is read or written there.
+var configPathGuard atomic.Pointer[func(path string)]
+
+// SetConfigPathGuardForTests installs (or, with nil, removes) a hook called with
+// every path ConfigDir and ConfigSubdir are about to return. Only test
+// harnesses should use it.
+func SetConfigPathGuardForTests(guard func(path string)) {
+	if guard == nil {
+		configPathGuard.Store(nil)
+		return
+	}
+	configPathGuard.Store(&guard)
+}
+
+func guardConfigPath(path string) {
+	if g := configPathGuard.Load(); g != nil && path != "" {
+		(*g)(path)
+	}
+}
 
 // ConfigDir returns the directory holding moa's own state: config.json,
 // credentials, sessions, skills, memory and attachments.
@@ -18,13 +41,16 @@ import (
 // home directory, such as expanding "~" in a path the user typed.
 func ConfigDir() string {
 	if dir := os.Getenv("MOA_CONFIG_DIR"); dir != "" {
+		guardConfigPath(dir)
 		return dir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".config", "moa")
+	dir := filepath.Join(home, ".config", "moa")
+	guardConfigPath(dir)
+	return dir
 }
 
 // ConfigSubdir returns a path inside ConfigDir, or "" if it cannot be
@@ -35,5 +61,7 @@ func ConfigSubdir(parts ...string) string {
 	if dir == "" {
 		return ""
 	}
-	return filepath.Join(append([]string{dir}, parts...)...)
+	path := filepath.Join(append([]string{dir}, parts...)...)
+	guardConfigPath(path)
+	return path
 }

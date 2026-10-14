@@ -86,7 +86,8 @@ func TestRound4DeleteCrashChild(t *testing.T) {
 	if dir == "" {
 		t.Skip("SIGKILL helper")
 	}
-	if !filepath.IsAbs(dir) || !strings.HasPrefix(filepath.Clean(dir), filepath.Clean(os.TempDir())+string(os.PathSeparator)) {
+	parentTmp := os.Getenv("MOA_ROUND4_DELETE_CRASH_TMP")
+	if !filepath.IsAbs(parentTmp) || !filepath.IsAbs(dir) || !strings.HasPrefix(filepath.Clean(dir), filepath.Clean(parentTmp)+string(os.PathSeparator)) {
 		t.Fatal("crash helper accepts only an explicit temporary directory")
 	}
 	t.Setenv("HOME", t.TempDir())
@@ -114,6 +115,7 @@ func TestRound4DeletePostUnlinkSIGKILLCannotRecreate(t *testing.T) {
 	h, r, o, sid, path := round4DeleteFixture(t)
 	cmd := exec.Command(os.Args[0], "-test.run=^TestRound4DeleteCrashChild$", "-test.count=1", "-test.timeout=30s", "-test.v")
 	cmd.Env = append(os.Environ(), round4DeleteCrashEnv+"="+h.dir,
+		"MOA_ROUND4_DELETE_CRASH_TMP="+os.TempDir(),
 		"MOA_ROUND4_DELETE_CRASH_AT="+h.clock.Now().Format(time.RFC3339Nano),
 		"MOA_ROUND4_DELETE_CRASH_SID="+sid, "MOA_ROUND4_DELETE_CRASH_OCC="+strconv.FormatInt(o.ID, 10))
 	out, err := cmd.CombinedOutput()
