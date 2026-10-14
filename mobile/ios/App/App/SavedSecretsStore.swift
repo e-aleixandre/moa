@@ -193,13 +193,8 @@ final class SavedSecretsStore {
     }
 
     private func accounts(service: String) throws -> [String] {
-        var q = try query(service: service, account: nil)
-        q[kSecReturnAttributes as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitAll
-        // Attributes only: fail rather than prompt if the OS ever disagrees.
-        let context = LAContext()
-        context.interactionNotAllowed = true
-        q[kSecUseAuthenticationContext as String] = context
+        guard let accessGroup else { throw SavedSecretsError.missingAccessGroup }
+        let q = SavedSecretQueries.existence(service: service, accessGroup: accessGroup)
         var result: CFTypeRef?
         let status = SecItemCopyMatching(q as CFDictionary, &result)
         if status == errSecItemNotFound { return [] }

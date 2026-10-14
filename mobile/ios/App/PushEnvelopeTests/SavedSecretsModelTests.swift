@@ -1,3 +1,4 @@
+import Security
 import XCTest
 
 final class SavedSecretsModelTests: XCTestCase {
@@ -27,6 +28,18 @@ final class SavedSecretsModelTests: XCTestCase {
         XCTAssertNil(entry["actionFingerprint"])
         XCTAssertEqual(entry["savedAt"] as? Int64, 1_790_000_000_000)
         XCTAssertTrue(entry["lastUsedAt"] is NSNull)
+    }
+
+    func testExistenceQueryIsAttributesOnlyAndNeverAuthenticates() {
+        let q = SavedSecretQueries.existence(service: "svc", accessGroup: "grp")
+        XCTAssertEqual(q[kSecReturnAttributes as String] as? Bool, true)
+        XCTAssertNil(q[kSecReturnData as String])
+        // A no-interaction LAContext makes a physical device answer -25308
+        // for biometry-ACL items even though attributes need no authentication.
+        XCTAssertNil(q[kSecUseAuthenticationContext as String])
+        XCTAssertNil(q[kSecUseAuthenticationUI as String])
+        XCTAssertEqual(q[kSecAttrService as String] as? String, "svc")
+        XCTAssertEqual(q[kSecAttrAccessGroup as String] as? String, "grp")
     }
 
     func testEpochMs() {
