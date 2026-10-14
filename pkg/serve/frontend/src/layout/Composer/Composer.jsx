@@ -344,7 +344,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     setFileSuggestions(null);
     if (retrigger) setTimeout(updateFileSuggestions, 50); // navigate into directory
     el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.focus();
+    // Entering a folder keeps browsing: a programmatic focus() would raise the
+    // iOS keyboard on every pick. The menu's mousedown preventDefault already
+    // leaves an open keyboard open, so only a final file takes focus back.
+    if (!isDir) el.focus();
   }, [updateFileSuggestions]);
 
   const acceptSuggestion = useCallback((cmd) => {

@@ -18,6 +18,11 @@ const recalled = [];
 // can legitimately acquire other text before the server answers.
 let sendResult;
 
+// Lets a test pin one useState slot (by call order within a render) to a value;
+// the counter restarts at every Composer() call via beginRender().
+let stateCalls = 0;
+const stateOverrides = new Map();
+
 let voiceOptions;
 // What the voice hooks report, so a test can put the composer in the
 // dictating or on-a-call state without a microphone.
@@ -40,7 +45,11 @@ mock.module("preact/hooks", () => ({
   },
   useCallback(fn) { return fn; },
   useEffect() {},
-  useState(initial) { return [typeof initial === "function" ? initial() : initial, () => {}]; },
+  useState(initial) {
+    const n = stateCalls++;
+    if (stateOverrides.has(n)) return [stateOverrides.get(n), () => {}];
+    return [typeof initial === "function" ? initial() : initial, () => {}];
+  },
 }));
 
 // The slash menu's skills come from the server; this suite exercises the
@@ -719,4 +728,41 @@ test("the voice wash is drawn only while dictating or during a live call", () =>
     voiceRecording = false;
     callOverride = null;
   }
+});
+
+// Picking a folder in the @ menu navigates into it; it must not call focus():
+// on iOS a programmatic focus() raised the keyboard every time it was closed.
+// The menu's mousedown preventDefault already keeps an open keyboard open.
+// Picking a file still returns focus, as before.
+function mentionPick(isDir) {
+  const src = require("node:fs").readFileSync(new URL("./Composer.jsx", import.meta.url), "utf8");
+  const slot = src.slice(0, src.indexOf("const [fileSuggestions")).split("useState(").length - 1;
+  refs.length = 0;
+  stateCalls = 0;
+  stateOverrides.clear();
+  stateOverrides.set(slot, [{ path: "src", is_dir: true }, { path: "a.go", is_dir: false }]);
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
+  stateOverrides.clear();
+  const menu = descendants(tree).find((n) => typeof n.type === "function" && n.props?.onSelect);
+  let focused = 0;
+  const events = [];
+  refs[0].current = {
+    value: "@sr", selectionStart: 3, selectionEnd: 3, style: {}, scrollHeight: 24,
+    focus() { focused += 1; }, dispatchEvent(e) { events.push(e.type); },
+  };
+  menu.props.onSelect(isDir ? "src" : "a.go", isDir);
+  return { focused, textarea: refs[0].current, events };
+}
+
+test("navigating into a folder from the @ menu does not focus the textarea", () => {
+  const r = mentionPick(true);
+  expect(r.textarea.value).toBe("@src/");
+  expect(r.events).toContain("input");
+  expect(r.focused).toBe(0);
+});
+
+test("picking a file from the @ menu still returns focus to the textarea", () => {
+  const r = mentionPick(false);
+  expect(r.textarea.value).toBe("a.go ");
+  expect(r.focused).toBe(1);
 });
