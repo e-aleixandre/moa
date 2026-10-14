@@ -155,7 +155,7 @@ import { splitAskResponder } from './ask-user-machine.js';
 import { parseHistoryResult, historyOut } from './history-result.js';
 import { parseFileCardData } from './util/file-card.js';
 import { parseUnifiedDiff } from './util/unified-diff.js';
-import { toolMessage, messagePreview } from './util/message-tools.js';
+import { toolMessage, messagePreview, subagentTaskLine } from './util/message-tools.js';
 
 export const LIVE_FULL_MAX_LINES = 400;
 export const LIVE_FULL_MAX_CHARS = 20000;
@@ -244,6 +244,10 @@ export function projectStream(session) {
   const seenJobIds = seenJobIdsOf(messages);
   const canonicalSubagentJobIds = canonicalSubagentJobIdsOf(messages);
   const originToolCalls = originToolCallsOf(session.subagents);
+  // What each child was told, from the model's own call: the live entry and the
+  // completion card both carry the task cut to the wire's bound and neither
+  // knows `resume`, while the call (hidden once the job exists) is whole.
+  const subagentCalls = subagentCallMessages(messages, originToolCalls);
 
   // currentDoc = the document object for the turn currently being built; reset
   // to null at every user message (and system line) so the next assistant
@@ -393,6 +397,7 @@ export function projectStream(session) {
           jobId,
           openable,
           subagentIdentityOf(session.subagents, jobId),
+          subagentCalls.get(jobId),
         ));
         closeLedger();
         continue;
@@ -713,7 +718,7 @@ export function projectStream(session) {
         }
         for (const s of liveSyncSubs) {
           currentDelegation.agents.push(
-            delegationRunningAgent(s, subagentAccentIndex(session.subagents, s.jobId)),
+            delegationRunningAgent(s, subagentAccentIndex(session.subagents, s.jobId), subagentCalls.get(s.jobId)),
           );
         }
         currentDelegation.settled = false;
@@ -899,11 +904,17 @@ export function liveTrayAgents(session, sessions = {}, owners = []) {
   if (!session) return [];
   const seen = seenJobIdsOf(session.messages);
   const { subs, bash } = liveSubagents(session.subagents, seen);
+  const calls = subagentCallMessages(session.messages || [], originToolCallsOf(session.subagents));
   const chips = subs
     .filter((sub) => sub.async === true)
     .map((sub) => {
       const a = liveAgent(sub, subagentAccentIndex(session.subagents, sub.jobId));
-      return { id: a.id, kind: 'subagent', name: a.name, accent: a.accent, action: a.action, time: a.time };
+      const chip = { id: a.id, kind: 'subagent', name: a.name, accent: a.accent, action: a.action, time: a.time };
+      // What it was told, beside its name: the dock is where an async child
+      // lives, so it is where the owner looks for the assignment.
+      const sent = calls.get(String(sub.jobId)) || toolMessage('subagent', { task: sub.task });
+      if (sent) chip.task = subagentTaskLine(sent);
+      return chip;
     });
   for (const job of bash) {
     const chip = { id: job.jobId, kind: 'bash', name: 'bash', action: bashAction(job) };
@@ -1272,6 +1283,7 @@ function toSessionMessageBlock(msg) {
     action,
     sessionId: String((args && args.session_id) || '').trim(),
     text: '',
+    result,
   };
   if (action === 'new') {
     const started = result.match(/Started session (\S+?) in /);
@@ -1390,7 +1402,7 @@ export function liveAgent(sub, i) {
 // inline as history so nothing an agent did is ever lost.
 
 // delegationRunningAgent builds a running agent row from a live subagent.
-function delegationRunningAgent(sub, accentIdx) {
+function delegationRunningAgent(sub, accentIdx, sent = null) {
   const agent = {
     id: sub.jobId,
     name: subagentLabel(sub),
@@ -1405,6 +1417,7 @@ function delegationRunningAgent(sub, accentIdx) {
   };
   const action = agentAction(sub);
   if (action) agent.action = action;
+  attachSent(agent, sent || toolMessage('subagent', { task: sub.task }), sub.title);
   // Prefer the backend's cumulative elapsed; fall back to wall-clock since the
   // job started (usage.elapsedMs isn't populated on live subagent entries).
   const elapsedMs = (sub.usage && sub.usage.elapsedMs) ||
@@ -1417,7 +1430,7 @@ function delegationRunningAgent(sub, accentIdx) {
 // delegationDoneAgent builds a terminated agent row from a subagent card
 // (tool_name 'subagent', keyed `subagent-<jobId>` or legacy `subagent_<index>`)
 // comes from session.subagents (the completed entry keeps its accentIndex).
-function delegationDoneAgent(msg, accent, jobIDOverride, openable = true, entry = null) {
+function delegationDoneAgent(msg, accent, jobIDOverride, openable = true, entry = null, sent = null) {
   const jobId = jobIDOverride || String(msg.tool_call_id || '').replace(/^subagent[-_]/, '');
   const failed = msg.status === 'error' || msg.status === 'failed' || msg.status === 'cancelled';
   const agent = {
@@ -1448,15 +1461,38 @@ function delegationDoneAgent(msg, accent, jobIDOverride, openable = true, entry 
   if (msg.error || ((msg.status === 'error' || msg.status === 'failed') && msg.result)) {
     agent.error = String(msg.error || msg.result);
   }
-  // What the parent told the child: the task, or the message it resumed it
-  // with. The name only holds the head of it (or the title replacing it).
-  const sent = toolMessage('subagent', msg.args);
-  if (sent) {
-    agent.message = sent;
-    agent.sentPreview = sent.target !== 'subagent' || !!((entry && entry.title) || msg.subagentTitle);
-  }
+  // The original call is whole; the card's own args are cut (and know no
+  // `resume`), so they are only the fallback when the call is not in the log.
+  attachSent(agent, sent || toolMessage('subagent', msg.args), (entry && entry.title) || msg.subagentTitle);
   if (msg.excerpt) agent.excerpt = true;
   return agent;
+}
+
+// attachSent puts what the parent told a child on its agent row. The name only
+// holds the head of it (or the title that replaced it), so the row repeats it
+// as a line of its own for a resume or a titled child.
+function attachSent(agent, sent, title) {
+  if (!sent) return;
+  agent.message = sent;
+  agent.sentPreview = sent.target !== 'new subagent' || !!title;
+}
+
+// subagentCallMessages maps a job id to what its launching `subagent` call said.
+// Completion cards (`subagent-<id>`) are not calls; the call's job comes from
+// the live entry that names it as origin, or from the result it recorded.
+function subagentCallMessages(messages, originToolCalls) {
+  const byJob = new Map();
+  for (const msg of messages) {
+    if (!msg || msg._type !== 'tool_start' || msg.tool_name !== 'subagent') continue;
+    const id = String(msg.tool_call_id || '');
+    if (/^subagent[-_]/.test(id)) continue;
+    const origin = originToolCalls.byID.get(id);
+    const jobId = origin ? String(origin.jobId) : msg.subagentJobId;
+    if (!jobId) continue;
+    const sent = toolMessage('subagent', msg.args);
+    if (sent) byJob.set(String(jobId), sent);
+  }
+  return byJob;
 }
 
 // delegationSummary counts states for the block header (·N done ·N failed

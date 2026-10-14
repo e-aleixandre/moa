@@ -127,3 +127,15 @@ test("the fold borrows the transcript's disclosure grammar", () => {
   expect(css).toMatch(/prefers-reduced-motion[\s\S]*\.smsg-chev \{ transition: none; \}/);
   expect(css).toMatch(/min-height: var\(--control-touch\)/);
 });
+
+test("the result of the call sits under the message", () => {
+  const block = SessionMessage({ action: "send", sessionId: "abc", text: "Pushea la rama.", result: "Queued for abc (it is working)." });
+  expect(byClass(block, "smsg-result")).toBeDefined();
+  expect(textContent(block)).toContain("Queued for abc (it is working).");
+});
+
+test("an answer is rendered as markdown, not literal text", () => {
+  const block = SessionMessage({ action: "answer", sessionId: "abc", text: "", answers: ["Sí, **adelante**"] });
+  const li = descendants(block).find((n) => n.type === "li");
+  expect(li.props.dangerouslySetInnerHTML.__html).toBe("<p>Sí, **adelante**</p>");
+});

@@ -41,7 +41,7 @@ export function toolMessage(name, args) {
       text = str(a.message);
       break;
     case 'subagent':
-      target = str(a.resume) ? shortId(a.resume) : 'subagent';
+      target = str(a.resume) ? shortId(a.resume) : 'new subagent';
       text = str(a.task);
       break;
     case 'sessions':
@@ -81,6 +81,16 @@ export function toolMessage(name, args) {
 // The row's one line: where it went, then the first lines flattened (the cell
 // ellipsises at its own width).
 export function messagePreview({ target, text }) {
-  const lines = String(text).split('\n').map(stripDecoration).filter(Boolean);
-  return `→ ${target} · ${lines.join(' ')}`;
+  return `→ ${target} · ${messageLines(text)}`;
+}
+
+// The first lines of a text, flattened to one.
+export function messageLines(text) {
+  return String(text).split('\n').map(stripDecoration).filter(Boolean).join(' ');
+}
+
+// What a subagent was told, as the dock names it: a fresh task is its own
+// subject, a resumed one says which job it continues.
+export function subagentTaskLine(message) {
+  return message.target === 'new subagent' ? messageLines(message.text) : messagePreview(message);
 }

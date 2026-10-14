@@ -26,7 +26,7 @@ export { shortId };
 
 export function SessionMessage({
   action = "send", sessionId = "", text = "", answers = [], askId = "",
-  cwd = "", model = "", thinking = "", title = "", queued = false, onOpenSession,
+  cwd = "", model = "", thinking = "", title = "", queued = false, result = "", onOpenSession,
   // Called with the disclosure's node once the message is open, so the
   // transcript can keep it where it was tapped (see stream-scroll.js).
   onExpand,
@@ -82,9 +82,10 @@ export function SessionMessage({
       )}
       {answers.length > 0 && !folded && (
         <ol class="smsg-answers">
-          {answers.map((answer, i) => <li key={i}>{answer}</li>)}
+          {answers.map((answer, i) => <li key={i} dangerouslySetInnerHTML={{ __html: renderMarkdown(answer) }} />)}
         </ol>
       )}
+      {result && !folded && <div class="smsg-result">{result}</div>}
     </section>
   );
 }

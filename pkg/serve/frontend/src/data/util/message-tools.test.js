@@ -10,7 +10,7 @@ test('subagent_steer exposes its message and the short job id', () => {
 
 test('subagent names the job it resumes and says nothing for a fresh one', () => {
   expect(toolMessage('subagent', { task: long, resume: '7d7f6348abcdef' })).toEqual({ target: '7d7f6348', text: long });
-  expect(toolMessage('subagent', { task: long })).toEqual({ target: 'subagent', text: long });
+  expect(toolMessage('subagent', { task: long })).toEqual({ target: 'new subagent', text: long });
 });
 
 test('sessions send, new and answer', () => {

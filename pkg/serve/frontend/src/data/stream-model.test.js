@@ -2029,3 +2029,38 @@ test('a resumed subagent card keeps the message it was resumed with', () => {
   expect(agent.message).toEqual({ target: '7d7f6348', text: 'Sigue con el punto 2' });
   expect(agent.sentPreview).toBe(true);
 });
+
+const FULL_TASK = 'Sigue con el punto 2. ' + 'detalle largo '.repeat(120);
+
+test('a live sync subagent shows the full task from the original call, from launch', () => {
+  const call = tool('toolu_9', 'subagent', { task: FULL_TASK, resume: '7d7f6348abcd' }, 'running', '');
+  const [doc] = projectStream(session([call], { subagents: {
+    j9: { jobId: 'j9', originToolCallId: 'toolu_9', task: FULL_TASK.slice(0, 1024), status: 'running', async: false, messages: [] },
+  } }));
+  const agent = doc.blocks.find((b) => b.type === 'delegation').agents[0];
+  expect(agent.state).toBe('running');
+  expect(agent.message).toEqual({ target: '7d7f6348', text: FULL_TASK });
+  expect(agent.sentPreview).toBe(true);
+});
+
+test('a completion card shows the original call, not its truncated args', () => {
+  const call = tool('toolu_8', 'subagent', { task: FULL_TASK, resume: '7d7f6348abcd', async: true }, 'done', 'Started job j8', { subagentJobId: 'j8' });
+  const card = tool('subagent-j8', 'subagent', { task: FULL_TASK.slice(0, 1024) }, 'done', 'Listo', { subagentJobId: 'j8' });
+  const [doc] = projectStream(session([call, card]));
+  const agent = doc.blocks.find((b) => b.type === 'delegation').agents[0];
+  expect(agent.message).toEqual({ target: '7d7f6348', text: FULL_TASK });
+});
+
+test('the dock chip of a live async subagent carries what it was told', () => {
+  const call = tool('toolu_7', 'subagent', { task: 'Revisa ws.go\n\nSolo lectura.', async: true }, 'done', 'Started job j7');
+  const chips = liveTrayAgents(session([call], { id: 's1', subagents: {
+    j7: { jobId: 'j7', originToolCallId: 'toolu_7', task: 'Revisa ws.go', status: 'running', async: true, messages: [] },
+  } }), {}, []);
+  expect(chips.find((c) => c.kind === 'subagent').task).toBe('Revisa ws.go Solo lectura.');
+});
+
+test('a finished sessions message keeps its result for the card', () => {
+  const [doc] = projectStream(session([tool('s1', 'sessions', { action: 'send', session_id: 'abcdef123456', text: 'hola' }, 'done', 'Queued for abcdef12 (it is working).')]));
+  const block = doc.blocks.find((b) => b.type === 'session_message');
+  expect(block.result).toBe('Queued for abcdef12 (it is working).');
+});

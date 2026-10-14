@@ -63,6 +63,19 @@
 }
 
 .smsg-answers li { margin: 2px 0; }
+.smsg-answers li > p { margin: 0; }
+
+/* What the tool answered, under the message and set off the way a ledger row
+   sets its output off. */
+.smsg-result {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--zl-line);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--overlay0);
+  overflow-wrap: anywhere;
+}
 
 /* A phone has no room for a second indent: the block already sits inside the
    turn's column. */

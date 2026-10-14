@@ -173,7 +173,7 @@ function OutcomeAgentRow({ agent, onOpenAgent, onPromoteAgent }) {
 			{openAgent && <button type="button" onClick={() => openAgent(id)} aria-label={`Open ${name} conversation`}>Conversation <ChevronRight size={14} aria-hidden="true" /></button>}
 		</div>}
 		{expanded && <div class="dlg-result-body">
-			{message && <><span class="dlg-result-label">{message.target === "subagent" ? "Task" : "Resumed with"}</span><div class="dlg-sent"><ToolMessage target={message.target} text={message.text} /></div></>}
+			{message && <><span class="dlg-result-label">{message.target === "new subagent" ? "Task" : "Resumed with"}</span><div class="dlg-sent"><ToolMessage target={message.target} text={message.text} /></div></>}
 			{outcomeText && <><span class="dlg-result-label">{outcomeLabel}</span><pre>{outcomeText}</pre>
 			<button type="button" class="dlg-copy" onClick={() => copyToClipboard(outcomeText).then((ok) => { if (ok) { clearTimeout(copiedTimer.current); setCopied(true); copiedTimer.current = setTimeout(() => setCopied(false), 1200); } })}>{copied ? <><Check size={14} aria-hidden="true" /> Copied</> : `Copy ${outcomeLabel.toLowerCase()}`}</button></>}
 		</div>}

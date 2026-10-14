@@ -104,6 +104,7 @@ export function docChildren(blocks, onOpenSubagent, visibleDone, sessionId, onEx
             thinking={b.thinking}
             title={b.title}
             queued={b.queued}
+            result={b.result}
             onOpenSession={openSession}
             onExpand={onExpandBlock}
           />
