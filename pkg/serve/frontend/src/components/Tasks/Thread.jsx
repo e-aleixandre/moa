@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { User } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { addToast } from "../../data/notifications.js";
-import { postComment, setThreadDraft, tasksSlice, threadDraftOf, threadOf, watchThread } from "../../data/tasks.js";
+import { sendThreadDraft, setThreadDraft, tasksSlice, threadDraftOf, threadOf, watchThread } from "../../data/tasks.js";
 import { commentAuthor, errorText, handoffSide, relAge, sessionName, threadPlaceholder } from "../../data/tasks-model.js";
 import { Keycap, MOD_ENTER, OwnerMark } from "./parts.jsx";
 import { TasksGlyph } from "./TasksGlyph.jsx";
@@ -103,11 +103,10 @@ export function ThreadComposer({ task, owners, sessions, phone }) {
   const field = useRef(null);
   const placeholder = threadPlaceholder(task, { owners, sessions });
   const send = () => {
-    const body = text.trim();
-    if (!body || busy) return;
+    if (!text.trim() || busy) return;
     setBusy(true);
-    postComment(task.id, body)
-      .then(() => { setThreadDraft(task.id, ""); requestAnimationFrame(() => autosize(field.current)); })
+    sendThreadDraft(task.id)
+      .then(() => requestAnimationFrame(() => autosize(field.current)))
       .catch((error) => addToast({ title: "Could not send the comment", detail: errorText(error), type: "error" }))
       .finally(() => setBusy(false));
   };

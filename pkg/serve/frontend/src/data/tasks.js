@@ -258,6 +258,19 @@ export function setThreadDraft(id, text) {
   patch((t) => ({ threadDrafts: { ...(t.threadDrafts || {}), [id]: text } }));
 }
 
+// sendThreadDraft posts the reply typed for a task. Its success empties the
+// reply only if that is still exactly what was sent: the field stays editable
+// while the POST is out, and what was typed since is not sent yet.
+export function sendThreadDraft(id) {
+  const typed = threadDraftOf(tasksSlice(store.get()), id);
+  const body = typed.trim();
+  if (!body) return Promise.resolve(null);
+  return postComment(id, body).then((c) => {
+    if (threadDraftOf(tasksSlice(store.get()), id) === typed) setThreadDraft(id, '');
+    return c;
+  });
+}
+
 // resolveHandoff answers a request to send a task to another owner. A stale
 // revision (409) stores the task as it is now before rejecting, so the
 // detail shows the current answer instead of the one it read.

@@ -103,3 +103,26 @@ test("R7: an unsent reply is still there when the composer mounts again", () => 
   expect(field(expand(ThreadComposer(props))).props.value).toBe("Keep this");
   expect(field(expand(ThreadComposer({ ...props, task: { ...HANDOFF, id: 8 } }))).props.value).toBe("");
 });
+
+test("R8: a POST that succeeds clears the reply only if it is still what was sent", async () => {
+  setState({ tasks: { ...TASKS_INITIAL } });
+  let release;
+  globalThis.fetch = (path, opts) => {
+    if (opts.method === "POST") return new Promise((r) => { release = () => r(new Response(JSON.stringify({ id: 1, body: "first" }), { status: 201 })); });
+    return Promise.resolve(new Response(JSON.stringify({ comments: [] }), { status: 200 }));
+  };
+  tasksData.setThreadDraft(7, "first");
+  const sent = tasksData.sendThreadDraft(7);
+  tasksData.setThreadDraft(7, "second, typed while sending");
+  release();
+  await sent;
+  expect(tasksData.threadDraftOf(store.get().tasks, 7)).toBe("second, typed while sending");
+
+  tasksData.setThreadDraft(7, "third");
+  const again = tasksData.sendThreadDraft(7);
+  release();
+  await again;
+  expect(tasksData.threadDraftOf(store.get().tasks, 7)).toBe("");
+});
+
+// ── R9 ────────────────────────────────────────────────────────────────────
