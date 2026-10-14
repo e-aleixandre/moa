@@ -128,6 +128,10 @@ func attachHandoffs(ctx context.Context, q querier, recs []Record) error {
 			if rec.Status == StatusDone {
 				h.Outcome = outcome.String
 			}
+			// The sender is who the handoff says. tasks.requester_session_id
+			// is a shared column that a binary without handoffs can clear (a
+			// move), and the sender must not be lost with it.
+			rec.RequesterSessionID = h.fromSession
 			rec.Handoff = &h
 		}
 		return rows.Err()

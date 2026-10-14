@@ -221,8 +221,8 @@ func (r *Repo) AgentList(ctx context.Context, a Actor) (AgentView, error) {
 		AND id NOT IN (SELECT task_id FROM task_handoffs)`, a.SessionID); err != nil {
 		return view, err
 	}
-	if view.Sent, err = load(`requester_session_id = ? AND archived_at IS NULL
-		AND id IN (SELECT task_id FROM task_handoffs)`, a.SessionID); err != nil {
+	if view.Sent, err = load(`archived_at IS NULL
+		AND id IN (SELECT task_id FROM task_handoffs WHERE from_session_id = ?)`, a.SessionID); err != nil {
 		return view, err
 	}
 	if a.ProjectKey != "" {
