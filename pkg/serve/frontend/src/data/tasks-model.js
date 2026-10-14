@@ -591,6 +591,8 @@ export function handoffSide(task, side, owners) {
 // or deleted. Only claimed once the owners roster has loaded.
 export function handoffOrphan(task, owners, loaded = true) {
   if (!loaded || !isOpen(task) || !isHandoff(task)) return false;
+  // A session's projection names the owners without their ids: unknown, not gone.
+  if (!task.handoff.to_owner_id) return false;
   return !ownerById(owners, task.handoff.to_owner_id);
 }
 
