@@ -59,10 +59,10 @@ func NewFind(cfg ToolConfig) core.Tool {
 			var stdout, stderr headTailBuffer
 			stdout.headMax = maxOutputBytes / 2
 			stdout.tailMax = maxOutputBytes / 2
-			stdout.SpillDir = spillOutputDir
+			stdout.SpillDir = SpillOutputDir()
 			stderr.headMax = maxOutputBytes / 2
 			stderr.tailMax = maxOutputBytes / 2
-			stderr.SpillDir = spillOutputDir
+			stderr.SpillDir = SpillOutputDir()
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 

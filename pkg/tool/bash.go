@@ -233,10 +233,10 @@ func executeBash(ctx context.Context, cfg ToolConfig, command, cwd string, persi
 	var stdout, stderr headTailBuffer
 	stdout.headMax = maxOutputBytes / 2
 	stdout.tailMax = maxOutputBytes / 2
-	stdout.SpillDir = spillOutputDir
+	stdout.SpillDir = SpillOutputDir()
 	stderr.headMax = maxOutputBytes / 2
 	stderr.tailMax = maxOutputBytes / 2
-	stderr.SpillDir = spillOutputDir
+	stderr.SpillDir = SpillOutputDir()
 
 	// Assign io.Writers so os/exec owns the output copiers and Wait()
 	// drains them before closing the pipes. A self-owned StdoutPipe read

@@ -5,8 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -199,7 +203,7 @@ func TestInheritedMarkerOnlyAddsRoots(t *testing.T) {
 func isolated(t *testing.T, env []string, args ...string) (string, int) {
 	t.Helper()
 	fake := t.TempDir()
-	cmd := exec.Command("sh", append([]string{filepath.Join(moduleRoot(t), "scripts", "test-isolated.sh")}, args...)...)
+	cmd := exec.Command(filepath.Join(moduleRoot(t), "scripts", "test-isolated.sh"), args...)
 	cmd.Dir = fake
 	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + fake, "XDG_CONFIG_HOME=" + filepath.Join(fake, "xdg"),
 		"MOA_CONFIG_DIR=", "GOTOOLCHAIN=local"}, env...)
@@ -235,17 +239,52 @@ func TestIsolatedScriptKeepsExplicitGoCaches(t *testing.T) {
 func TestIsolatedScriptResolvesGoDefaultsBeforeChangingHome(t *testing.T) {
 	fake := t.TempDir()
 	env := []string{"HOME=" + fake, "GOPATH=", "GOMODCACHE=", "GOCACHE=", "XDG_CACHE_HOME="}
+	out, code := isolated(t, env, "sh", "-c", printEnv)
+	got := strings.Split(strings.TrimSpace(out), "\n")
+	if code != 0 || len(got) != 7 {
+		t.Fatalf("code %d, output %q", code, out)
+	}
+	want := []string{filepath.Join(fake, "go"), filepath.Join(fake, "go", "pkg", "mod"), filepath.Join(fake, ".cache", "go-build")}
+	for i, w := range want {
+		if got[4+i] != w {
+			t.Errorf("Go location %d = %q, want %q", i, got[4+i], w)
+		}
+	}
+}
+
+func TestIsolatedScriptDerivesModCacheFromFirstGOPATHEntryAndHonoursXDG(t *testing.T) {
+	fake := t.TempDir()
+	env := []string{"HOME=" + fake, "GOPATH=/x/a:/x/b", "GOMODCACHE=", "GOCACHE=", "XDG_CACHE_HOME=/x/xdg"}
 	out, _ := isolated(t, env, "sh", "-c", printEnv)
 	got := strings.Split(strings.TrimSpace(out), "\n")
-	if len(got) != 7 {
-		t.Fatalf("unexpected output %q", out)
+	if len(got) != 7 || got[4] != "/x/a:/x/b" || got[5] != "/x/a/pkg/mod" || got[6] != "/x/xdg/go-build" {
+		t.Fatalf("env %q", got)
 	}
-	if want := filepath.Join(fake, "go"); got[4] != want {
-		t.Errorf("GOPATH = %q, want %q", got[4], want)
+}
+
+func TestIsolatedScriptLeavesGOCACHEOffAlone(t *testing.T) {
+	out, _ := isolated(t, []string{"GOCACHE=off"}, "sh", "-c", printEnv)
+	got := strings.Split(strings.TrimSpace(out), "\n")
+	if len(got) != 7 || got[6] != "off" {
+		t.Fatalf("env %q", got)
 	}
+}
+
+// A wrapper run inside another wrapper, with the caches left to Go's defaults,
+// must still resolve them from the outermost HOME.
+func TestIsolatedScriptNestsWithoutPointingCachesIntoAWrapper(t *testing.T) {
+	fake := t.TempDir()
+	script := filepath.Join(moduleRoot(t), "scripts", "test-isolated.sh")
+	env := []string{"HOME=" + fake, "GOPATH=", "GOMODCACHE=", "GOCACHE=", "XDG_CACHE_HOME="}
+	out, code := isolated(t, env, script, "sh", "-c", printEnv)
+	got := strings.Split(strings.TrimSpace(out), "\n")
+	if code != 0 || len(got) != 7 {
+		t.Fatalf("code %d, output %q", code, out)
+	}
+	want := []string{filepath.Join(fake, "go"), filepath.Join(fake, "go", "pkg", "mod"), filepath.Join(fake, ".cache", "go-build")}
 	for i, p := range got[4:] {
-		if strings.HasPrefix(p, "/tmp/moa-isolated.") || p == "" {
-			t.Errorf("Go location %d = %q points into the sandbox or is empty", i, p)
+		if p != want[i] {
+			t.Errorf("nested Go location %d = %q, want %q", i, p, want[i])
 		}
 	}
 }
@@ -292,5 +331,220 @@ func TestCacheEnvHelper(t *testing.T) {
 		if got := os.Getenv(k); got != v {
 			t.Errorf("%s = %q, want %q", k, got, v)
 		}
+	}
+}
+
+// A signal sent only to the wrapper must stop the literal long-lived command
+// and remove the sandbox.
+func TestIsolatedScriptForwardsSignalsToTheCommand(t *testing.T) {
+	if _, err := os.Stat("/proc/self/task"); err != nil {
+		t.Skip("needs /proc")
+	}
+	for _, tc := range []struct {
+		sig  syscall.Signal
+		code int
+	}{{syscall.SIGTERM, 143}, {syscall.SIGINT, 130}} {
+		t.Run(tc.sig.String(), func(t *testing.T) {
+			cmd := exec.Command(filepath.Join(moduleRoot(t), "scripts", "test-isolated.sh"), "sleep", "60")
+			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GOPATH=/x", "GOCACHE=/x"}
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			wrapper := cmd.Process.Pid
+			var child int
+			var sandbox string
+			defer func() {
+				_ = syscall.Kill(-wrapper, syscall.SIGKILL) // no leftovers if the test fails
+				_ = cmd.Wait()
+				if sandbox != "" {
+					_ = os.RemoveAll(sandbox)
+				}
+			}()
+			deadline := time.Now().Add(5 * time.Second)
+			for child == 0 && time.Now().Before(deadline) {
+				kids, _ := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", wrapper, wrapper))
+				// mktemp and mkdir are transient children; wait for the sleep.
+				if f := strings.Fields(string(kids)); len(f) == 1 {
+					comm, _ := os.ReadFile(fmt.Sprintf("/proc/%s/comm", f[0]))
+					if strings.TrimSpace(string(comm)) != "sleep" {
+						time.Sleep(10 * time.Millisecond)
+						continue
+					}
+					child, _ = strconv.Atoi(f[0])
+					if env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", child)); err == nil {
+						for _, kv := range strings.Split(string(env), "\x00") {
+							if v, ok := strings.CutPrefix(kv, "HOME="); ok {
+								sandbox = filepath.Dir(v)
+							}
+						}
+					}
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if child == 0 || sandbox == "" {
+				t.Fatalf("wrapper %d never started its command (child %d, sandbox %q)", wrapper, child, sandbox)
+			}
+			if err := syscall.Kill(wrapper, tc.sig); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			select {
+			case err := <-done:
+				if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != tc.code {
+					t.Errorf("wrapper exit = %v, want %d", err, tc.code)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("wrapper still running 5s after %v", tc.sig)
+			}
+			if err := syscall.Kill(child, 0); err == nil {
+				t.Errorf("command %d survived", child)
+			}
+			if _, err := os.Stat(sandbox); !os.IsNotExist(err) {
+				t.Errorf("sandbox %q survived (%v)", sandbox, err)
+			}
+		})
+	}
+}
+
+const cleanupEnv = "MOA_TESTENV_CLEANUP"
+
+func runCleanupChild(t *testing.T, mode string) (parent string, out []byte, err error) {
+	t.Helper()
+	exe, e := os.Executable()
+	if e != nil {
+		t.Fatal(e)
+	}
+	parent = t.TempDir()
+	cmd := exec.Command(exe, "-test.run=^TestCleanupHelper$", "-test.count=1")
+	cmd.Env = []string{"TMPDIR=" + parent, "HOME=" + t.TempDir(), cleanupEnv + "=" + mode, cleanupEnv + "_PARENT=" + parent}
+	out, err = cmd.CombinedOutput()
+	return parent, out, err
+}
+
+// TestCleanupHelper runs in a child: it leaves read-only content in the
+// sandbox ("readonly"), or makes the sandbox's parent unwritable so that it
+// cannot be removed at all ("stuck").
+func TestCleanupHelper(t *testing.T) {
+	mode := os.Getenv(cleanupEnv)
+	if mode == "" {
+		t.Skip("subprocess helper")
+	}
+	switch mode {
+	case "readonly":
+		dir := filepath.Join(os.Getenv("HOME"), "ro")
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o400); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+	case "stuck":
+		if err := os.Chmod(os.Getenv(cleanupEnv+"_PARENT"), 0o500); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRunRemovesReadOnlySandboxContent(t *testing.T) {
+	parent, out, err := runCleanupChild(t, "readonly")
+	if err != nil {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+	if left, _ := os.ReadDir(parent); len(left) != 0 {
+		t.Errorf("sandbox left behind: %v", left)
+	}
+}
+
+func TestRunFailsWhenTheSandboxCannotBeRemoved(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	parent := ""
+	defer func() {
+		if parent != "" {
+			_ = os.Chmod(parent, 0o700) // let t.TempDir clean up
+		}
+	}()
+	parent, out, err := runCleanupChild(t, "stuck")
+	_ = os.Chmod(parent, 0o700)
+	if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() == 0 {
+		t.Errorf("child exit = %v, want non-zero\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "testenv: cannot remove sandbox") {
+		t.Errorf("no diagnostic in output:\n%s", out)
+	}
+}
+
+// Unset Go cache variables must resolve against the incoming HOME, not the
+// sandbox one; explicit values stay as given.
+func TestRunPinsGoDefaultsFromIncomingHome(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", "")
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestGoDefaultsHelper$", "-test.count=1")
+	cmd.Env = []string{"TMPDIR=" + t.TempDir(), "HOME=" + home, "GOCACHE_PIN_CHECK=" + home, "GOMODCACHE=/x/mod",
+		"GOCACHE_PIN_EXPECTED=" + filepath.Join(cacheDir, "go-build"), "GOCACHE_PIN_GO=" + goTool, "GOTOOLCHAIN=local"}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+	cmd = exec.Command(exe, "-test.run=^TestGoDefaultsHelper$", "-test.count=1")
+	cmd.Env = append([]string{"TMPDIR=" + t.TempDir(), "HOME=" + home}, "GOCACHE=off", "GOPATH=/x/a"+string(os.PathListSeparator)+"/x/b")
+	cmd.Env = append(cmd.Env, "GOCACHE_PIN_EXPLICIT=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("explicit child: %v\n%s", err, out)
+	}
+}
+
+func TestGoDefaultsHelper(t *testing.T) {
+	if os.Getenv("GOCACHE_PIN_EXPLICIT") != "" {
+		if os.Getenv("GOCACHE") != "off" || os.Getenv("GOPATH") != "/x/a"+string(os.PathListSeparator)+"/x/b" ||
+			os.Getenv("GOMODCACHE") != "/x/a/pkg/mod" {
+			t.Errorf("explicit values changed: GOCACHE=%q GOPATH=%q GOMODCACHE=%q",
+				os.Getenv("GOCACHE"), os.Getenv("GOPATH"), os.Getenv("GOMODCACHE"))
+		}
+		return
+	}
+	home := os.Getenv("GOCACHE_PIN_CHECK")
+	if home == "" {
+		t.Skip("subprocess helper")
+	}
+	cache, err := os.UserCacheDir() // HOME is the sandbox here
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, "go"); os.Getenv("GOPATH") != want {
+		t.Errorf("GOPATH = %q, want %q", os.Getenv("GOPATH"), want)
+	}
+	if os.Getenv("GOMODCACHE") != "/x/mod" {
+		t.Errorf("explicit GOMODCACHE changed: %q", os.Getenv("GOMODCACHE"))
+	}
+	if got, want := os.Getenv("GOCACHE"), os.Getenv("GOCACHE_PIN_EXPECTED"); got != want || strings.HasPrefix(got, cache) {
+		t.Errorf("GOCACHE = %q, want %q", got, want)
+	}
+	out, err := exec.Command(os.Getenv("GOCACHE_PIN_GO"), "env", "GOPATH", "GOMODCACHE", "GOCACHE").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go env: %v\n%s", err, out)
+	}
+	got := strings.Split(strings.TrimSpace(string(out)), "\n")
+	want := []string{os.Getenv("GOPATH"), os.Getenv("GOMODCACHE"), os.Getenv("GOCACHE")}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("child go env = %q, want shared locations %q", got, want)
 	}
 }

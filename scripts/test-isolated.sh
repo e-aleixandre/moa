@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Run a command (e.g. a freshly built moa binary) with a private HOME and
 # config directory under /tmp, keeping the Go caches shared.
 #
@@ -24,13 +24,21 @@ cleanup() {
 	rm -rf "$root"
 }
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 mkdir "$root/home" "$root/config" "$root/xdg" "$root/tmp"
 export HOME="$root/home" MOA_CONFIG_DIR="$root/config" XDG_CONFIG_HOME="$root/xdg" TMPDIR="$root/tmp"
 
-# Not exec: the sandbox must be removed after the command ends.
+# Bash restores SIGINT in the asynchronous subshell before exec. The parent
+# stays alive to forward signals and remove the sandbox after the command ends.
+(trap - INT; exec "$@") <&0 &
+child=$!
+forward() {
+	kill -"$1" "$child" 2>/dev/null || true
+	wait "$child" 2>/dev/null || true
+	exit "$2"
+}
+trap 'forward TERM 143' TERM
+trap 'forward INT 130' INT
 rc=0
-"$@" || rc=$?
+wait "$child" || rc=$?
 exit "$rc"

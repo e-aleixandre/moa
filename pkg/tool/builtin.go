@@ -146,12 +146,10 @@ func RegisterBuiltins(reg *core.Registry, cfg ToolConfig) error {
 // safePath resolves a path relative to WorkspaceRoot.
 // If the path is absolute, it's used as-is but still checked for escapes.
 // Returns error if the resolved path escapes the workspace via .. or symlinks.
-// spillOutputDir is the directory under /tmp where tool output spill files
-// are created. Exported via SpillOutputDir() for safePath whitelisting.
-var spillOutputDir = filepath.Join(os.TempDir(), "moa-output")
-
-// SpillOutputDir returns the directory where tool output spill files are stored.
-func SpillOutputDir() string { return spillOutputDir }
+// SpillOutputDir returns the directory where tool output spill files are
+// stored, under the temporary directory current at the time of the call (a
+// package variable would freeze TMPDIR at init, before TestMain can change it).
+func SpillOutputDir() string { return filepath.Join(os.TempDir(), "moa-output") }
 
 const (
 	maxSpillBytes      int64 = 10 << 20  // 10 MiB per command stream
@@ -223,7 +221,7 @@ var (
 // to call at process/session startup and is also invoked before the first spill
 // is created in a process.
 func CleanupSpillFiles() error {
-	return cleanupSpillFiles(spillOutputDir, time.Now(), spillTTL, defaultSpillBudget)
+	return cleanupSpillFiles(SpillOutputDir(), time.Now(), spillTTL, defaultSpillBudget)
 }
 
 func initializeSpillFiles() {
@@ -231,7 +229,7 @@ func initializeSpillFiles() {
 		_ = CleanupSpillFiles()
 		// Account for surviving files from a previous process so the global cap
 		// also applies immediately after a restart.
-		_ = accountSpillFiles(spillOutputDir, time.Now(), spillTTL, defaultSpillBudget)
+		_ = accountSpillFiles(SpillOutputDir(), time.Now(), spillTTL, defaultSpillBudget)
 	})
 }
 
@@ -612,9 +610,9 @@ func (b *headTailBuffer) initSpillFile() {
 	}
 	dir := b.SpillDir
 	if dir == "" {
-		dir = spillOutputDir
+		dir = SpillOutputDir()
 	}
-	if dir == spillOutputDir {
+	if dir == SpillOutputDir() {
 		initializeSpillFiles()
 	}
 	if err := ensureSpillDir(dir); err != nil {

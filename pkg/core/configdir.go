@@ -6,7 +6,8 @@ import (
 	"sync/atomic"
 )
 
-// configPathGuard is nil in production. Test binaries install one through
+// configPathGuard is nil in production, and production code never installs one:
+// path resolution is unchanged there. Test binaries install the hook through
 // internal/testenv so that resolving a path inside the developer's real config
 // directory fails loudly before anything is read or written there.
 var configPathGuard atomic.Pointer[func(path string)]

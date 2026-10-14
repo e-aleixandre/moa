@@ -1,6 +1,8 @@
 package testenv
 
 import (
+	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -44,7 +46,11 @@ func TestEveryPackageReachingCoreInstallsTheHarness(t *testing.T) {
 		if dir != "." {
 			importPath += "/" + filepath.ToSlash(dir)
 		}
-		f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		mode := parser.ImportsOnly
+		if strings.HasSuffix(path, "_test.go") {
+			mode = parser.SkipObjectResolution // bodies are needed to find the TestMain call
+		}
+		f, err := parser.ParseFile(fset, path, nil, mode)
 		if err != nil {
 			return err
 		}
@@ -63,11 +69,7 @@ func TestEveryPackageReachingCoreInstallsTheHarness(t *testing.T) {
 		if strings.HasSuffix(path, "_test.go") {
 			p.hasTests = true
 			p.testImports = append(p.testImports, imports...)
-			src, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if strings.Contains(string(src), "testenv.Run(") {
+			if hasHarnessMain(f) {
 				p.usesHarness = true
 			}
 		} else {
@@ -110,6 +112,84 @@ func TestEveryPackageReachingCoreInstallsTheHarness(t *testing.T) {
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		t.Fatalf("packages reach pkg/core but their tests do not call testenv.Run from TestMain: %v", missing)
+	}
+}
+
+// hasHarnessMain reports whether f declares func TestMain whose body calls Run
+// of the testenv package, under whatever name it is imported. Text in
+// comments or strings, and calls from other functions, do not count.
+func hasHarnessMain(f *ast.File) bool {
+	var names []string
+	for _, imp := range f.Imports {
+		if path, _ := strconv.Unquote(imp.Path.Value); path != modulePath+"/internal/testenv" {
+			continue
+		}
+		name := "testenv"
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		names = append(names, name)
+	}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Name.Name != "TestMain" || fn.Body == nil {
+			continue
+		}
+		found := false
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return !found
+			}
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Run" {
+				if id, ok := sel.X.(*ast.Ident); ok {
+					for _, name := range names {
+						found = found || id.Name == name
+					}
+				}
+			}
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func parseSrc(t *testing.T, src string) *ast.File {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), "x_test.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestHasHarnessMain(t *testing.T) {
+	const imp = `import (
+	"os"
+	"testing"
+	%s "github.com/e-aleixandre/moa/internal/testenv"
+)
+`
+	for _, tc := range []struct {
+		name, src string
+		want      bool
+	}{
+		{"plain", fmt.Sprintf(imp, "") + `func TestMain(m *testing.M) { os.Exit(testenv.Run(m)) }`, true},
+		{"aliased", fmt.Sprintf(imp, "te") + `func TestMain(m *testing.M) { os.Exit(te.Run(m)) }`, true},
+		{"ignored harness", fmt.Sprintf(imp, "") + `func ignoredHarness(m *testing.M) { testenv.Run(m) }`, false},
+		{"other function and TestMain without call", fmt.Sprintf(imp, "") + `func helper(m *testing.M) { testenv.Run(m) }
+func TestMain(m *testing.M) { os.Exit(m.Run()) }`, false},
+		{"comment and string", fmt.Sprintf(imp, "") + `// testenv.Run(m)
+func TestMain(m *testing.M) { _ = "testenv.Run("; os.Exit(m.Run()) }`, false},
+		{"other Run", fmt.Sprintf(imp, "_") + `func TestMain(m *testing.M) { os.Exit(other.Run(m)) }`, false},
+		{"alias mismatch", fmt.Sprintf(imp, "te") + `func TestMain(m *testing.M) { os.Exit(testenv.Run(m)) }`, false},
+	} {
+		if got := hasHarnessMain(parseSrc(t, "package p\n"+tc.src)); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

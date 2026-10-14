@@ -4,6 +4,7 @@ package testenv
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,7 @@ var (
 // HOME or MOA_CONFIG_DIR, runs the tests and removes the sandbox. The
 // environment is not restored afterwards: work that outlives a test stays
 // sandboxed too.
-func Run(m *testing.M) int {
+func Run(m *testing.M) (code int) {
 	// Roots are made absolute now: a later chdir must not move them.
 	var roots []string
 	if dir := os.Getenv("MOA_CONFIG_DIR"); dir != "" {
@@ -43,7 +44,14 @@ func Run(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "testenv: cannot create sandbox:", err)
 		return 1
 	}
-	defer os.RemoveAll(sandbox) //nolint:errcheck
+	defer func() {
+		if err := removeSandbox(sandbox); err != nil {
+			fmt.Fprintln(os.Stderr, "testenv: cannot remove sandbox:", err)
+			if code == 0 {
+				code = 1
+			}
+		}
+	}()
 	for _, root := range roots {
 		if within(root, sandbox) {
 			fmt.Fprintf(os.Stderr, "testenv: sandbox %s is inside protected config %s\n", sandbox, root)
@@ -58,6 +66,7 @@ func Run(m *testing.M) int {
 			return 1
 		}
 	}
+	pinGoLocations()
 	// Child sandboxes stay owned by this run even if a crash test kills them.
 	env := map[string]string{
 		"HOME":            home,
@@ -74,6 +83,60 @@ func Run(m *testing.M) int {
 	_ = os.Unsetenv("MOA_CONFIG_DIR")
 	install(roots)
 	return m.Run()
+}
+
+// removeSandbox deletes dir. Tests may leave read-only content behind (module
+// caches are, for one), which RemoveAll cannot delete, so on failure the
+// owner's write bit is restored without following symlinks and removal is
+// retried once.
+func removeSandbox(dir string) error {
+	if os.RemoveAll(dir) == nil {
+		return nil
+	}
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if d == nil || d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			perm := os.FileMode(0o200)
+			if d.IsDir() {
+				perm = 0o700 // also needed to list and enter it
+			}
+			_ = os.Chmod(path, info.Mode().Perm()|perm)
+		}
+		return nil
+	})
+	return os.RemoveAll(dir)
+}
+
+// pinGoLocations fixes the Go defaults that derive from the incoming HOME, so
+// go commands started by tests keep using the shared caches instead of
+// downloading and rebuilding inside the sandbox. Explicit values (including
+// GOCACHE=off) are left alone, and a default that cannot be computed stays unset.
+func pinGoLocations() {
+	pin := func(key string, value func() (string, bool)) {
+		if os.Getenv(key) != "" {
+			return
+		}
+		if v, ok := value(); ok {
+			_ = os.Setenv(key, v)
+		}
+	}
+	pin("GOPATH", func() (string, bool) {
+		home := os.Getenv("HOME")
+		return filepath.Join(home, "go"), home != ""
+	})
+	pin("GOMODCACHE", func() (string, bool) {
+		first := filepath.SplitList(os.Getenv("GOPATH"))
+		if len(first) == 0 {
+			return "", false
+		}
+		return filepath.Join(first[0], "pkg", "mod"), true
+	})
+	pin("GOCACHE", func() (string, bool) {
+		dir, err := os.UserCacheDir()
+		return filepath.Join(dir, "go-build"), err == nil
+	})
 }
 
 func splitList(s string) []string {
