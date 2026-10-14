@@ -99,7 +99,9 @@ const field = (tree) => flat(tree).find((n) => n.type === "textarea");
 test("R7: an unsent reply is still there when the composer mounts again", () => {
   setState({ tasks: { ...TASKS_INITIAL } });
   const props = { task: HANDOFF, owners: [], sessions: {}, phone: false };
-  field(expand(ThreadComposer(props))).props.onInput({ currentTarget: { value: "Keep this", scrollHeight: 10, style: {} } });
+  // preact/compat, loaded by other suites, lowercases the handler name
+  const { props: p } = field(expand(ThreadComposer(props)));
+  (p.onInput || p.oninput)({ currentTarget: { value: "Keep this", scrollHeight: 10, style: {} } });
   expect(field(expand(ThreadComposer(props))).props.value).toBe("Keep this");
   expect(field(expand(ThreadComposer({ ...props, task: { ...HANDOFF, id: 8 } }))).props.value).toBe("");
 });
