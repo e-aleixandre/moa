@@ -73,7 +73,7 @@ lists them and forgets any of them; unpairing forgets all of them.
 - The pairing scanner decodes on the device, with no Google service involved.
   Notifications are meant to be delivered through Firebase Cloud Messaging, and
   carry only the encrypted envelope; the app decrypts it itself. They work only
-  if the push relay you use has Android set up; otherwise the app reports
-  notifications as unavailable.
+  if the push relay you use has Android set up; otherwise enabling
+  notifications fails.
 - Reinstalling over a build signed with a different key requires uninstalling
   first, which forgets the pairing.
