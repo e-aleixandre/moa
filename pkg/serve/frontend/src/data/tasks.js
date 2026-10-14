@@ -225,11 +225,24 @@ export function threadOf(slice, id) {
   return (slice.threads || {})[id] || null;
 }
 
+// Each thread read and each confirmed comment takes a number; only the answer
+// to the latest read of a task is applied. An older GET (out of order, or in
+// flight when a comment was confirmed) would otherwise show the thread as it
+// was before that comment.
+const threadSeq = new Map();
+const nextThreadSeq = (id) => {
+  const seq = (threadSeq.get(id) || 0) + 1;
+  threadSeq.set(id, seq);
+  return seq;
+};
+
 export function loadThread(id) {
   if (!id) return Promise.resolve(null);
+  const seq = nextThreadSeq(id);
   return api('GET', `/api/tasks/${id}/comments`)
     .then((res) => {
       const comments = Array.isArray(res?.comments) ? res.comments : [];
+      if (seq !== threadSeq.get(id)) return comments;
       patch((t) => ({ threads: { ...(t.threads || {}), [id]: { comments, loaded: true } } }));
       return comments;
     })
@@ -239,6 +252,7 @@ export function loadThread(id) {
 export function postComment(id, body) {
   return api('POST', `/api/tasks/${id}/comments`, { body }).then((c) => {
     if (c?.id) {
+      nextThreadSeq(id);
       patch((t) => {
         const cur = (t.threads || {})[id]?.comments || [];
         const comments = cur.some((x) => x.id === c.id) ? cur : [...cur, c];

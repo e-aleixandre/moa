@@ -126,3 +126,39 @@ test("R8: a POST that succeeds clears the reply only if it is still what was sen
 });
 
 // ── R9 ────────────────────────────────────────────────────────────────────
+
+test("R9: an older thread read cannot erase a comment already confirmed", async () => {
+  setState({ tasks: { ...TASKS_INITIAL } });
+  const gets = [];
+  globalThis.fetch = (path, opts) => {
+    if (opts.method === "POST") return Promise.resolve(new Response(JSON.stringify({ id: 5, body: "posted" }), { status: 201 }));
+    return new Promise((resolve) => gets.push((comments) => resolve(new Response(JSON.stringify({ comments }), { status: 200 }))));
+  };
+  const first = tasksData.loadThread(9); // asked before the comment existed
+  await tasksData.postComment(9, "posted");
+  const second = tasksData.loadThread(9);
+  gets[1]([{ id: 5, body: "posted" }]);
+  await second;
+  gets[0]([]); // the old answer arrives last
+  await first;
+  expect(store.get().tasks.threads[9].comments.map((c) => c.id)).toEqual([5]);
+});
+
+test("R9: a read in flight when the POST confirms does not drop the comment", async () => {
+  setState({ tasks: { ...TASKS_INITIAL } });
+  let answer;
+  globalThis.fetch = (path, opts) => {
+    if (opts.method === "POST") return Promise.resolve(new Response(JSON.stringify({ id: 5, body: "posted" }), { status: 201 }));
+    return new Promise((resolve) => { answer = (c) => resolve(new Response(JSON.stringify({ comments: c }), { status: 200 })); });
+  };
+  const read = tasksData.loadThread(9);
+  await tasksData.postComment(9, "posted");
+  answer([]);
+  await read;
+  expect(store.get().tasks.threads[9].comments.map((c) => c.id)).toEqual([5]);
+});
+
+// ── R10 ───────────────────────────────────────────────────────────────────
+
+const ORPHAN = { ...HANDOFF, handoff: { ...HANDOFF.handoff, to_owner_id: "own_gone", to_owner_name: "Gone" } };
+const LIVE_OWNERS = [{ id: "own_moa", name: "moa", session_id: "s-moa" }];
