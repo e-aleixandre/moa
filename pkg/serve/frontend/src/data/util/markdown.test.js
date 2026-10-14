@@ -154,3 +154,104 @@ test('a session id in prose or inside a fenced code block is not tagged', () => 
   expect(html).toContain(SESSION_ID);
   expect(html).not.toContain('session-ref');
 });
+
+// --- user messages ---------------------------------------------------------
+//
+// Only fenced code, `code`, **bold** and links render; everything else stays
+// as typed. The battery is pasted text of the kind that real messages carry.
+
+import { parseUserMarkdown, renderUserMarkdown } from './markdown.js';
+
+// What a reader sees outside code blocks: tags dropped, entities decoded.
+function visible(html) {
+  return html
+    .replace(/<div class="code-block[\s\S]*?<\/pre>\s*<\/div>/g, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+}
+
+const PASTED = [
+  'cp /tmp/*/logs/* /backup',
+  '{"a": "_foo_", "b": "*x*", "c": "snake_case_name"}',
+  '404.\n500.\nfoo',
+  '1. one\n2. two\n- a\n- b\n* c',
+  '# title\n## two\ntitle\n=====\n---\n***',
+  '> quoted\n> more',
+  '| a | b |\n|---|---|\n| 1 | 2 |',
+  '2026-10-14  ERROR   <foo>  a < b &amp; c &lt;tag&gt;',
+  '\\*not em\\* and C:\\path\\new',
+  '    indented\n\tx\n\n\n\ntrailing  \nlines',
+  '![x](http://t.example/p.png) <img src=x onerror=alert(1)> <script>x</script>',
+  '[ref]: http://x\n[a][ref] [b] footnote[^1]',
+  '~~strike~~ ~one~ &copy; &#35; &nbsp;',
+  'a  \nb\\\nc',
+  '$ ls *.go 2 * 3 * 4 _x_ _',
+  'class A:\n    def __init__(self): pass\nif __name__ == "__main__": print(a.__dict__)',
+  '__init__ __main__ __dict__',
+  '  at Foo._bar_ (file.js:1:2)\n  at *anonymous* <anonymous>\n\n\nERROR: _id_ = 5',
+];
+
+// Known limits, accepted by the owner:
+// - `**debug**` inside pasted JSON renders as bold; unavoidable if bold renders.
+// - Selecting and copying bold text yields the rendered text, as in any chat;
+//   only the code blocks' Copy button gives the original source.
+// Known limit, accepted: a glob with two `**` such as `a/**/b y c/**/d` reads
+// as bold ("/b y c/") and loses those asterisks; bold and literal `**` cannot
+// both hold, so it is not in the battery.
+test('pasted text keeps every visible character', () => {
+  for (const text of PASTED) {
+    expect(visible(parseUserMarkdown(text))).toBe(text);
+  }
+});
+
+test('the sanitized render keeps them too', () => {
+  const prev = DOMPurify.sanitize;
+  DOMPurify.sanitize = (html) => html;
+  try {
+    for (const text of PASTED) expect(visible(renderUserMarkdown(text))).toBe(text);
+  } finally {
+    DOMPurify.sanitize = prev;
+  }
+});
+
+test('user markdown renders fenced code, inline code, bold and links only', () => {
+  const html = parseUserMarkdown('**b** and `d`\n\n[l](https://e.com) <https://a.com> https://b.com\n\n```\nx := 1 * 2\n```\n');
+  expect(html).toContain('<strong>b</strong>');
+  expect(html).toContain('<code>d</code>');
+  expect(html).toContain('<a href="https://e.com">l</a>');
+  expect(html).toContain('<a href="https://a.com">https://a.com</a>');
+  expect(html).toContain('<a href="https://b.com">https://b.com</a>');
+  expect(html).toContain('class="code-block');
+  expect(html).toContain('code-block-copy');
+  expect(html).toContain('x := 1 * 2');
+});
+
+test('italics, lists, headings, quotes, tables and images do not render', () => {
+  const html = parseUserMarkdown('*a* _b_\n\n- x\n\n1. y\n\n# h\n\n> q\n\n| a |\n|---|\n| 1 |\n\n![i](http://t/p.png)');
+  expect(html).not.toMatch(/<(em|ul|ol|li|h\d|blockquote|table|img)\b/);
+});
+
+test('a large user message is cached, not re-parsed on every render', () => {
+  const sanitize = DOMPurify.sanitize;
+  let calls = 0;
+  DOMPurify.sanitize = (html) => {
+    calls++;
+    return html;
+  };
+  try {
+    const text = `${crypto.randomUUID()} ` + 'line of pasted log\n'.repeat(1500);
+    expect(text.length).toBeGreaterThan(16 * 1024);
+    renderUserMarkdown(text);
+    renderUserMarkdown(text);
+    expect(calls).toBe(1);
+  } finally {
+    DOMPurify.sanitize = sanitize;
+  }
+});
+
+test('assistant markdown is unchanged by the user mode', () => {
+  expect(parseMarkdown('# h')).toContain('<h1');
+  expect(parseMarkdown('<b>x</b>')).toContain('<b>x</b>');
+  expect(parseMarkdown('*a*')).toContain('<em>a</em>');
+});

@@ -81,6 +81,28 @@
 }
 .zl-user-body p { margin: 0; }
 .zl-user-body p + p { margin-top: 8px; }
+
+/* The message's markdown subset (fenced code, `code`, bold, links). The body
+   is pre-wrap and the HTML is the text as typed, so spacing outside code
+   blocks survives; the code block's own markup is not text, and its <pre>
+   keeps its own white-space. The waypoint keeps its own size and colour. */
+.zl-user-body .wp-md {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  white-space: pre-wrap;
+}
+.zl-user-body .wp-md .code-block {
+  white-space: normal;
+  margin: 2px 0;
+}
+.zl-user-body .wp-md .code-block code {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  font-size: inherit;
+  color: inherit;
+}
 .zl-user .zl-data {
   font-family: var(--mono);
   font-size: var(--zl-fs-meta);

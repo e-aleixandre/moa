@@ -22,7 +22,7 @@ import { ProviderErrorAction } from "../../components/ProviderErrorAction/Provid
 import { turnFinalResponse } from "../../data/stream-model.js";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { parsePreviewReference } from "../../data/util/preview-reference.js";
-import { renderMarkdown, renderMarkdownWithCaret } from "../../data/util/markdown.js";
+import { renderMarkdown, renderMarkdownWithCaret, renderUserMarkdown } from "../../data/util/markdown.js";
 import { retryHistoryHydration } from "../../data/api.js";
 import { openSession } from "../../data/tile-actions.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
@@ -198,7 +198,9 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
           summary={block.fromOwner ? ownerMessageSummary(text) : undefined}
           onExpand={onExpandBlock}
         >
-          {text && <p>{text}</p>}
+          {/* Presentation only: block.text (rewind preview, model input) is
+              untouched. Same sanitizer as assistant prose via markdown.js. */}
+          {text && <div class="zl-prose wp-md" dangerouslySetInnerHTML={{ __html: renderUserMarkdown(text) }} />}
         </UserWaypoint>
       );
     }

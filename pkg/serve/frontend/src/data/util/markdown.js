@@ -126,6 +126,50 @@ const renderer = {
 
 marked.use({ renderer });
 
+// User messages are free text the owner typed or pasted (logs, globs, JSON,
+// stack traces), not authored markdown, so only a small safe subset renders:
+// fenced code, `inline code`, **bold** and links. Everything else stays
+// literal, and spacing outside code blocks is kept as typed (the body is
+// pre-wrap). Same engine, renderers and sanitizer as assistant prose; the
+// rest is switched off with tokenizers that return nothing (marked falls back
+// to its default only on `false`).
+const off = () => undefined;
+const userMarked = new Marked({ gfm: true });
+userMarked.use({
+  renderer,
+  tokenizer: {
+    // block: keep fences, paragraphs and blank lines
+    code: off, heading: off, hr: off, blockquote: off, list: off, html: off,
+    def: off, table: off, lheading: off,
+    // inline: keep codespan, strong, link, autolink and bare URLs
+    escape: off, tag: off, reflink: off, del: off, br: off,
+  },
+});
+userMarked.use({
+  renderer: {
+    // Whitespace is the user's: blank lines and trailing newlines come back
+    // verbatim, and text is escaped in full (marked would keep `&amp;`).
+    space: (token) => escapeHtml(token.raw),
+    paragraph(token) {
+      return this.parser.parseInline(token.tokens) + escapeHtml(token.raw.match(/\n*$/)[0]);
+    },
+    text(token) {
+      return token.tokens ? this.parser.parseInline(token.tokens) : escapeHtml(token.text);
+    },
+    image: (token) => escapeHtml(token.raw),
+  },
+  // emStrong yields <em> for a lone * or _ (globs, snake_case, JSON keys) and
+  // <strong> for ** and __. Only ** survives: __init__ / __main__ / __dict__
+  // are everyday code, so anything else goes back to its source text.
+  walkTokens(token) {
+    const literal = token.type === 'em' || (token.type === 'strong' && !token.raw.startsWith('**'));
+    if (!literal) return;
+    token.type = 'text';
+    token.text = token.raw;
+    delete token.tokens;
+  },
+});
+
 // Copy handler via event delegation, so code blocks carry no inline onclick —
 // that let DOMPurify's ADD_ATTR whitelist onclick on *any* element, turning
 // quoted assistant HTML into an XSS sink.
@@ -155,6 +199,10 @@ if (typeof document !== 'undefined') {
 // renderer; production always goes through renderMarkdown, which sanitizes.
 export function parseMarkdown(text) {
   return marked.parse(text);
+}
+
+export function parseUserMarkdown(text) {
+  return userMarked.parse(text);
 }
 
 // Markdown output is inserted into the main document, so it gets an explicit
@@ -236,8 +284,7 @@ if (typeof DOMPurify.addHook === 'function') {
   });
 }
 
-function renderAndSanitizeMarkdown(text) {
-  const raw = marked.parse(text);
+function sanitizeRendered(raw) {
   sanitizingMarkdown = true;
   try {
     return DOMPurify.sanitize(raw, SANITIZE_CONFIG);
@@ -246,20 +293,36 @@ function renderAndSanitizeMarkdown(text) {
   }
 }
 
+function renderAndSanitizeMarkdown(text) {
+  return sanitizeRendered(marked.parse(text));
+}
+
 export function renderMarkdown(text) {
+  return renderCached(text, text, renderAndSanitizeMarkdown);
+}
+
+// Same sanitizer and the same bounded cache as assistant prose; the key is
+// namespaced because identical text renders differently in user mode.
+export function renderUserMarkdown(text) {
+  // A user message is stable, so unlike tool output it is cached whatever its
+  // size (the byte ceiling still bounds memory).
+  return renderCached(`\u0000user:${text}`, text, (t) => sanitizeRendered(userMarked.parse(t)), true);
+}
+
+function renderCached(key, text, render, cacheLarge = false) {
   // Long tool results are unlikely to be revisited and would otherwise let
   // cached source plus HTML consume disproportionate memory.
-  if (text.length > MARKDOWN_CACHE_MAX_SOURCE_BYTES) return renderAndSanitizeMarkdown(text);
+  if (!cacheLarge && text.length > MARKDOWN_CACHE_MAX_SOURCE_BYTES) return render(text);
 
-  const cached = markdownCache.get(text);
+  const cached = markdownCache.get(key);
   if (cached) {
-    markdownCache.delete(text);
-    markdownCache.set(text, cached);
+    markdownCache.delete(key);
+    markdownCache.set(key, cached);
     return cached.html;
   }
 
-  const html = renderAndSanitizeMarkdown(text);
-  const bytes = 2 * (text.length + html.length);
+  const html = render(text);
+  const bytes = 2 * (key.length + html.length);
   if (bytes > MARKDOWN_CACHE_MAX_BYTES) return html;
 
   while (markdownCache.size >= MARKDOWN_CACHE_MAX_ENTRIES
@@ -269,7 +332,7 @@ export function renderMarkdown(text) {
     markdownCache.delete(oldest[0]);
     markdownCacheBytes -= oldest[1].bytes;
   }
-  markdownCache.set(text, { html, bytes });
+  markdownCache.set(key, { html, bytes });
   markdownCacheBytes += bytes;
   return html;
 }
