@@ -1659,6 +1659,7 @@ func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	// A configured summarizer writes the summary instead of the session's
 	// model. The window stays the session's: it decides when and how much to
 	// compact, and swapping it would change what the summary is asked to cover.
+	sessionOpts := streamOpts
 	sumProvider, sumModel, fallbackNotice := provider, model, ""
 	if summarizer != nil {
 		sumProvider, sumModel, fallbackNotice = summarizer(model)
@@ -1672,8 +1673,8 @@ func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus str
 		}
 	}
 
-	result, compacted, err := compaction.Compact(
-		ctx, sumProvider, sumModel, streamOpts,
+	result, compacted, sumModel, fallbackNotice, err := compactWithSessionFallback(
+		ctx, sumProvider, sumModel, streamOpts, fallbackNotice, provider, model, sessionOpts,
 		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings, focus,
 	)
 	// A stopped compaction reports the cancellation itself, whatever the

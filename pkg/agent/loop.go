@@ -516,6 +516,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				// A configured summarizer writes the summary instead of the
 				// session's model; the window stays the session's, since it is
 				// what decides when and how much to compact.
+				sessionOpts := compactOpts
 				sumProvider, sumModel, fallbackNotice := cfg.provider, cfg.model, ""
 				if cfg.compactSummarizer != nil {
 					sumProvider, sumModel, fallbackNotice = cfg.compactSummarizer(cfg.model)
@@ -538,8 +539,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					cfg.stateMu.Unlock()
 					originals = append([]core.AgentMessage(nil), cfg.state.Messages...)
 				}
-				result, compacted, err := compaction.Compact(
-					ctx, sumProvider, sumModel, compactOpts,
+				result, compacted, sumModel, fallbackNotice, err := compactWithSessionFallback(
+					ctx, sumProvider, sumModel, compactOpts, fallbackNotice, cfg.provider, cfg.model, sessionOpts,
 					cfg.state.Messages, estimate.Tokens, window, *compactionSettings, "",
 				)
 				if err != nil {

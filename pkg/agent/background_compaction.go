@@ -251,6 +251,7 @@ func (a *Agent) startBackgroundCompaction(ctx context.Context, cfg *loopConfig, 
 	compactOpts := cfg.requestOptions()
 	compactOpts.CacheRetention = core.CacheOff
 	compactOpts.OnRequestFingerprint = nil
+	sessionOpts := compactOpts
 	sumProvider, sumModel, fallbackNotice := cfg.provider, cfg.model, ""
 	if cfg.compactSummarizer != nil {
 		sumProvider, sumModel, fallbackNotice = cfg.compactSummarizer(cfg.model)
@@ -288,13 +289,13 @@ func (a *Agent) startBackgroundCompaction(ctx context.Context, cfg *loopConfig, 
 	a.mu.Unlock()
 	a.emitter.Emit(evt)
 
-	go a.runBackgroundCompaction(job, sumProvider, sumModel, compactOpts, estimate, window, settings, fallbackNotice, checkpoint, checkpointGen, consume)
+	go a.runBackgroundCompaction(job, sumProvider, sumModel, compactOpts, cfg.provider, cfg.model, sessionOpts, estimate, window, settings, fallbackNotice, checkpoint, checkpointGen, consume)
 	return job, false
 }
 
-func (a *Agent) runBackgroundCompaction(job *backgroundCompactionJob, provider core.Provider, model core.Model, opts core.StreamOptions, estimate, window int, settings core.CompactionSettings, notice, checkpoint string, checkpointGen *uint64, consume func()) {
+func (a *Agent) runBackgroundCompaction(job *backgroundCompactionJob, provider core.Provider, model core.Model, opts core.StreamOptions, sessProvider core.Provider, sessModel core.Model, sessOpts core.StreamOptions, estimate, window int, settings core.CompactionSettings, notice, checkpoint string, checkpointGen *uint64, consume func()) {
 	defer a.bgWG.Done()
-	result, compacted, err := compaction.Compact(job.ctx, provider, model, opts, job.prefix, estimate, window, settings, "")
+	result, compacted, model, notice, err := compactWithSessionFallback(job.ctx, provider, model, opts, notice, sessProvider, sessModel, sessOpts, job.prefix, estimate, window, settings, "")
 	// Whatever the outcome, a provider-reported usage was spent. An outcome
 	// with an error is never adoptable, even if it carries that usage.
 	var usage *core.Usage

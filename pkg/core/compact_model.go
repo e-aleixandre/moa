@@ -68,3 +68,16 @@ func CompactModelFallbackNotice(reason CompactModelFallback, spec string, used M
 		return ""
 	}
 }
+
+// CompactModelUnavailableNotice renders the runtime fallback: the configured
+// summarizer failed with a temporary provider error and the session's model
+// wrote the summary instead. Same shape as CompactModelFallbackNotice.
+func CompactModelUnavailableNotice(configured, used Model, reason string) string {
+	name := func(m Model) string {
+		if m.Name != "" {
+			return m.Name
+		}
+		return m.ID
+	}
+	return "✂ Summarized with " + name(used) + " — " + name(configured) + " was unavailable (" + reason + ")"
+}
