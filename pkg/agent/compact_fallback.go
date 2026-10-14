@@ -11,10 +11,11 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
-// transientProviderReason classifies err as a temporary provider failure and
+// transientProviderReason classifies err as a temporary provider failure (or a
+// typed usage limit) and
 // names it for the reader, or returns "" when it is not one. It builds on the
-// stream-repair classification (credentials, quota and 4xx other than 429 are
-// never transient) and adds what that one leaves out because the HTTP retry
+// stream-repair classification (credentials and 4xx other than 429 are never
+// transient) and adds what that one leaves out because the HTTP retry
 // layer normally absorbs it: a 5xx or an overload that outlived its retries.
 func transientProviderReason(err error) string {
 	if err == nil || errors.Is(err, context.Canceled) {
@@ -23,8 +24,10 @@ func transientProviderReason(err error) string {
 	if _, ok := core.AsProviderCredentialError(err); ok {
 		return ""
 	}
+	// A usage limit on the summarizer's account is a reason to use the session's
+	// model, even though a retry on the same one would not clear it.
 	if _, ok := core.AsQuotaExceeded(err); ok {
-		return ""
+		return "usage limit reached"
 	}
 	var authErr *core.ProviderAuthError
 	if errors.As(err, &authErr) {

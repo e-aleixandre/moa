@@ -45,7 +45,7 @@ func newFallbackAgent(t *testing.T, session core.Provider, sumProv core.Provider
 	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 100, KeepRecent: 200}
 	ag, err := New(AgentConfig{
 		Provider:   session,
-		Model:      core.Model{ID: "session-model", Name: "Session", MaxInput: 1000, Pricing: &core.Pricing{Input: 1}},
+		Model:      core.Model{ID: "session-model", Name: "Opus 5.5", MaxInput: 1000, Pricing: &core.Pricing{Input: 1}},
 		Compaction: &settings,
 		Tools:      core.NewRegistry(),
 		CompactSummarizer: func(core.Model) (core.Provider, core.Model, string) {
@@ -77,6 +77,7 @@ func TestCompact_TemporaryProviderErrorFallsBackToSessionModel(t *testing.T) {
 		{"http 429", errors.New("openai: HTTP 429: slow down"), false, "rate limited"},
 		{"network", errors.New("read tcp: connection reset by peer"), true, "network error"},
 		{"timeout", fmt.Errorf("post: %w", context.DeadlineExceeded), false, "network error"},
+		{"quota", fmt.Errorf("summarization: %w", &core.QuotaExceededError{Provider: "openai"}), true, "usage limit reached"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,7 +98,7 @@ func TestCompact_TemporaryProviderErrorFallsBackToSessionModel(t *testing.T) {
 			if got := session.seen()[sessBefore:]; len(got) != 1 || got[0] != "session-model" {
 				t.Errorf("session model should serve exactly one retry, got %v", got)
 			}
-			want := "✂ Summarized with Session — Sol was unavailable (" + tc.reason + ")"
+			want := "✂ Summarized with Opus 5.5 — Sol was unavailable (" + tc.reason + ")"
 			if payload.SummarizerNotice != want {
 				t.Errorf("notice = %q, want %q", payload.SummarizerNotice, want)
 			}
@@ -119,7 +120,6 @@ func TestCompact_NonTemporaryErrorDoesNotFallBack(t *testing.T) {
 		{"context too long", errors.New("openai: HTTP 400: context_length_exceeded, maximum context length")},
 		{"refusal", errors.New("anthropic: refusal: stop_reason refusal")},
 		{"auth typed", &core.ProviderAuthError{Provider: "openai", Status: 401}},
-		{"quota", &core.QuotaExceededError{Provider: "openai"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -196,7 +196,7 @@ func TestAutoCompact_TemporaryErrorFallsBackToSessionModel(t *testing.T) {
 	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 100, KeepRecent: 200}
 	ag, err := New(AgentConfig{
 		Provider:   session,
-		Model:      core.Model{ID: "session-model", Name: "Session", MaxInput: 1000},
+		Model:      core.Model{ID: "session-model", Name: "Opus 5.5", MaxInput: 1000},
 		Compaction: &settings,
 		Tools:      core.NewRegistry(),
 		CompactSummarizer: func(core.Model) (core.Provider, core.Model, string) {
@@ -224,7 +224,7 @@ func TestAutoCompact_TemporaryErrorFallsBackToSessionModel(t *testing.T) {
 		t.Fatalf("auto compaction did not run (notices=%v, bad calls=%d)", notices, bad.count())
 	}
 	for _, n := range notices {
-		if n != "✂ Summarized with Session — Sol was unavailable (overloaded)" {
+		if n != "✂ Summarized with Opus 5.5 — Sol was unavailable (overloaded)" {
 			t.Errorf("notice = %q", n)
 		}
 	}
