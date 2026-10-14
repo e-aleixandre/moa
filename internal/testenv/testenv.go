@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -66,7 +67,10 @@ func Run(m *testing.M) (code int) {
 			return 1
 		}
 	}
-	pinGoLocations()
+	if err := pinGoLocations(); err != nil {
+		fmt.Fprintln(os.Stderr, "testenv:", err)
+		return 1
+	}
 	// Child sandboxes stay owned by this run even if a crash test kills them.
 	env := map[string]string{
 		"HOME":            home,
@@ -109,11 +113,44 @@ func removeSandbox(dir string) error {
 	return os.RemoveAll(dir)
 }
 
-// pinGoLocations fixes the Go defaults that derive from the incoming HOME, so
+// pinGoLocations fixes the Go locations that derive from the incoming HOME, so
 // go commands started by tests keep using the shared caches instead of
-// downloading and rebuilding inside the sandbox. Explicit values (including
-// GOCACHE=off) are left alone, and a default that cannot be computed stays unset.
-func pinGoLocations() {
+// downloading and rebuilding inside the sandbox. When a go binary is on PATH
+// it is asked once for the effective values, which honours explicit
+// variables (including GOCACHE=off) and settings persisted with go env -w; a
+// failing query is an error rather than a guess. Without go on PATH the
+// built-in defaults apply, leaving explicit values alone.
+//
+// Known debt: Go telemetry may recreate a few small .count files after the
+// sandbox is removed; the residue is bounded (KB) and accepted, telemetry is
+// left enabled.
+func pinGoLocations() error {
+	goPath, err := exec.LookPath("go")
+	if err != nil {
+		pinDefaultGoLocations()
+		return nil
+	}
+	out, err := exec.Command(goPath, "env", "GOPATH", "GOMODCACHE", "GOCACHE").Output()
+	if err != nil {
+		var stderr []byte
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = ee.Stderr
+		}
+		return fmt.Errorf("cannot resolve Go locations with %s env: %v: %s", goPath, err, strings.TrimSpace(string(stderr)))
+	}
+	lines := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if len(lines) != 3 {
+		return fmt.Errorf("unexpected output from %s env: %q", goPath, out)
+	}
+	for i, key := range []string{"GOPATH", "GOMODCACHE", "GOCACHE"} {
+		if err := os.Setenv(key, lines[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func pinDefaultGoLocations() {
 	pin := func(key string, value func() (string, bool)) {
 		if os.Getenv(key) != "" {
 			return

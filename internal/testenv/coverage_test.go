@@ -118,6 +118,9 @@ func TestEveryPackageReachingCoreInstallsTheHarness(t *testing.T) {
 // hasHarnessMain reports whether f declares func TestMain whose body calls Run
 // of the testenv package, under whatever name it is imported. Text in
 // comments or strings, and calls from other functions, do not count.
+//
+// Known debt: the walk also counts a Run call inside a function literal in the
+// body that never executes; that artificial case is accepted.
 func hasHarnessMain(f *ast.File) bool {
 	var names []string
 	for _, imp := range f.Imports {

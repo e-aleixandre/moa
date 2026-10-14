@@ -356,6 +356,11 @@ func TestIsolatedScriptForwardsSignalsToTheCommand(t *testing.T) {
 			var sandbox string
 			defer func() {
 				_ = syscall.Kill(-wrapper, syscall.SIGKILL) // no leftovers if the test fails
+				if child != 0 {
+					// The command runs in its own process group.
+					_ = syscall.Kill(-child, syscall.SIGKILL)
+					_ = syscall.Kill(child, syscall.SIGKILL)
+				}
 				_ = cmd.Wait()
 				if sandbox != "" {
 					_ = os.RemoveAll(sandbox)
@@ -403,6 +408,103 @@ func TestIsolatedScriptForwardsSignalsToTheCommand(t *testing.T) {
 			}
 			if _, err := os.Stat(sandbox); !os.IsNotExist(err) {
 				t.Errorf("sandbox %q survived (%v)", sandbox, err)
+			}
+		})
+	}
+}
+
+// A signal sent only to the wrapper must reach the whole process group of the
+// command: a shell and the sleep it is waiting on both stop, and the wrapper
+// exits promptly with the signal's status.
+func TestIsolatedScriptSignalsTheWholeCommandGroup(t *testing.T) {
+	if _, err := os.Stat("/proc/self/task"); err != nil {
+		t.Skip("needs /proc")
+	}
+	for _, tc := range []struct {
+		sig  syscall.Signal
+		code int
+	}{{syscall.SIGTERM, 143}, {syscall.SIGINT, 130}} {
+		t.Run(tc.sig.String(), func(t *testing.T) {
+			pidFile := filepath.Join(t.TempDir(), "sh.pid")
+			// The trailing ":" keeps sh from exec'ing the sleep.
+			cmd := exec.Command(filepath.Join(moduleRoot(t), "scripts", "test-isolated.sh"),
+				"sh", "-c", `echo $$ > "$1"; sleep 30; :`, "sh", pidFile)
+			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GOPATH=/x", "GOCACHE=/x"}
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			wrapper := cmd.Process.Pid
+			var shell, sleeper int
+			var sandbox string
+			defer func() {
+				// Only PIDs and groups recorded by this test.
+				_ = syscall.Kill(-wrapper, syscall.SIGKILL)
+				if shell != 0 {
+					_ = syscall.Kill(-shell, syscall.SIGKILL)
+					_ = syscall.Kill(shell, syscall.SIGKILL)
+				}
+				if sleeper != 0 {
+					_ = syscall.Kill(sleeper, syscall.SIGKILL)
+				}
+				_ = cmd.Wait()
+				if sandbox != "" {
+					_ = os.RemoveAll(sandbox)
+				}
+			}()
+			deadline := time.Now().Add(5 * time.Second)
+			for sleeper == 0 && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+				b, _ := os.ReadFile(pidFile)
+				pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+				if err != nil {
+					continue
+				}
+				shell = pid
+				kids, _ := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", shell, shell))
+				for _, f := range strings.Fields(string(kids)) {
+					if comm, _ := os.ReadFile("/proc/" + f + "/comm"); strings.TrimSpace(string(comm)) == "sleep" {
+						sleeper, _ = strconv.Atoi(f)
+					}
+				}
+			}
+			if sleeper == 0 {
+				t.Fatalf("wrapper %d never started the shell's sleep (shell %d)", wrapper, shell)
+			}
+			if env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", shell)); err == nil {
+				for _, kv := range strings.Split(string(env), "\x00") {
+					if v, ok := strings.CutPrefix(kv, "HOME="); ok {
+						sandbox = filepath.Dir(v)
+					}
+				}
+			}
+			if pg, err := syscall.Getpgid(shell); err != nil || pg == wrapper {
+				t.Errorf("command group %d (%v) must differ from the wrapper %d", pg, err, wrapper)
+			}
+			if err := syscall.Kill(wrapper, tc.sig); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			select {
+			case err := <-done:
+				if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != tc.code {
+					t.Errorf("wrapper exit = %v, want %d", err, tc.code)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("wrapper still running 5s after %v", tc.sig)
+			}
+			for name, pid := range map[string]int{"shell": shell, "sleep": sleeper} {
+				if st, _ := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); len(st) > 0 {
+					if i := strings.LastIndex(string(st), ") "); i >= 0 && string(st)[i+2] != 'Z' {
+						t.Errorf("%s %d still running after %v", name, pid, tc.sig)
+					}
+				}
+			}
+			if sandbox != "" {
+				if _, err := os.Stat(sandbox); !os.IsNotExist(err) {
+					t.Errorf("sandbox %q survived (%v)", sandbox, err)
+				}
 			}
 		})
 	}
@@ -546,5 +648,95 @@ func TestGoDefaultsHelper(t *testing.T) {
 	want := []string{os.Getenv("GOPATH"), os.Getenv("GOMODCACHE"), os.Getenv("GOCACHE")}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("child go env = %q, want shared locations %q", got, want)
+	}
+}
+
+// Settings persisted with go env -w must win over the built-in defaults, and a
+// single go invocation resolves all three locations.
+func TestRunPinsGoLocationsFromPersistedConfig(t *testing.T) {
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("needs go on PATH")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := t.TempDir()
+	goenv := filepath.Join(t.TempDir(), "go.env")
+	base := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + fake, "GOENV=" + goenv, "GOTOOLCHAIN=local", "GOPROXY=off"}
+	want := []string{"/x/pa" + string(os.PathListSeparator) + "/x/pb", "/x/mod", "/x/cache"}
+	write := exec.Command(goTool, "env", "-w", "GOPATH="+want[0], "GOMODCACHE="+want[1], "GOCACHE="+want[2])
+	write.Env = base
+	if out, err := write.CombinedOutput(); err != nil {
+		t.Fatalf("go env -w: %v\n%s", err, out)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestPersistedGoEnvHelper$", "-test.count=1")
+	cmd.Env = append(append([]string{}, base...), "TMPDIR="+t.TempDir(), "PERSISTED_GO_WANT="+strings.Join(want, "\n"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+}
+
+func TestPersistedGoEnvHelper(t *testing.T) {
+	want := os.Getenv("PERSISTED_GO_WANT")
+	if want == "" {
+		t.Skip("subprocess helper")
+	}
+	got := []string{os.Getenv("GOPATH"), os.Getenv("GOMODCACHE"), os.Getenv("GOCACHE")}
+	if !reflect.DeepEqual(got, strings.Split(want, "\n")) {
+		t.Errorf("pinned %q, want %q", got, strings.Split(want, "\n"))
+	}
+	out, err := exec.Command("go", "env", "GOPATH", "GOMODCACHE", "GOCACHE").Output() // HOME is the sandbox here
+	if err != nil {
+		t.Fatalf("go env: %v", err)
+	}
+	if g := strings.Split(strings.TrimSpace(string(out)), "\n"); !reflect.DeepEqual(g, got) {
+		t.Errorf("child go env = %q, want %q", g, got)
+	}
+}
+
+// With a go on PATH, one query supplies all three values; when it fails the
+// test binary stops with a clear message instead of guessing.
+func TestRunQueriesGoOnceAndFailsWhenTheQueryFails(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, body string
+		ok         bool
+	}{
+		{"works", `printf '/g/path\n/g/mod\noff\n'`, true},
+		{"fails", `echo boom >&2; exit 3`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin, log := t.TempDir(), filepath.Join(t.TempDir(), "calls")
+			script := "#!/bin/sh\necho \"$@\" >> " + log + "\n" + tc.body + "\n"
+			if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(exe, "-test.run=^TestFakeGoHelper$", "-test.count=1")
+			cmd.Env = []string{"PATH=" + bin, "HOME=" + t.TempDir(), "TMPDIR=" + t.TempDir(), "FAKE_GO_CHECK=1"}
+			out, err := cmd.CombinedOutput()
+			if tc.ok && err != nil {
+				t.Fatalf("child: %v\n%s", err, out)
+			}
+			if !tc.ok && (err == nil || !strings.Contains(string(out), "testenv: cannot resolve Go locations")) {
+				t.Fatalf("child err %v, output:\n%s", err, out)
+			}
+			if calls, _ := os.ReadFile(log); string(calls) != "env GOPATH GOMODCACHE GOCACHE\n" {
+				t.Errorf("go invocations: %q", calls)
+			}
+		})
+	}
+}
+
+func TestFakeGoHelper(t *testing.T) {
+	if os.Getenv("FAKE_GO_CHECK") == "" {
+		t.Skip("subprocess helper")
+	}
+	if got := []string{os.Getenv("GOPATH"), os.Getenv("GOMODCACHE"), os.Getenv("GOCACHE")}; !reflect.DeepEqual(got, []string{"/g/path", "/g/mod", "off"}) {
+		t.Errorf("pinned %q", got)
 	}
 }

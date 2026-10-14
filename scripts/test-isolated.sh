@@ -28,12 +28,17 @@ trap cleanup EXIT
 mkdir "$root/home" "$root/config" "$root/xdg" "$root/tmp"
 export HOME="$root/home" MOA_CONFIG_DIR="$root/config" XDG_CONFIG_HOME="$root/xdg" TMPDIR="$root/tmp"
 
-# Bash restores SIGINT in the asynchronous subshell before exec. The parent
-# stays alive to forward signals and remove the sandbox after the command ends.
+# Job control (set -m) puts the asynchronous command in its own process group,
+# so signals also reach descendants that stay in that group (a shell and its
+# sleep, say), not just its first process. Bash restores SIGINT in the
+# subshell before exec. The parent stays alive to forward signals and remove
+# the sandbox after the command ends.
+set -m
 (trap - INT; exec "$@") <&0 &
 child=$!
+set +m
 forward() {
-	kill -"$1" "$child" 2>/dev/null || true
+	kill -"$1" -- "-$child" 2>/dev/null || true
 	wait "$child" 2>/dev/null || true
 	exit "$2"
 }
