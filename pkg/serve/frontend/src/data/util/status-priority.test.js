@@ -27,6 +27,12 @@ describe("statusItemPriority", () => {
     expect(statusItemPriority("tasks")).toBe("p4");
   });
 
+  it("keeps a session's unfinished tasks on the phone line", () => {
+    expect(statusItemPriority("tasks", "pending")).toBe("p2");
+    expect(statusItemPriority("tasks", "for-you")).toBe("p2");
+    expect(statusItemPriority("tasks", "done")).toBe("p4");
+  });
+
   it("treats anything unknown as the first to go, never as p1", () => {
     expect(statusItemPriority("something-new")).toBe("p4");
   });

@@ -268,7 +268,10 @@ export function sessionTasksStatus(data, now = Date.now(), tz = deviceZone()) {
   const verdict = sessionTasksVerdict(data, now, tz);
   if (verdict === 'none') return null;
   const forYou = openSessionRequests(data).length;
-  return { text: verdict, forYou, short: forYou ? String(forYou) : verdict };
+  const list = Array.isArray(data?.checklist) ? data.checklist : [];
+  const done = list.filter((t) => t.status === 'done').length;
+  const progress = list.length ? `${done}/${list.length}` : verdict;
+  return { text: verdict, forYou, pending: list.length - done, short: forYou ? String(forYou) : progress };
 }
 
 export function sessionGroups(data, sessionId = '') {

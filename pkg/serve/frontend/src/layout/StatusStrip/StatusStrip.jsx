@@ -137,6 +137,11 @@ export function StatusStrip({
       + (mcp.disabled > 0 ? `, ${mcp.disabled} disabled` : "")
     : "";
 
+  // What the tasks chip yields to on a narrow line: the alarms that are on it
+  // (api, a failing MCP, extra) and the owner's face. CSS decides by width;
+  // this is only the count it cannot know.
+  const alarms = (apiKey ? 1 : 0) + (mcpUnhealthy || mcpNeedsSignIn ? 1 : 0) + (alerts.onExtra ? 1 : 0);
+
   return (
     <div class={`zl-status${compact ? " is-compact" : ""}`}>
       {/* tier 1 — settings */}
@@ -224,7 +229,7 @@ export function StatusStrip({
             the Tasks view narrowed to this session. Requests waiting on you
             keep it in view longer than a checklist's progress. */}
         {tasks && (() => {
-          const cls = `zl-st zl-st-ev zl-st-tasks zl-${tasks.forYou ? "p2" : statusItemPriority("tasks")}`;
+          const cls = `zl-st zl-st-ev zl-st-tasks zl-${statusItemPriority("tasks", tasks.forYou ? "for-you" : tasks.pending ? "pending" : "done")}`;
           const body = (
             <>
               <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l1.5 1.5 3-3M3 10.5l1.5 1.5 3-3M9 5h4M9 11h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -234,11 +239,11 @@ export function StatusStrip({
             </>
           );
           return onOpenTasks ? (
-            <button type="button" class={cls} onClick={onOpenTasks} aria-label={`Tasks: ${tasks.text} — open this session's tasks`} title={`Tasks: ${tasks.text}`}>
+            <button type="button" class={cls} data-alarms={alarms} data-owner={owner ? "1" : undefined} onClick={onOpenTasks} aria-label={`Tasks: ${tasks.text} — open this session's tasks`} title={`Tasks: ${tasks.text}`}>
               {body}
             </button>
           ) : (
-            <span class={cls} title={`Tasks: ${tasks.text}`}>{body}</span>
+            <span class={cls} data-alarms={alarms} data-owner={owner ? "1" : undefined} title={`Tasks: ${tasks.text}`}>{body}</span>
           );
         })()}
 

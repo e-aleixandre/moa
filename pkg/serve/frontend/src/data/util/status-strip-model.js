@@ -81,8 +81,10 @@ export function statusStripModel(session, globalUsage) {
    The order is the owner's: model, permissions and context never drop -- they
    are what you glance at while typing and what changes the answer. Real alarms
    outrank plain numbers because they only exist while something is wrong.
-   Tokens and spend are read after the fact. Fast, goal, tasks and a healthy
-   MCP go first.
+   Tokens and spend are read after the fact. Fast, goal and a healthy MCP go
+   first. Tasks follow their STATE like MCP: unfinished work is p2, because the
+   phone line has room for it and it is what a session has pending; a finished
+   checklist is p4. It still yields to alarms when the line is crowded (CSS).
 
    Note that MCP takes its priority from its STATE, not its type: healthy it
    drops early, unhealthy it stays. A rule keyed on the kind of datum alone
@@ -112,6 +114,8 @@ export function statusItemPriority(kind, state) {
     case "extra":
     case "api":
       return "p2";
+    case "tasks":
+      return state === "for-you" || state === "pending" ? "p2" : "p4";
     case "tokens":
     case "spend":
       return "p3";

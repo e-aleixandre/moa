@@ -233,5 +233,13 @@ test("the status line's Tasks item speaks the panel row's words, and is absent w
   expect(sessionTasksStatus({
     requests: [{ id: 1, status: "pending" }],
     checklist: [{ id: 2, status: "done" }, { id: 3, status: "pending" }],
-  })).toEqual({ text: "1 for you · 1/2", forYou: 1, short: "1" });
+  })).toEqual({ text: "1 for you · 1/2", forYou: 1, pending: 1, short: "1" });
+});
+
+test("a checklist with work left reads as its progress on a narrow line, and says it is unfinished", async () => {
+  const { sessionTasksStatus } = await import("./tasks-model.js");
+  const list = (...statuses) => ({ requests: [], checklist: statuses.map((status, i) => ({ id: i + 1, status })) });
+  expect(sessionTasksStatus(list("pending", "in_progress")))
+    .toEqual({ text: "0/2", forYou: 0, pending: 2, short: "0/2" });
+  expect(sessionTasksStatus(list("done", "done")).pending).toBe(0);
 });
