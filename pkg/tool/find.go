@@ -90,8 +90,13 @@ func NewFind(cfg ToolConfig) core.Tool {
 }
 
 func buildFindArgs(pattern, searchPath, fileType string) []string {
-	// Try fd first (respects .gitignore by default), fallback to find
-	if fdPath, err := exec.LookPath("fd"); err == nil {
+	// Try fd first (respects .gitignore by default), then fdfind (the
+	// Debian/Ubuntu binary name), fallback to find
+	fdPath, err := exec.LookPath("fd")
+	if err != nil {
+		fdPath, err = exec.LookPath("fdfind")
+	}
+	if err == nil {
 		args := []string{fdPath, "--glob", "--color=never"}
 		switch fileType {
 		case "f":
