@@ -286,6 +286,29 @@ describe("Android share-in", () => {
 // by itself. A Promise that settles false (or rejects) later hands the
 // decision back to Java on the push port, which asks NavigationGate with the
 // tap's own generation. Runs the exact expression PushMessages returns.
+describe("Android release build", () => {
+  const build = code(appGradle);
+
+  it("derives versionCode from the release version, and stays 1 / 1.0 without it", () => {
+    expect(build).toContain("def moaVersion = System.getenv('MOA_ANDROID_VERSION')");
+    expect(build).toContain("def moaVersionCode = 1");
+    expect(build).toContain('def moaVersionName = "1.0"');
+    expect(build).toContain("moaVersion =~ /^(\\d+)\\.(\\d+)\\.(\\d+)$/");
+    expect(build).toContain("if (minor > 99 || patch > 99)");
+    expect(build).toContain("moaVersionCode = major * 10000 + minor * 100 + patch");
+    expect(build).toContain("moaVersionName = moaVersion");
+    expect(build).toMatch(/versionCode moaVersionCode\s+versionName moaVersionName/);
+    expect(build).not.toMatch(/versionCode \d/);
+  });
+
+  it("signs only from the environment and keeps no key material in the repo", () => {
+    expect(build).toContain("def releaseKeystore = System.getenv('MOA_ANDROID_KEYSTORE')");
+    expect(build).toContain("storePassword System.getenv('MOA_ANDROID_KEYSTORE_PASSWORD')");
+    expect(build).toMatch(/if \(releaseKeystore\) \{\s+signingConfig signingConfigs\.release/);
+    expect(build).not.toMatch(/findProperty\('[^']*(?:[Pp]assword|[Kk]eystore)/);
+  });
+});
+
 describe("Android in-place navigation script", () => {
   const source = code(java["PushMessages.java"]);
   const method = source.slice(source.indexOf("static String openInPlaceScript"));

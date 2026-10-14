@@ -373,12 +373,18 @@ repo or the command line:
     MOA_ANDROID_KEYSTORE=/path/to/release.jks \
     MOA_ANDROID_KEYSTORE_PASSWORD=... \
     MOA_ANDROID_KEY_ALIAS=moa-release \
+    MOA_ANDROID_VERSION=0.46.0 \
     ./gradlew assembleRelease
 
 The APK is `android/app/build/outputs/apk/release/app-release.apk`. Without
 `MOA_ANDROID_KEYSTORE`, `assembleRelease` produces an unsigned APK. The release
 key differs from any debug key, so a debug install has to be removed before
 installing a release APK over it.
+
+`MOA_ANDROID_VERSION` is the moa release (`MAJOR.MINOR.PATCH`). It becomes the
+`versionName`, and `versionCode` is `MAJOR*10000 + MINOR*100 + PATCH` (0.46.0 is
+4600, 0.46.1 is 4601), so every release installs over the previous one. Without
+it the build is version 1 / `1.0`.
 
 `testDebugUnitTest` runs the JVM tests: the push crypto against every case in
 `relay/test/vectors.json` (read from the repo, not copied), the bridge origin
