@@ -15,9 +15,28 @@ import (
 // session or project. The one exception is send, offered only to an owner's
 // conversation, which names another owner (never its session).
 func NewTool(scope *Scope) core.Tool {
+	return newTool(scope, scope.ownerSession)
+}
+
+// ChildVariant is the tasks tool as a subagent sees it: the owner's tool
+// without send, whose schema and description are those of a plain session. A
+// child inherits its parent's tools but does not speak for the owner. It
+// reports false for any tool that is not an owner's tasks tool. The refusal
+// itself lives in Execute (see actsForOwner), so selecting the tool by name
+// cannot bypass this.
+func ChildVariant(t core.Tool) (core.Tool, bool) {
+	if t.Name != "tasks" || t.Execute == nil || !strings.Contains(string(t.Parameters), `"send"`) {
+		return core.Tool{}, false
+	}
+	plain := newTool(nil, false)
+	t.Description, t.Parameters = plain.Description, plain.Parameters
+	return t, true
+}
+
+func newTool(scope *Scope, ownerSession bool) core.Tool {
 	actions := `"create", "ask", "list", "get", "update", "done", "claim", "comment"`
 	description := toolDescription
-	if scope.ownerSession {
+	if ownerSession {
 		actions += `, "send"`
 		description += toolOwnerDescription
 	}
@@ -66,7 +85,7 @@ func NewTool(scope *Scope) core.Tool {
 				"note": {
 					"type": "string",
 					"description": "For done: the result, or the reason for cant_do. Required on a task another owner sent you"
-				},` + toParam(scope.ownerSession) + `
+				},` + toParam(ownerSession) + `
 				"status": {
 					"type": "string",
 					"enum": ["pending", "in_progress"],
@@ -102,6 +121,9 @@ func NewTool(scope *Scope) core.Tool {
 				}
 			}
 			if err := checkScheduleParams(action, params); err != nil {
+				return core.ErrorResult(toolErrorText(err)), nil
+			}
+			if err := actsForOwner(ctx, repo, actor, action, params); err != nil {
 				return core.ErrorResult(toolErrorText(err)), nil
 			}
 			var (
@@ -147,6 +169,29 @@ const toolDescription = "Your task checklist, your requests to the owner, and yo
 
 const toolOwnerDescription = " send gives a task to another project's owner (to, title, description, subtasks); " +
 	"without the user's permission it waits for them first. list shows what you sent under Sent."
+
+// actsForOwner refuses what a subagent (a context tagged with an agent id)
+// would do in its owner's name: sending a task to another owner, and
+// answering or closing a task another owner sent. The rest of the tool works
+// for a child as it does for any session.
+func actsForOwner(ctx context.Context, repo *Repo, actor Actor, action string, params map[string]any) error {
+	if core.AgentIDFromContext(ctx) == "" {
+		return nil
+	}
+	switch action {
+	case "send":
+		return invalid("a subagent cannot send tasks to another owner: that is the owner's own decision")
+	case "comment", "done":
+		id, ok := toInt(params["id"])
+		if !ok {
+			return nil
+		}
+		if t, err := repo.AgentGet(ctx, actor, int64(id)); err == nil && t.HandoffState != "" {
+			return invalid("task #%d is between owners: only the owner's own conversation can answer or close it", id)
+		}
+	}
+	return nil
+}
 
 func toParam(owner bool) string {
 	if !owner {

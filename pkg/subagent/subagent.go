@@ -18,6 +18,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
@@ -1447,6 +1448,14 @@ func buildChildRegistry(parent *core.Registry, params map[string]any, readOnlyFi
 	if bookTool, ok := allowed[book.ToolName]; ok {
 		if readOnly, downgraded := book.ReadOnlyVariant(bookTool); downgraded {
 			allowed[book.ToolName] = readOnly
+		}
+	}
+
+	// Nor does a child speak for the owner: it does not get to send tasks to
+	// other owners (the tool refuses it too, whatever the schema says).
+	if tasksTool, ok := allowed["tasks"]; ok {
+		if plain, downgraded := tasks.ChildVariant(tasksTool); downgraded {
+			allowed["tasks"] = plain
 		}
 	}
 
