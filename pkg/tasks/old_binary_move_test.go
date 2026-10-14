@@ -36,3 +36,20 @@ func TestMovedByOldBinaryKeepsSender(t *testing.T) {
 		t.Fatal("sender hears nothing from the thread")
 	}
 }
+
+// An older binary can also move a task between owners to the backlog, where
+// a requester is not allowed: the user must still be able to edit it.
+func TestMovedToBacklogByOldBinaryStaysEditable(t *testing.T) {
+	r := newRepo(t)
+	moa, infra := testOwners()
+	sent := mustSend(t, r, moa, infra, true)
+	oldExec(t, r, `UPDATE tasks SET place='backlog', requester_session_id=NULL, assignee_session_id=NULL, revision=revision+1 WHERE id=?`, sent.ID)
+	cur, err := r.Get(bg, sent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	title := "edited after an old move"
+	if _, err := r.Update(bg, sent.ID, cur.Revision, Patch{Title: &title}); err != nil {
+		t.Fatalf("old-moved backlog task is not editable: %v", err)
+	}
+}

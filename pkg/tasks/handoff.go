@@ -130,8 +130,12 @@ func attachHandoffs(ctx context.Context, q querier, recs []Record) error {
 			}
 			// The sender is who the handoff says. tasks.requester_session_id
 			// is a shared column that a binary without handoffs can clear (a
-			// move), and the sender must not be lost with it.
-			rec.RequesterSessionID = h.fromSession
+			// move), and the sender must not be lost with it. Not in the
+			// backlog, which has no requester: one moved there by such a
+			// binary has left the sender's hands.
+			if rec.Place != PlaceBacklog {
+				rec.RequesterSessionID = h.fromSession
+			}
 			rec.Handoff = &h
 		}
 		return rows.Err()
