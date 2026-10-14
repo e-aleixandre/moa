@@ -11,14 +11,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
-// abandonedAttempt is a summarization the fallback gave up on. Its reported
-// usage was spent at its own model's rates, and is billed even though the
-// summary is discarded.
-type abandonedAttempt struct {
-	model core.Model
-	usage *core.Usage
-}
-
 // unrecoverableForOtherModel reports why a summarization failure would repeat
 // on any model, or "" when another model may well succeed. It is a short
 // denylist rather than a list of known transient formats: providers word
@@ -87,33 +79,29 @@ func fallbackReason(err error) string {
 //
 // It returns the model that produced the outcome, whose pricing bills it, and
 // the notice to record: the caller's own when no fallback happened, the
-// "was unavailable" one when it did. A fallback also returns the abandoned
-// first attempt when it reported usage.
+// "was unavailable" one when it did.
+//
+// retryAllowed, when set, is asked just before the retry: the loop passes its
+// budget check, so a run that is out of budget gets the original error instead
+// of one more request. The failed first attempt is not billed (known debt: a
+// compaction that fails reports no cost anywhere).
 func compactWithSessionFallback(
 	ctx context.Context,
 	sumProvider core.Provider, sumModel core.Model, sumOpts core.StreamOptions, notice string,
 	sessProvider core.Provider, sessModel core.Model, sessOpts core.StreamOptions,
 	msgs []core.AgentMessage, tokens, window int, settings core.CompactionSettings, focus string,
-) (*compaction.Result, []core.AgentMessage, core.Model, string, *abandonedAttempt, error) {
+	retryAllowed func() bool,
+) (*compaction.Result, []core.AgentMessage, core.Model, string, error) {
 	result, compacted, err := compaction.Compact(ctx, sumProvider, sumModel, sumOpts, msgs, tokens, window, settings, focus)
 	if err == nil || sumModel.ID == sessModel.ID || ctx.Err() != nil || unrecoverableForOtherModel(err) {
-		return result, compacted, sumModel, notice, nil, err
+		return result, compacted, sumModel, notice, err
+	}
+	if retryAllowed != nil && !retryAllowed() {
+		return result, compacted, sumModel, notice, err
 	}
 	reason := fallbackReason(err)
 	slog.Warn("compaction summarizer unavailable; retrying with the session model",
 		"summarizer", sumModel.ID, "session_model", sessModel.ID, "reason", reason, "error", err)
-	var abandoned *abandonedAttempt
-	if result != nil && result.Usage != nil {
-		abandoned = &abandonedAttempt{model: sumModel, usage: result.Usage}
-	}
 	result, compacted, err = compaction.Compact(ctx, sessProvider, sessModel, sessOpts, msgs, tokens, window, settings, focus)
-	return result, compacted, sessModel, core.CompactModelUnavailableNotice(sumModel, sessModel, reason), abandoned, err
-}
-
-// attach records the abandoned attempt's spend on the payload that is adopted.
-func (b *abandonedAttempt) attach(p *core.CompactionPayload) {
-	if b == nil {
-		return
-	}
-	p.AbandonedUsage, p.AbandonedPricing = b.usage, b.model.Pricing
+	return result, compacted, sessModel, core.CompactModelUnavailableNotice(sumModel, sessModel, reason), err
 }

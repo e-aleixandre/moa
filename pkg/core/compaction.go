@@ -88,11 +88,6 @@ type CompactionPayload struct {
 	// Pricing is the rate card of the model that wrote the summary, for
 	// charging Usage. Not persisted: cost is settled when the event is seen.
 	Pricing *Pricing `json:"-"`
-	// AbandonedUsage is what a fallback's first attempt reported before it was
-	// given up, billed at AbandonedPricing (its model's rates, not Pricing's).
-	// Not persisted, like Pricing: cost is settled when the event is seen.
-	AbandonedUsage   *Usage   `json:"-"`
-	AbandonedPricing *Pricing `json:"-"`
 	// Ephemeral marks a compaction of the discarded preparation conversation.
 	// The producer fixes its origin before asynchronous delivery: a generation
 	// stamped by a later consumer may belong to a different run. This only

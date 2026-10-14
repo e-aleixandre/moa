@@ -1061,9 +1061,6 @@ func (sctx *SessionContext) addRunEvent(gen uint64, e core.AgentEvent) {
 		if e.Compaction != nil && e.Compaction.Usage != nil && e.Compaction.Pricing != nil {
 			sctx.runStats.costUSD += e.Compaction.Pricing.Cost(*e.Compaction.Usage)
 		}
-		if e.Compaction != nil && e.Compaction.AbandonedUsage != nil && e.Compaction.AbandonedPricing != nil {
-			sctx.runStats.costUSD += e.Compaction.AbandonedPricing.Cost(*e.Compaction.AbandonedUsage)
-		}
 	}
 }
 
