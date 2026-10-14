@@ -6,7 +6,7 @@ import { addToast } from "../../data/notifications.js";
 import { useStore } from "../../hooks/useStore.js";
 import { loadTask, patchTask, isNewRequest } from "../../data/tasks.js";
 import {
-  canCheck, canMove, closeReady, completeNotifies, completePatch, deliverOptions, errorText, isCantDo, isHere, isOpen, isRequest,
+  canCheck, canMove, handoffOrphan, closeReady, completeNotifies, completePatch, deliverOptions, errorText, isCantDo, isHere, isOpen, isRequest,
   needsDeliverChoice, noticeStateWords, projectLabelOf, recipientFor, relAge, rowFrom, sessionName, startNotifyGesture, taskProjectName,
 } from "../../data/tasks-model.js";
 import { moveIndex, moveSearch } from "../../data/tasks-move.js";
@@ -318,7 +318,7 @@ function Meta({ items }) {
   return <span class="tk-row-meta">{items.map((m, i) => <>{i > 0 && <span class="tk-sep">·</span>}{m}</>)}</span>;
 }
 
-export function TaskRow({ task, selected, onSelect, phone, context, sessions, lookup, owners, newSince, completing, onCheck, completion, draggable, onDragStart, onDragEnd, dragging }) {
+export function TaskRow({ task, selected, onSelect, phone, context, sessions, lookup, owners, ownersLoaded, newSince, completing, onCheck, completion, draggable, onDragStart, onDragEnd, dragging }) {
   const meta = rowMeta({ task, context, sessions, lookup, owners });
   const age = relAge(task.status === "done" ? task.completed_at || task.updated_at : task.created_at);
   return (
@@ -339,7 +339,7 @@ export function TaskRow({ task, selected, onSelect, phone, context, sessions, lo
           title={task.title}
           status={task.status}
           cant={isCantDo(task)}
-          disabled={!canCheck(task)}
+          disabled={!canCheck(task) || handoffOrphan(task, owners, ownersLoaded)}
           onToggle={() => onCheck(task)}
           big={phone && context !== "session"}
         />
@@ -387,6 +387,7 @@ function GroupHead({ g, open, onToggle, dragging, onDrop }) {
 export function TaskGroups({ groups, selected, onSelect, phone, context, sessions, lookup, newSince, completingId, setCompletingId, onCheck, onAdd, onDropTask, doneOpen, setDoneOpen, draggable }) {
   const [dragging, setDragging] = useState(null);
   const owners = useStore((st) => ownersSlice(st).list);
+  const ownersLoaded = useStore((st) => ownersSlice(st).loaded);
   const visible = groups.filter((g) => g.rows.length || g.add);
   if (!visible.length) return null;
   return (
@@ -413,6 +414,7 @@ export function TaskGroups({ groups, selected, onSelect, phone, context, session
                 sessions={sessions}
                 lookup={lookup}
                 owners={owners}
+                ownersLoaded={ownersLoaded}
                 newSince={newSince}
                 completing={completingId === t.id}
                 completion={completingId === t.id && (

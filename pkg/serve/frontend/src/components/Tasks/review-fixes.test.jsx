@@ -162,3 +162,34 @@ test("R9: a read in flight when the POST confirms does not drop the comment", as
 
 const ORPHAN = { ...HANDOFF, handoff: { ...HANDOFF.handoff, to_owner_id: "own_gone", to_owner_name: "Gone" } };
 const LIVE_OWNERS = [{ id: "own_moa", name: "moa", session_id: "s-moa" }];
+
+test("R10: the ring of an orphaned handoff is disabled", () => {
+  const ring = (owners) => flat(expand(TaskRow({ task: ORPHAN, owners, ownersLoaded: true, lookup: () => null, onSelect() {}, onCheck() {} })))
+    .find((n) => n.type === "button" && /^Complete/.test(n.props["aria-label"] || ""));
+  expect(ring(LIVE_OWNERS).props.disabled).toBe(true);
+  const live = [...LIVE_OWNERS, { id: "own_gone", name: "Gone", session_id: "s-gone" }];
+  expect(ring(live).props.disabled).toBeFalsy();
+});
+
+test("R10: Alt+Enter on an orphaned handoff does not start a Done", () => {
+  setState({
+    tasks: { ...TASKS_INITIAL, details: { [ORPHAN.id]: ORPHAN } },
+    owners: { ...store.get().owners, list: LIVE_OWNERS, loaded: true },
+  });
+  const effects = [];
+  runtime.useEffect = (f) => effects.push(f);
+  const handlers = [];
+  const doc = globalThis.document;
+  globalThis.document = { addEventListener: (t, fn) => t === "keydown" && handlers.push(fn), removeEventListener() {}, querySelector: () => null, body: {} };
+  try {
+    TaskDetail({ taskId: ORPHAN.id, keys: true });
+    effects.forEach((f) => f());
+    expect(handlers.length).toBeGreaterThan(0);
+    const before = setters.flat().length;
+    handlers.forEach((h) => h({ key: "Enter", altKey: true, target: null, preventDefault() {}, defaultPrevented: false }));
+    expect(setters.flat().filter((v) => v === "done" || v === "completing")).toEqual([]);
+    expect(setters.flat().length).toBe(before);
+  } finally {
+    globalThis.document = doc;
+  }
+});

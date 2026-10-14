@@ -149,7 +149,8 @@ export function TaskDetail({
   const thread = useThread(taskId, !isNew && hasThread(task));
 
   const startDone = () => {
-    if (!task || !isOpen(task) || busy || awaitingPermission(task)) return;
+    // Nobody receives an orphaned handoff: it closes as Can't do, never Done.
+    if (!task || !isOpen(task) || busy || awaitingPermission(task) || handoffOrphan(task, owners, ownersLoaded)) return;
     if (handoff) { setMode("done"); return; }
     if (isRequest(task) || completeNotifies(task)) { setMode("completing"); return; }
     patchTask(task.id, completePatch(task)).catch((error) => fail("Could not complete the task", error));
