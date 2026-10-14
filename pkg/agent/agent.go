@@ -1673,7 +1673,7 @@ func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus str
 		}
 	}
 
-	result, compacted, sumModel, fallbackNotice, err := compactWithSessionFallback(
+	result, compacted, sumModel, fallbackNotice, abandoned, err := compactWithSessionFallback(
 		ctx, sumProvider, sumModel, streamOpts, fallbackNotice, provider, model, sessionOpts,
 		msgs, estimate.Tokens, settings.EffectiveWindow(model.MaxInput), *settings, focus,
 	)
@@ -1693,6 +1693,7 @@ func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus str
 		compacted[i].EnsureMsgID()
 	}
 	payload := compactionPayload(result, compacted, fallbackNotice, sumModel.Pricing)
+	abandoned.attach(payload)
 	if commit != nil {
 		originals := append([]core.AgentMessage(nil), msgs...)
 		if err := commit(ctx, core.CompactionCommit{Originals: originals, Payload: payload, Trims: a.trimsEmitted.Load(), CheckpointGeneration: checkpointGen}); err != nil {

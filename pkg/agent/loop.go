@@ -539,10 +539,14 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					cfg.stateMu.Unlock()
 					originals = append([]core.AgentMessage(nil), cfg.state.Messages...)
 				}
-				result, compacted, sumModel, fallbackNotice, err := compactWithSessionFallback(
+				result, compacted, sumModel, fallbackNotice, abandoned, err := compactWithSessionFallback(
 					ctx, sumProvider, sumModel, compactOpts, fallbackNotice, cfg.provider, cfg.model, sessionOpts,
 					cfg.state.Messages, estimate.Tokens, window, *compactionSettings, "",
 				)
+				// Spent whether or not the compaction is kept.
+				if abandoned != nil {
+					addRunCostAt(cfg, abandoned.model.Pricing, abandoned.usage)
+				}
 				if err != nil {
 					// Non-fatal: log and continue with full context.
 					emitLifecycle(cfg, core.AgentEvent{
@@ -563,6 +567,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 						compacted[i].EnsureMsgID()
 					}
 					payload := compactionPayload(result, compacted, fallbackNotice, sumModel.Pricing)
+					abandoned.attach(payload)
 					payload.Ephemeral = cfg.ephemeralCompaction
 					// Account for compaction LLM call cost, at the rates of
 					// the model that wrote the summary. It was paid whether

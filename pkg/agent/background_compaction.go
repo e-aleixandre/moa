@@ -295,7 +295,7 @@ func (a *Agent) startBackgroundCompaction(ctx context.Context, cfg *loopConfig, 
 
 func (a *Agent) runBackgroundCompaction(job *backgroundCompactionJob, provider core.Provider, model core.Model, opts core.StreamOptions, sessProvider core.Provider, sessModel core.Model, sessOpts core.StreamOptions, estimate, window int, settings core.CompactionSettings, notice, checkpoint string, checkpointGen *uint64, consume func()) {
 	defer a.bgWG.Done()
-	result, compacted, model, notice, err := compactWithSessionFallback(job.ctx, provider, model, opts, notice, sessProvider, sessModel, sessOpts, job.prefix, estimate, window, settings, "")
+	result, compacted, model, notice, abandoned, err := compactWithSessionFallback(job.ctx, provider, model, opts, notice, sessProvider, sessModel, sessOpts, job.prefix, estimate, window, settings, "")
 	// Whatever the outcome, a provider-reported usage was spent. An outcome
 	// with an error is never adoptable, even if it carries that usage.
 	var usage *core.Usage
@@ -316,6 +316,12 @@ func (a *Agent) runBackgroundCompaction(job *backgroundCompactionJob, provider c
 		payload = compactionPayload(result, compacted, notice, model.Pricing)
 	}
 
+	// A fallback's abandoned first attempt was spent at its own model's rates.
+	if abandoned != nil {
+		u := *abandoned.usage
+		a.emitter.Emit(core.AgentEvent{Type: core.AgentEventCompactionUsage, BackgroundJobID: job.id, Usage: &u, Pricing: abandoned.model.Pricing, Origin: job.origin})
+	}
+
 	// Known usage is settled once, whatever becomes of the result. Emitted
 	// before the result is published, so a run waiting on it sees its cost
 	// accounted ahead of its own end.
@@ -333,6 +339,11 @@ func (a *Agent) runBackgroundCompaction(job *backgroundCompactionJob, provider c
 	// the session settles the cost through the usage event alone.
 	if usage != nil && model.Pricing != nil && a.bgOwner == job.owner {
 		if usd := model.Pricing.Cost(*usage); usd > 0 {
+			a.bgDebits = append(a.bgDebits, backgroundDebit{owner: job.owner, usd: usd})
+		}
+	}
+	if abandoned != nil && abandoned.model.Pricing != nil && a.bgOwner == job.owner {
+		if usd := abandoned.model.Pricing.Cost(*abandoned.usage); usd > 0 {
 			a.bgDebits = append(a.bgDebits, backgroundDebit{owner: job.owner, usd: usd})
 		}
 	}

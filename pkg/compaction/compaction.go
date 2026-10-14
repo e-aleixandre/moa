@@ -7,6 +7,7 @@ package compaction
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -509,14 +510,28 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 
 	var text strings.Builder
 	var finalMsg *core.Message
+	// Usage already reported by a stream that later fails (Anthropic announces
+	// the input tokens at message start; OpenAI's empty-response error carries
+	// them) was spent all the same.
+	var startUsage *core.Usage
 	for event := range ch {
 		switch event.Type {
+		case core.ProviderEventStart:
+			if event.Partial != nil && event.Partial.Usage != nil {
+				u := *event.Partial.Usage
+				startUsage = &u
+			}
 		case core.ProviderEventTextDelta:
 			text.WriteString(event.Delta)
 		case core.ProviderEventDone:
 			finalMsg = event.Message
 		case core.ProviderEventError:
-			return "", nil, fmt.Errorf("summarization: %w", event.Error)
+			spent := startUsage
+			var empty *core.EmptyResponseError
+			if errors.As(event.Error, &empty) && empty.Usage != nil {
+				spent = empty.Usage
+			}
+			return "", spent, fmt.Errorf("summarization: %w", event.Error)
 		}
 	}
 

@@ -77,6 +77,12 @@ func TestCompact_TemporaryProviderErrorFallsBackToSessionModel(t *testing.T) {
 		{"http 429", errors.New("openai: HTTP 429: slow down"), false, "rate limited"},
 		{"network", errors.New("read tcp: connection reset by peer"), true, "network error"},
 		{"timeout", fmt.Errorf("post: %w", context.DeadlineExceeded), false, "network error"},
+		{"idle timeout", errors.New("read: stream idle timeout: no data received"), true, "network error"},
+		{"conn refused", errors.New("dial tcp 127.0.0.1:443: connect: connection refused"), false, "network error"},
+		{"dns", errors.New("dial tcp: lookup api.openai.com: no such host"), false, "network error"},
+		{"anthropic api_error", errors.New("anthropic api_error: Internal server error"), true, "server error"},
+		{"openai normalized", errors.New("openai: Internal server error"), true, "server error"},
+		{"sanitized after retries", errors.New("xai: request failed after retries"), false, "provider error"},
 		{"quota", fmt.Errorf("summarization: %w", &core.QuotaExceededError{Provider: "openai"}), true, "usage limit reached"},
 	}
 	for _, tc := range cases {
@@ -119,6 +125,8 @@ func TestCompact_NonTemporaryErrorDoesNotFallBack(t *testing.T) {
 		{"400", errors.New("openai: HTTP 400: invalid request")},
 		{"context too long", errors.New("openai: HTTP 400: context_length_exceeded, maximum context length")},
 		{"refusal", errors.New("anthropic: refusal: stop_reason refusal")},
+		{"403", errors.New("openai: access denied (HTTP 403)")},
+		{"canceled", fmt.Errorf("summarization: %w", context.Canceled)},
 		{"auth typed", &core.ProviderAuthError{Provider: "openai", Status: 401}},
 	}
 	for _, tc := range cases {
@@ -144,7 +152,7 @@ func TestCompact_NoRetryWhenConfiguredModelIsTheSessionModel(t *testing.T) {
 	session := &failingProvider{err: errors.New("openai: HTTP 503: down"), event: true}
 	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 100, KeepRecent: 200}
 	model := core.Model{ID: "same", MaxInput: 1000}
-	_, _, _, _, err := compactWithSessionFallback(
+	_, _, _, _, _, err := compactWithSessionFallback(
 		context.Background(), session, model, core.StreamOptions{}, "",
 		session, model, core.StreamOptions{},
 		longHistory(), 900, 1000, settings, "")
@@ -160,7 +168,7 @@ func TestCompact_FallbackFailureSurfacesTheRetryError(t *testing.T) {
 	session := &failingProvider{err: errors.New("openai: HTTP 401: nope"), event: true}
 	bad := &failingProvider{err: errors.New("openai: HTTP 503: down"), event: true}
 	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 100, KeepRecent: 200}
-	_, _, _, _, err := compactWithSessionFallback(
+	_, _, _, _, _, err := compactWithSessionFallback(
 		context.Background(), bad, core.Model{ID: "sol", MaxInput: 1000}, core.StreamOptions{}, "",
 		session, core.Model{ID: "sess", MaxInput: 1000}, core.StreamOptions{},
 		longHistory(), 900, 1000, settings, "")
@@ -235,7 +243,7 @@ func TestAutoCompact_TemporaryErrorFallsBackToSessionModel(t *testing.T) {
 // notice travels with the adopted compaction.
 func TestBackgroundCompaction_TemporaryErrorFallsBackToSessionModel(t *testing.T) {
 	f := newBGT(t, nil)
-	bad := &failingProvider{err: errors.New("openai: HTTP 503: down"), event: true}
+	bad := &usageThenErrorProvider{usage: &core.Usage{Input: 1000}, err: errors.New("openai: HTTP 503: down")}
 	f.ag.mu.Lock()
 	f.ag.config.CompactSummarizer = func(m core.Model) (core.Provider, core.Model, string) {
 		return bad, core.Model{ID: "sol", Name: "Sol", MaxInput: 100000, Pricing: &core.Pricing{Input: 99}}, ""
@@ -246,8 +254,10 @@ func TestBackgroundCompaction_TemporaryErrorFallsBackToSessionModel(t *testing.T
 	}
 	f.ag.WaitBackgroundCompaction()
 	f.ag.Drain(bgtWait)
-	if bad.count() != 1 {
-		t.Fatalf("configured summarizer tried %d times, want 1", bad.count())
+	// The session provider of this fixture reports no usage: the one receipt
+	// is the abandoned attempt's.
+	if got := f.count(isUsage); got != 1 {
+		t.Fatalf("usage receipts = %d, want 1 (the abandoned attempt)", got)
 	}
 	if f.sum.calls.Load() != 0 {
 		t.Fatal("fixture summarizer must not be used")
@@ -255,4 +265,52 @@ func TestBackgroundCompaction_TemporaryErrorFallsBackToSessionModel(t *testing.T
 	if !hasSummary(f.ag.Messages()) {
 		t.Fatalf("the session model did not write the summary: %v", f.ag.Messages())
 	}
+}
+
+// Usage reported by the abandoned attempt is billed at its own model's rates.
+func TestCompact_AbandonedAttemptUsageIsReported(t *testing.T) {
+	bad := &usageThenErrorProvider{usage: &core.Usage{Input: 1000, Output: 10}, err: errors.New("anthropic api_error: overloaded_error")}
+	session := &recordingProvider{text: "## Goal\nsession summary"}
+	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 100, KeepRecent: 200}
+	sumModel := core.Model{ID: "sol", Name: "Sol", MaxInput: 1000, Pricing: &core.Pricing{Input: 99}}
+	sessModel := core.Model{ID: "sess", Name: "Opus 5.5", MaxInput: 1000, Pricing: &core.Pricing{Input: 1}}
+	_, _, used, _, ab, err := compactWithSessionFallback(
+		context.Background(), bad, sumModel, core.StreamOptions{}, "",
+		session, sessModel, core.StreamOptions{},
+		longHistory(), 900, 1000, settings, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used.ID != "sess" {
+		t.Errorf("used %s", used.ID)
+	}
+	if ab == nil || ab.usage == nil || ab.usage.Input != 1000 || ab.model.Pricing.Input != 99 {
+		t.Fatalf("abandoned attempt = %+v, want 1000 input tokens at the summarizer's rates", ab)
+	}
+}
+
+func TestCompact_EmptyResponseUsageIsReported(t *testing.T) {
+	bad := &failingProvider{event: true, err: &core.EmptyResponseError{Provider: "openai", Usage: &core.Usage{Input: 500}}}
+	session := &recordingProvider{text: "## Goal\nsession summary"}
+	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 100, KeepRecent: 200}
+	_, _, _, _, ab, err := compactWithSessionFallback(
+		context.Background(), bad, core.Model{ID: "sol", MaxInput: 1000, Pricing: &core.Pricing{Input: 99}}, core.StreamOptions{}, "",
+		session, core.Model{ID: "sess", MaxInput: 1000}, core.StreamOptions{},
+		longHistory(), 900, 1000, settings, "")
+	if err != nil || ab == nil || ab.usage.Input != 500 {
+		t.Fatalf("err=%v abandoned=%+v", err, ab)
+	}
+}
+
+type usageThenErrorProvider struct {
+	usage *core.Usage
+	err   error
+}
+
+func (p *usageThenErrorProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	ch := make(chan core.AssistantEvent, 2)
+	ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &core.Message{Role: "assistant", Usage: p.usage}}
+	ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: p.err}
+	close(ch)
+	return ch, nil
 }
