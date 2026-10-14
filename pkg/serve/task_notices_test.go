@@ -216,8 +216,14 @@ func TestNoticeToWorkingSessionSteersOnce(t *testing.T) {
 
 // An owner is a session like any other for events: a working owner is steered.
 func TestNoticeToWorkingOwnerSteers(t *testing.T) {
-	prov := newMockProvider(delayedResponseHandler(800*time.Millisecond, "working"))
+	// The provider holds the run until the notice is queued, so the owner is
+	// still working when the dispatcher admits it.
+	started, release := make(chan struct{}, 1), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseProvider := func() { releaseOnce.Do(func() { close(release) }) }
+	prov := newMockProvider(blockingHandler(started, release, "working"))
 	srv, mgr := newNoticeTestServer(t, prov)
+	t.Cleanup(releaseProvider)
 	info, err := mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Winerim"})
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +239,10 @@ func TestNoticeToWorkingOwnerSteers(t *testing.T) {
 	resp := mustAPI(t, srv, "POST", "/api/tasks", fmt.Sprintf(`{"title":"review the plan","place":"agent","assignee_session_id":%q}`, own.ID), http.StatusCreated)
 	created := decode[tasks.Record](t, resp)
 
-	n := waitNoticeState(t, mgr, created.ID, tasks.NoticeDelivered)
+	n := waitNoticeState(t, mgr, created.ID, tasks.NoticeSent)
+	pollUntil(t, 5*time.Second, "notice queued before releasing the provider", func() bool { return noticeQueued(own, n) })
+	releaseProvider()
+	n = waitNoticeState(t, mgr, created.ID, tasks.NoticeDelivered)
 	msgs := noticeMessages(own.History(), n.ID)
 	if n.Kind != tasks.NoticeAssigned || len(msgs) != 1 || msgs[0].Custom["steer"] != true {
 		t.Fatalf("owner notice = %+v, messages %+v", n, msgs)

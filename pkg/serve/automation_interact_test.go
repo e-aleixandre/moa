@@ -41,16 +41,23 @@ func startAutomationRun(t *testing.T, mgr *Manager, prompt string) string {
 	return id
 }
 
-// unloadSession drops a session from memory the way a restart would, leaving
-// only the persisted session on disk.
+// unloadSession leaves only the persisted session on disk, as a restart would.
+// It waits for the run to settle and closes the session through the normal
+// teardown so no runtime or bus outlives the fixture and writes the transcript.
 func unloadSession(t *testing.T, mgr *Manager, id string) {
 	t.Helper()
-	if _, ok := mgr.Get(id); !ok {
+	sess, ok := mgr.Get(id)
+	if !ok {
 		t.Fatalf("session %s is not loaded", id)
 	}
-	mgr.mu.Lock()
-	delete(mgr.sessions, id)
-	mgr.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if !sess.runtime.WaitSettled(ctx) {
+		t.Fatal("session did not settle before fixture unload")
+	}
+	if err := mgr.CloseSession(id); err != nil {
+		t.Fatalf("unload session: %v", err)
+	}
 }
 
 // pendingAskCatcher records the first ask request published on a session's
