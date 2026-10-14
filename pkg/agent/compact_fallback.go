@@ -29,6 +29,10 @@ func unrecoverableForOtherModel(err error) bool {
 	if errors.As(err, &authErr) {
 		return true
 	}
+	// A typed usage limit falls back whatever its provider-written message says.
+	if _, ok := core.AsQuotaExceeded(err); ok {
+		return false
+	}
 	s := strings.ToLower(err.Error())
 	// A 4xx is the request's fault, except 429 which is the server's load.
 	for _, code := range []string{"http 400", "http 401", "http 403", "http 404", "http 405", "http 409", "http 413", "http 422"} {

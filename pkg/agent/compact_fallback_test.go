@@ -83,6 +83,7 @@ func TestCompact_TemporaryProviderErrorFallsBackToSessionModel(t *testing.T) {
 		{"anthropic api_error", errors.New("anthropic api_error: Internal server error"), true, "server error"},
 		{"openai normalized", errors.New("openai: Internal server error"), true, "server error"},
 		{"sanitized after retries", errors.New("xai: request failed after retries"), false, "provider error"},
+		{"quota with unrecoverable-looking text", fmt.Errorf("summarization: %w", &core.QuotaExceededError{Provider: "openai", Message: "invalid_request: account usage limit refusal HTTP 400"}), true, "usage limit reached"},
 		{"quota", fmt.Errorf("summarization: %w", &core.QuotaExceededError{Provider: "openai"}), true, "usage limit reached"},
 	}
 	for _, tc := range cases {
