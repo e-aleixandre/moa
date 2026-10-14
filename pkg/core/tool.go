@@ -77,6 +77,15 @@ func ErrorResult(msg string) Result {
 	return Result{Content: []Content{TextContent("Error: " + msg)}, IsError: true}
 }
 
+// RejectedResult is an ErrorResult for a call the human refused at a prompt
+// the tool itself raised. The marker lets the loop tell a refusal, which is
+// the user's answer, from a failure the model should change course on.
+func RejectedResult(msg string) Result {
+	r := ErrorResult(msg)
+	r.Custom = map[string]any{"rejected": true}
+	return r
+}
+
 const (
 	// ToolCallDecisionKindPermission marks user-facing permission denials.
 	ToolCallDecisionKindPermission = "permission"

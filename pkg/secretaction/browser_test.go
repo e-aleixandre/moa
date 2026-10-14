@@ -227,6 +227,9 @@ func TestBrowserFillDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := <-done
+	if !res.IsError || res.Custom["rejected"] != true {
+		t.Errorf("human denial must carry structured rejection: %+v", res)
+	}
 	if !strings.Contains(strings.ToLower(resultText(res)), "denied") {
 		t.Fatalf("deny result = %s", resultText(res))
 	}
@@ -234,5 +237,20 @@ func TestBrowserFillDenied(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.typed) != 0 {
 		t.Fatal("typed after deny")
+	}
+}
+
+func TestBrowserFillCancellationIsNotDenial(t *testing.T) {
+	reg, broker, f, _ := newBrowserFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	broker.SetHooks(func(Request) { cancel() }, nil)
+	tool, _ := reg.Get(BrowserFillToolName)
+	res, err := tool.Execute(ctx, loginParams(false), nil)
+	if err != nil || !res.IsError || res.Custom["rejected"] == true || resultText(res) != "Error: cancelled" {
+		t.Errorf("cancellation is not human denial: result=%+v error=%v", res, err)
+	}
+	if len(f.typed) != 0 {
+		t.Fatal("typed after cancellation")
 	}
 }

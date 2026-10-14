@@ -122,7 +122,7 @@ func NewRunWithSecret(cfg ToolConfig, broker *secretaction.Broker) core.Tool {
 				return core.ErrorResult("cancelled"), nil
 			}
 			if !ans.Allow {
-				return core.ErrorResult("The user denied the request; the command did not run."), nil
+				return core.RejectedResult("The user denied the request; the command did not run."), nil
 			}
 			for i := range prompts {
 				prompts[i].value = ans.Values[i]

@@ -20,7 +20,7 @@ type AgentEvent struct {
 	Args           map[string]any     // tool_execution_start
 	Result         *Result            // tool_execution_end/update
 	IsError        bool               // tool_execution_end
-	Rejected       bool               // tool_execution_end (true only for permission denial)
+	Rejected       bool               // tool_execution_end (true for human permission denial, incl. tool-raised prompts)
 	Messages       []AgentMessage     // agent_end (full conversation)
 	Compaction     *CompactionPayload // compaction_end
 	Trim           *TrimPayload       // context_trimmed

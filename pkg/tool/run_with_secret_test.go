@@ -89,6 +89,32 @@ func passwordField() map[string]any {
 	return map[string]any{"label": "Keychain password", "kind": "password", "alias": "agents-keychain"}
 }
 
+func TestRunWithSecretDenialAndCancellationClassification(t *testing.T) {
+	for _, denied := range []bool{true, false} {
+		t.Run(strconv.FormatBool(denied), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			broker := secretaction.NewBroker("synthetic-classification")
+			broker.SetHooks(func(req secretaction.Request) {
+				if !denied {
+					cancel()
+				} else if err := broker.Resolve(req.ID, false, nil); err != nil {
+					t.Errorf("resolve: %v", err)
+				}
+			}, nil)
+			res, err := NewRunWithSecret(ToolConfig{WorkspaceRoot: t.TempDir()}, broker).Execute(ctx,
+				map[string]any{"command": "exit 99", "fields": []any{passwordField()}}, nil)
+			want := "cancelled"
+			if denied {
+				want = "The user denied the request; the command did not run."
+			}
+			if err != nil || !res.IsError || secretText(res) != "Error: "+want || (res.Custom["rejected"] == true) != denied {
+				t.Errorf("denial=%v result=%+v error=%v", denied, res, err)
+			}
+		})
+	}
+}
+
 func assertNoLeak(t *testing.T, run secretRun, values ...string) {
 	t.Helper()
 	all := secretText(run.result) + "\n" + strings.Join(run.updates, "")

@@ -240,6 +240,9 @@ func TestAskUser_CancelledBeforeSend(t *testing.T) {
 	if !result.IsError {
 		t.Fatal("expected error for cancelled context")
 	}
+	if result.Custom["rejected"] == true || result.Content[0].Text != "Error: cancelled" {
+		t.Errorf("Stop before send must not become a denial: %+v", result)
+	}
 }
 
 func TestAskUser_CancelledWhileWaiting(t *testing.T) {
@@ -262,6 +265,30 @@ func TestAskUser_CancelledWhileWaiting(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Fatal("expected error for cancelled context")
+	}
+	if result.Custom["rejected"] == true || !strings.Contains(result.Content[0].Text, "the user stopped this run") {
+		t.Errorf("Stop while waiting must retain its distinct result: %+v", result)
+	}
+}
+
+func TestAskUser_NegativeAndSkipAnswersAreNotDenials(t *testing.T) {
+	for _, answer := range []string{"No", "(skipped)", "The user denied the request"} {
+		t.Run(answer, func(t *testing.T) {
+			bridge := NewBridge()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			go func() {
+				select {
+				case prompt := <-bridge.Prompts():
+					prompt.Response <- Reply{Answers: []string{answer}, Responder: Responder{Kind: ResponderUser}}
+				case <-ctx.Done():
+				}
+			}()
+			res, err := NewTool(bridge).Execute(ctx, map[string]any{"questions": []any{map[string]any{"question": "Proceed?"}}}, nil)
+			if err != nil || res.IsError || res.Custom["rejected"] == true || res.Content[0].Text != answer {
+				t.Errorf("ordinary answer must not be parsed as denial: result=%+v error=%v", res, err)
+			}
+		})
 	}
 }
 

@@ -151,7 +151,7 @@ func newBrowserFillTool(reg *core.Registry, broker *Broker, typeName, evalName s
 				return core.ErrorResult("cancelled"), nil
 			}
 			if !ans.Allow {
-				return core.ErrorResult("The user denied the request; nothing was filled."), nil
+				return core.RejectedResult("The user denied the request; nothing was filled."), nil
 			}
 
 			// The page may have navigated while the card waited.

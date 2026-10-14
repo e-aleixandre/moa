@@ -1093,6 +1093,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// consisting only of exempt status/wait tools (polling background async
 		// work) are skipped entirely so they neither trip nor reset the streak.
 		repeated := false
+		// A batch the human fully refused is not the model repeating itself;
+		// the streak is restored after the batch when that turns out to be it.
+		prevSig, prevCount := lastToolSig, repeatCount
 		if nonExempt := filterDoomLoopCalls(toolCalls); len(nonExempt) > 0 {
 			sig := toolCallSignature(nonExempt)
 			if sig == lastToolSig {
@@ -1134,7 +1137,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 
 		// Execute tool calls concurrently.
-		claimed := executeTools(ctx, cfg, toolCalls, repeated)
+		claimed, allRejected := executeTools(ctx, cfg, toolCalls, repeated)
+		if allRejected {
+			lastToolSig, repeatCount = prevSig, prevCount
+		}
 		if cfg.steerMu != nil {
 			cfg.steerMu.Lock()
 		}
@@ -1476,6 +1482,7 @@ type toolExecSlot struct {
 	result             core.Result // populated after execution
 	isError            bool
 	validationError    bool // rejected by ValidateToolCall
+	humanRejected      bool // the human refused it, at the permission prompt or in the tool's own
 	executed           bool // Execute was reached after admitToolStart
 }
 
@@ -1560,8 +1567,9 @@ func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot,
 //
 // It returns the steer items the batch claimed when it withdrew unstarted
 // calls. The caller owns them: they are no longer in the live queue and must
-// reach history, even when the run was stopped meanwhile.
-func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content, repeated bool) []core.SteerItem {
+// reach history, even when the run was stopped meanwhile. It also reports
+// whether every non-exempt call (and at least one) was refused by the human.
+func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content, repeated bool) ([]core.SteerItem, bool) {
 	slots := make([]toolExecSlot, len(toolCalls))
 	batch := &toolBatch{}
 	// repeated arms a single warning for the batch's first eligible error.
@@ -1573,6 +1581,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		slots[i].tc = tc
 		preflightToolCall(ctx, cfg, &slots[i], i)
 		if !slots[i].approved {
+			slots[i].humanRejected = slots[i].rejectKind == rejectKindPermission
 			endRejectedToolCall(cfg, &slots[i], &pendingWarning)
 		}
 	}
@@ -1699,7 +1708,17 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 	for ; pending > 0; pending-- {
 		i := <-finished
 		resultWithFeedback := appendPermissionFeedback(slots[i].result, slots[i].permissionFeedback)
+		// Read before the hooks, which may replace Custom.
+		slots[i].humanRejected = resultWithFeedback.Custom["rejected"] == true
 		result := cfg.hooks.FireToolResult(ctx, slots[i].tc.ToolName, resultWithFeedback, slots[i].isError)
+		if slots[i].humanRejected {
+			custom := make(map[string]any, len(result.Custom)+1)
+			for k, v := range result.Custom {
+				custom[k] = v
+			}
+			custom["rejected"] = true
+			result.Custom = custom
+		}
 		result = decorateRepeatedError(&pendingWarning, &slots[i], result)
 		slots[i].result, slots[i].isError = result, result.IsError
 		cfg.emitter.Emit(core.AgentEvent{
@@ -1708,14 +1727,21 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			ToolName:   slots[i].tc.ToolName,
 			Result:     &result,
 			IsError:    result.IsError,
-			Rejected:   false,
+			Rejected:   slots[i].humanRejected,
 		})
 	}
+	nonExempt, rejectedCount := 0, 0
 	for i := range slots {
-		rejected := !slots[i].approved && slots[i].rejectKind == rejectKindPermission
-		cfg.appendState(toolResultMessage(slots[i].tc, slots[i].result, slots[i].isError, rejected))
+		cfg.appendState(toolResultMessage(slots[i].tc, slots[i].result, slots[i].isError, slots[i].humanRejected))
+		if doomLoopExemptTools[slots[i].tc.ToolName] {
+			continue
+		}
+		nonExempt++
+		if slots[i].humanRejected {
+			rejectedCount++
+		}
 	}
-	return batch.steers
+	return batch.steers, nonExempt > 0 && nonExempt == rejectedCount
 }
 
 const repeatedToolErrorWarning = "\n\nRepeated tool error.\nChange the arguments or use a different\napproach; the next identical tool-call\nbatch will stop this run."
@@ -1724,7 +1750,7 @@ const repeatedToolErrorWarning = "\n\nRepeated tool error.\nChange the arguments
 // error result of a non-exempt call that failed validation or actually ran.
 // Content is cloned so the tool's own result is left untouched.
 func decorateRepeatedError(pending *bool, slot *toolExecSlot, result core.Result) core.Result {
-	if !*pending || doomLoopExemptTools[slot.tc.ToolName] || !result.IsError || (!slot.validationError && !slot.executed) {
+	if !*pending || doomLoopExemptTools[slot.tc.ToolName] || !result.IsError || slot.humanRejected || (!slot.validationError && !slot.executed) {
 		return result
 	}
 	*pending = false

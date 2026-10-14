@@ -366,7 +366,12 @@ func TestLoop_RepeatedToolErrorWarning_NoWarn(t *testing.T) {
 			}
 			var handlers []func(core.Request) (<-chan core.AssistantEvent, error)
 			var resultIDs []string
-			for i := range 3 {
+			batches := 3
+			humanDenied := tc.decision != nil && !tc.hook && tc.decision.Kind != core.ToolCallDecisionKindPolicy
+			if humanDenied {
+				batches = 4
+			}
+			for i := range batches {
 				id := fmt.Sprintf("call-%d", i+1)
 				calls := []core.Content{core.ToolCallContent(id, tc.toolName, map[string]any{})}
 				if tc.skipped {
@@ -407,11 +412,11 @@ func TestLoop_RepeatedToolErrorWarning_NoWarn(t *testing.T) {
 			_, err = ag.Run(context.Background(), "repeat the call")
 			wantExecutions, wantRequests := int32(2), 3
 			endIDs := []string{"call-1", "call-2"}
-			if tc.exempt {
-				wantExecutions, wantRequests = 3, 4
-				endIDs = append(endIDs, "call-3")
+			if tc.exempt || humanDenied {
+				wantExecutions, wantRequests = int32(batches), batches+1
+				endIDs = append([]string(nil), resultIDs...)
 				if err != nil {
-					t.Errorf("exempt polling failed: %v", err)
+					t.Errorf("exempt/denied calls must not count toward doom loop: %v", err)
 				}
 			} else if !errors.Is(err, ErrDoomLoop) {
 				t.Errorf("non-exempt repetition must still stop: %v", err)
