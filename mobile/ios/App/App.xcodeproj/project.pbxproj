@@ -38,6 +38,8 @@
 		C00000000000000000000001 /* SavedSecretsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* SavedSecretsModel.swift */; };
 		C00000000000000000000002 /* SavedSecretsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000002 /* SavedSecretsStore.swift */; };
 		C00000000000000000000003 /* SavedSecretsBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000003 /* SavedSecretsBridge.swift */; };
+		C00000000000000000000006 /* SavedSecretsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000002 /* SavedSecretsStore.swift */; };
+		C00000000000000000000007 /* SavedSecretsStoreKeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000007 /* SavedSecretsStoreKeychainTests.swift */; };
 		C00000000000000000000004 /* SavedSecretsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* SavedSecretsModel.swift */; };
 		C00000000000000000000005 /* SavedSecretsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000004 /* SavedSecretsModelTests.swift */; };
 		13EDA98D3F2E938E41E7E279 /* ShareBodyWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6D4BE125E99C1D9ED870A6 /* ShareBodyWriterTests.swift */; };
@@ -132,6 +134,7 @@
 		C10000000000000000000001 /* SavedSecretsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsModel.swift; sourceTree = "<group>"; };
 		C10000000000000000000002 /* SavedSecretsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsStore.swift; sourceTree = "<group>"; };
 		C10000000000000000000003 /* SavedSecretsBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsBridge.swift; sourceTree = "<group>"; };
+		C10000000000000000000007 /* SavedSecretsStoreKeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsStoreKeychainTests.swift; sourceTree = "<group>"; };
 		C10000000000000000000004 /* SavedSecretsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedSecretsModelTests.swift; sourceTree = "<group>"; };
 		039A9BF7103BA0E1B896C1A7 /* ShareClientTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareClientTests.swift; sourceTree = "<group>"; };
 		0EECAF3668F257616C41EFCE /* ShareLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareLogicTests.swift; sourceTree = "<group>"; };
@@ -276,6 +279,7 @@
 			children = (
 				B1000000000000000000000A /* PushEnvelopeVectorsTests.swift */,
 				C10000000000000000000004 /* SavedSecretsModelTests.swift */,
+				C10000000000000000000007 /* SavedSecretsStoreKeychainTests.swift */,
 				0EECAF3668F257616C41EFCE /* ShareLogicTests.swift */,
 				BA6D4BE125E99C1D9ED870A6 /* ShareBodyWriterTests.swift */,
 				039A9BF7103BA0E1B896C1A7 /* ShareClientTests.swift */,
@@ -542,7 +546,9 @@
 				B00000000000000000000009 /* PushEnvelope.swift in Sources */,
 				B0000000000000000000000A /* PushEnvelopeVectorsTests.swift in Sources */,
 				C00000000000000000000004 /* SavedSecretsModel.swift in Sources */,
+				C00000000000000000000006 /* SavedSecretsStore.swift in Sources */,
 				C00000000000000000000005 /* SavedSecretsModelTests.swift in Sources */,
+				C00000000000000000000007 /* SavedSecretsStoreKeychainTests.swift in Sources */,
 				C122D9E488203AB248FB037F /* KeychainGroups.swift in Sources */,
 				9FED83D042197EC31BFFC98E /* ShareLogic.swift in Sources */,
 				AF7FEE3A43CD9083174EC13B /* ShareBodyWriter.swift in Sources */,
