@@ -239,11 +239,11 @@ export function StatusStrip({
             </>
           );
           return onOpenTasks ? (
-            <button type="button" class={cls} data-alarms={alarms} data-owner={owner ? "1" : undefined} onClick={onOpenTasks} aria-label={`Tasks: ${tasks.text} — open this session's tasks`} title={`Tasks: ${tasks.text}`}>
+            <button type="button" class={cls} data-alarms={alarms} data-owner={owner ? "1" : undefined} data-wide={(tasks.short || tasks.text).length > 3 ? "1" : undefined} onClick={onOpenTasks} aria-label={`Tasks: ${tasks.text} — open this session's tasks`} title={`Tasks: ${tasks.text}`}>
               {body}
             </button>
           ) : (
-            <span class={cls} data-alarms={alarms} data-owner={owner ? "1" : undefined} title={`Tasks: ${tasks.text}`}>{body}</span>
+            <span class={cls} data-alarms={alarms} data-owner={owner ? "1" : undefined} data-wide={(tasks.short || tasks.text).length > 3 ? "1" : undefined} title={`Tasks: ${tasks.text}`}>{body}</span>
           );
         })()}
 

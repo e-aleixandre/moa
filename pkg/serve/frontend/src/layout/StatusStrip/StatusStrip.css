@@ -191,6 +191,8 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
      the line (api, a failing MCP, extra) the chip no longer fits beside the
      ring, and an alarm you cannot see is worse than a checklist you can. */
   .zl-st-tasks:is([data-alarms="2"], [data-alarms="3"]) { display: none; }
+  /* A long count ("12/20") costs what a second alarm does beside the face. */
+  .zl-st-tasks[data-wide][data-owner]:not([data-alarms="0"]) { display: none; }
 }
 @container (max-width: 320px) {
   /* The floor. Below this the ring drops its percent and keeps the arc: the
@@ -200,7 +202,7 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
   .zl-st-ctx .zl-data { display: none; }
   .zl-st { padding: 0 4px; gap: 4px; }
   /* At the floor the owner's face takes the room one alarm would. */
-  .zl-st-tasks[data-owner]:not([data-alarms="0"]) { display: none; }
+  .zl-st-tasks:is([data-owner], [data-wide]):not([data-alarms="0"]) { display: none; }
 }
 /* The events group never squeezes its children: if room runs out the line
    gives, not the legibility of a warning. */
