@@ -345,58 +345,74 @@ func TestIsolatedScriptForwardsSignalsToTheCommand(t *testing.T) {
 		code int
 	}{{syscall.SIGTERM, 143}, {syscall.SIGINT, 130}} {
 		t.Run(tc.sig.String(), func(t *testing.T) {
-			cmd := exec.Command(filepath.Join(moduleRoot(t), "scripts", "test-isolated.sh"), "sleep", "60")
+			// The command announces its PID and HOME itself, so readiness does
+			// not depend on reading another process's /proc entries mid-start.
+			ready := filepath.Join(t.TempDir(), "ready")
+			cmd := exec.Command(filepath.Join(moduleRoot(t), "scripts", "test-isolated.sh"),
+				"sh", "-c", `printf "%s\n%s\n" "$$" "$HOME" > "$1"; exec sleep 60`, "sh", ready)
 			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GOPATH=/x", "GOCACHE=/x"}
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
 			wrapper := cmd.Process.Pid
+			done := make(chan error, 1) // cmd.Wait runs exactly once, here
+			go func() { done <- cmd.Wait() }()
+			waited := false
 			var child int
 			var sandbox string
 			defer func() {
-				_ = syscall.Kill(-wrapper, syscall.SIGKILL) // no leftovers if the test fails
+				// Only PIDs and groups recorded by this test.
+				_ = syscall.Kill(-wrapper, syscall.SIGKILL)
 				if child != 0 {
 					// The command runs in its own process group.
 					_ = syscall.Kill(-child, syscall.SIGKILL)
 					_ = syscall.Kill(child, syscall.SIGKILL)
 				}
-				_ = cmd.Wait()
+				if !waited {
+					<-done
+				}
 				if sandbox != "" {
 					_ = os.RemoveAll(sandbox)
 				}
 			}()
-			deadline := time.Now().Add(5 * time.Second)
-			for child == 0 && time.Now().Before(deadline) {
-				kids, _ := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", wrapper, wrapper))
-				// mktemp and mkdir are transient children; wait for the sleep.
-				if f := strings.Fields(string(kids)); len(f) == 1 {
-					comm, _ := os.ReadFile(fmt.Sprintf("/proc/%s/comm", f[0]))
-					if strings.TrimSpace(string(comm)) != "sleep" {
-						time.Sleep(10 * time.Millisecond)
-						continue
-					}
-					child, _ = strconv.Atoi(f[0])
-					if env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", child)); err == nil {
-						for _, kv := range strings.Split(string(env), "\x00") {
-							if v, ok := strings.CutPrefix(kv, "HOME="); ok {
-								sandbox = filepath.Dir(v)
-							}
-						}
+			// Generous: under CPU load the wrapper can be slow to reach the command.
+			deadline := time.Now().Add(30 * time.Second)
+			var home string
+			for home == "" && time.Now().Before(deadline) {
+				b, _ := os.ReadFile(ready)
+				// A partial read lacks the second newline; wait for both lines.
+				if f := strings.Split(string(b), "\n"); len(f) == 3 && f[2] == "" {
+					if pid, err := strconv.Atoi(f[0]); err == nil && pid > 0 && f[1] != "" {
+						child, home = pid, f[1]
+						sandbox = filepath.Dir(home)
 					}
 				}
-				time.Sleep(10 * time.Millisecond)
+				if home == "" {
+					time.Sleep(10 * time.Millisecond)
+				}
 			}
 			if child == 0 || sandbox == "" {
-				t.Fatalf("wrapper %d never started its command (child %d, sandbox %q)", wrapper, child, sandbox)
+				t.Fatalf("wrapper %d never reported its command (child %d, sandbox %q)", wrapper, child, sandbox)
+			}
+			// The shell announces itself before exec: the literal sleep must be
+			// the one that receives the signal.
+			for {
+				comm, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", child))
+				if strings.TrimSpace(string(comm)) == "sleep" {
+					break
+				}
+				if !time.Now().Before(deadline) {
+					t.Fatalf("command %d never became sleep (comm %q)", child, comm)
+				}
+				time.Sleep(10 * time.Millisecond)
 			}
 			if err := syscall.Kill(wrapper, tc.sig); err != nil {
 				t.Fatal(err)
 			}
-			done := make(chan error, 1)
-			go func() { done <- cmd.Wait() }()
 			select {
 			case err := <-done:
+				waited = true
 				if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != tc.code {
 					t.Errorf("wrapper exit = %v, want %d", err, tc.code)
 				}
