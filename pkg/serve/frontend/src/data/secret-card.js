@@ -68,7 +68,12 @@ export function createSecretCard({ request, send, bridge = null, onChange, notif
       if (!bridge || !alive) return;
       const refresh = async () => {
         const statuses = await loadStatuses(bridge, request);
-        if (alive) patch({ statuses });
+        if (!alive) return;
+        // A field the owner has already typed in keeps what was typed: a save
+        // finishing elsewhere must not swap it for the Keychain value.
+        const typeAnother = { ...state.typeAnother };
+        for (const f of request.fields) if (state.values[f.index]) typeAnother[f.index] = true;
+        patch({ statuses, typeAnother });
       };
       // A save that completes while this card is mounted changes its answer.
       unsubscribe?.();

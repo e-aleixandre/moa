@@ -36,3 +36,20 @@ test("a disposed card stops listening", async () => {
   await first.submit();
   expect(calls).toBe(before);
 });
+
+test("a refresh never replaces what the owner already typed", async () => {
+  let saved = false;
+  const bridge = { status: async () => ({ saved, sameAction: saved }), save: async () => { saved = true; }, use: async () => ({ value: "SAVED-DUMMY" }) };
+  const posted = [];
+  const second = createSecretCard({ request: { ...request, id: "second" }, bridge, send: async (_id, body) => { posted.push(body); } });
+  await second.init();
+  second.setValue(0, "TYPED-DUMMY");
+  const first = createSecretCard({ request, bridge, send: async () => {} });
+  first.setValue(0, "x");
+  first.toggleSave();
+  await first.submit();
+  expect([...second.derive().savedRows]).toEqual([]);
+  await second.submit();
+  expect(JSON.stringify(posted[0])).toContain("TYPED-DUMMY");
+  second.dispose();
+});
