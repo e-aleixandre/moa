@@ -30,18 +30,6 @@ final class SavedSecretsModelTests: XCTestCase {
         XCTAssertTrue(entry["lastUsedAt"] is NSNull)
     }
 
-    func testExistenceQueryIsAttributesOnlyAndNeverAuthenticates() {
-        let q = SavedSecretQueries.existence(service: "svc", accessGroup: "grp")
-        XCTAssertEqual(q[kSecReturnAttributes as String] as? Bool, true)
-        XCTAssertNil(q[kSecReturnData as String])
-        // A no-interaction LAContext makes a physical device answer -25308
-        // for biometry-ACL items even though attributes need no authentication.
-        XCTAssertNil(q[kSecUseAuthenticationContext as String])
-        XCTAssertNil(q[kSecUseAuthenticationUI as String])
-        XCTAssertEqual(q[kSecAttrService as String] as? String, "svc")
-        XCTAssertEqual(q[kSecAttrAccessGroup as String] as? String, "grp")
-    }
-
     func testEpochMs() {
         XCTAssertEqual(SavedSecretMetadata.epochMs(Date(timeIntervalSince1970: 1.5)), 1500)
     }

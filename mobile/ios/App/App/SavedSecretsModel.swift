@@ -105,21 +105,3 @@ struct ReplyFence: Equatable {
         generation == current && boundOrigin == origin && documentMatchesPairing
     }
 }
-
-enum SavedSecretQueries {
-    /// Keychain query that lists which accounts exist for a service.
-    /// Attributes only, so it needs no authentication and deliberately carries
-    /// no LAContext or kSecUseAuthenticationUI: on a physical device a
-    /// no-interaction context makes this lookup fail with -25308 for
-    /// biometry-ACL items (the simulator returns 0, so it cannot be seen there).
-    static func existence(service: String, accessGroup: String) -> [String: Any] {
-        return [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccessGroup as String: accessGroup,
-            kSecAttrSynchronizable as String: kCFBooleanFalse as Any,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll
-        ]
-    }
-}

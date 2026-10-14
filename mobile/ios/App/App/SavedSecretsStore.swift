@@ -12,18 +12,46 @@ enum SavedSecretsError: Error, Equatable {
     case keychain(OSStatus)
 }
 
+/// The only door to the Keychain, so tests can observe which queries run.
+protocol KeychainClient {
+    func copyMatching(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+    func add(_ attributes: CFDictionary) -> OSStatus
+    func update(_ query: CFDictionary, _ attributes: CFDictionary) -> OSStatus
+    func delete(_ query: CFDictionary) -> OSStatus
+}
+
+struct SystemKeychain: KeychainClient {
+    func copyMatching(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
+        SecItemCopyMatching(query, result)
+    }
+    func add(_ attributes: CFDictionary) -> OSStatus { SecItemAdd(attributes, nil) }
+    func update(_ query: CFDictionary, _ attributes: CFDictionary) -> OSStatus {
+        SecItemUpdate(query, attributes)
+    }
+    func delete(_ query: CFDictionary) -> OSStatus { SecItemDelete(query) }
+}
+
 // The value lives in one Keychain item guarded by an access control
 // (biometryCurrentSet, passcode set, this device only): the Keychain itself
 // demands Face ID on every read and drops the item if enrolment changes.
 // Metadata lives in a second, unprotected item so status/list never prompt.
+// Invariant: SecItemCopyMatching is NEVER run on the secret item outside `use`
+// -- not even attributes-only. On a physical device that lookup either prompts
+// for Face ID (no context) or fails with -25308 (no-interaction context), so
+// existence and listing come from the metadata items alone. A secret that is
+// gone while its metadata remains surfaces as notFound in `use`, which then
+// drops the stale metadata.
 final class SavedSecretsStore {
     static let secretService = "com.ealeixandre.moa.saved-secrets"
     static let metaService = "com.ealeixandre.moa.saved-secrets.meta"
 
     private let accessGroup: String?
+    private let keychain: KeychainClient
 
-    init(accessGroup: String? = KeychainGroups.deviceCredential) {
+    init(accessGroup: String? = KeychainGroups.deviceCredential,
+         keychain: KeychainClient = SystemKeychain()) {
         self.accessGroup = accessGroup
+        self.keychain = keychain
     }
 
     func status(serverID: String, alias: String, fingerprint: String) throws -> [String: Any] {
@@ -57,7 +85,7 @@ final class SavedSecretsStore {
         var item = try query(service: Self.secretService, account: account)
         item[kSecAttrAccessControl as String] = control
         item[kSecValueData as String] = value
-        let status = SecItemAdd(item as CFDictionary, nil)
+        let status = keychain.add(item as CFDictionary)
         if status == errSecParam || status == errSecNotAvailable || status == errSecAuthFailed {
             throw SavedSecretsError.biometryUnavailable
         }
@@ -92,7 +120,7 @@ final class SavedSecretsStore {
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         q[kSecUseAuthenticationContext as String] = context
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(q as CFDictionary, &result)
+        let status = keychain.copyMatching(q as CFDictionary, &result)
         switch status {
         case errSecSuccess:
             guard let data = result as? Data else { throw SavedSecretsError.invalidData }
@@ -111,11 +139,7 @@ final class SavedSecretsStore {
     }
 
     func list(serverID: String) throws -> [SavedSecretMetadata] {
-        let present = Set(try accounts(service: Self.secretService))
-        let metas = try allMetadata(serverID: serverID).filter {
-            present.contains(SavedSecretKey.account(serverID: serverID, alias: $0.alias))
-        }
-        return metas.sorted { ($0.lastUsedAt ?? $0.savedAt) > ($1.lastUsedAt ?? $1.savedAt) }
+        try allMetadata(serverID: serverID).sorted { ($0.lastUsedAt ?? $0.savedAt) > ($1.lastUsedAt ?? $1.savedAt) }
     }
 
     func touch(serverID: String, alias: String, fingerprint: String) throws {
@@ -133,41 +157,38 @@ final class SavedSecretsStore {
         try deleteMetadata(account: account)
     }
 
-    // serverID nil wipes every server (unpairing); otherwise only that server.
+    // serverID nil wipes every server (unpairing) with service-wide deletes:
+    // no enumeration, so the secret items are never queried. Otherwise the
+    // accounts of that server come from the metadata items.
     func forgetAll(serverID: String? = nil) throws {
         var firstError: Error?
-        for service in [Self.secretService, Self.metaService] {
-            let found: [String]
-            do { found = try accounts(service: service) } catch {
-                firstError = firstError ?? error
-                continue
+        func attempt(_ body: () throws -> Void) {
+            do { try body() } catch { firstError = firstError ?? error }
+        }
+        if let serverID {
+            for account in try metadataAccounts(serverID: serverID) {
+                attempt { try deleteSecret(account: account) }
+                attempt { try deleteMetadata(account: account) }
             }
-            for account in found {
-                if let serverID, SavedSecretKey.alias(fromAccount: account, serverID: serverID) == nil { continue }
-                do { try delete(service: service, account: account) } catch { firstError = firstError ?? error }
-            }
+        } else {
+            attempt { try delete(service: Self.secretService, account: nil) }
+            attempt { try delete(service: Self.metaService, account: nil) }
         }
         if let firstError { throw firstError }
     }
 
     // MARK: - Keychain plumbing
 
-    // A secret counts as saved only if the guarded item still exists:
-    // attributes-only lookups never trigger the biometric prompt.
     private func metadata(serverID: String, alias: String) throws -> SavedSecretMetadata? {
         let account = SavedSecretKey.account(serverID: serverID, alias: alias)
         var q = try query(service: Self.metaService, account: account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(q as CFDictionary, &result)
+        let status = keychain.copyMatching(q as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw SavedSecretsError.keychain(status) }
         guard let data = result as? Data, let meta = SavedSecretMetadata.decode(data) else { return nil }
-        guard try accounts(service: Self.secretService).contains(account) else {
-            try? deleteMetadata(account: account)
-            return nil
-        }
         return meta
     }
 
@@ -177,7 +198,7 @@ final class SavedSecretsStore {
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitAll
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(q as CFDictionary, &result)
+        let status = keychain.copyMatching(q as CFDictionary, &result)
         if status == errSecItemNotFound { return [] }
         guard status == errSecSuccess, let rows = result as? [[String: Any]] else {
             throw SavedSecretsError.keychain(status)
@@ -192,16 +213,18 @@ final class SavedSecretsStore {
         }
     }
 
-    private func accounts(service: String) throws -> [String] {
-        guard let accessGroup else { throw SavedSecretsError.missingAccessGroup }
-        let q = SavedSecretQueries.existence(service: service, accessGroup: accessGroup)
+    private func metadataAccounts(serverID: String) throws -> [String] {
+        var q = try query(service: Self.metaService, account: nil)
+        q[kSecReturnAttributes as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitAll
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(q as CFDictionary, &result)
+        let status = keychain.copyMatching(q as CFDictionary, &result)
         if status == errSecItemNotFound { return [] }
         guard status == errSecSuccess, let rows = result as? [[String: Any]] else {
             throw SavedSecretsError.keychain(status)
         }
         return rows.compactMap { $0[kSecAttrAccount as String] as? String }
+            .filter { SavedSecretKey.alias(fromAccount: $0, serverID: serverID) != nil }
     }
 
     private func writeMetadata(_ meta: SavedSecretMetadata, serverID: String) throws {
@@ -212,20 +235,20 @@ final class SavedSecretsStore {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
-        let updated = SecItemUpdate(q as CFDictionary, attrs as CFDictionary)
+        let updated = keychain.update(q as CFDictionary, attrs as CFDictionary)
         if updated == errSecSuccess { return }
         guard updated == errSecItemNotFound else { throw SavedSecretsError.keychain(updated) }
         var item = q
         attrs.forEach { item[$0] = $1 }
-        let added = SecItemAdd(item as CFDictionary, nil)
+        let added = keychain.add(item as CFDictionary)
         guard added == errSecSuccess else { throw SavedSecretsError.keychain(added) }
     }
 
     private func deleteSecret(account: String) throws { try delete(service: Self.secretService, account: account) }
     private func deleteMetadata(account: String) throws { try delete(service: Self.metaService, account: account) }
 
-    private func delete(service: String, account: String) throws {
-        let status = SecItemDelete(try query(service: service, account: account) as CFDictionary)
+    private func delete(service: String, account: String?) throws {
+        let status = keychain.delete(try query(service: service, account: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw SavedSecretsError.keychain(status)
         }
