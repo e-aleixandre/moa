@@ -138,6 +138,8 @@ type LiveToolInitData struct {
 	AskResponder *askuser.Responder `json:"ask_responder,omitempty"`
 	// Images are the stored-image references of a terminal call (see ToolEndData).
 	Images []core.Content `json:"images,omitempty"`
+	// PatchFiles is an apply_patch's per-file diff record (see ToolEndData).
+	PatchFiles any `json:"patch_files,omitempty"`
 }
 
 // SubagentInitData describes one live subagent job for reconnecting clients
@@ -264,6 +266,10 @@ type ToolEndData struct {
 	Result     string `json:"result"`
 	// AskResponder is who answered an ask_user (absent when not recorded).
 	AskResponder *askuser.Responder `json:"ask_responder,omitempty"`
+	// PatchFiles is an apply_patch's per-file diff record: path, op, +/- counts
+	// and the unified diff of what was written (bounded by the tool). Display
+	// only; the model's result text is just the M/A/D list.
+	PatchFiles any `json:"patch_files,omitempty"`
 	// Images are stored-image references (never bytes) the client fetches from
 	// the session's attachment endpoint, same keys as history content blocks.
 	Images []core.Content `json:"images,omitempty"`

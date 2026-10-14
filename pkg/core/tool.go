@@ -65,6 +65,11 @@ type Result struct {
 	Custom map[string]any `json:"custom,omitempty"`
 }
 
+// CustomKeyPatchFiles is the Result.Custom key under which apply_patch records
+// the per-file diffs of what it wrote. The frontend renders them; the model
+// never receives them.
+const CustomKeyPatchFiles = "patch_files"
+
 // TextResult creates a Result with a single text content block.
 func TextResult(text string) Result {
 	return Result{Content: []Content{TextContent(text)}}

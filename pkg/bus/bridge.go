@@ -865,6 +865,7 @@ func (sctx *SessionContext) endLiveToolLocked(call LiveToolCall) {
 			sctx.liveTools[i].Result = call.Result
 			sctx.liveTools[i].AskResponder = call.AskResponder
 			sctx.liveTools[i].Images = call.Images
+			sctx.liveTools[i].PatchFiles = call.PatchFiles
 			return
 		}
 	}
@@ -1464,7 +1465,7 @@ func EndedLiveToolCall(e core.AgentEvent) LiveToolCall {
 	} else if e.IsError {
 		phase = LiveToolPhaseError
 	}
-	return LiveToolCall{ToolCallID: e.ToolCallID, ToolName: e.ToolName, Phase: phase, Result: resultText(e.Result), AskResponder: askResponderOf(e.Result), Images: resultImageRefs(e.Result)}
+	return LiveToolCall{ToolCallID: e.ToolCallID, ToolName: e.ToolName, Phase: phase, Result: resultText(e.Result), AskResponder: askResponderOf(e.Result), Images: resultImageRefs(e.Result), PatchFiles: patchFilesOf(e.Result)}
 }
 
 // askResponderOf is who answered an ask_user, as its result records it.
@@ -1476,6 +1477,15 @@ func askResponderOf(result *core.Result) *askuser.Responder {
 		return &r
 	}
 	return nil
+}
+
+// patchFilesOf is the per-file diff record an apply_patch result carries for
+// display (see core.CustomKeyPatchFiles); nil for every other result.
+func patchFilesOf(result *core.Result) any {
+	if result == nil {
+		return nil
+	}
+	return result.Custom[core.CustomKeyPatchFiles]
 }
 
 // resultImageRefs lists the images a tool result carries as stored references,
@@ -1614,6 +1624,7 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 			IsError:      e.IsError,
 			Rejected:     e.Rejected,
 			AskResponder: askResponderOf(e.Result),
+			PatchFiles:   patchFilesOf(e.Result),
 		}
 		events := []any{ended}
 		// Emit task update on tool_end only (matches serve behavior).

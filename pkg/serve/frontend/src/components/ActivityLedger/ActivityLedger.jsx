@@ -5,6 +5,7 @@ import { usePresence } from "../../hooks/usePresence.js";
 import { MOTION, prefersReducedMotion } from "../../hooks/motion.js";
 import { useArrivals } from "./arrivals.js";
 import { useTailWindow } from "./tail-dwell.js";
+import { PatchFiles } from "../PatchFiles/PatchFiles.jsx";
 import "./ActivityLedger.css";
 
 // ActivityLedger — a batch of tool calls. Markup and CSS are the catalogue's
@@ -158,7 +159,8 @@ function DoneRow({ row, arrive }) {
   const { text, detail: argDetail } = argParts(row.arg);
   const dim = argDetail || row.dim;
   const detail = detailNode(row.detail);
-  const hasDetail = detail != null;
+  const files = row.patchFiles;
+  const hasDetail = detail != null || (files != null && files.some((f) => f.diff || f.has_diff));
   const Tag = hasDetail ? "button" : "div";
 
   return (
@@ -184,7 +186,8 @@ function DoneRow({ row, arrive }) {
         {hasDetail && <Chevron open={open} />}
         <span class="sr-only">{SR[row.status] || SR.ok}</span>
       </Tag>
-      {hasDetail && mounted && (
+      {files && <PatchFiles files={files} rowOpen={open} detailUrl={row.patchDetailUrl} more={row.patchMore} />}
+      {detail != null && mounted && (
         <div class={`zl-lg-detail is-opening${leaving ? " is-leaving" : ""}`}>
           <div class="zl-lg-detail-in">{detail}</div>
         </div>

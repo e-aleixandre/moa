@@ -1092,6 +1092,29 @@ function toLedgerRow(msg) {
     const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
     if (bookWrites(args)) row.detailKind = 'edit';
   }
+  // A finished apply_patch carries the diffs of what it actually wrote, recorded
+  // by the tool on its result. An older result without them keeps the plain
+  // M/A/D text body.
+  if (name.toLowerCase() === 'apply_patch' && msg.status === 'done' && Array.isArray(msg.patchFiles) && msg.patchFiles.length) {
+    const files = msg.patchFiles;
+    // Files past the transcript list's cap are only counted; totals stay true.
+    const more = msg.patchMore || null;
+    const add = files.reduce((n, f) => n + (f.add || 0), 0) + (more?.add || 0);
+    const del = files.reduce((n, f) => n + (f.del || 0), 0) + (more?.del || 0);
+    const total = files.length + (more?.files || 0);
+    row.patchFiles = files;
+    if (more) row.patchMore = more;
+    // Files that arrive without their diffs (a persisted child's transcript)
+    // fetch them on open from the same detail URL the row would have used.
+    if (msg.detailUrl && files.some((f) => f.has_diff && !f.diff)) {
+      row.patchDetailUrl = msg.detailUrl;
+      delete row.detailUrl;
+    }
+    row.arg = { text: total === 1 ? '1 file' : `${total} files` };
+    row.out = add || del ? `+${add} −${del}` : '';
+    delete row.echo;
+    return row;
+  }
   if (body && !row.history) row.body = body;
   // The tool currently in flight (status running/generating) is marked `live`
   // so ActivityLedger renders it as the unified card's live row (verb +

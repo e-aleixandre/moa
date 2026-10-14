@@ -234,7 +234,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "tool_end", Data: ToolEndData{
 			ToolCallID: e.ToolCallID, ToolName: e.ToolName,
 			IsError: e.IsError, Rejected: e.Rejected, Result: e.Result, Images: e.Images,
-			AskResponder: e.AskResponder,
+			AskResponder: e.AskResponder, PatchFiles: e.PatchFiles,
 		}}, true
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
@@ -461,6 +461,11 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 	// client never has to guess it from the answer's text.
 	if r, ok := askuser.ResponderFromCustom(custom[askuser.CustomKey]); ok {
 		return map[string]any{askuser.CustomKey: r}
+	}
+	// An apply_patch's per-file diffs are what its card shows; the tool bounds
+	// them (patchDisplayMaxBytes) so they cross this boundary as recorded.
+	if files, ok := custom[core.CustomKeyPatchFiles]; ok {
+		return map[string]any{core.CustomKeyPatchFiles: files}
 	}
 	// The trim marker is a session_event like the compaction one, but carries
 	// only counters: the elided content itself never crosses.
@@ -1035,6 +1040,7 @@ func liveToolInitData(calls []bus.LiveToolCall) []LiveToolInitData {
 			Result:       truncateHistoryString(c.Result),
 			AskResponder: c.AskResponder,
 			Images:       c.Images,
+			PatchFiles:   c.PatchFiles,
 		}
 		if !c.StartedAt.IsZero() {
 			d.StartedAtMs = c.StartedAt.UnixMilli()

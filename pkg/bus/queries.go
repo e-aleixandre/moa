@@ -177,6 +177,9 @@ type LiveToolCall struct {
 	// Images are the stored-image references of a terminal call (see
 	// ToolExecEnded.Images).
 	Images []core.Content
+	// PatchFiles is an ended apply_patch's per-file diff record (see
+	// ToolExecEnded.PatchFiles).
+	PatchFiles any
 	// StartedAt anchors the client's elapsed timer to the moment the call first
 	// appeared, so a reconnect resumes the count instead of restarting it.
 	StartedAt time.Time

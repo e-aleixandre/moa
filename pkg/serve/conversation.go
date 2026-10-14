@@ -17,6 +17,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 const (
@@ -43,6 +44,11 @@ type ConversationMessage struct {
 	Target        string          `json:"target,omitempty"`
 	Status        string          `json:"status,omitempty"`
 	Attachments   []AttachmentDTO `json:"attachments,omitempty"`
+	// PatchFiles is an apply_patch item's files and counts, without diffs: the
+	// closed card's content (see tool.SummarizePatchFiles).
+	PatchFiles []tool.PatchFileDisplay `json:"patch_files,omitempty"`
+	// PatchMore counts the files past the list's cap, so totals stay true.
+	PatchMore *tool.PatchMore `json:"patch_more,omitempty"`
 	// full is what Text or Target was cut from, kept only when it was cut. It
 	// never reaches the wire (the HTTP budget stays as it is); the owner's
 	// sessions tool reads it to serve a message whole on request.
@@ -86,13 +92,17 @@ type conversationSnapshot struct {
 }
 
 type conversationToolDetail struct {
-	output    string
-	arguments map[string]any
+	output     string
+	arguments  map[string]any
+	patchFiles any
 }
 
 type conversationToolDetailResponse struct {
 	Output string         `json:"output"`
 	Args   map[string]any `json:"args,omitempty"`
+	// PatchFiles is an apply_patch's per-file diff record, as the tool bounded
+	// it. It is here because the transcript's own tool items cut arguments.
+	PatchFiles any `json:"patch_files,omitempty"`
 }
 
 type conversationProjection struct {
@@ -144,7 +154,7 @@ func handleConversationMessages(m *Manager) http.HandlerFunc {
 				http.Error(w, "tool item not found", http.StatusNotFound)
 				return
 			}
-			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Args: toolDetail.arguments})
+			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Args: toolDetail.arguments, PatchFiles: toolDetail.patchFiles})
 			return
 		}
 		beforeID := ""
@@ -321,6 +331,7 @@ func (m *Manager) safeConversationMessages(sessionID string, messages []core.Age
 					toolItem.Timestamp = conversationTimestamp(result.Timestamp)
 				}
 				details[toolID] = conversationToolDetailFromResult(result)
+				toolItem.PatchFiles, toolItem.PatchMore = tool.SummarizePatchFiles(result.Custom[core.CustomKeyPatchFiles])
 			} else {
 				details[toolID] = conversationToolDetail{}
 			}
@@ -444,7 +455,7 @@ func conversationToolDetailFromResult(result core.AgentMessage) conversationTool
 		}
 		output.WriteString(strings.ToValidUTF8(block.Text, "�"))
 	}
-	return conversationToolDetail{output: output.String()}
+	return conversationToolDetail{output: output.String(), patchFiles: result.Custom[core.CustomKeyPatchFiles]}
 }
 
 // conversationToolActivity exposes a bounded description of every tool's

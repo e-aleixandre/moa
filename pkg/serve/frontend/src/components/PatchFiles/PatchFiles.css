@@ -1,0 +1,61 @@
+/* The file list sits between ledger rows, under the apply_patch row. It uses
+   the ledger's own rhythm (same left column as a row's text) so it reads as
+   part of the card rather than a card inside it. */
+.zl-pf { display: flex; flex-direction: column; }
+.zl-pf-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 10px 0 32px;
+  border: 0;
+  background: transparent;
+  color: var(--zl-t3);
+  font: inherit;
+  font-size: var(--zl-fs-meta);
+  text-align: left;
+}
+button.zl-pf-file { cursor: pointer; }
+button.zl-pf-file:hover, .zl-pf-file.is-open { color: var(--zl-t2); }
+.zl-pf-file.is-open .zl-lg-chev { transform: rotate(90deg); }
+.zl-pf-file .zl-lg-chev { flex: none; width: 12px; height: 12px; margin-left: auto; color: var(--zl-t4); }
+.zl-pf-letter { flex: none; width: 1.2em; font-family: var(--mono); font-weight: 600; color: var(--zl-t3); }
+.zl-pf-letter.is-A { color: var(--zl-green); }
+.zl-pf-letter.is-D { color: var(--zl-red); }
+.zl-pf-letter.is-R { color: var(--zl-yellow); }
+/* Paths are told apart by their end: ellipsise from the head. */
+.zl-pf-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.zl-pf-add { flex: none; color: var(--zl-green); }
+.zl-pf-del { flex: none; color: var(--zl-red); }
+.zl-pf-note { flex: none; color: var(--zl-t4); }
+.zl-pf-cut { font-size: var(--zl-fs-meta); }
+.zl-pf > .zl-pf-cut { padding: 4px 10px 6px 32px; }
+.zl-pf-body {
+  padding: 4px 10px 8px 32px;
+  background: var(--zl-canvas);
+  box-shadow: inset 0 1px 0 var(--zl-line);
+  overflow-x: auto;
+}
+.zl-pf-body .code.flush { margin: 0 -10px 0 -32px; }
+.zl-pf-more {
+  display: block;
+  margin: 6px 0 2px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--zl-t3);
+  font: inherit;
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.zl-ledger.is-dense .zl-pf-file { padding-left: 24px; }

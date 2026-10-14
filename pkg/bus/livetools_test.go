@@ -389,3 +389,31 @@ func TestToolEndCarriesStoredImageRefsOnly(t *testing.T) {
 		t.Fatalf("text-only result Images = %+v, want nil", got)
 	}
 }
+
+// An apply_patch that ended while a sibling still runs keeps its diff record:
+// like the responder, it is in no history until the batch is collected.
+func TestBridgeEvent_LiveToolKeepsPatchFilesOfEndedCall(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContext(b, nil)
+
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecStart, ToolCallID: "p", ToolName: "apply_patch"})
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecStart, ToolCallID: "sib", ToolName: "bash"})
+	record := []string{"a.go"}
+	result := core.Result{Content: []core.Content{core.TextContent("M a.go")}, Custom: map[string]any{core.CustomKeyPatchFiles: record}}
+	bridgeEvent(sctx, core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolCallID: "p", ToolName: "apply_patch", Result: &result})
+
+	for _, c := range sctx.LiveTools() {
+		if c.ToolCallID == "p" && c.PatchFiles == nil {
+			t.Fatal("ended apply_patch lost its record")
+		}
+		if c.ToolCallID == "sib" && c.PatchFiles != nil {
+			t.Fatalf("running sibling carries a record: %+v", c.PatchFiles)
+		}
+	}
+
+	events := TranslateAgentEvent("s", 1, core.AgentEvent{Type: core.AgentEventToolExecEnd, ToolCallID: "p", ToolName: "apply_patch", Result: &result}, nil)
+	if ended, ok := events[0].(ToolExecEnded); !ok || ended.PatchFiles == nil {
+		t.Fatalf("ToolExecEnded = %+v", events[0])
+	}
+}

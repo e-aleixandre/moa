@@ -11,6 +11,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
+	"github.com/e-aleixandre/moa/pkg/tool"
 )
 
 // SubagentSummary describes a subagent available to an owner-authorized
@@ -109,7 +110,7 @@ func handleSubagentConversation(m *Manager) http.HandlerFunc {
 				http.Error(w, "tool item not found", http.StatusNotFound)
 				return
 			}
-			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Args: toolDetail.arguments})
+			writeJSON(w, http.StatusOK, conversationToolDetailResponse{Output: toolDetail.output, Args: toolDetail.arguments, PatchFiles: toolDetail.patchFiles})
 			return
 		}
 		beforeID := ""
@@ -366,6 +367,7 @@ func safeSubagentConversationMessages(messages []core.AgentMessage) conversation
 				detail := conversationToolDetailFromResult(result)
 				detail.arguments = block.Arguments
 				details[toolID] = detail
+				item.PatchFiles, item.PatchMore = tool.SummarizePatchFiles(result.Custom[core.CustomKeyPatchFiles])
 			} else {
 				details[toolID] = conversationToolDetail{arguments: block.Arguments}
 			}

@@ -7,9 +7,15 @@ import { api } from "../api.js";
 import { toolPreview } from "../util/format.js";
 import { mapToolToKind } from "../util/tool-kind.js";
 import { ToolMessage } from "../../components/ToolMessage/ToolMessage.jsx";
+import { PatchFiles } from "../../components/PatchFiles/PatchFiles.jsx";
 import { ToolImages } from "../../components/ToolImages/ToolImages.jsx";
 
 export function projectedToolDetailNode(tool, path, detail) {
+  // A persisted subagent's transcript item cuts arguments, so the diffs the
+  // tool recorded come with the lazily fetched detail instead.
+  if (Array.isArray(detail?.patch_files) && detail.patch_files.length) {
+    return <PatchFiles files={detail.patch_files} rowOpen />;
+  }
   const preview = toolPreview(tool, detail?.args, detail?.output, 'done');
   if (!preview?.text) return <div className="doc-mono zl-lg-input">No output</div>;
   if (preview.kind === 'diff') {

@@ -11,12 +11,15 @@ import (
 // around a single replacement. contextLines controls how many unchanged lines
 // surround each change hunk (default 3).
 func unifiedDiff(old, new string, contextLines int) string {
+	return unifiedDiffLines(splitLines(old), splitLines(new), contextLines)
+}
+
+// unifiedDiffLines is unifiedDiff over already split lines, for callers that
+// decide how the final newline is counted.
+func unifiedDiffLines(oldLines, newLines []string, contextLines int) string {
 	if contextLines <= 0 {
 		contextLines = 3
 	}
-
-	oldLines := splitLines(old)
-	newLines := splitLines(new)
 
 	// Myers is overkill for single-replacement edits. Use a simple LCS-based
 	// approach that handles the common case well.

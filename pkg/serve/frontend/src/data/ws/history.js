@@ -77,6 +77,8 @@ export function normalizeHistory(raw, liveSubagents = []) {
             subagentJobId: tr?.custom?.subagent_job_id || undefined,
             // Who answered an ask_user, as recorded by the server.
             askResponder: tr?.custom?.ask_responder || undefined,
+            // The diffs an apply_patch actually wrote, as its result recorded them.
+            patchFiles: tr?.custom?.patch_files || undefined,
             timestamp: tr?.timestamp || msg.timestamp,
           });
         }
@@ -268,6 +270,7 @@ export function appendNormalizedHistoryDelta(prefix, raw, liveSubagents = []) {
     const subagentJobId = msg.custom?.subagent_job_id;
     if (subagentJobId) update.subagentJobId = subagentJobId;
     if (msg.custom?.ask_responder) update.askResponder = msg.custom.ask_responder;
+    if (msg.custom?.patch_files) update.patchFiles = msg.custom.patch_files;
     toolResults.set(msg.tool_call_id, update);
   }
   for (let i = 0; i < prefix.length; i++) {
@@ -351,6 +354,10 @@ export function normalizeConversationProjection(raw, toolDetailBase = '') {
         activity: { action: item.action || '', target: item.target || '' },
         status,
         result: null,
+        // A persisted child's closed card lists its files and counts; the diffs
+        // come with the detail request, which the row opens lazily.
+        ...(item.patch_files ? { patchFiles: item.patch_files } : {}),
+        ...(item.patch_more ? { patchMore: item.patch_more } : {}),
         ...(toolDetailBase && item.id
           ? { detailUrl: `${toolDetailBase}?detail=full&item_id=${encodeURIComponent(item.id)}` }
           : {}),

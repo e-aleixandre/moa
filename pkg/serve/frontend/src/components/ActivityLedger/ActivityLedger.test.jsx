@@ -135,3 +135,53 @@ test("fullLabel prefers the untruncated command and omits an empty tooltip", () 
   expect(fullLabel({}, "pattern")).toBe("pattern");
   expect(fullLabel({}, "")).toBeUndefined();
 });
+
+const DIFF_A = "@@ -1,2 +1,4 @@\n   1  keep\n   2 -old1\n   2 +new1\n   3 +new2\n   4 +new3";
+const PATCH_ROW = {
+  tool: "apply_patch", arg: { text: "3 files" }, out: "+5 −1", status: "ok", id: "p1",
+  patchFiles: [
+    { op: "M", path: "src/a.go", add: 3, del: 1, diff: DIFF_A },
+    { op: "A", path: "src/new.go", add: 2, del: 0, diff: "@@ -0,0 +1,2 @@\n   1 +package x\n   2 +" },
+    { op: "D", path: "src/old.go", add: 0, del: 0 },
+  ],
+};
+
+test("a closed apply_patch row lists each file with its letter and counts, with no diff mounted", () => {
+  stateValue = null;
+  const nodes = render([PATCH_ROW]);
+  const files = nodes.filter((n) => typeof n.props?.class === "string" && n.props.class.split(" ").includes("zl-pf-file"));
+  expect(files.map((f) => textContent(f).replace(/false/g, ""))).toEqual(["Msrc/a.go+3−1", "Asrc/new.go+2", "Dsrc/old.godeleted"]);
+  expect(nodes.some((n) => typeof n.props?.class === "string" && n.props.class.includes("diff"))).toBe(false);
+});
+
+test("an open apply_patch row shows the recorded diff of every file that has one", () => {
+  stateValue = true;
+  const nodes = render([PATCH_ROW]);
+  const diffs = nodes.filter((n) => typeof n.props?.class === "string" && n.props.class.split(" ").includes("diff"));
+  expect(diffs).toHaveLength(2);
+  expect(textContent(diffs[0])).toContain("old1");
+  expect(textContent(diffs[1])).toContain("package x");
+  stateValue = null;
+});
+
+test("an old result without recorded diffs stays a plain text row", () => {
+  stateValue = null;
+  const nodes = render([{ tool: "apply_patch", arg: { text: "x" }, status: "ok", id: "p2", body: "M a.go\nA b.go" }]);
+  expect(nodes.some((n) => typeof n.props?.class === "string" && n.props.class.includes("zl-pf"))).toBe(false);
+});
+
+test("files listed without their diffs (a persisted child) are openable and mount no rows closed", () => {
+  stateValue = null;
+  const row = { ...PATCH_ROW, patchDetailUrl: "/x", patchFiles: [{ op: "M", path: "a.go", add: 1, del: 1, has_diff: true }, { op: "D", path: "b.go", add: 0, del: 2, has_diff: true }] };
+  const nodes = render([row]);
+  expect(nodes.find((n) => n.type === "button" && n.props?.class?.includes("zl-lg-row")).props["aria-expanded"]).toBe(false);
+  const files = nodes.filter((n) => typeof n.props?.class === "string" && n.props.class.split(" ").includes("zl-pf-file"));
+  expect(files.every((f) => f.type === "button")).toBe(true);
+  expect(nodes.some((n) => typeof n.props?.class === "string" && n.props.class.includes("diff"))).toBe(false);
+});
+
+test("a patch listed past its cap says how many more files there are", () => {
+  stateValue = null;
+  const nodes = render([{ ...PATCH_ROW, patchMore: { files: 1, add: 1, del: 2 } }]);
+  expect(textContent(nodes.find((n) => n.props?.class?.includes?.("zl-pf-cut")))).toBe("+1 more files");
+});

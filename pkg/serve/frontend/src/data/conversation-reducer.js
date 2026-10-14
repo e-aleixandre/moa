@@ -163,7 +163,7 @@ export function reduceToolEnd(target, buffers, data, extractNote) {
   const note = extractNote ? extractNote(data.result, data.rejected === true) : null;
   target.messages = target.messages.map(m => {
     if (m._type === 'tool_start' && m.tool_call_id === data.tool_call_id) {
-      return { ...m, status: nextStatus, result: data.result, images: toolImageRefs(data.images), streamingResult: null, note };
+      return { ...m, status: nextStatus, result: data.result, images: toolImageRefs(data.images), streamingResult: null, note, ...(data.patch_files ? { patchFiles: data.patch_files } : {}) };
     }
     return m;
   });

@@ -164,6 +164,9 @@ type ToolExecEnded struct {
 	Rejected bool
 	// AskResponder is who answered an ask_user, when the result records it.
 	AskResponder *askuser.Responder
+	// PatchFiles is an apply_patch's per-file diff record (display only; the
+	// model never sees it). Opaque here: the tool defines its shape.
+	PatchFiles any
 }
 
 // ---------------------------------------------------------------------------

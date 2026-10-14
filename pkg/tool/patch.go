@@ -186,7 +186,13 @@ Format:
 			if onUpdate != nil {
 				onUpdate(core.TextResult(result))
 			}
-			return core.TextResult(result), nil
+			// The diff of what was really written rides in Custom, which the
+			// model never sees: the text above stays the short M/A/D list.
+			out := core.TextResult(result)
+			if files := buildPatchDisplay(staged); len(files) > 0 {
+				out.Custom = map[string]any{core.CustomKeyPatchFiles: files}
+			}
+			return out, nil
 		},
 	}
 }
@@ -203,11 +209,14 @@ const (
 
 // stagedChange holds a computed change ready to apply.
 type stagedChange struct {
-	action  stagedAction
-	path    string // resolved absolute path
-	moveTo  string // only for actionMove
-	content string // new file content (empty for delete)
-	label   string // summary line (e.g. "A new.txt")
+	action   stagedAction
+	path     string // resolved absolute path
+	moveTo   string // only for actionMove
+	content  string // new file content (empty for delete)
+	before   string // content this change started from (empty for add)
+	display  string // path as the patch wrote it, for the display record
+	moveName string // destination as the patch wrote it (move only)
+	label    string // summary line (e.g. "A new.txt")
 }
 
 // validateAndCompute validates all hunks and computes results in memory.
@@ -222,6 +231,16 @@ func validateAndCompute(cfg ToolConfig, hunks []PatchHunk) ([]stagedChange, erro
 	memFS := make(map[string]string)
 	// Track deleted paths so we don't read from disk after a delete.
 	deleted := make(map[string]bool)
+	// What the patch itself last wrote to each path, for the display record
+	// only (the patch is applied exactly as before). A path no earlier
+	// operation touched is absent and read from disk; one it removed holds "".
+	shown := make(map[string]string)
+	shownBefore := func(path, fallback string) string {
+		if content, ok := shown[path]; ok {
+			return content
+		}
+		return fallback
+	}
 
 	for i, h := range hunks {
 		resolved, err := safePath(cfg, h.Path)
@@ -242,10 +261,12 @@ func validateAndCompute(cfg ToolConfig, hunks []PatchHunk) ([]stagedChange, erro
 			}
 
 			memFS[resolved] = h.Content
+			shown[resolved] = h.Content
 			staged = append(staged, stagedChange{
 				action:  actionAdd,
 				path:    resolved,
 				content: h.Content,
+				display: h.Path,
 				label:   fmt.Sprintf("A %s", h.Path),
 			})
 
@@ -260,12 +281,24 @@ func validateAndCompute(cfg ToolConfig, hunks []PatchHunk) ([]stagedChange, erro
 				return nil, fmt.Errorf("hunk %d: cannot delete %s — file does not exist", i+1, h.Path)
 			}
 
+			// What is being removed is what the card shows, so keep it: from a
+			// prior hunk's in-memory state, else from disk.
+			removed, inMem := memFS[resolved]
+			if !inMem {
+				if data, err := os.ReadFile(resolved); err == nil {
+					removed = string(data)
+				}
+			}
 			deleted[resolved] = true
 			delete(memFS, resolved)
+			before := shownBefore(resolved, removed)
+			shown[resolved] = ""
 			staged = append(staged, stagedChange{
-				action: actionDelete,
-				path:   resolved,
-				label:  fmt.Sprintf("D %s", h.Path),
+				action:  actionDelete,
+				path:    resolved,
+				before:  before,
+				display: h.Path,
+				label:   fmt.Sprintf("D %s", h.Path),
 			})
 
 		case HunkUpdate:
@@ -299,18 +332,37 @@ func validateAndCompute(cfg ToolConfig, hunks []PatchHunk) ([]stagedChange, erro
 				if err != nil {
 					return nil, fmt.Errorf("hunk %d move to %s: %w", i+1, h.MovePath, err)
 				}
+				// A move onto an existing file overwrites it, and that is the
+				// change worth showing: diff against what the destination held
+				// in the patch's working state, else on disk, else the source.
+				source := shownBefore(resolved, content)
+				before := source
+				if prior, ok := shown[moveTo]; ok {
+					before = prior
+				} else if data, err := os.ReadFile(moveTo); err == nil {
+					before = string(data)
+				}
+				shown[resolved] = ""
+				shown[moveTo] = newContent
 				staged = append(staged, stagedChange{
-					action:  actionMove,
-					path:    resolved,
-					moveTo:  moveTo,
-					content: newContent,
-					label:   fmt.Sprintf("R %s → %s", h.Path, h.MovePath),
+					action:   actionMove,
+					path:     resolved,
+					moveTo:   moveTo,
+					content:  newContent,
+					before:   before,
+					display:  h.Path,
+					moveName: h.MovePath,
+					label:    fmt.Sprintf("R %s → %s", h.Path, h.MovePath),
 				})
 			} else {
+				before := shownBefore(resolved, content)
+				shown[resolved] = newContent
 				staged = append(staged, stagedChange{
 					action:  actionUpdate,
 					path:    resolved,
 					content: newContent,
+					before:  before,
+					display: h.Path,
 					label:   fmt.Sprintf("M %s", h.Path),
 				})
 			}

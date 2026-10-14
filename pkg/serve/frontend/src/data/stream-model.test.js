@@ -2064,3 +2064,23 @@ test('a finished sessions message keeps its result for the card', () => {
   const block = doc.blocks.find((b) => b.type === 'session_message');
   expect(block.result).toBe('Queued for abcdef12 (it is working).');
 });
+
+test('a finished apply_patch row carries the recorded per-file diffs instead of a text body', () => {
+  const patchFiles = [
+    { path: 'a.go', op: 'M', add: 1, del: 1, diff: '@@ -1 +1 @@\n   1 -x\n   1 +y' },
+    { path: 'b.go', op: 'D', add: 0, del: 0 },
+  ];
+  const rows = projectStream(session([
+    tool('p1', 'apply_patch', { patch: '' }, 'done', 'M a.go\nD b.go', { patchFiles }),
+    tool('p2', 'apply_patch', {}, 'error', 'hunk 1: nope', { patchFiles }),
+    tool('p3', 'apply_patch', {}, 'done', 'M a.go\nD b.go'),
+  ]))[0].blocks.find(b => b.type === 'ledger').rows;
+  expect(rows[0].patchFiles).toBe(patchFiles);
+  expect(rows[0].body).toBeUndefined();
+  expect(rows[0].arg.text).toBe('2 files');
+  expect(rows[0].out).toBe('+1 −1');
+  expect(rows[1].patchFiles).toBeUndefined();
+  // A result recorded before diffs existed keeps today's text body.
+  expect(rows[2].patchFiles).toBeUndefined();
+  expect(rows[2].body).toBe('M a.go\nD b.go');
+});
