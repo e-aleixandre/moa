@@ -12,7 +12,8 @@ import { openPalette } from "../../../data/palette.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, rewindToMessage, stopRun } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
 import { closeInbox, dismissEvent, dismissSource, inboxPendingCount, openInbox, retryEvents, routeEvent, routeEventToNewSession, routeEventToOwner } from "../../../data/events.js";
-import { PermissionPrompt, SecretActionPrompt, AskUserPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
+import { pendingPromptsTail } from "../../Stream/pending-prompts.jsx";
+import { PermissionPrompt, McpBanner, GlobalSettings } from "../../../components/index.js";
 import { SessionRow } from "../../../components/SessionRow/SessionRow.jsx";
 import { OwnerAvatarFor } from "../../../components/Owners/OwnerAvatar.jsx";
 import { LivePreview } from "../../../components/LivePreview/LivePreview.jsx";
@@ -291,7 +292,7 @@ function MobileConversationBody({ forceMobile = false }) {
     }
   } else {
     const blocks = projectStream(session);
-    const blocking = session.untrustedMcp || session.pendingPerm || session.pendingSecrets?.length > 0;
+    const blocking = session.untrustedMcp || session.pendingPerm;
     const conversation = (
       <>
         <MobileStream
@@ -310,13 +311,12 @@ function MobileConversationBody({ forceMobile = false }) {
           }}
           lead={<EarlierBranches sessionId={session.id} empty={!(session.messages?.length > 0)} onOpen={() => setRewindOpen(true)} />}
           onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
-          tail={session.pendingAsk ? <AskUserPrompt key={session.id} session={session} /> : null}
+          tail={pendingPromptsTail(session)}
         />
         {blocking && (
           <div class="mconv-blocking">
             {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
             {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
-            {session.pendingSecrets?.length > 0 && <SecretActionPrompt key={session.id} session={session} />}
           </div>
         )}
         {/* One bar of live work between the transcript and the composer: the

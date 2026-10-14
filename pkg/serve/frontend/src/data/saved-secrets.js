@@ -18,17 +18,27 @@ export function actionSummary(request) {
 }
 
 // loadStatuses asks the app about each field that has an alias. A field whose
-// status call fails is simply "not saved".
+// status call fails is treated as "not saved" so typing still works, but the
+// failure is logged so it does not look like a missing save forever.
 export async function loadStatuses(bridge, request) {
   const entries = await Promise.all(request.fields.filter((f) => f.alias).map(async (f) => {
     try {
       const s = await bridge.status({ alias: f.alias, actionFingerprint: request.actionFingerprint });
       return [f.index, { saved: !!s?.saved, sameAction: !!s?.sameAction, savedAt: s?.savedAt || 0 }];
-    } catch {
+    } catch (e) {
+      console.error("Saved password status failed:", e?.code || "error");
       return [f.index, { saved: false, sameAction: false, savedAt: 0 }];
     }
   }));
   return Object.fromEntries(entries);
+}
+
+// Cards that are already mounted hear about a completed save in this document
+// (listeners may return a promise, awaited so callers see the refreshed state).
+const savedListeners = new Set();
+export function onSavedChange(listener) {
+  savedListeners.add(listener);
+  return () => savedListeners.delete(listener);
 }
 
 // readSaved reads one saved value, which is where Face ID happens. One field at
@@ -41,22 +51,45 @@ export async function readSaved(bridge, field, reason) {
 }
 
 // recordUse runs after a successful POST: touch what was reused, save what the
-// owner asked to keep. Failures are swallowed — the action already happened.
+// owner asked to keep. The action already happened, so nothing throws; it
+// returns what happened to each save so the owner can be told. Touch failures
+// are only logged (never a value).
 export async function recordUse(bridge, request, { touched = [], saves = [] }) {
   for (const f of touched) {
-    try { await bridge.touch({ alias: f.alias, actionFingerprint: request.actionFingerprint }); } catch { /* best effort */ }
+    try {
+      await bridge.touch({ alias: f.alias, actionFingerprint: request.actionFingerprint });
+    } catch (e) {
+      console.error("Saved password touch failed:", e?.code || "error");
+    }
   }
+  const outcomes = [];
   for (const { field, value } of saves) {
+    const label = clean(field.label || field.alias, 80) || "Password";
     try {
       await bridge.save({
         alias: field.alias,
         actionFingerprint: request.actionFingerprint,
-        label: clean(field.label || field.alias, 80) || "Password",
+        label,
         actionSummary: actionSummary(request),
         value,
       });
-    } catch { /* best effort */ }
+      outcomes.push({ alias: field.alias, label, ok: true });
+    } catch (e) {
+      console.error("Saved password save failed:", e?.code || "error");
+      outcomes.push({ alias: field.alias, label, ok: false, error: clean(e?.message || e?.code, 120) || "Try again." });
+    }
   }
+  if (outcomes.some((o) => o.ok)) await Promise.all([...savedListeners].map((fn) => fn()));
+  return { saves: outcomes };
+}
+
+// saveNotice is the toast for the outcomes of one answer, or null when nothing
+// was asked to be saved.
+export function saveNotice({ saves = [] } = {}) {
+  const failed = saves.find((o) => !o.ok);
+  if (failed) return { type: "error", title: "Couldn't save on this iPhone", detail: failed.error };
+  if (saves.length === 0) return null;
+  return { type: "success", title: "Saved on this iPhone", detail: saves.map((o) => o.label).join(", ") };
 }
 
 export function faceIdReason(request) {

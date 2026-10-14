@@ -34,7 +34,7 @@ function mount(props, { init = true } = {}) {
   const request = props.request;
   const firstRef = { current: null };
   const bridge = props.bridge ?? (globalThis.window?.moaSavedSecrets || null);
-  const card = createSecretCard({ request, send: props.send, bridge, onChange() {} });
+  const card = createSecretCard({ request, send: props.send, bridge, onChange() {}, notify: (t) => toasts.push(t) });
   const api = {
     card, firstRef,
     tree: () => expand(SecretActionView({ ...props, bridge, card, firstRef })),
@@ -84,6 +84,9 @@ const session = { id: "s1", subagents: { job7: { title: "sonnet" } } };
 
 let sent;
 let failWith;
+// notifications.js is mocked process-wide by another test file, so the card's
+// notice goes to a collector rather than the real toast queue.
+let toasts;
 const send = async (id, body) => {
   sent.push({ id, body: JSON.parse(JSON.stringify(body)) });
   if (failWith) throw failWith;
@@ -92,6 +95,7 @@ const send = async (id, body) => {
 const globals = { window: globalThis.window };
 beforeEach(() => {
   sent = [];
+  toasts = [];
   failWith = null;
   globalThis.window = { matchMedia: () => ({ matches: false }) };
 });
@@ -442,14 +446,37 @@ test("Save only offers fields that have an alias, and summarises a browser by it
   expect(c3.buttons().some((x) => x.props.role === "switch")).toBe(false);
 });
 
-test("a save that fails after the answer was accepted does not surface", async () => {
+test("a save that succeeds is confirmed by a toast naming what was saved", async () => {
+  bridge();
+  const c = mount({ session, request: COMMAND, send });
+  await c.ready;
+  c.buttons().find((x) => x.props.role === "switch").props.onClick();
+  c.type("password", "pw");
+  await c.submit();
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatchObject({ type: "success", title: "Saved on this iPhone", detail: "Keychain password" });
+  expect(JSON.stringify(toasts)).not.toContain("pw\"");
+});
+
+test("no toast when nothing was asked to be saved", async () => {
+  bridge();
+  const c = mount({ session, request: COMMAND, send });
+  await c.ready;
+  c.type("password", "pw");
+  await c.submit();
+  expect(toasts).toHaveLength(0);
+});
+
+test("a save that fails after the answer was accepted is reported with the bridge's text, not in the card", async () => {
   const b = bridge();
-  b.save = async () => { throw Object.assign(new Error("x"), { code: "biometry_unavailable" }); };
+  b.save = async () => { throw Object.assign(new Error("Face ID is not set up"), { code: "biometry_unavailable" }); };
   const c = mount({ session, request: COMMAND, send });
   await c.ready;
   c.buttons().find((x) => x.props.role === "switch").props.onClick();
   c.type("password", "pw");
   await c.submit();
   expect(sent).toHaveLength(1);
-  expect(c.text()).not.toContain("biometry");
+  expect(c.text()).not.toContain("Face ID is not set up");
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatchObject({ type: "error", title: "Couldn't save on this iPhone", detail: "Face ID is not set up" });
 });

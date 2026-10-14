@@ -20,3 +20,10 @@ export function followsTail(following, previousScrollTop, scrollTop, scrollHeigh
   if (scrollTop < previousScrollTop) return false;
   return following;
 }
+
+// pendingPromptKey identifies what the session is waiting on inline (ask_user,
+// secret request). A new key pins the stream to the tail once so the owner
+// lands on the prompt; after that they can scroll up freely.
+export function pendingPromptKey(session) {
+  return [session?.pendingAsk?.id, session?.pendingSecrets?.[0]?.id].filter(Boolean).join("|");
+}

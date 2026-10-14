@@ -542,3 +542,44 @@ test('the mobile header no longer carries an overflow action rail', async () => 
 
   expect(source).not.toContain('MobileActionRail');
 });
+
+const secretRequest = { id: 'sx-1', kind: 'command', command: 'ssh host', actionFingerprint: 'fp', fields: [{ index: 0, kind: 'password', label: 'Password', alias: 'host' }] };
+
+function withSecretSession(extra, fn) {
+  const previous = store.get();
+  setState({
+    sessions: { s1: { id: 's1', title: 'Build', state: 'running', messages: [], subagents: {}, pendingSecrets: [secretRequest], ...extra } },
+    activeSession: 's1',
+    isMobile: true,
+    sessionsLoaded: true,
+  });
+  try { return fn(); } finally { setState(previous); }
+}
+
+test('mobile: a pending secret request scrolls with the transcript, like ask_user', () => {
+  withSecretSession({}, () => {
+    const screen = MobileConversationScreen({});
+    const stream = componentNode(screen, 'MobileStream');
+    expect(componentNode(stream.props.tail, 'SecretActionPrompt')).toBeTruthy();
+    // Not in the fixed strip: nothing blocking is left on the screen.
+    expect(JSON.stringify(screen, (k, v) => (typeof v === 'function' ? undefined : v))).not.toContain('mconv-blocking');
+  });
+});
+
+test('mobile: with an ask and a secret pending, the ask comes first in the tail', () => {
+  withSecretSession({ pendingAsk: { id: 'a1', questions: [] } }, () => {
+    const stream = componentNode(MobileConversationScreen({}), 'MobileStream');
+    const names = [].concat(stream.props.tail.props.children).filter(Boolean).map((n) => n.type.name);
+    expect(names).toEqual(['AskUserPrompt', 'SecretActionPrompt']);
+  });
+});
+
+test('desktop: a pending secret request scrolls with the transcript, like ask_user', () => {
+  withSecretSession({}, () => {
+    setState({ isMobile: false, tileTree: { type: 'tile', id: 1, sessionId: 's1' }, focusedTile: 1 });
+    const screen = ConversationScreen();
+    const stream = componentNode(screen, 'Stream');
+    expect(componentNode(stream.props.tail, 'SecretActionPrompt')).toBeTruthy();
+    expect(JSON.stringify(screen, (k, v) => (typeof v === 'function' ? undefined : v))).not.toContain('conversation-blocking');
+  });
+});

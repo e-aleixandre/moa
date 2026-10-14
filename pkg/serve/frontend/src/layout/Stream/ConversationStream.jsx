@@ -27,6 +27,7 @@ import { retryHistoryHydration } from "../../data/api.js";
 import { openSession } from "../../data/tile-actions.js";
 import { captureHydrationAnchor, restoreHydrationAnchor } from "../../data/stream-hydration-anchor.js";
 import { useStreamScroll } from "../../data/stream-scroll.js";
+import { pendingPromptKey } from "../../data/stream-scroll-policy.js";
 import { ownerMessageSummary, ownerMessageFolds } from "../../data/util/owner-message.js";
 import {
   READ_ANCHOR_MARGIN, consumeReadAnchor, hasReadAnchor, readAnchorTargetID, settleReadAnchor,
@@ -242,7 +243,7 @@ export function ConversationStream({
   const { containerRef, contentRef, setScrollEl, checkScroll, scrollToBottom, placeReadAnchor, showNewBtn, stickToBottom } = useStreamScroll({
     session,
     sessionId: session?.id,
-    pendingAskId: session?.pendingAsk?.id,
+    pendingPromptKey: pendingPromptKey(session),
     onScrollEl,
     followSignals: [
       blocks.length,

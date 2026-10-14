@@ -11,8 +11,9 @@ import {
   DENY_BODY, buildAllowBody, firstEmptyField, secretErrorText, valuesComplete,
 } from "./secret-action.js";
 import {
-  bridgeErrorText, faceIdReason, loadStatuses, readSaved, recordUse,
+  bridgeErrorText, faceIdReason, loadStatuses, onSavedChange, readSaved, recordUse, saveNotice,
 } from "./saved-secrets.js";
+import { addToast } from "./notifications.js";
 
 // autofocusAllowed — focus the first field on desktop only: on a touch screen
 // it would pop the keyboard before the owner has read what is being asked.
@@ -20,7 +21,7 @@ export function autofocusAllowed(win = typeof window !== "undefined" ? window : 
   return !win?.matchMedia?.("(pointer: coarse)")?.matches;
 }
 
-export function createSecretCard({ request, send, bridge = null, onChange }) {
+export function createSecretCard({ request, send, bridge = null, onChange, notify = addToast }) {
   const state = {
     values: {},
     revealed: {},
@@ -33,6 +34,7 @@ export function createSecretCard({ request, send, bridge = null, onChange }) {
   };
   let alive = true;
   let inFlight = false;
+  let unsubscribe = null;
   const emit = () => { if (alive) onChange?.(); };
   const patch = (changes) => { Object.assign(state, changes); emit(); };
 
@@ -63,13 +65,21 @@ export function createSecretCard({ request, send, bridge = null, onChange }) {
     },
 
     async init() {
-      if (!bridge) return;
-      const statuses = await loadStatuses(bridge, request);
-      if (alive) patch({ statuses });
+      if (!bridge || !alive) return;
+      const refresh = async () => {
+        const statuses = await loadStatuses(bridge, request);
+        if (alive) patch({ statuses });
+      };
+      // A save that completes while this card is mounted changes its answer.
+      unsubscribe?.();
+      unsubscribe = onSavedChange(refresh);
+      await refresh();
     },
 
     dispose() {
       alive = false;
+      unsubscribe?.();
+      unsubscribe = null;
       state.values = {};
       state.revealed = {};
       state.fromSaved = {};
@@ -164,7 +174,12 @@ export function createSecretCard({ request, send, bridge = null, onChange }) {
         patch({ error: secretErrorText(e), busy: false });
         return;
       }
-      if (bridge) await recordUse(bridge, request, { touched: [...used, ...reused], saves });
+      if (bridge) {
+        const outcome = await recordUse(bridge, request, { touched: [...used, ...reused], saves });
+        // The card is gone by now; the toast is how the owner learns the result.
+        const notice = saveNotice(outcome);
+        if (notice) notify(notice);
+      }
     },
 
     async deny() {
