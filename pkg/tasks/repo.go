@@ -447,24 +447,15 @@ func migrateWith(db *sql.DB, path string, migrations, compat []string) (tooNew b
 	return false, tx.Commit()
 }
 
-// backupBeforeCompat copies the database to <path>.pre-compat<n>.bak, once:
-// an existing non-empty backup is never overwritten. It reads through its own
-// connection; the caller's transaction holds the write lock but has not
-// written, so the copy is the last committed state.
+// backupBeforeCompat copies the database to <path>.pre-compat<n>.bak, once.
+// The copy is made under a temporary name, validated and only then renamed,
+// so a crash can never leave a partial file where a backup is expected. An
+// existing backup is accepted only if it is a regular file that passes the
+// same validation; anything else is an error, never deleted or trusted. The
+// copy reads through its own connection; the caller's transaction holds the
+// write lock but has not written, so it is the last committed state.
 func backupBeforeCompat(ctx context.Context, path string, n int) error {
 	bak := fmt.Sprintf("%s.pre-compat%d.bak", path, n)
-	f, err := os.OpenFile(bak, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	switch {
-	case errors.Is(err, os.ErrExist):
-		if st, statErr := os.Stat(bak); statErr == nil && st.Size() > 0 {
-			return nil
-		}
-		// An empty file is a backup that never finished: VACUUM INTO fills it.
-	case err != nil:
-		return err
-	default:
-		_ = f.Close()
-	}
 	u := url.URL{Scheme: "file", Path: path}
 	u.RawQuery = url.Values{"_pragma": {"busy_timeout(5000)"}}.Encode()
 	src, err := sql.Open("sqlite", u.String())
@@ -472,11 +463,90 @@ func backupBeforeCompat(ctx context.Context, path string, n int) error {
 		return err
 	}
 	defer func() { _ = src.Close() }()
-	if _, err := src.ExecContext(ctx, "VACUUM INTO ?", bak); err != nil {
-		_ = os.Remove(bak)
+	var version int
+	if err := src.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	return os.Chmod(bak, 0o600)
+	switch st, err := os.Lstat(bak); {
+	case err == nil && !st.Mode().IsRegular():
+		return fmt.Errorf("%s exists and is not a regular file", bak)
+	case err == nil && st.Size() > 0:
+		if err := validBackup(ctx, bak, version); err != nil {
+			return fmt.Errorf("existing backup %s is not usable: %w", bak, err)
+		}
+		return nil
+	case err != nil && !errors.Is(err, os.ErrNotExist):
+		return err
+	}
+	// An empty file is a backup that never finished: it is replaced below.
+	if stale, _ := filepath.Glob(bak + ".tmp-*"); len(stale) > 0 {
+		for _, f := range stale {
+			_ = os.Remove(f)
+		}
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(bak), filepath.Base(bak)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	_ = tmp.Close()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := src.ExecContext(ctx, "VACUUM INTO ?", tmpName); err != nil {
+		return err
+	}
+	if err := validBackup(ctx, tmpName, version); err != nil {
+		return err
+	}
+	if err := syncPath(tmpName); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, bak); err != nil {
+		return err
+	}
+	committed = true
+	return syncPath(filepath.Dir(bak))
+}
+
+// validBackup opens a backup on its own and checks it is a complete database
+// of the same base version.
+func validBackup(ctx context.Context, file string, version int) error {
+	u := url.URL{Scheme: "file", Path: file}
+	u.RawQuery = url.Values{"mode": {"ro"}}.Encode()
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	var check string
+	if err := db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&check); err != nil {
+		return err
+	}
+	if check != "ok" {
+		return fmt.Errorf("integrity check: %s", check)
+	}
+	var got int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&got); err != nil {
+		return err
+	}
+	if got != version {
+		return fmt.Errorf("user_version %d, want %d", got, version)
+	}
+	return nil
+}
+
+// syncPath fsyncs a file or a directory.
+func syncPath(p string) error {
+	f, err := os.Open(p)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	return f.Sync()
 }
 
 func isBusy(err error) bool {
