@@ -122,8 +122,13 @@ func attachHandoffs(ctx context.Context, q querier, recs []Record) error {
 				&h.ToOwnerID, &h.ToOwnerName, &h.toSession, &h.State, &outcome); err != nil {
 				return err
 			}
-			h.Outcome = outcome.String
-			recs[idx[id]].Handoff = &h
+			rec := &recs[idx[id]]
+			// An outcome belongs to a closed task: a binary that reopens it does
+			// not know to clear it, and it must not come back on the next Done.
+			if rec.Status == StatusDone {
+				h.Outcome = outcome.String
+			}
+			rec.Handoff = &h
 		}
 		return rows.Err()
 	})

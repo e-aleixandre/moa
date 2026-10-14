@@ -360,6 +360,12 @@ func (r *Repo) saveTask(ctx context.Context, tx *sql.Tx, t Record, revision int6
 		}
 		return &ConflictError{Current: cur}
 	}
+	if t.Handoff != nil && t.Status != StatusDone {
+		// Reopening a task between owners drops its outcome, whoever reopens.
+		if _, err := tx.ExecContext(ctx, `UPDATE task_handoffs SET outcome = NULL WHERE task_id = ? AND outcome IS NOT NULL`, t.ID); err != nil {
+			return err
+		}
+	}
 	if t.OccurrenceID != 0 {
 		// Every status path (owner, agent, /tasks) writes through here, so a
 		// run can never disagree with its child.
