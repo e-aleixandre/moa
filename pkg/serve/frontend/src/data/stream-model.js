@@ -155,6 +155,7 @@ import { splitAskResponder } from './ask-user-machine.js';
 import { parseHistoryResult, historyOut } from './history-result.js';
 import { parseFileCardData } from './util/file-card.js';
 import { parseUnifiedDiff } from './util/unified-diff.js';
+import { toolMessage, messagePreview } from './util/message-tools.js';
 
 export const LIVE_FULL_MAX_LINES = 400;
 export const LIVE_FULL_MAX_CHARS = 20000;
@@ -1033,6 +1034,17 @@ function toLedgerRow(msg) {
   const echo = deriveEcho(measured);
   if (echo) row.echo = echo;
   if (PATH_ARG_TOOLS.has(name.toLowerCase())) row.argTail = true;
+  // Text sent to another agent: the row says what was said, not just that
+  // something was sent. The result moves into the detail beside it.
+  const sent = toolMessage(name, msg.args);
+  if (sent) {
+    row.arg = { text: messagePreview(sent) };
+    row.message = { ...sent, result: msg.result ? String(msg.result) : '' };
+    // The result is shown in the detail; leaving it on the row as well only
+    // took width from the message, which is what the row is for. A failure
+    // keeps its reason on the row.
+    if (status !== 'err' && status !== 'warn') delete row.echo;
+  }
   if (msg.detailUrl) row.detailUrl = msg.detailUrl;
   if (msg.images) row.images = msg.images;
   const inputLine = toolInputLine(name, msg.args);
@@ -1435,6 +1447,13 @@ function delegationDoneAgent(msg, accent, jobIDOverride, openable = true, entry 
   if (msg.result) agent.result = String(msg.result);
   if (msg.error || ((msg.status === 'error' || msg.status === 'failed') && msg.result)) {
     agent.error = String(msg.error || msg.result);
+  }
+  // What the parent told the child: the task, or the message it resumed it
+  // with. The name only holds the head of it (or the title replacing it).
+  const sent = toolMessage('subagent', msg.args);
+  if (sent) {
+    agent.message = sent;
+    agent.sentPreview = sent.target !== 'subagent' || !!((entry && entry.title) || msg.subagentTitle);
   }
   if (msg.excerpt) agent.excerpt = true;
   return agent;

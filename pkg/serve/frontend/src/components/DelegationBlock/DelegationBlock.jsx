@@ -3,6 +3,8 @@ import { GitFork, Check, X, ChevronDown, ChevronRight } from "lucide-preact";
 import "./DelegationBlock.css";
 import { Spinner } from "../../primitives/index.js";
 import { copyToClipboard } from "../../data/util/format.js";
+import { messagePreview } from "../../data/util/message-tools.js";
+import { ToolMessage } from "../ToolMessage/ToolMessage.jsx";
 
 // DelegationBlock — replaces FanoutBlock as the ONE surface for a wave of
 // subagents in the stream (SUBAGENTS-REDESIGN-SPEC-FABLE.md §1). It renders
@@ -125,7 +127,7 @@ function DoneAgentRow({ agent, onOpenAgent }) {
 }
 
 function OutcomeAgentRow({ agent, onOpenAgent, onPromoteAgent }) {
-	const { id, name, accent = "sky", state, action, chip, result, error, excerpt, time, openable = true, promotable = false } = agent;
+	const { id, name, accent = "sky", state, action, chip, result, error, excerpt, time, openable = true, promotable = false, message, sentPreview } = agent;
   const terminal = state !== "running";
   const failed = state === "failed";
   const cancelled = state === "cancelled";
@@ -135,7 +137,7 @@ function OutcomeAgentRow({ agent, onOpenAgent, onPromoteAgent }) {
   useEffect(() => () => clearTimeout(copiedTimer.current), []);
 	const outcomeText = failed ? error : result;
 	const outcomeLabel = `${failed ? "Error" : "Result"}${excerpt ? " excerpt" : ""}`;
-	const canExpand = !!outcomeText;
+	const canExpand = !!outcomeText || !!message;
   const SummaryTag = canExpand ? "button" : "div";
   const preview = terminal ? (chip || (cancelled ? "Cancelled before producing a result." : "No result returned.")) : action || "Working";
   // A button that cannot reach a conversation is a bug, not an affordance: an
@@ -163,15 +165,17 @@ function OutcomeAgentRow({ agent, onOpenAgent, onPromoteAgent }) {
           {time && <span class="outcome-time">{time}</span>}
         </span>
         <span class="outcome-preview">{state === "running" && "▸ "}{preview}</span>
+        {message && sentPreview && <span class="outcome-sent">{messagePreview(message)}</span>}
       </SummaryTag>
 		{actionCount > 0 && <div class={`dlg-outcome-actions${actionCount > 1 ? "" : " single"}`}>
 			{promote && <button type="button" class="dlg-promote" onClick={promote}>to background</button>}
-			{canExpand && <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>{outcomeLabel} <ChevronDown class={expanded ? "open" : ""} size={13} aria-hidden="true" /></button>}
+			{canExpand && <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>{outcomeText ? outcomeLabel : "Task"} <ChevronDown class={expanded ? "open" : ""} size={13} aria-hidden="true" /></button>}
 			{openAgent && <button type="button" onClick={() => openAgent(id)} aria-label={`Open ${name} conversation`}>Conversation <ChevronRight size={14} aria-hidden="true" /></button>}
 		</div>}
 		{expanded && <div class="dlg-result-body">
-			<span class="dlg-result-label">{outcomeLabel}</span><pre>{outcomeText}</pre>
-			<button type="button" class="dlg-copy" onClick={() => copyToClipboard(outcomeText).then((ok) => { if (ok) { clearTimeout(copiedTimer.current); setCopied(true); copiedTimer.current = setTimeout(() => setCopied(false), 1200); } })}>{copied ? <><Check size={14} aria-hidden="true" /> Copied</> : `Copy ${outcomeLabel.toLowerCase()}`}</button>
+			{message && <><span class="dlg-result-label">{message.target === "subagent" ? "Task" : "Resumed with"}</span><div class="dlg-sent"><ToolMessage target={message.target} text={message.text} /></div></>}
+			{outcomeText && <><span class="dlg-result-label">{outcomeLabel}</span><pre>{outcomeText}</pre>
+			<button type="button" class="dlg-copy" onClick={() => copyToClipboard(outcomeText).then((ok) => { if (ok) { clearTimeout(copiedTimer.current); setCopied(true); copiedTimer.current = setTimeout(() => setCopied(false), 1200); } })}>{copied ? <><Check size={14} aria-hidden="true" /> Copied</> : `Copy ${outcomeLabel.toLowerCase()}`}</button></>}
 		</div>}
     </div>
   );

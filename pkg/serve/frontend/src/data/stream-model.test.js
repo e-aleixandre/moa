@@ -2011,3 +2011,21 @@ test('consecutive messages after a complete answer are not midTurn', () => {
   const blocks = projectStream(session([user('first'), assistant('done'), user('rejected'), user('next')]));
   expect(blocks.filter((block) => block.kind === 'waypoint').map((block) => block.midTurn === true)).toEqual([false, false, false]);
 });
+
+test('a message to another agent shows its destination and first lines on the row', () => {
+  const message = 'La re-review de **PR #12** falla.\n\nRevisa `pkg/a.go`.';
+  const [doc] = projectStream(session([tool('t1', 'subagent_steer', { job_id: '7d7f6348abcd', message }, 'done', 'Message queued')]));
+  const ledger = doc.blocks.find((b) => b.type === 'ledger');
+  const row = ledger.rows[0];
+  expect(row.arg.text).toBe('→ 7d7f6348 · La re-review de PR #12 falla. Revisa pkg/a.go.');
+  expect(row.message).toEqual({ target: '7d7f6348', text: message, result: 'Message queued' });
+  expect(row.echo).toBeUndefined();
+});
+
+test('a resumed subagent card keeps the message it was resumed with', () => {
+  const card = tool('subagent-abcd1234', 'subagent', { task: 'Sigue con el punto 2', resume: '7d7f6348abcd' }, 'done', 'Listo.');
+  const [doc] = projectStream(session([card]));
+  const agent = doc.blocks.find((b) => b.type === 'delegation').agents[0];
+  expect(agent.message).toEqual({ target: '7d7f6348', text: 'Sigue con el punto 2' });
+  expect(agent.sentPreview).toBe(true);
+});

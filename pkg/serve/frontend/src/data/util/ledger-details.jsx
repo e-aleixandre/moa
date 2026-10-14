@@ -6,6 +6,7 @@ import { HistoryDetail } from "../../components/HistoryDetail/HistoryDetail.jsx"
 import { api } from "../api.js";
 import { toolPreview } from "../util/format.js";
 import { mapToolToKind } from "../util/tool-kind.js";
+import { ToolMessage } from "../../components/ToolMessage/ToolMessage.jsx";
 import { ToolImages } from "../../components/ToolImages/ToolImages.jsx";
 
 export function projectedToolDetailNode(tool, path, detail) {
@@ -109,6 +110,9 @@ export function fuseLedgerDetails(rows, siblingDiff, sessionId) {
         ...row,
         detail: { node: <AskUserDetail questions={row.askUser.questions} result={row.askUser.result} responder={row.askUser.responder} /> },
       };
+    }
+    if (row.message) {
+      return { ...row, detail: { node: <ToolMessage {...row.message} /> } };
     }
     if (row.command) {
       return {

@@ -96,6 +96,21 @@ button.zl-lg-row, button.zl-lg-head { cursor: pointer; transition: background va
 .zl-lg-arg.is-tail { direction: rtl; text-align: left; }
 .zl-lg-dim { flex: none; color: var(--zl-t4); }
 
+/* A row that sent text to another agent: on a phone the one-line preview is a
+   few characters wide, so the message gets its own two lines under the name. */
+@media (max-width: 720px) {
+  .zl-lg-row.is-message:not(.is-folding) { max-height: 84px; }
+  .zl-lg-row.is-message { padding-block: 8px; line-height: 1.35; }
+  .zl-lg-row.is-message .zl-lg-txt { flex-wrap: wrap; row-gap: 2px; white-space: normal; }
+  .zl-lg-row.is-message .zl-lg-arg {
+    flex: 1 1 100%;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+}
+
 /* The two right-hand cells, which used to be one.
 
    `out` is a MEASURE ("232 lines") — a short, bounded, tabular thing, so it

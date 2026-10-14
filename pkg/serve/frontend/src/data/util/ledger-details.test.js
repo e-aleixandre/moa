@@ -1,5 +1,7 @@
-import { test, expect } from 'bun:test';
-import { fuseLedgerDetails, ProjectedToolDetail, projectedToolDetailNode } from './ledger-details.jsx';
+import { test, expect, mock } from 'bun:test';
+const realMarkdown = await import('./markdown.js');
+mock.module('./markdown.js', () => ({ ...realMarkdown, renderMarkdown: (text) => `<strong>${text}</strong>` }));
+const { fuseLedgerDetails, ProjectedToolDetail, projectedToolDetailNode } = await import('./ledger-details.jsx');
 import { AskUserDetail } from '../../components/AskUserCard/AskUserDetail.jsx';
 
 // fuseLedgerDetails is the shared (desktop + mobile) step that attaches inline
@@ -161,4 +163,14 @@ test('source rows are not mutated', () => {
   const out = fuseLedgerDetails(rows, diff);
   expect(rows[0].detail).toBeUndefined(); // original untouched
   expect(out[0]).not.toBe(rows[0]); // a new object
+});
+
+test('a row carrying a message opens onto the whole message and the result below it', () => {
+  const rows = [row('subagent_steer', { id: 's1', message: { target: '7d7f6348', text: '**Hola** mundo', result: 'Message queued' } })];
+  const [out] = fuseLedgerDetails(rows, null);
+  const node = out.detail.node.type(out.detail.node.props);
+  const html = JSON.stringify(node, (k, v) => (typeof v === 'function' ? undefined : v));
+  expect(html).toContain('7d7f6348');
+  expect(html).toContain('<strong>**Hola** mundo</strong>');
+  expect(html).toContain('Message queued');
 });

@@ -165,7 +165,7 @@ function DoneRow({ row, arrive }) {
     <>
       <Tag
         type={hasDetail ? "button" : undefined}
-        class={`zl-lg-row${open ? " is-open" : ""}${row._folding ? " is-folding" : ""}${arrive != null ? " is-arriving" : ""}`}
+        class={`zl-lg-row${open ? " is-open" : ""}${row.message ? " is-message" : ""}${row._folding ? " is-folding" : ""}${arrive != null ? " is-arriving" : ""}`}
         style={arrive ? `--zl-lg-delay: calc(${arrive} * var(--motion-stagger))` : undefined}
         onClick={hasDetail ? () => setOpen((v) => !v) : undefined}
         aria-expanded={hasDetail ? open : undefined}

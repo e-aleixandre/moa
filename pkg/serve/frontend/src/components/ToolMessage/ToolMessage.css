@@ -1,0 +1,18 @@
+/* ToolMessage — the message inside an opened ledger row. It rides the row's own
+   detail panel, so there is no surface of its own: a provenance line in the
+   ledger's mono voice and the message in the prose voice it was written in. */
+.tmsg-to {
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t4);
+  overflow-wrap: anywhere;
+}
+.tmsg-body.zl-prose {
+  margin-top: 6px;
+  font-family: var(--font);
+  font-size: var(--zl-fs-body);
+  line-height: 1.5;
+  color: var(--subtext1);
+  overflow-wrap: anywhere;
+}
+.tmsg-body > :first-child { margin-top: 0; }
+.tmsg-body > :last-child { margin-bottom: 0; }

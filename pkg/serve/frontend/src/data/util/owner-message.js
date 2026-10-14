@@ -19,7 +19,7 @@
 // was shorter and wrong: these assignments are made of paths and identifiers,
 // so `data/foo_bar.js` became `data/foobar.js` and `__init__` became `init` —
 // the summary corrupting exactly the token it exists to show.
-function stripDecoration(line) {
+export function stripDecoration(line) {
   // Code spans are masked before the emphasis pass and restored verbatim
   // after: inside backticks `__init__` is a name, not bold. Masking rather
   // than splitting, because a bold span may WRAP a code span

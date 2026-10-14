@@ -495,6 +495,8 @@
 .outcome-name { min-width: 0; color: var(--a); font-weight: var(--weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .outcome-time { color: var(--overlay0); font-family: var(--mono); font-size: var(--text-micro); white-space: nowrap; }
 .outcome-preview { margin-left: 26px; color: var(--subtext0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: var(--text-xs); }
+.outcome-sent { margin-left: 26px; margin-top: 2px; color: var(--zl-t4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: var(--text-xs); }
+.dlg-sent { color: var(--subtext1); }
 .dlg-outcome-card.failed .outcome-preview { color: var(--red); }
 .dlg-outcome-card.cancelled .outcome-preview { color: var(--overlay1); }
 .dlg-outcome-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--zl-line); }
