@@ -166,8 +166,9 @@ type Repo struct {
 	tooNew bool
 	// noCompat is why the database is open in its pre-compat state: the
 	// backup before upgrading failed. Reads work, writes are refused.
-	noCompat error
-	closed   bool
+	noCompat   error
+	noCompatAt time.Time
+	closed     bool
 
 	changed chan struct{} // nudges Watch after a local commit
 
@@ -264,7 +265,14 @@ func (r *Repo) ensure(create bool) (w, rd *sql.DB, tooNew bool, err error) {
 		return nil, nil, false, fmt.Errorf("%w: closed", ErrUnavailable)
 	}
 	if r.w != nil {
-		return r.w, r.r, r.tooNew, nil
+		if r.noCompat == nil || r.now().Before(r.noCompatAt.Add(compatRetryAfter)) {
+			return r.w, r.r, r.tooNew, nil
+		}
+		// The backup failed a while ago: try again. The old pools may still be
+		// in use by a caller that got them before; close them a bit later.
+		oldW, oldR := r.w, r.r
+		time.AfterFunc(compatRetryAfter, func() { _ = oldR.Close(); _ = oldW.Close() })
+		r.w, r.r, r.noCompat = nil, nil, nil
 	}
 	if r.path == "" {
 		return nil, nil, false, fmt.Errorf("%w: cannot resolve the config directory", ErrUnavailable)
@@ -302,6 +310,9 @@ func (r *Repo) ensure(create bool) (w, rd *sql.DB, tooNew bool, err error) {
 	}
 	rdb.SetMaxOpenConns(4)
 	r.w, r.r, r.tooNew, r.noCompat = wdb, rdb, tooNew, noCompat
+	if noCompat != nil {
+		r.noCompatAt = r.now()
+	}
 	return r.w, r.r, r.tooNew, nil
 }
 
@@ -567,6 +578,12 @@ func syncPath(p string) error {
 	defer func() { _ = f.Close() }()
 	return f.Sync()
 }
+
+// compatRetryAfter is how long a failed pre-compat backup is trusted to keep
+// failing: until then reads and writes reuse the read-only pools; after it,
+// the next use reopens and tries the backup and the migration again. Every
+// try copies the whole database, so it is not done on every write.
+const compatRetryAfter = 30 * time.Second
 
 // backupFailure marks a migration refused only because the backup before it
 // could not be made.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A backup that cannot be made leaves the legacy data readable and refuses
@@ -46,5 +47,37 @@ func TestCompatBackupBlockedByDirectoryKeepsReads(t *testing.T) {
 	}
 	if rec, err := r.Get(bg, 4); err != nil || rec.Title != "checklist" || len(rec.Subtasks) != 2 || rec.Handoff != nil {
 		t.Fatalf("legacy read: %+v, %v", rec, err)
+	}
+}
+
+// Once the backup can be made, the next write migrates and succeeds without a
+// restart; reads then see the real tables, not the empty stand-ins.
+func TestCompatBackupFailureRetriedWithoutRestart(t *testing.T) {
+	p := v4DB(t, DatabaseName)
+	bak := p + ".pre-compat1.bak"
+	if err := os.Mkdir(bak, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	r := New(p)
+	defer func() { _ = r.Close() }()
+	if _, err := r.Create(bg, CreateInput{Title: "x", Place: PlaceYou}); err == nil {
+		t.Fatal("write succeeded without a backup")
+	}
+	if err := os.Remove(bak); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Create(bg, CreateInput{Title: "too soon", Place: PlaceYou}); err == nil {
+		t.Fatal("retried the backup on every write")
+	}
+	r.SetClock(func() time.Time { return time.Now().Add(compatRetryAfter + time.Second) })
+	rec, err := r.Create(bg, CreateInput{Title: "after the fix", Place: PlaceYou})
+	if err != nil {
+		t.Fatalf("write after the backup became possible: %v", err)
+	}
+	if st, err := os.Stat(bak); err != nil || !st.Mode().IsRegular() {
+		t.Fatalf("backup not made: %v", err)
+	}
+	if got, err := r.Get(bg, rec.ID); err != nil || got.Title != "after the fix" {
+		t.Fatalf("read after migration: %+v, %v", got, err)
 	}
 }
