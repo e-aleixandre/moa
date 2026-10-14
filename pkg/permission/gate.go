@@ -255,7 +255,7 @@ func (g *Gate) askUser(ctx context.Context, name string, args map[string]any) *c
 	respCh := make(chan Response, 1)
 
 	select {
-	case g.reqCh <- Request{ToolName: name, Args: args, Response: respCh}:
+	case g.reqCh <- Request{ToolName: name, Args: core.CloneArgs(args), Response: respCh}:
 	case <-ctx.Done():
 		return cancelledDecision(ctx)
 	}

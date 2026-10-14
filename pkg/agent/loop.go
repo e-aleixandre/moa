@@ -1509,7 +1509,7 @@ func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot,
 		Type:       core.AgentEventToolExecStart,
 		ToolCallID: tc.ToolCallID,
 		ToolName:   tc.ToolName,
-		Args:       tc.Arguments,
+		Args:       core.CloneArgs(tc.Arguments),
 	})
 	slot.startEmitted = true
 	// Best effort: flush start to subscribers before we might block on
@@ -1578,7 +1578,9 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 	// Phase 1: pre-flight (sequential). A rejected call never runs, so it is
 	// reported ended right away; its result is appended in order with the rest.
 	for i, tc := range toolCalls {
-		slots[i].tc = tc
+		// The call owns its args from here: the assistant message that carries
+		// tc is already published, and permission, hooks and tools adjust them.
+		slots[i].tc = tc.Clone()
 		preflightToolCall(ctx, cfg, &slots[i], i)
 		if !slots[i].approved {
 			slots[i].humanRejected = slots[i].rejectKind == rejectKindPermission
@@ -1908,7 +1910,7 @@ func endRejectedToolCall(cfg *loopConfig, slot *toolExecSlot, pendingWarning *bo
 			Type:       core.AgentEventToolExecStart,
 			ToolCallID: slot.tc.ToolCallID,
 			ToolName:   slot.tc.ToolName,
-			Args:       slot.tc.Arguments,
+			Args:       core.CloneArgs(slot.tc.Arguments),
 		})
 	}
 	reason := slot.rejectReason
