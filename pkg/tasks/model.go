@@ -103,6 +103,19 @@ type Task struct {
 	DependsOn   []int  `json:"depends_on,omitempty"`
 	CreatedAt   int64  `json:"created_at,omitempty"`   // unix millis
 	CompletedAt int64  `json:"completed_at,omitempty"` // unix millis
+
+	// Set only on a task between owners (or one with a thread); names and
+	// state only, never a session or project of the other owner.
+	Handoff      *TaskHandoff `json:"handoff,omitempty"`
+	CommentCount int          `json:"comment_count,omitempty"`
+}
+
+// TaskHandoff is what a session's projection says of a task between owners.
+type TaskHandoff struct {
+	State         string `json:"state"`
+	Outcome       string `json:"outcome,omitempty"`
+	FromOwnerName string `json:"from_owner_name"`
+	ToOwnerName   string `json:"to_owner_name"`
 }
 
 // Sentinel errors. Handlers map them to 404/403/409/400.

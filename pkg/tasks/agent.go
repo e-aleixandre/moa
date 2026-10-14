@@ -527,7 +527,10 @@ func (r *Repo) flat(ctx context.Context, where, sessionID string) ([]Task, error
 	for _, t := range recs {
 		a := Actor{SessionID: sessionID, ProjectKey: t.ProjectKey}
 		ft := Task{ID: int(t.ID), Title: t.Title, Description: t.Description, Status: t.Status,
-			CreatedAt: t.CreatedAt, CompletedAt: t.CompletedAt}
+			CreatedAt: t.CreatedAt, CompletedAt: t.CompletedAt, CommentCount: t.CommentCount}
+		if h := t.Handoff; h != nil {
+			ft.Handoff = &TaskHandoff{State: h.State, Outcome: h.Outcome, FromOwnerName: h.FromOwnerName, ToOwnerName: h.ToOwnerName}
+		}
 		for _, w := range t.WaitsFor {
 			if k := known[w]; k != nil && a.reads(k) {
 				ft.DependsOn = append(ft.DependsOn, int(w))
