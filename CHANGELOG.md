@@ -5,6 +5,105 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Passwords for one action.** `run_with_secret` runs a command in a terminal
+  and types the password you enter on a card at its prompts (`sudo`, `ssh`…);
+  `browser_fill_secret` fills fields of a page the agent opened. The value
+  never reaches the chat, the transcript or the model, and every request shows
+  the exact action. In the iOS app a value can be saved behind Face ID for the
+  same exact action (**Settings → Saved passwords** manages them). See
+  [Passwords for one action](docs/tools.md#passwords-for-one-action).
+- **Android app**, with the same pairing, web UI and encrypted push as iOS,
+  Back-button support and a share sheet. It is installed from an APK and is not
+  on Google Play. See [Native app](docs/mobile.md).
+- **Share into moa from iOS and Android.** The share sheet lists your owners and
+  recent conversations, takes a note and sends only when you tap **Send**; if
+  moa cannot be reached it offers **Save for later**, and a send whose outcome
+  is unknown is never retried automatically. The iOS app also scans pairing
+  codes with the system camera and accepts a list of allowed push relays.
+- **Native push for iOS** through the end-to-end encrypted relay (Android uses
+  Firebase Cloud Messaging through the same relay).
+- **Provider sign-ins in Settings.** Sign in to Anthropic, OpenAI or Grok,
+  replace an API key or switch between a subscription and a key from
+  **Settings → Providers**, in the browser or from a paired phone. See
+  [Provider sign-ins](docs/serve.md#provider-sign-ins).
+- **One Anthropic API key beside the plan.** With both, moa uses the plan and
+  falls back to the key when the plan's 5-hour or weekly limit is reached,
+  flagged by `api` in the status line, and returns to the plan on its own.
+  Without a key, a confirmed plan limit is a visible, cancellable wait
+  (*Waiting for 5h quota* / *Waiting for weekly quota*); changing the model
+  continues right away.
+- **`history` tool.** The agent can search, read and look around the original
+  messages of its own session, including those a compaction or a trim hid from
+  it. It is read-only and does not change what the model is sent. A
+  `ask_user` answer now records who gave it, and the card says *Answered by
+  ‹name›* when it was not you. See [History](docs/tools.md#history).
+- **Rewind on your own message** goes back to just before it, keeps the reply
+  that came before and returns the message, with its attachments, to the
+  composer for editing. See [Rewind](docs/serve.md#rewind).
+- **Tasks between owners.** An owner can give a task to another owner (with
+  your permission per pair, **Can send tasks to** in Edit owner); tasks and
+  requests have a thread, and the recipient closes it with Done or Can't do and
+  a note. See [Tasks between owners](docs/serve.md#tasks-between-owners).
+- **You can detach a session an owner launched**; it then notifies you directly.
+- **Claude Haiku 5.5** (`claude-haiku-5-5`, 1M-token context), priced $0.10 /
+  $0.50 per million tokens up to 100K prompt tokens and $0.50 / $2.50 above.
+  The `haiku` alias still points to Haiku 4.5.
+- **Multiple-choice questions** from `ask_user`: toggle several options and add
+  free text.
+- **A warning before a repeated error stops the run.** After the second
+  identical failing batch the error says to change approach; the third stops
+  the run. A batch you refused never counts. See
+  [Repeated tool calls](docs/tools.md#repeated-tool-calls).
+- **In-app viewer for video, audio and PDF.**
+- **Tool cards show more.** `apply_patch` lists its files with `+N −M` and a
+  diff each; the messages sent through `subagent`, `subagent_steer`, `sessions`
+  and `tasks` are readable in full; an image returned by `read` shows as a
+  thumbnail.
+- **Markdown in your own messages**: code, `**bold**` and links render; the rest
+  stays as typed.
+- **Prompt-cache misses explained.** The Usage page counts them, adds what
+  re-caching cost and names the probable cause of the latest one.
+- **Tasks chip on the phone's status line** while a session has unfinished
+  tasks.
+- `find` also looks for `fdfind`, the name of `fd` on Debian and Ubuntu.
+
+### Changed
+
+- `max_budget` and a goal's budget now include the subagents a run launches or
+  resumes, background ones too. The session cost total is saved and survives
+  closing and reopening a conversation. A resumed subagent is priced from what
+  it produced in that run, and the `-output json` `subagent_end` line can carry
+  `run_cost_usd`.
+- Compaction no longer blocks the run: the summary is computed in the background
+  and adopted at the next request boundary. If the configured `compact_model`
+  fails, the summary is retried once with the session's model; your setting is
+  untouched.
+- Sonnet 5.5's cache-read price is $0.10 per million tokens; Opus 5.5, Sonnet
+  5.5 and Haiku 5.5 cap output at 128,000 tokens.
+- The device session cookie is `SameSite=Lax`.
+- Built with Go 1.26.9 and `golang.org/x/net` v0.60.0.
+
+### Fixed
+
+- Stop and early messages: no tool starts after Stop, and a message you send
+  while a tool runs is committed in order with the run's events.
+- A tool call cut off by a refusal or a budget stop no longer leaves a session
+  that every later request rejects; existing sessions recover.
+- The permission card scrolls on short screens and keeps **Allow**, **Always**
+  and **Deny** reachable under a long command.
+- The password card scrolls with the conversation and confirms what was saved.
+- Sol and Astra thinking levels are mapped once, so subagents, resumed sessions
+  and `/handoff` no longer climb one level each time.
+- Opening `@` folders in the composer no longer raises the iOS keyboard.
+- Paid usage of failed partial responses and refusals now counts in the run's
+  cost and budget.
+- `HEAD /api/preview/target` no longer changes the preview.
+- An image that failed to load in the lightbox is retried each time you open it.
+
 ## [0.45.0] - 2026-10-01
 
 ### Added

@@ -10,16 +10,17 @@ Always registered:
 | `bash_status` | Check a background bash job's status and output |
 | `bash_wait` | Block until a background bash job finishes and return its result |
 | `bash_cancel` | Cancel a running background bash job |
-| `read` | Read text, image and PDF files with offset/limit (PDF needs `pdftotext`) |
+| `read` | Read text, image and PDF files with offset/limit (PDF needs `pdftotext`). An image goes to the model as vision input and, in the web UI, shows as a thumbnail in the tool's row (see [Reading the transcript](./serve.md#reading-the-transcript)) |
 | `write` | Create or overwrite files (atomic: temp file + rename) |
 | `edit` | Text replacement that tolerates whitespace/indentation differences; the match must be unique unless `replaceAll` is set (atomic write) |
 | `multiedit` | Atomic batch of edits to a single file |
 | `apply_patch` | Add, delete and update several files in one `*** Begin Patch` block |
 | `grep` | Search file content (prefers `rg` if installed) |
-| `find` | Search files by glob (prefers `fd` if installed) |
+| `find` | Search files by glob (prefers `fd` if installed; on Debian and Ubuntu, where that program is called `fdfind`, it uses that) |
 | `ls` | List directory contents |
 | `fetch_content` | Fetch a URL and extract readable markdown |
 | `memory` | Search/read/update persistent cross-session notes |
+| `history` | Read-only search of this session's own original messages. See [History](#history) |
 | `subagent` | Spawn a child agent (sync or async) |
 | `subagent_status` | Poll async subagent jobs |
 | `subagent_wait` | Block until an async subagent job finishes and return its result |
@@ -35,7 +36,7 @@ Conditionally registered:
 | Tool | Condition |
 |------|-----------|
 | `web_search` | `brave_api_key` is configured |
-| `ask_user` | The web UI is active (not headless) |
+| `ask_user` | The web UI is active (not headless). A question can offer options to pick one from or, when the agent marks it multiple-choice, to toggle several, always with room for a free-text answer. If someone other than you answered (an [owner](./owners.md) from its book, or an automation), the agent is told so and the card says *Answered by ‹name›* |
 | `run_with_secret` | The web UI is active. Runs a command in a terminal and types the password the owner enters on a card at its password prompts. See [Passwords for one action](#passwords-for-one-action) |
 | `browser_fill_secret` | The web UI is active and an MCP server exposes `browser_type` and `browser_evaluate` (Playwright). Types what the owner enters on a card into fields of the open page. See [Passwords for one action](#passwords-for-one-action) for its limits |
 
@@ -240,7 +241,9 @@ parent's model/thinking instead of failing the resume.
 ### Guardrails
 
 Child agents run with their own, independent limits (they do **not** inherit
-the parent's numbers, and have **no** budget/`$` cap of their own):
+the parent's numbers, and have no `$` cap of their own: what they spend counts
+against the budget of the run that launched them, see
+[Cost & persistence](#cost--persistence)):
 
 | Limit | Default | Config key (`config.json`) |
 | --- | --- | --- |
@@ -256,7 +259,7 @@ neither `memory` nor the ephemeral checkpoint to write to, so a warning could
 only produce stray files, and its findings already travel back in its report.
 
 Children cannot spawn their own subagents, use `memory`, call `ask_user`, use
-`checkpoint`, or direct other sessions with `sessions`; a child of the project
+`checkpoint`, search `history`, or direct other sessions with `sessions`; a child of the project
 owner reads the `book` but cannot write it. A child started by a forked skill
 has that same denylist.
 
@@ -268,6 +271,15 @@ In `moa serve` it also answers for a job that has already left memory, reading
 its outcome from the saved transcript; a transcript left unfinished by a
 restart is reported as interrupted and can be continued with `resume`.
 The web UI shows each agent's cost separately from the session total.
+
+**Budget.** A run limited by `max_budget` (or by a goal's remaining budget)
+shares that limit with every subagent it launches or resumes, and with theirs:
+the run stops once what the whole family has spent exceeds it, even when the
+child runs in the background. A child on a model without known pricing adds
+nothing to the total but still stops when the limit is exhausted. The cost is
+charged when each response arrives, before its tools run, so a child started by
+that response already sees it. The session total is saved with the session, so
+closing and reopening a conversation keeps it instead of starting again at $0.
 
 Finished subagent transcripts are persisted to a side directory next to the
 parent session (`<session-id>.subagents/<job-id>.json`), so they survive
@@ -290,6 +302,39 @@ again. A resumed job's `resumed_from` names the job it continued: compare the
 original job's `last` with the resumed job's `first` to see where the prefix
 diverged. Treat this file as private: hashes can confirm guessed content; do not share it publicly.
 The terminal UI does not persist subagents and keeps no audit.
+
+## History
+
+`history` lets the agent check what was actually said instead of trusting a
+summary. It searches the original messages of the current session, including
+those a compaction has summarized, a [Start fresh](./serve.md#prompt-cache-expiry-and-start-fresh)
+has cut off or a trim has elided, and only on the branch you are on.
+
+- `search` finds the messages that contain every word of `query`
+  (case- and accent-insensitive; a phrase in double quotes), oldest first, each
+  with its ID, author and a snippet. `role` narrows it to `user`, `assistant`,
+  `tool` or `ask_user`; that last one finds your answers to the agent's
+  questions, with who gave each one. Up to 50 results per call, and `after`
+  continues a long list.
+- `read` returns one message by ID, in pages for a long one.
+- `around` shows the messages just before and after one (up to 20 each way).
+
+It never changes the conversation, the compaction or what the model is sent.
+Every result is capped at 16 KiB. Main sessions, owners and the headless CLI
+have it; subagents do not. In the web UI its card shows what was found in
+readable form.
+
+## Repeated tool calls
+
+A run that issues the same tool calls three times in a row is stopped, so a
+stuck model cannot burn tokens indefinitely. Before that happens, when the
+second identical batch ends in an error, the error result carries a warning:
+*Repeated tool error. Change the arguments or use a different approach; the
+next identical tool-call batch will stop this run.* The status tools
+(`bash_status`, `bash_wait`, `subagent_status`, `subagent_wait`) are exempt,
+since polling them is normal. A batch that **you** refused (a denied permission
+request, a declined password card) does not count as the model repeating itself
+and gets no warning.
 
 ## Custom script tools
 

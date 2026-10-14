@@ -113,6 +113,12 @@ uses a shared public Grok Build client and a private consumer proxy, so it is
 best-effort rather than a promised public xAI API integration. If both are set,
 `XAI_API_KEY` takes precedence over the stored xAI OAuth login.
 
+In `moa serve` you can also sign in, replace an API key or switch between a
+subscription and a key from **Settings → Providers**, in the browser or from a
+paired phone (see [Provider sign-ins](./serve.md#provider-sign-ins)). For
+Anthropic you can keep a subscription **and** an API key: the key takes over
+when the plan's limit is reached and the plan resumes when it recovers.
+
 An expired login does not lock you out of Serve: sessions still open and
 existing ones still reopen, and the failure appears when you send a message,
 naming the provider to sign in to again. Switching that session to a model from

@@ -11,11 +11,13 @@ Moa is a coding agent runtime in Go. One core, two interfaces: web UI and headle
 - **Subagents**: spawn child agents, sync or async
 - **Memory**: cross-session persistent project notes
 - **Skills**: loadable knowledge packs discovered from `.moa/skills/` or `~/.config/moa/skills/`. The agent pulls one in with `load_skill`; you can invoke one yourself with `/<name>`. `context: fork` runs the skill as an isolated subagent instead of loading it into the current conversation
-- **Budget & limits**: per-run USD caps, turn limits, duration limits
+- **Budget & limits**: per-run USD caps (subagents included), turn limits, duration limits
 - **Checkpoint / undo**: revert file changes per agent turn
 - **Context compaction**: when context grows large, old tool outputs are trimmed first (a line in the transcript says how much was freed) and the conversation is summarized only when that is not enough — by the session's model or by a [summarizer you choose](./configuration.md#features)
 - **MCP**: connect external tool servers, local or remote; remote servers that need a login sign in with OAuth from the session's MCP page
 - **Mid-run messages**: what you send while the agent works is [queued](./serve.md#queued-commands-and-mid-run-messages) and read at its next step; one tap brings the whole queue back to the input
+- **[Rewind](./serve.md#rewind)**: go back to any message of yours, edit it and send it again; the branch you leave stays reachable
+- **[Native app](./mobile.md)**: the iOS and Android shell around the web UI, with push notifications, a share sheet and passwords kept behind Face ID
 - **[Artifacts](./serve.md#files-sent-by-the-agent)**: files the agent sends you stay reachable from the conversation
 - **Voice input**: dictate messages in the web UI, or hand the conversation to a voice delegate and get its minutes back as a draft
 - **[Live Preview](./serve.md#live-preview)**: watch the web app the agent is building inside the conversation, at a chosen viewport width, and tap an element to tell the agent what should change about it

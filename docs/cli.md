@@ -8,7 +8,7 @@
 | `-model` | `sonnet` | Model alias or `provider/model-id` |
 | `-thinking` | `medium` | `off`, `low`, `medium`, `high`, `xhigh` — see [Thinking levels](#thinking-levels) |
 | `-max-turns` | 0 | Max agent turns per run. `0` uses `max_turns` from config (unlimited if unset) |
-| `-max-budget` | from config | Max USD spend per run (`-1` sentinel = use `config.json`; an explicit `0` means unlimited) |
+| `-max-budget` | from config | Max USD spend per run, subagents included (`-1` sentinel = use `config.json`; an explicit `0` means unlimited) |
 | `-yolo` | false | Disable sandbox and all permissions |
 | `-permissions` | from config | `yolo`, `ask`, `auto`. A one-shot run has nobody to approve, so a call that would ask is denied: cover what the run needs with `-allow` |
 | `-permissions-model` | | Model for `auto` mode evaluator |
@@ -131,7 +131,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 |-------|------------|
 | `sonnet` | `claude-sonnet-5-5` |
 | `opus` | `claude-opus-5-5` |
-| `haiku` | `claude-haiku-4-5-20251001` |
+| `haiku` | `claude-haiku-4-5-20251001` (Claude Haiku 5.5 is `claude-haiku-5-5`, by ID only) |
 | `fable` | `claude-fable-5-1` |
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
@@ -152,7 +152,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-haiku-5-5`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
 ## Thinking levels
 
@@ -168,8 +168,11 @@ model does with them differs:
 - **Claude Sonnet 5.5** cannot turn thinking fully off. `off` sends its lowest
   setting, `between_tools`: no up-front thinking, only short progress notes
   between tool calls, at the default `high` effort.
-- **Claude Haiku 5.5** thinks adaptively at `medium` effort by default; `off`
-  sends `disabled`, which the API accepts up to `high` effort.
+- **Claude Haiku 5.5** (`claude-haiku-5-5`, 1M-token context, up to 128K tokens
+  of output) thinks adaptively at `medium` effort by default and accepts `xhigh`;
+  `off` sends `disabled`, which the API accepts up to `high` effort. It costs
+  $0.10 / $0.50 per million input / output tokens for prompts up to 100K tokens;
+  above that the whole request is priced at $0.50 / $2.50.
 - **`xhigh`** is its own effort level on every Anthropic model except Haiku
   4.5, which caps it at `high`. OpenAI models accept `xhigh` as its own
   effort level. On **GPT-6 Astra**, the five UI positions map to `low`,

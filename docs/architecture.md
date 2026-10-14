@@ -175,6 +175,16 @@ on the next request — while `prepare` costs a request. Both apply only to
 `/prepare-compact` is the manual form of the same turn. Subagents are excluded
 under every setting.
 
+An automatic compaction does not stop the run. Once the context crosses the
+threshold, the summary of the older part is computed in the background while
+requests keep leaving with the full context; it is adopted, together with
+everything appended meanwhile, at the next ordinary request boundary or when the
+session is idle. Only a request that would not fit in the model's window waits
+for it. If the configured summarizer fails for a reason other than
+authentication, an invalid request, a context too long for it or a refusal, the
+summary is retried once with the session's model (see `compact_model` in
+[Configuration](./configuration.md#features)).
+
 Compaction is lossy by construction. The full transcript remains on disk: the
 session log is append-only, so a summarized session can still be inspected in
 full after the fact.

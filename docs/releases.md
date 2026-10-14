@@ -9,7 +9,8 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 (`feat:`, `fix:`, `docs:`, and so on). The changelog is curated rather than
 generated, and normal feature/fix PRs do not edit it. When preparing a release,
 inspect the commits since the previous tag and write one coherent dated section
-covering the user-visible changes in [CHANGELOG.md](../CHANGELOG.md).
+covering the user-visible changes in [CHANGELOG.md](../CHANGELOG.md). Until the
+version and date are chosen, the section is kept under `## [Unreleased]`.
 
 ## Release checklist
 

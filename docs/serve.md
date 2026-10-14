@@ -36,7 +36,10 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - Keyboard-first navigation
 - [Voice input](#voice-input), and [live calls](#talk-live) with a voice delegate that hands back minutes
 - Session IDs the agent writes in its replies become chips that open that session
-- Share a file from another app into a conversation (installed web app)
+- Share a file or link from another app into a conversation (installed web app, and the [native iOS and Android apps](./mobile.md))
+- [Rewind](#rewind): go back to any of your messages and edit it, without losing the branch you leave
+- [Provider sign-ins](#provider-sign-ins) managed from Settings, also from a paired phone
+- A native [iOS and Android app](./mobile.md) with push notifications and passwords saved behind Face ID
 - Stage short-lived secrets for the agent without putting their values in chat
 - [Project owners](./owners.md): a standing agent per codebase, shown at the top of the session list
 - Pair a Pulse device by scanning a **QR code** (or manual code) from **Settings → Devices → Pair a device…** or the palette's **Pair Pulse…** (`POST /api/pulse/pairings`)
@@ -334,8 +337,8 @@ head holds search (`⌘K`), **+** for a new session, and the two orders:
 Each row says why a session wants you in words, not only in colour. Use a row's
 menu to close or reopen it, copy its ID, or delete it. The foot holds the
 [inbox](#event-inbox), [**Tasks**](#using-tasks-in-the-web-ui) and **Settings**
-(compaction, notification sound and push, subagent models, paired devices, and
-the version under **About**). The gear shows a dot when a newer release is out.
+(compaction, notification sound and push, subagent models, **Providers**, paired
+devices, **Saved passwords** in the iOS app, and the version under **About**). The gear shows a dot when a newer release is out.
 
 On a phone, every panel opens as a bottom sheet: swipe it down from anywhere on
 its surface, or tap the scrim, to dismiss it. A step opened from inside a sheet
@@ -358,7 +361,15 @@ which you can edit in place, the folder, and rows for **Tasks** (see
 
 The status line under the composer opens the same places directly: the model
 and thinking picker, the permission mode, MCP, and the context and cost gauge
-(→ Usage).
+(→ Usage). Short chips appear on it only while they apply: `fast` when
+[fast mode](./cli.md#fast-mode) is on, `api` while a run is being served with
+your Anthropic API key because the plan hit its limit (see [Provider
+sign-ins](#provider-sign-ins)), the goal, MCP and extra-usage states, and
+**tasks**: your open requests and the session's checklist progress (`0/2`),
+which opens that session's tasks. On a phone the tasks chip stays visible while
+the session has unfinished tasks, in its short form; it gives way only to
+alarms (two on the line, or one next to the owner's face on the narrowest
+screens) and never pushes the context gauge off the line.
 
 ## Model and thinking
 
@@ -381,6 +392,45 @@ On desktop, you can split panes horizontally or vertically, switch focus by keyb
   thin line says how much it freed.
 - A line marks where **Start fresh** cut the model's context; the messages
   above it stay in the transcript but are no longer sent to the model.
+- Your own messages show a safe subset of Markdown: fenced and inline code
+  (fenced blocks have a **Copy** button), `**bold**` and links. Italics, lists,
+  headings, quotes, tables, HTML and images stay as the literal text you typed,
+  and the spacing you used is kept.
+- Each tool call is a row; open it for the details. `read` of an image, or any
+  tool that returns a stored image, shows a thumbnail there that opens in the
+  lightbox (past the fourth, a **+N** button reveals the rest; a very large
+  image is a tap-to-open tile so nothing heavy is fetched unasked). If the
+  image has since been removed, the lightbox says *Image unavailable*.
+- `apply_patch` rows list the files they changed with `+N −M`; open one to see
+  each file's diff, taken from what was really written (long patches show the
+  first diffs only).
+- A row for `subagent`, `subagent_steer`, `sessions` or `tasks` shows where the
+  text went and its first lines; open it for the whole message, rendered as
+  Markdown, with the result below it.
+- Video, audio and PDF files (agent artifacts, file cards, your attachments)
+  open in an in-app viewer instead of handing you to the system share sheet;
+  PDFs are drawn page by page.
+
+### Rewind
+
+Every message of yours has a rewind mark. Tapping it asks **Rewind here?**; a
+rewind on your own message goes back to just before it, **keeps the reply that
+came before**, and puts the message back in the composer with its text and
+attachments so you can change it and send it again (**Rewind and edit**). It is
+meant for the case where a message should not have been sent as it was, say
+because the provider refused it. If the composer already holds a draft, the
+message is added below it; an attachment that only exists as a file on disk
+cannot come back and the toast names it. A message that was your first one
+leaves the conversation empty; one you sent mid-turn returns to the last complete
+reply before it, and the confirmation says so.
+
+Nothing is deleted: rewinding starts a new branch and the one you left stays
+reachable. **See all points and branches** in the confirmation opens the rewind
+timeline, which also lists the agent's turns and shows which points already
+have branches; an emptied conversation links to it as **Earlier branches**.
+Rewind is refused while the agent is working; stop the run first.
+The REST form is `POST /api/sessions/{id}/branch` with `{"entry_id", "before"}`;
+`before: true` is the edit form and answers with the message to restore.
 
 ## Prompt cache expiry and Start fresh
 
@@ -390,6 +440,12 @@ uncached price. Moa warns only where the provider documents a cache lifetime:
 on Anthropic after the configured [`cache_ttl`](./configuration.md#features) (1 hour by
 default, or 5 minutes), on OpenAI 30 minutes after the last request, and never
 on other providers. The warning survives a reload or a restart.
+
+The **Usage** page of the session panel says how often the cache missed: the
+number of misses, what re-caching cost over a cache read, and the latest miss
+with its probable cause (idle past the provider's window, a model change, a
+compaction, a context cut). A cause is named only when the transcript shows it;
+otherwise the miss is left as unknown.
 
 Next to it, **Start fresh** stops sending the older part of the conversation
 to the model without summarizing it: the model keeps exactly the recent
@@ -407,6 +463,13 @@ Tap the microphone (**Dictate**) to record and tap it again to stop; the
 transcript lands at the cursor, so you can dictate, fix a word and dictate
 more. `Esc` discards a recording. `⌘.` / `Alt+.` does the same as a tap.
 Dictation also works when steering a subagent.
+
+An agent question (`ask_user`) can offer options to pick one from, or, when the
+agent marks it multiple-choice, toggles you can combine, plus optional free
+text. Whatever you choose reaches the agent as one answer, with the picks joined
+by `; ` and the free text last. A question answered by someone else (the
+project's [owner](./owners.md) from its book, or an automation) says *Answered
+by ‹name›* on its card.
 
 Agent questions (`ask_user`) take dictation the same way: with the free answer
 empty, its button is a microphone; or use the shortcut while the question is on
@@ -442,7 +505,7 @@ separately and is not included.
 
 ## Attachments
 
-Attach files from the composer's **+** menu (**Attach files**) or by pasting an image. With Moa installed as a web app, you can also share a file from another app: Moa asks which conversation it belongs to and puts it in that composer, unsent. How each file is handled depends on its type:
+Attach files from the composer's **+** menu (**Attach files**) or by pasting an image. With Moa installed as a web app, you can also share a file from another app: Moa asks which conversation it belongs to and puts it in that composer, unsent. The native iOS and Android apps have their own share sheet, which can [send it straight away](./mobile.md#sharing-into-moa). How each file is handled depends on its type:
 
 - **Images** (`jpeg/png/gif/webp`) are sent to the model natively as vision input. Large photos are downscaled in the browser before upload. The server validates the file's magic bytes against the declared type — a binary mislabeled as an image is saved to disk instead of being forwarded to the provider.
 - **PDFs** are sent to the model natively as a `document` block **when the active provider supports it AND the bytes are actually a PDF** (`%PDF-` magic; Anthropic always supports documents, OpenAI on the API-key path). xAI Grok currently supports images but not native document/PDF input in Moa. If the active provider does not support native documents — the PDF exceeds the size limit, or the content isn't a real PDF — it is saved to disk as a fallback (see below) and the agent is told where to find it. Because Moa is provider-agnostic and you can switch models mid-conversation, this decision is made per message against whichever provider is active at send time; a `document` already in the history is degraded to a text note if you later switch to a provider that can't accept it.
@@ -470,7 +533,7 @@ The reader shows the file's position in the collection (`2 of 5`). Move to the
 previous or next file with the arrows beside its name, the `←` / `→` keys, or a
 sideways swipe on a phone.
 
-Markdown, text and images can be read in the viewer. HTML supports interactive
+Markdown, text, images, video, audio and PDF can be read in the viewer. HTML supports interactive
 reports inside a sandboxed iframe, without access to Moa's DOM, cookies or storage.
 External HTTPS resources may load automatically; the resource inspector lets you
 check their domains. Keep local HTML assets inline or use externally hosted assets:
@@ -690,6 +753,41 @@ saved session. Consequences worth knowing:
   [your project state](configuration.md#your-project-state), not in the
   repository.
 
+## Provider sign-ins
+
+**Settings → Providers** shows Anthropic, OpenAI and Grok (xAI) with their
+state (*Ready*, *Sign-in expired*, *API key rejected*, *Managed by environment*…)
+and lets you sign in, replace or remove an API key, or switch between a
+subscription and an API key, without a terminal. What you change applies to
+every session on its next request. Switching between a subscription and an API
+key says who will bill you before it replaces anything. A provider whose key
+comes from an environment variable is shown but not editable here. A phone you
+paired can do everything the browser can, with the same protections as the rest
+of the [pairing](#security).
+
+**Anthropic plan plus an API key.** Anthropic has one **API key** field beside
+the subscription sign-in; saving a key does not sign you out of the plan.
+With both, moa uses the plan. When the plan's 5-hour or weekly limit is
+confirmed to be reached, requests go out on your API key (the status line shows
+`api` while that lasts, and nothing is added to the conversation), and the next
+request goes back to the plan as soon as the provider accepts it again. If the
+API credits run out, the provider's error is shown as it is; moa does not hide
+it behind a wait or switch your model. With only a key, the key is the main
+credential, as before. Removing the key removes the fallback.
+
+**No key to fall back on.** When a plan limit has been reached and there is
+none, moa waits instead of failing: the live bar says *Waiting for 5h quota*
+or *Waiting for weekly quota*, with the announced reset and next attempt when
+the provider gives them. **Stop** ends the wait; changing the model continues
+right away on the new one. A restart keeps the turn and a note about the wait
+but does not resume it by itself. A subagent's own time limit pauses while it
+waits.
+
+The Providers API (`GET /api/providers` and `/status`, and `POST
+/api/providers/{provider}/oauth/begin|complete|progress|cancel`, `api-key`,
+`api-key/remove`, `retry-save`) answers only the owner or a paired device, and a
+`POST` must come from moa's own page.
+
 ## Plan usage
 
 The web usage panel can show provider-qualified subscription plan quota. For
@@ -733,7 +831,8 @@ it can read sessions, conversations and activity and use the same generic
 actions as the web client. This is deliberate: Pulse is a client of Moa, not a
 separate restricted product surface. The exceptions are pairing administration:
 only the network/token owner can create pairings, list paired devices or revoke
-a device. An already paired device cannot extend its own authority.
+a device. An already paired device cannot extend its own authority. A paired
+device can manage [provider sign-ins](#provider-sign-ins), like the browser.
 
 Inbound automation (webhooks, cron, CI) uses a **separate** shared secret,
 `--automation-token` / `MOA_AUTOMATION_TOKEN`, presented as
@@ -758,6 +857,11 @@ server-enforced confirmation ceremony. The attention item intentionally no
 longer includes `requires_verbatim_confirm`; clients must not infer an
 echo-confirmation requirement from the queue. Serve has no formal API version;
 this is the current attention contract.
+
+In the interface, the permission card sizes itself to the room that is left:
+a long command scrolls inside the card, and **Allow**, **Always** and **Deny**
+stay pinned at its foot, on short screens and in landscape too, with **Add
+rule** and feedback inside the scrolling part.
 
 Moa also rejects requests whose `Host` header isn't `localhost`, an IP literal, or an explicit `--allowed-hosts` entry (anti DNS-rebinding), and requires an `X-Moa-Request` header on non-GET requests (CSRF protection). None of this replaces a real network boundary: prefer localhost, Tailscale, or a reverse proxy for remote access, and use `--token` on top of it. When pairing remotely, terminate TLS at Serve or a trusted proxy; Tailscale connectivity alone does not make an HTTP request TLS to Serve.
 
@@ -1013,8 +1117,9 @@ replacement and the sound are the OS's.
 
 ### Native app
 
-The iOS app gets the same notifications through a relay that holds the APNs
-key ([`relay/`](../relay/README.md)). The content is end-to-end encrypted with a
+The [native app](./mobile.md) gets the same notifications through a relay that
+holds the APNs key (iOS) or the Firebase credentials (Android)
+([`relay/`](../relay/README.md)). The content is end-to-end encrypted with a
 key the iPhone generated: the relay sees an opaque handle, a fixed-size sealed
 envelope, an opaque grouping id and the time, never the title, the session,
 the project or the kind. Only the server the iPhone paired with can send to it.
@@ -1037,6 +1142,9 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/version` | Current version, update state, and served frontend build id |
 | `GET /api/capabilities` | Server/session capabilities (providers, features) |
 | `GET /api/usage` | Usage/cost readout |
+| `GET /api/providers` · `GET /api/providers/status` · `POST /api/providers/{provider}/…` | The [provider sign-ins](#provider-sign-ins): state of each provider (the full list only for the owner or a paired device), and the sign-in and API-key actions |
+| `GET /api/share/destinations` | Where a native app's share sheet can drop something: owners first, then the 50 most recent conversations |
+| `POST /api/sessions/{id}/branch` · `GET /api/sessions/{id}/branches` | [Rewind](#rewind) to a point (`{"entry_id", "before"?}`) and list the points that have branches |
 | `GET /api/sessions/{id}/history?before={msg_id}&limit={n}` | Chronological, lossless display-history page before a message ID; the page size is an objective and can grow to keep tool calls with their results |
 | `GET /api/model-preferences` · `PATCH /api/model-preferences` | Read or pin/unpin models in the owner's global preferences |
 | `GET /api/compact-strategy` · `PATCH /api/compact-strategy` | Read or set what the agent gets before an automatic compaction (`plain`, `notify`, `prepare`) |
