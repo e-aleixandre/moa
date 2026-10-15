@@ -208,7 +208,7 @@ func (m *Manager) voiceBookOwner(called string) (string, error) {
 // the configured backend model through the plan, the voice allowlist only,
 // every tool executed by this call's dispatcher. Its last text is the answer.
 func (c *voiceCall) runHandoff(ctx context.Context, request string) string {
-	prov, model, err := c.reg.backendProvider()
+	prov, model, err := c.reg.backendProvider(c.id)
 	if err != nil {
 		return "moa's backend is not available for this call."
 	}
@@ -241,18 +241,16 @@ func (c *voiceCall) runHandoff(ctx context.Context, request string) string {
 	return "moa's backend needed too many steps for this request."
 }
 
-// backendProvider builds the handoff backend through the plan sign-in only:
-// a text API key must never pay for a plan call behind the user's back.
-func (r *voiceCallRegistry) backendProvider() (core.Provider, core.Model, error) {
+// backendProvider builds the handoff backend of call id bound to the plan
+// sign-in the call was opened with, never to the text selection: a text API
+// key must never pay for a plan call, nor another account serve it.
+func (r *voiceCallRegistry) backendProvider(id string) (core.Provider, core.Model, error) {
 	model := voiceModel()
-	if r.store == nil || r.mgr.providerFactory == nil {
-		return nil, model, errors.New("no backend")
-	}
-	snap, err := r.store.PeekSnapshot(model.Provider)
-	if err != nil || snap.Kind != "oauth" {
+	plan, ok := r.openedPlan(id)
+	if !ok || r.opts.Backend == nil {
 		return nil, model, errors.New("backend needs the plan sign-in")
 	}
-	prov, err := r.mgr.providerFactory(model)
+	prov, err := r.opts.Backend(model, plan)
 	if err != nil {
 		return nil, model, err
 	}

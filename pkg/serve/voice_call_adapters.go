@@ -54,8 +54,8 @@ func (l VoiceCallLimits) withDefaults() VoiceCallLimits {
 	return d
 }
 
-// VoiceCallOptions injects transport for voice calls. Production leaves it
-// zero; tests route providers to local fakes and keep ICE on loopback.
+// VoiceCallOptions injects transport for voice calls. Production sets only
+// Backend; tests route providers to local fakes and keep ICE on loopback.
 type VoiceCallOptions struct {
 	HTTPClient *http.Client
 	Limits     VoiceCallLimits
@@ -63,6 +63,10 @@ type VoiceCallOptions struct {
 	// nil ICEServers selects the peer's public STUN default.
 	PeerSettings *webrtc.SettingEngine
 	ICEServers   []webrtc.ICEServer
+	// Backend builds the handoff backend of a ChatGPT-plan call, bound to
+	// plan: the stored plan sign-in (and account) the call was opened with.
+	// It must never select another credential. nil: handoffs are refused.
+	Backend func(model core.Model, plan auth.CredentialSnapshot) (core.Provider, error)
 }
 
 // WithVoiceCalls overrides the voice call transport and budgets.
@@ -122,6 +126,13 @@ func (s *storeVoiceCredentials) accept(snap auth.CredentialSnapshot) (voice.Cred
 	return voice.Credential{Token: snap.Token, AccountID: snap.AccountID}, nil
 }
 
+// opened is the snapshot the call was opened (or last refreshed) with.
+func (s *storeVoiceCredentials) opened() auth.CredentialSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.last
+}
+
 func (s *storeVoiceCredentials) Resolve(ctx context.Context) (voice.Credential, error) {
 	snap, err := s.store.ResolveSnapshot(ctx, s.provider, s.sel)
 	if err != nil {
@@ -144,23 +155,24 @@ func (s *storeVoiceCredentials) Refresh(ctx context.Context, rejected voice.Cred
 	return s.accept(next)
 }
 
-// adapter builds the adapter of p with a credential source of its own.
-func (r *voiceCallRegistry) adapter(p voice.ProviderID) (voice.Adapter, bool) {
+// adapter builds the adapter of p with a credential source of its own,
+// returned too so the call can pin what it was opened with.
+func (r *voiceCallRegistry) adapter(p voice.ProviderID) (voice.Adapter, *storeVoiceCredentials, bool) {
 	info, ok := voiceProviders[p]
 	if !ok || r.store == nil {
-		return nil, false
+		return nil, nil, false
 	}
 	creds := &storeVoiceCredentials{store: r.store, provider: info.store, sel: voiceSelection(p)}
 	switch p {
 	case voice.GrokPlan, voice.XAIAPI:
-		return voice.NewRealtimeWS(voice.RealtimeWSConfig{ID: p, HTTPClient: r.opts.HTTPClient, Credentials: creds, OAuth: p == voice.GrokPlan, Billing: info.billing}), true
+		return voice.NewRealtimeWS(voice.RealtimeWSConfig{ID: p, HTTPClient: r.opts.HTTPClient, Credentials: creds, OAuth: p == voice.GrokPlan, Billing: info.billing}), creds, true
 	case voice.OpenAILiveAPI:
-		return voice.NewLiveWS(voice.LiveWSConfig{HTTPClient: r.opts.HTTPClient, Credentials: creds, Billing: info.billing}), true
+		return voice.NewLiveWS(voice.LiveWSConfig{HTTPClient: r.opts.HTTPClient, Credentials: creds, Billing: info.billing}), creds, true
 	case voice.ChatGPTPlan:
 		return voice.NewChatGPTPlan(voice.ChatGPTPlanConfig{HTTPClient: r.opts.HTTPClient, Credentials: creds, Billing: info.billing,
-			Peer: voice.PeerConfig{ICEServers: r.opts.ICEServers, SettingEngine: r.opts.PeerSettings}}), true
+			Peer: voice.PeerConfig{ICEServers: r.opts.ICEServers, SettingEngine: r.opts.PeerSettings}}), creds, true
 	}
-	return nil, false
+	return nil, nil, false
 }
 
 // selectable reports, without network or refresh, whether p's credential

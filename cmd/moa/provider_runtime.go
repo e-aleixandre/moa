@@ -23,17 +23,23 @@ type snapshotProvider struct {
 	model      core.Model // Provider is always set
 	authStore  *auth.Store
 	httpClient *http.Client
+	// plan, when set, pins every request to that stored plan sign-in
+	// (same generation and account) instead of the text selection. A
+	// replaced or removed sign-in fails the request; it never switches.
+	plan *auth.CredentialSnapshot
 }
 
 func (p *snapshotProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
-	snap, err := p.authStore.ResolveSnapshot(ctx, p.model.Provider)
+	snap, err := p.resolve(ctx)
 	if err != nil {
-		p.authStore.RecordUse(auth.CredentialSnapshot{Provider: p.model.Provider}, err)
+		if p.plan == nil {
+			p.authStore.RecordUse(auth.CredentialSnapshot{Provider: p.model.Provider}, err)
+		}
 		return nil, err
 	}
 	secrets := &secretSet{}
 	secrets.add(snap)
-	if p.model.Provider == "anthropic" && ((snap.Kind == "oauth" && snap.Source == core.CredentialSourceStore) || (req.Options.ProviderBinding != nil && req.Options.ProviderBinding.Kind == "api_backup")) {
+	if p.plan == nil && p.model.Provider == "anthropic" && ((snap.Kind == "oauth" && snap.Source == core.CredentialSourceStore) || (req.Options.ProviderBinding != nil && req.Options.ProviderBinding.Kind == "api_backup")) {
 		return p.streamAnthropic(ctx, req, snap, secrets)
 	}
 	base, err := provider.New(p.model, p.config(snap, secrets))
@@ -57,9 +63,72 @@ func (p *snapshotProvider) Stream(ctx context.Context, req core.Request) (<-chan
 // SupportsDocuments answers for the transport the next request would use,
 // without refreshing anything.
 func (p *snapshotProvider) SupportsDocuments() bool {
-	snap, _ := p.authStore.PeekSnapshot(p.model.Provider)
+	snap, _ := p.peek()
 	base, err := provider.New(p.model, p.config(snap, nil))
 	return err == nil && core.ProviderSupportsDocuments(base)
+}
+
+func (p *snapshotProvider) selection() []auth.SnapshotSelection {
+	if p.plan != nil {
+		return []auth.SnapshotSelection{auth.SelectPlanOAuth}
+	}
+	return nil
+}
+
+// resolve selects the credential of the next request: the text selection,
+// or only the pinned plan sign-in.
+func (p *snapshotProvider) resolve(ctx context.Context) (auth.CredentialSnapshot, error) {
+	if p.plan != nil {
+		// Checked before resolving too, so another login's expired token
+		// is not refreshed on the pinned call's behalf.
+		if cur, err := p.peek(); err == nil && !samePlan(cur, *p.plan) {
+			return auth.CredentialSnapshot{}, planChanged(*p.plan)
+		}
+	}
+	snap, err := p.authStore.ResolveSnapshot(ctx, p.model.Provider, p.selection()...)
+	if err != nil || p.plan == nil {
+		return snap, err
+	}
+	if !samePlan(snap, *p.plan) {
+		return auth.CredentialSnapshot{}, planChanged(*p.plan)
+	}
+	return snap, nil
+}
+
+func (p *snapshotProvider) peek() (auth.CredentialSnapshot, error) {
+	return p.authStore.PeekSnapshot(p.model.Provider, p.selection()...)
+}
+
+// samePlan reports whether snap is still the pinned stored sign-in. A
+// rotation keeps the generation; a new sign-in or account does not.
+func samePlan(snap, plan auth.CredentialSnapshot) bool {
+	return snap.Kind == "oauth" && snap.Source == core.CredentialSourceStore &&
+		snap.Generation == plan.Generation && snap.AccountID == plan.AccountID
+}
+
+func planChanged(plan auth.CredentialSnapshot) error {
+	changed := core.NewProviderCredentialError(plan.Provider, core.CredentialSourceStore, "inference", core.CredentialChanged)
+	changed.Generation = plan.Generation
+	return changed
+}
+
+// newVoiceBackendFactory builds the handoff backend of a plan voice call,
+// bound to the plan sign-in the call was opened with. Unlike text it never
+// selects an environment or stored API key: a plan call must not be paid
+// for, or served by another account, behind the user's back.
+func newVoiceBackendFactory(authStore *auth.Store, httpClient *http.Client) func(core.Model, auth.CredentialSnapshot) (core.Provider, error) {
+	return func(model core.Model, plan auth.CredentialSnapshot) (core.Provider, error) {
+		m := model
+		m.Provider = providerNameForModel(model)
+		if plan.Provider != m.Provider || plan.Kind != "oauth" || plan.Source != core.CredentialSourceStore {
+			return nil, planChanged(plan)
+		}
+		p := &snapshotProvider{model: m, authStore: authStore, httpClient: httpClient, plan: &plan}
+		if _, err := provider.New(m, p.config(plan, nil)); err != nil {
+			return nil, err
+		}
+		return p, nil
+	}
 }
 
 func (p *snapshotProvider) config(snap auth.CredentialSnapshot, secrets *secretSet) provider.Config {
@@ -126,9 +195,12 @@ func (p *snapshotProvider) classify(ctx context.Context, snap auth.CredentialSna
 // provider's selected credential: nil if it is, otherwise the classified
 // reason (credentials_changed, or the store's own failure).
 func (p *snapshotProvider) selectionChanged(snap auth.CredentialSnapshot) error {
-	cur, err := p.authStore.PeekSnapshot(snap.Provider)
+	cur, err := p.peek()
 	if err != nil {
 		return err
+	}
+	if p.plan != nil && !samePlan(cur, *p.plan) {
+		return planChanged(*p.plan)
 	}
 	same := cur.Source == snap.Source && cur.Kind == snap.Kind &&
 		cur.Generation == snap.Generation && cur.AccountID == snap.AccountID

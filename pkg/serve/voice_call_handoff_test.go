@@ -9,7 +9,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/voice"
 )
 
-// A ChatGPT-plan delegation runs through Manager's providerFactory backend
+// A ChatGPT-plan delegation runs through the plan-bound backend
 // loop: the backend sees only the voice allowlist and the handoff prompt, its
 // tool call is executed by the call's dispatcher, and the answer returns to
 // the peer as delegation.context.append for that item.

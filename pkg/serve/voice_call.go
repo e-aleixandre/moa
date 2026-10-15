@@ -42,9 +42,10 @@ type voiceCallRegistry struct {
 
 	mu         sync.Mutex
 	closed     bool
-	principals map[string]*voiceSlot // one reservation per principal
-	calls      map[string]*voiceCall // active calls by ID
-	ended      map[string]string     // tombstone: call ID → principal
+	principals map[string]*voiceSlot              // one reservation per principal
+	calls      map[string]*voiceCall              // active calls by ID
+	plans      map[string]auth.CredentialSnapshot // plan sign-in each ChatGPT-plan call opened with
+	ended      map[string]string                  // tombstone: call ID → principal
 	endedOrder []string
 	wg         sync.WaitGroup // reservations and controllers
 }
@@ -56,7 +57,7 @@ func newVoiceCallRegistry(mgr *Manager, store *auth.Store, opts VoiceCallOptions
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &voiceCallRegistry{mgr: mgr, store: store, opts: opts, admission: newVoiceLiveAdmission(), ctx: ctx, cancel: cancel,
-		principals: map[string]*voiceSlot{}, calls: map[string]*voiceCall{}, ended: map[string]string{}}
+		principals: map[string]*voiceSlot{}, calls: map[string]*voiceCall{}, plans: map[string]auth.CredentialSnapshot{}, ended: map[string]string{}}
 }
 
 // voiceSlot is a principal's reservation. tearingDown is closed once its
@@ -119,16 +120,28 @@ func (r *voiceCallRegistry) release(principal string, slot *voiceSlot) {
 	r.wg.Done()
 }
 
-// register publishes an opened call. It fails when the registry closed while
-// the upstream was opening; the caller then closes that upstream.
-func (r *voiceCallRegistry) register(c *voiceCall) bool {
+// register publishes an opened call with the plan sign-in it was opened
+// with, if any. It fails when the registry closed while the upstream was
+// opening; the caller then closes that upstream.
+func (r *voiceCallRegistry) register(c *voiceCall, plan *auth.CredentialSnapshot) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		return false
 	}
 	r.calls[c.id] = c
+	if plan != nil {
+		r.plans[c.id] = *plan
+	}
 	return true
+}
+
+// openedPlan is the plan sign-in call id was opened with.
+func (r *voiceCallRegistry) openedPlan(id string) (auth.CredentialSnapshot, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	plan, ok := r.plans[id]
+	return plan, ok
 }
 
 // releasePrincipal frees the principal's slot once the upstream is closed:
@@ -141,6 +154,7 @@ func (r *voiceCallRegistry) releasePrincipal(c *voiceCall) {
 func (r *voiceCallRegistry) finish(c *voiceCall) {
 	r.mu.Lock()
 	delete(r.calls, c.id)
+	delete(r.plans, c.id)
 	r.ended[c.id] = c.principal
 	r.endedOrder = append(r.endedOrder, c.id)
 	if len(r.endedOrder) > voiceTombstones {
@@ -229,7 +243,7 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		}
 		provider = p
 	}
-	adapter, ok := r.adapter(provider)
+	adapter, creds, ok := r.adapter(provider)
 	if !ok {
 		voiceError(w, http.StatusBadRequest, map[string]any{"error": "unknown_provider"})
 		return
@@ -272,7 +286,12 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 	}
 	c := newVoiceCall(r, id, principal, sess.ID, provider, adapter.Billing(), up)
 	c.slot = slot
-	if !r.register(c) {
+	var plan *auth.CredentialSnapshot
+	if provider == voice.ChatGPTPlan {
+		opened := creds.opened()
+		plan = &opened
+	}
+	if !r.register(c, plan) {
 		ctx, cancel := context.WithTimeout(context.Background(), r.opts.Limits.Teardown)
 		_ = up.Close(ctx, "shutdown")
 		cancel()

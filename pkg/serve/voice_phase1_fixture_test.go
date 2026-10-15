@@ -42,7 +42,7 @@ type vpLimits struct {
 // Only hookup changes belong here when the voice factory/clock/selector exist.
 // These current options do NOT wire the absent voice adapters. Never register
 // test routes or implement policy here. Budgets are test-only, not defaults.
-func vpServerOptions(store *auth.Store, logins *auth.ProviderLoginManager, client *http.Client, limits vpLimits) []ServerOption {
+func vpServerOptions(store *auth.Store, logins *auth.ProviderLoginManager, client *http.Client, limits vpLimits, backend func(core.Model, auth.CredentialSnapshot) (core.Provider, error)) []ServerOption {
 	// Same loopback-only ICE as the provider fixture: no STUN, no external host.
 	var se webrtc.SettingEngine
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
@@ -58,6 +58,7 @@ func vpServerOptions(store *auth.Store, logins *auth.ProviderLoginManager, clien
 		Limits:       VoiceCallLimits{Grace: limits.grace, Maximum: limits.maximum, Minutes: limits.minutes, Teardown: limits.teardown, BufferedBytes: limits.bufferedBytes, BriefChars: limits.briefChars},
 		PeerSettings: &se,
 		ICEServers:   []webrtc.ICEServer{},
+		Backend:      backend,
 	})}
 }
 
@@ -556,6 +557,8 @@ type vpFixture struct {
 	store            *auth.Store
 	prov             *mockProvider
 	voiceText        *vpVoiceText
+	backendMu        sync.Mutex
+	backendPlans     []auth.CredentialSnapshot // plan each handoff backend was bound to
 	sess             *ManagedSession
 	root, provider   string
 	log, clientBytes vpBuffer
@@ -627,7 +630,13 @@ func vpNewFixtureWithLimits(t *testing.T, provider string, limits vpLimits, hand
 func (f *vpFixture) start() {
 	logins := auth.NewProviderLoginManagerWithHTTPClient(context.Background(), f.store, f.up.client())
 	f.t.Cleanup(logins.Close)
-	opts := append(vpServerOptions(f.store, logins, f.up.client(), f.limits), WithAuthToken("vp-owner-token", false), WithDeviceStorePath(filepath.Join(f.root, "devices.json")))
+	backend := func(_ core.Model, plan auth.CredentialSnapshot) (core.Provider, error) {
+		f.backendMu.Lock()
+		f.backendPlans = append(f.backendPlans, plan)
+		f.backendMu.Unlock()
+		return f.voiceText, nil
+	}
+	opts := append(vpServerOptions(f.store, logins, f.up.client(), f.limits, backend), WithAuthToken("vp-owner-token", false), WithDeviceStorePath(filepath.Join(f.root, "devices.json")))
 	f.handler = NewServer(f.mgr, opts...)
 	f.srv = httptest.NewServer(f.handler)
 }
