@@ -190,12 +190,12 @@ func Classify(err error) *OpenError {
 }
 
 func statusError(status int) *OpenError {
-	switch {
-	case status == 401:
+	switch status {
+	case 401:
 		return &OpenError{Class: ClassUnauthorized, Status: status}
-	case status == 403:
+	case 403:
 		return &OpenError{Class: ClassForbidden, Status: status}
-	case status == 429:
+	case 429:
 		return &OpenError{Class: ClassRateLimited, Status: status}
 	default:
 		return &OpenError{Class: ClassUnavailable, Status: status}

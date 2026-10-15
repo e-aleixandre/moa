@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/coder/websocket"
 )
@@ -230,13 +229,4 @@ func (u *wsUpstream) close(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func int64p(v int64) *int64 { return &v }
-
-func deadlineOr(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
-	if _, ok := ctx.Deadline(); ok {
-		return context.WithCancel(ctx)
-	}
-	return context.WithTimeout(ctx, d)
 }

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -527,5 +526,3 @@ func (c *voiceCall) readClient(cl *voiceClient) {
 		}
 	}
 }
-
-var errVoiceEnding = errors.New("the call is ending")
