@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.46.0] - 2026-10-15
 
 ### Added
 
@@ -19,17 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same exact action (**Settings → Saved passwords** manages them). See
   [Passwords for one action](docs/tools.md#passwords-for-one-action).
 - **Android app**, with the same pairing, web UI and encrypted push as iOS,
-  Back-button support and a share sheet. It is not on Google Play; for now it is
-  built from source, and an APK is offered only when a release includes one.
-  See [Native app](docs/mobile.md).
+  Back-button support and a share sheet. It is not on Google Play: install the
+  signed APK attached to this release, or build it from source. See
+  [Native app](docs/mobile.md).
 - **Share into moa from iOS and Android.** The share sheet lists your owners and
   recent conversations, takes a note and sends only when you tap **Send**; if
   moa cannot be reached it offers **Save for later**, and on iOS a send whose
   outcome is unknown is never retried automatically. The iOS app also scans pairing
   codes with the system camera and accepts a list of allowed push relays.
-- **Native push for iOS** through the end-to-end encrypted relay. The Android
-  app is built to receive push through Firebase Cloud Messaging via the same
-  relay; that works once the relay in use has been set up for it.
+- **Native push for iOS and Android** through the end-to-end encrypted relay;
+  Android receives it through Firebase Cloud Messaging. The official relay
+  supports both. A relay you run yourself needs its Firebase service account
+  for Android (see [relay/README.md](relay/README.md)).
 - **Provider sign-ins in Settings.** Sign in to Anthropic, OpenAI or Grok,
   replace an API key or switch between a subscription and a key from
   **Settings → Providers**, in the browser or from a paired phone. See
@@ -109,6 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cost and budget.
 - `HEAD /api/preview/target` no longer changes the preview.
 - An image that failed to load in the lightbox is retried each time you open it.
+- The server no longer crashes with `concurrent map iteration and map write`
+  when a tool call's arguments are adjusted while the conversation is being
+  read; the transcript keeps the arguments the model sent.
 
 ## [0.45.0] - 2026-10-01
 
