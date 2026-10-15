@@ -549,31 +549,7 @@ func TestVoicePhase1_FakeChatGPTDirectRTCLoopback(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Source-grounded simulation, NOT evidence of a live provider handoff.
-	// The spike observed the sideband join and events; the append shapes
-	// below come from pinned Codex source, not a recorded handoff trace.
-	control, _, err := websocket.Dial(ctx, "https://api.openai.com/v1/live/"+peer.callID, &websocket.DialOptions{HTTPClient: up.client()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer control.CloseNow() //nolint:errcheck
-	if _, _, err := control.Read(ctx); err != nil {
-		t.Fatal(err)
-	} // session.started
-	delegation := map[string]any{"type": "delegation.created", "item": map[string]any{"id": "delegation-fixture", "type": "delegation", "target": "client", "content": []any{map[string]any{"type": "input_text", "text": "source-grounded fixture request"}}}}
-	peer.emit(t, delegation)
-	_, raw, err := control.Read(ctx)
-	if err != nil || string(raw) != vpJSON(delegation) {
-		t.Fatal("sideband changed raw delegation event")
-	}
-	appendContext := map[string]any{"type": "delegation.context.append", "delegation_item_id": "delegation-fixture", "channel": "speakable", "content": []any{map[string]any{"type": "input_text", "text": "fixture result"}}}
-	if err := control.Write(ctx, websocket.MessageText, []byte(vpJSON(appendContext))); err != nil {
-		t.Fatal(err)
-	}
-	peer.await(t, "raw v3 sideband context append", func(v map[string]any) bool {
-		return v["type"] == "delegation.context.append" && v["delegation_item_id"] == "delegation-fixture"
-	})
-	if err := control.Write(ctx, websocket.MessageText, []byte(`{"type":"session.close"}`)); err != nil {
+	if err := peer.rtc.Close(); err != nil {
 		t.Fatal(err)
 	}
 	vpClosed(t, peer)

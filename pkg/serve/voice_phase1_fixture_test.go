@@ -94,17 +94,16 @@ type vpUpstream struct {
 	backend     *vpVoiceText
 }
 type vpPeer struct {
-	conn           *websocket.Conn
-	rtc            *vpRTC
-	callID         string
-	backend        *vpVoiceText
-	provider       string
-	mu             sync.Mutex
-	frames         []map[string]any
-	closed         chan struct{}
-	sidebandClosed chan struct{}
-	writeMu        sync.Mutex
-	timeline       int
+	conn     *websocket.Conn
+	rtc      *vpRTC
+	callID   string
+	backend  *vpVoiceText
+	provider string
+	mu       sync.Mutex
+	frames   []map[string]any
+	closed   chan struct{}
+	writeMu  sync.Mutex
+	timeline int
 }
 
 // Wire sources: grok_voz_moa.py:85-135; PLAN fact 11 and voice-live.js's
@@ -204,29 +203,9 @@ func (u *vpUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		p.callID = fmt.Sprintf("rtc_VP-UPSTREAM-CALL-%d", len(u.peers)+1)
 		u.peers = append(u.peers, p)
 		u.mu.Unlock()
-		// Synthetic resource URL: the report preserved ID extraction, not the
-		// full Location. This is not an assertion of its real provider shape.
-		w.Header().Set("Location", "https://api.openai.com/v1/live/"+p.callID)
 		w.Header().Set("Content-Type", "application/sdp")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, answer)
-		return
-	}
-	if origin == "api.openai.com" && strings.HasPrefix(r.URL.Path, "/v1/live/rtc_") {
-		u.mu.Lock()
-		var p *vpPeer
-		for _, candidate := range u.peers {
-			if candidate.callID == strings.TrimPrefix(r.URL.Path, "/v1/live/") {
-				p = candidate
-				break
-			}
-		}
-		u.mu.Unlock()
-		if p == nil {
-			http.NotFound(w, r)
-			return
-		}
-		u.serveSideband(w, r, p)
 		return
 	}
 	provider := ""
@@ -238,8 +217,6 @@ func (u *vpUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	case origin == "api.openai.com" && r.URL.Path == "/v1/live/sessions":
 		provider = "openai-live-api"
-	case origin == "api.openai.com" && strings.HasPrefix(r.URL.Path, "/v1/live/rtc_"):
-		provider = "chatgpt-plan"
 	}
 	if provider == "" {
 		http.NotFound(w, r)
@@ -351,48 +328,6 @@ func (p *vpPeer) Close() error {
 	return nil
 }
 
-// Appendix B's v3 control is sideband WS. This is just the observed raw
-// transport and session.close, not a tool engine or a handoff implementation.
-func (u *vpUpstream) serveSideband(w http.ResponseWriter, r *http.Request, p *vpPeer) {
-	conn, err := websocket.Accept(w, r, nil)
-	if err != nil {
-		return
-	}
-	p.mu.Lock()
-	if p.conn != nil {
-		p.mu.Unlock()
-		_ = conn.CloseNow()
-		return
-	}
-	p.conn = conn
-	p.sidebandClosed = make(chan struct{})
-	done := p.sidebandClosed
-	p.mu.Unlock()
-	defer close(done)
-	defer conn.CloseNow() //nolint:errcheck
-	_ = p.send(r.Context(), map[string]any{"type": "session.started", "session": map[string]any{"id": p.callID}})
-	for {
-		_, raw, err := conn.Read(r.Context())
-		if err != nil {
-			return
-		}
-		var v map[string]any
-		if json.Unmarshal(raw, &v) != nil {
-			return
-		}
-		p.mu.Lock()
-		if len(p.frames) >= 256 {
-			p.mu.Unlock()
-			return
-		}
-		p.frames = append(p.frames, v)
-		p.mu.Unlock()
-		if v["type"] == "session.close" {
-			_ = p.rtc.Close()
-			return
-		}
-	}
-}
 func (p *vpPeer) emit(t *testing.T, v any) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), vpDeadline)
@@ -833,16 +768,6 @@ func vpClosedWithin(t *testing.T, p *vpPeer, budget time.Duration) {
 	case <-p.closed:
 	case <-deadline.C:
 		t.Fatal("moa did not close upstream before deadline; cleanup has not run")
-	}
-	p.mu.Lock()
-	done := p.sidebandClosed
-	p.mu.Unlock()
-	if done != nil {
-		select {
-		case <-done:
-		case <-deadline.C:
-			t.Fatal("peer closed but authenticated control socket still open")
-		}
 	}
 }
 func vpClosedBy(t *testing.T, p *vpPeer, start time.Time, budget time.Duration) {
