@@ -69,8 +69,13 @@ export function cancelSignIn(api, provider, attemptId) {
   return api("POST", `${base(provider)}/oauth/cancel`, { attempt_id: attemptId }).catch(() => {});
 }
 
-export function saveApiKey(api, provider, key, generation) {
-  return api("POST", `${base(provider)}/api-key`, { key: String(key || "").trim(), expected_generation: generation || "" }, {
+// keyGeneration — the key beside the plan as this page last saw it (undefined
+// when there is no plan): a page that missed a newer save gets a conflict
+// instead of replacing that key.
+export function saveApiKey(api, provider, key, generation, keyGeneration) {
+  const body = { key: String(key || "").trim(), expected_generation: generation || "" };
+  if (keyGeneration !== undefined) body.expected_key_generation = keyGeneration || "";
+  return api("POST", `${base(provider)}/api-key`, body, {
     timeoutMs: PROVIDER_ACTION_TIMEOUT_MS,
   });
 }

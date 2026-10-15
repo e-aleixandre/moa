@@ -48,10 +48,10 @@ function fakeApi(routes) {
 
 const ROW = { id: 'anthropic', source: 'store', kind: 'api_key', credential_generation: 'gen-1', state: 'key_rejected', actions: ['sign_in', 'api_key'] };
 
-function make({ api, flow = 'paste_code_state', provider = 'anthropic', openWindow, changed = [] } = {}) {
+function make({ api, flow = 'paste_code_state', provider = 'anthropic', openWindow, changed = [], row = ROW } = {}) {
   const b = box();
   const ctl = createRowController({
-    api, provider, flow, row: () => ROW, get: b.get, set: b.set,
+    api, provider, flow, row: () => row, get: b.get, set: b.set,
     onChanged: (row) => changed.push(row), openWindow: openWindow || (() => null),
   });
   return { b, ctl, changed };
@@ -89,6 +89,16 @@ afterEach(() => {
 const noSessionCalls = (api) => expect(api.calls.filter((c) => c.path.startsWith('/api/sessions'))).toEqual([]);
 
 // ── API key ────────────────────────────────────────────────────────────────
+
+test('a key saved beside a plan carries the key generation the page saw', async () => {
+  const api = fakeApi({ '/api-key': () => Promise.resolve({ ...ROW, state: 'saved' }) });
+  const row = { ...ROW, id: 'openai', kind: 'oauth', plan_api_key: { generation: 'k-7', state: 'configured' } };
+  const m = make({ api, provider: 'openai', row });
+  m.ctl.startApiKey();
+  m.ctl.setDraft(KEY);
+  await m.ctl.saveKey();
+  expect(api.calls).toEqual([{ method: 'POST', path: '/api/providers/openai/api-key', body: { key: KEY, expected_generation: 'gen-1', expected_key_generation: 'k-7' } }]);
+});
 
 test('a saved key is sent once and the field is emptied before the answer', async () => {
   let seenDraftDuringRequest = null;

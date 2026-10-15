@@ -132,7 +132,7 @@ export function createRowController({
       patch({ busy: true, draft: "", message: null });
       const { live } = begin();
       try {
-        const updated = await saveApiKey(api, provider, key, generation());
+        const updated = await saveApiKey(api, provider, key, generation(), row()?.plan_api_key ? row().plan_api_key.generation : undefined);
         if (live()) done(updated);
         else onChanged?.(null);
       } catch (error) {
