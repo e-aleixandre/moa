@@ -290,7 +290,7 @@ func assertVoicePhase1UnknownRecordPreserved(t *testing.T, fixture voicePhase1Se
 	}
 }
 
-func TestVoiceCredentials_SecondaryKeyNeverBecomesTextFallbackAfterOAuthRemoval(t *testing.T) {
+func TestVoiceCredentials_SecondaryKeyServesTextOnlyAfterOAuthRemoval(t *testing.T) {
 	for _, provider := range []string{"openai", "xai"} {
 		t.Run(provider, func(t *testing.T) {
 			fixture := newVoicePhase1SecondaryFixture(t, provider)
@@ -320,21 +320,13 @@ func TestVoiceCredentials_SecondaryKeyNeverBecomesTextFallbackAfterOAuthRemoval(
 			if err := NewStore(fixture.path).Remove(provider); err != nil {
 				t.Fatal(err)
 			}
+			// Without the plan the key, with its generation, is the only
+			// credential, so text now selects it.
 			reopened := NewStore(fixture.path)
-			if _, ok := reopened.Get(provider); ok {
-				t.Error("removed OAuth primary survived reopening")
+			if _, ok := reopened.Get(fixture.slot); ok {
+				t.Error("the key stayed beside a removed plan")
 			}
-			if got, ok := reopened.Get(fixture.slot); !ok || !sameCredential(got, fixture.secondary) {
-				t.Error("removing OAuth changed or deleted the secondary key or its generation")
-			}
-			snap, err := reopened.ResolveSnapshot(context.Background(), provider)
-			if err == nil || snap.Token != "" {
-				t.Errorf("text resolution after OAuth removal must error, not select the secondary key: kind=%q token_empty=%v error=%v", snap.Kind, snap.Token == "", err)
-			}
-			key, oauth, err := reopened.GetAPIKey(provider)
-			if err == nil || key != "" || oauth {
-				t.Errorf("legacy text resolution after OAuth removal selected a credential: oauth=%v token_empty=%v error=%v", oauth, key == "", err)
-			}
+			assertVoicePhase1TextSelection(t, reopened, provider, fixture.secondary)
 			assertVoicePhase1KeyPersisted(t, fixture.path, fixture.secondary.Key)
 			assertVoicePhase1UnknownRecordPreserved(t, fixture)
 		})

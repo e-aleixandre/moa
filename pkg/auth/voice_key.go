@@ -19,10 +19,13 @@ func voiceKeySlot(provider string) (string, bool) {
 	return slot, ok
 }
 
-// selectAPIKey picks the API key a SelectVoiceAPIKey snapshot uses from disk:
-// the key beside the plan, else a primary API key. It returns the record name
-// it came from. An OAuth primary is never an API key.
+// selectAPIKey picks the API key a SelectVoiceAPIKey snapshot uses from disk,
+// as normalizeVoiceKey would leave it: a primary API key, else the key beside
+// the plan (or left by one). It returns the record name it came from.
 func selectAPIKey(disk map[string]Credential, provider string) (Credential, string, error) {
+	if cred, ok := disk[provider]; ok && cred.Type == "api_key" && cred.Key != "" {
+		return cred, provider, nil
+	}
 	if slot, ok := voiceKeySlot(provider); ok {
 		if cred, ok := disk[slot]; ok {
 			if cred.Type != "api_key" || cred.Key == "" {
@@ -31,40 +34,32 @@ func selectAPIKey(disk map[string]Credential, provider string) (Credential, stri
 			return cred, slot, nil
 		}
 	}
-	if cred, ok := disk[provider]; ok && cred.Type == "api_key" && cred.Key != "" {
-		return cred, provider, nil
-	}
 	return Credential{}, "", missingCredential(provider)
 }
 
-// saveKeyBesidePlan stores key in provider's voice slot when the primary is a
-// plan sign-in, leaving the sign-in untouched. It reports false, writing
-// nothing, when there is no sign-in: the key is then the primary credential.
-// expectedPrimary is the primary generation the caller saw.
-func (s *Store) saveKeyBesidePlan(provider, slot, expectedPrimary, key string) (string, bool, error) {
-	gen, err := newGeneration()
-	if err != nil {
-		return "", false, persistenceFailed(provider, "api_key")
+// normalizeVoiceKey leaves provider with at most one API key: beside an OAuth
+// primary, or as the primary otherwise. This binary never writes both; a
+// writer that does not know the slot (an older binary) can only have saved the
+// primary key after the slot existed, so the primary is the most recent key
+// and the slot is dropped. A slot without a primary (a plan removed by an
+// earlier build) becomes the primary. An unknown primary type is left alone.
+func normalizeVoiceKey(disk map[string]Credential, provider string) {
+	slot, ok := voiceKeySlot(provider)
+	if !ok {
+		return
 	}
-	besidePlan := false
-	s.refreshMu.Lock()
-	defer s.refreshMu.Unlock()
-	err = s.transact(provider, "api_key", func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		primary := disk[provider]
-		if primary.Generation != expectedPrimary {
-			return false, nil, credentialsChanged(provider, "api_key", primary.Generation)
-		}
-		if primary.Type != "oauth" {
-			return false, nil, nil
-		}
-		besidePlan = true
-		disk[slot] = Credential{Type: "api_key", Key: key, Generation: gen}
-		return false, nil, s.saveFencedLocked(provider, slot, "api_key", disk)
-	})
-	if err != nil {
-		return "", false, err
+	key, ok := disk[slot]
+	if !ok {
+		return
 	}
-	return gen, besidePlan, nil
+	primary, hasPrimary := disk[provider]
+	switch {
+	case !hasPrimary && key.Type == "api_key" && key.Key != "":
+		disk[provider] = key
+		delete(disk, slot)
+	case hasPrimary && primary.Type == "api_key" && primary.Key != "":
+		delete(disk, slot)
+	}
 }
 
 // RemoveProviderAPIKey deletes provider's API key: the one beside the plan
@@ -78,6 +73,7 @@ func (s *Store) RemoveProviderAPIKey(provider, expectedKey string) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	return s.transact(provider, "api_key", func(disk map[string]Credential) (bool, *pendingRotation, error) {
+		normalizeVoiceKey(disk, provider)
 		record := slot
 		cur, ok := disk[slot]
 		if !ok {
@@ -126,30 +122,19 @@ func (s *Store) saveFencedLocked(provider, record, op string, disk map[string]Cr
 	return nil
 }
 
-// keepVoiceKey keeps provider's single API key across a primary change. A plan
-// sign-in replacing a primary API key moves that key beside the plan, unless a
-// key is already there (it is never overwritten). A primary API key replacing
-// the primary supersedes the key beside the plan, so only one key remains.
-func keepVoiceKey(disk map[string]Credential, provider string, next Credential) error {
+// keepVoiceKey moves a primary API key beside the plan sign-in replacing it,
+// as a new record, and reports whether it did. disk is normalized, so there is
+// no other key to keep.
+func keepVoiceKey(disk map[string]Credential, provider string, next Credential) (bool, error) {
 	slot, ok := voiceKeySlot(provider)
-	if !ok {
-		return nil
-	}
-	if next.Type == "api_key" {
-		delete(disk, slot)
-		return nil
-	}
 	prev := disk[provider]
-	if next.Type != "oauth" || prev.Type != "api_key" || prev.Key == "" {
-		return nil
-	}
-	if _, exists := disk[slot]; exists {
-		return nil
+	if !ok || next.Type != "oauth" || prev.Type != "api_key" || prev.Key == "" {
+		return false, nil
 	}
 	gen, err := newGeneration()
 	if err != nil {
-		return err
+		return false, err
 	}
 	disk[slot] = Credential{Type: "api_key", Key: prev.Key, Generation: gen}
-	return nil
+	return true, nil
 }

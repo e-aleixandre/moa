@@ -307,6 +307,17 @@ func (m *ProviderLoginManager) Close() {
 // SaveAPIKey stores a write-only API key as a new generation, provided the
 // stored generation is still expectedGeneration. The key is never echoed.
 func (m *ProviderLoginManager) SaveAPIKey(provider, expectedGeneration, key string) (string, error) {
+	return m.saveAPIKey(provider, expectedGeneration, nil, key)
+}
+
+// SaveAPIKeyExpecting is SaveAPIKey that also requires the OpenAI/xAI key
+// beside the plan to still be expectedKey ("" for none), so a stale page
+// cannot replace a key saved after it loaded.
+func (m *ProviderLoginManager) SaveAPIKeyExpecting(provider, expectedGeneration, expectedKey, key string) (string, error) {
+	return m.saveAPIKey(provider, expectedGeneration, &expectedKey, key)
+}
+
+func (m *ProviderLoginManager) saveAPIKey(provider, expectedGeneration string, expectedKey *string, key string) (string, error) {
 	if !webLoginProvider(provider) {
 		return "", loginError(provider, LoginUnsupported)
 	}
@@ -325,15 +336,9 @@ func (m *ProviderLoginManager) SaveAPIKey(provider, expectedGeneration, key stri
 	if provider == "anthropic" {
 		return m.store.SaveAnthropicAPIKey(expectedGeneration, key)
 	}
-	if slot, ok := voiceKeySlot(provider); ok {
-		gen, besidePlan, err := m.store.saveKeyBesidePlan(provider, slot, expectedGeneration, key)
-		if err != nil || besidePlan {
-			return gen, err
-		}
-		// No plan sign-in: the key is the primary credential, as before. The
-		// CAS rejects a sign-in that landed meanwhile.
-	}
-	return m.store.CommitLogin(provider, expectedGeneration, Credential{Type: "api_key", Key: key})
+	// With a plan sign-in the key goes beside it; otherwise it is the primary
+	// credential, as before. Either way it replaces the provider's only key.
+	return m.store.commitKey(provider, "api_key", &expectedGeneration, expectedKey, true, Credential{Type: "api_key", Key: key})
 }
 
 func (m *ProviderLoginManager) pollXAI(ctx context.Context, att *loginAttempt, device *XAIDeviceCode) {

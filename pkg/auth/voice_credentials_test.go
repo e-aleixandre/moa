@@ -85,8 +85,8 @@ func TestVoiceKey_RemovingEitherCredentialKeepsTheOther(t *testing.T) {
 			}
 			_, err = store.ResolveSnapshot(context.Background(), provider, SelectPlanOAuth)
 			wantCredClass(t, err, core.CredentialMissing)
-			_, err = store.ResolveSnapshot(context.Background(), provider)
-			wantCredClass(t, err, core.CredentialMissing)
+			// Without the plan the kept key is the only key, so text uses it.
+			assertVoicePhase1TextSelection(t, store, provider, Credential{Type: "api_key", Key: key, Generation: keyGen})
 		})
 	}
 }
@@ -149,20 +149,22 @@ func TestVoiceKey_PrimaryKeyRemovedWhenOnlyKey(t *testing.T) {
 	}
 }
 
-func TestVoiceKey_PrimaryKeySaveWithoutPlanSupersedesKeyBesidePlan(t *testing.T) {
+func TestVoiceKey_KeySaveAfterPlanRemovalReplacesTheKeptKey(t *testing.T) {
 	f := newVoiceKeyFixture(t, "openai", nil)
-	f.saveKey(t, "openai", voicePhase1Key("openai"))
+	kept := f.saveKey(t, "openai", voicePhase1Key("openai"))
 	if err := f.store.Remove("openai"); err != nil {
 		t.Fatal(err)
 	}
+	// The kept key is now the primary: a page that saw no key is stale.
 	const replacement = "offline-replacement-api-key-0123456789"
-	gen, err := f.m.SaveAPIKey("openai", "", replacement)
+	_, err := f.m.SaveAPIKey("openai", "", replacement)
+	wantCredClass(t, err, core.CredentialChanged)
+	gen, err := f.m.SaveAPIKey("openai", kept, replacement)
 	if err != nil {
 		t.Fatal(err)
 	}
-	disk := readAuthFile(t, f.path)
-	if _, ok := disk["__voice_openai_api_v1"]; ok {
-		t.Error("an older key beside a removed plan survived a new primary key")
+	if keys := apiKeyRecords(t, f.path); len(keys) != 1 {
+		t.Errorf("API key records = %d, want the replacement only", len(keys))
 	}
 	assertVoicePhase1TextSelection(t, NewStore(f.path), "openai", Credential{Type: "api_key", Key: replacement, Generation: gen})
 	snap, err := NewStore(f.path).ResolveSnapshot(context.Background(), "openai", SelectVoiceAPIKey)
@@ -171,29 +173,26 @@ func TestVoiceKey_PrimaryKeySaveWithoutPlanSupersedesKeyBesidePlan(t *testing.T)
 	}
 }
 
-func TestVoiceKey_PlanLoginDoesNotOverwriteExistingKeyBesidePlan(t *testing.T) {
+func TestVoiceKey_PlanLoginKeepsTheMostRecentOfTwoKeys(t *testing.T) {
 	clearProviderEnv(t)
 	path := filepath.Join(t.TempDir(), "auth.json")
 	store := NewStore(path)
 	if err := store.Set("__voice_xai_api_v1", Credential{Type: "api_key", Key: "offline-existing-secondary-key-0123"}); err != nil {
 		t.Fatal(err)
 	}
-	existing := readAuthFile(t, path)["__voice_xai_api_v1"]
 	gen, err := store.CommitLogin("xai", "", Credential{Type: "api_key", Key: "offline-primary-key-0123456789"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A primary key save supersedes the secondary; re-seed it as a racing
-	// writer that set it directly.
-	if err := store.Set("__voice_xai_api_v1", Credential{Type: "api_key", Key: existing.Key}); err != nil {
+	// Re-seed the older key beside it as a writer that set it directly.
+	if err := store.Set("__voice_xai_api_v1", Credential{Type: "api_key", Key: "offline-existing-secondary-key-0123"}); err != nil {
 		t.Fatal(err)
 	}
-	existing = readAuthFile(t, path)["__voice_xai_api_v1"]
 	if _, err := store.CommitLogin("xai", gen, Credential{Type: "oauth", Access: "a", Refresh: "r", Expires: fresh()}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readAuthFile(t, path)["__voice_xai_api_v1"]; !sameCredential(got, existing) {
-		t.Error("plan login overwrote the key already beside the plan")
+	if keys := apiKeyRecords(t, path); len(keys) != 1 || keys["__voice_xai_api_v1"].Key != "offline-primary-key-0123456789" {
+		t.Errorf("plan login kept %d keys or not the primary one", len(keys))
 	}
 }
 
