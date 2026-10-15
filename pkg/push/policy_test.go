@@ -372,3 +372,26 @@ func TestCancelSessionDropsItsWaitingSummaryButNotOthers(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultTitlesAreEnglish(t *testing.T) {
+	cases := []struct {
+		sig  Signal
+		want string
+	}{
+		{Signal{Kind: KindAsk, SessionID: "s1", RequestID: "a1"}, "moa needs your decision"},
+		{Signal{Kind: KindPermission, SessionID: "s2", RequestID: "p1"}, "moa needs your approval"},
+		{Signal{Kind: KindDone, SessionID: "s3"}, "moa finished"},
+		{Signal{Kind: KindFailed, SessionID: "s4"}, "moa failed"},
+		{Signal{Kind: KindDigest, SessionID: "s5", Project: "/a"}, "moa finished"},
+		{Signal{Kind: KindEvent, SessionID: "s6", Source: "x"}, "moa: event"},
+	}
+	for _, c := range cases {
+		p, rec, clock := newPolicy("")
+		p.Handle(c.sig)
+		clock.fire()
+		got := rec.all()
+		if len(got) != 1 || got[0].Title != c.want {
+			t.Errorf("kind %v: sent %+v, want title %q", c.sig.Kind, got, c.want)
+		}
+	}
+}

@@ -220,7 +220,7 @@ func (p *Policy) decide(s Signal) decision {
 		// sooner it still goes at the original deadline, not earlier.
 		switch s.Kind {
 		case KindAsk:
-			setTitle("moa necesita tu decisión")
+			setTitle("moa needs your decision")
 		case KindSecret:
 			// Generic on purpose: never the command, the host or the field.
 			setTitle("moa")
@@ -230,7 +230,7 @@ func (p *Policy) decide(s Signal) decision {
 				n.Body = "A session needs a password"
 			}
 		default:
-			setTitle("moa espera tu aprobación")
+			setTitle("moa needs your approval")
 		}
 		n.Level = LevelUrgent
 		n.Tag = "req:" + s.SessionID
@@ -243,21 +243,21 @@ func (p *Policy) decide(s Signal) decision {
 		if s.Watched {
 			return decision{}
 		}
-		setTitle("moa terminó")
+		setTitle("moa finished")
 		n.Level, n.Tag = LevelActive, "run:"+s.SessionID
 		return decision{send: true, n: n}
 	case KindFailed:
 		if s.Watched {
 			return decision{}
 		}
-		setTitle("moa falló")
+		setTitle("moa failed")
 		n.Level, n.Tag = LevelActive, "run:"+s.SessionID
 		return decision{send: true, n: n}
 	case KindDigest:
 		if s.Watched || p.summaries == SummariesOff {
 			return decision{}
 		}
-		setTitle("moa terminó")
+		setTitle("moa finished")
 		n.Level = p.summaryLevel()
 		n.Tag = "project:" + s.Project
 		return decision{send: true, n: n}
@@ -265,7 +265,7 @@ func (p *Policy) decide(s Signal) decision {
 		if p.summaries == SummariesOff {
 			return decision{}
 		}
-		setTitle("moa: evento")
+		setTitle("moa: event")
 		n.Level = p.summaryLevel()
 		n.Tag = "event:" + s.Source
 		return decision{send: true, n: n}
