@@ -99,7 +99,8 @@ func (c *voiceCall) answerQuestion(toolID, askID string, answers []string) voice
 	}
 	err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: askID, Answers: answers, Responder: askuser.Responder{Kind: askuser.ResponderVoice, CallID: c.id}})
 	if errors.Is(err, askuser.ErrRequiresTap) {
-		c.needsTap(askID, "ask")
+		// The resolver's own guard. The tap card belongs to the controller's
+		// check above, so each layer stays observable on its own.
 		return voiceErrorResult(toolID, "this question requires the owner's tap; it cannot be answered by voice")
 	}
 	if err != nil {
