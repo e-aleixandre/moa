@@ -787,6 +787,8 @@ type AskUserRequested struct {
 	RunGen    uint64
 	ID        string
 	Questions []AskQuestion
+	// RequiresTap: only a tap or typed answer may resolve this request.
+	RequiresTap bool
 }
 
 // AskUserResolved is published when a pending ask-user prompt is answered.

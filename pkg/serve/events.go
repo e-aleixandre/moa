@@ -199,9 +199,10 @@ type PermissionData struct {
 
 // AskData is a pending ask_user request.
 type AskData struct {
-	ID        string            `json:"id"`
-	RunGen    uint64            `json:"run_gen,omitempty"`
-	Questions []bus.AskQuestion `json:"questions"`
+	ID          string            `json:"id"`
+	RunGen      uint64            `json:"run_gen,omitempty"`
+	Questions   []bus.AskQuestion `json:"questions"`
+	RequiresTap bool              `json:"requires_tap,omitempty"`
 }
 
 // StateChangeData is sent when the session state changes.

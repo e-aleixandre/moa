@@ -270,6 +270,8 @@ func author(m *core.AgentMessage) string {
 			return fmt.Sprintf("ask_user answer, answered by the owner agent %q", short(r.Name, nameBytes))
 		case askuser.ResponderAutomation:
 			return "ask_user answer, answered by an automation"
+		case askuser.ResponderVoice:
+			return "ask_user answer, answered by voice relay (not a tap or typed confirmation)"
 		}
 		return "ask_user answer, answered by " + short(r.Kind, nameBytes)
 	case "session_event":

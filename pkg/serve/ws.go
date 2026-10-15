@@ -354,6 +354,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.AskUserRequested:
 		return Event{Type: "ask_user", Data: map[string]any{
 			"id": e.ID, "run_gen": e.RunGen, "questions": e.Questions,
+			"requires_tap": e.RequiresTap,
 		}}, true
 	case bus.AskUserResolved:
 		return Event{Type: "ask_resolved", Data: PromptResolvedData{ID: e.ID}}, true
@@ -922,8 +923,9 @@ func pendingAttentionData(pending bus.PendingApprovalInfo) (*PermissionData, *As
 	var askData *AskData
 	if pending.Ask != nil {
 		askData = &AskData{
-			ID:        pending.Ask.ID,
-			Questions: pending.Ask.Questions,
+			ID:          pending.Ask.ID,
+			Questions:   pending.Ask.Questions,
+			RequiresTap: pending.Ask.RequiresTap,
 		}
 	}
 	return permissionData, askData
