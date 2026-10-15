@@ -41,6 +41,7 @@ type voiceCall struct {
 	reg       *voiceCallRegistry
 	id        string
 	principal string
+	slot      *voiceSlot
 	sessionID string
 	provider  voice.ProviderID
 	billing   voice.Billing
@@ -291,6 +292,7 @@ func (c *voiceCall) finishCall(client *voiceClient, events <-chan voice.Event) {
 	}
 	tctx, cancel := context.WithTimeout(context.Background(), c.limits.Teardown)
 	closed := make(chan struct{})
+	c.slot.markTearingDown()
 	go func() { _ = c.up.Close(tctx, reason); close(closed) }()
 drain:
 	for events != nil {
@@ -308,6 +310,7 @@ drain:
 	}
 	<-closed
 	cancel()
+	c.reg.releasePrincipal(c)
 	c.workCancel()
 	<-c.workerDone
 	c.persistMinutes(reason)

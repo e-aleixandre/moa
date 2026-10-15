@@ -39,7 +39,7 @@ type voiceCallRegistry struct {
 
 	mu         sync.Mutex
 	closed     bool
-	principals map[string]bool       // one reservation per principal
+	principals map[string]*voiceSlot // one reservation per principal
 	calls      map[string]*voiceCall // active calls by ID
 	ended      map[string]string     // tombstone: call ID → principal
 	endedOrder []string
@@ -53,29 +53,66 @@ func newVoiceCallRegistry(mgr *Manager, store *auth.Store, opts VoiceCallOptions
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &voiceCallRegistry{mgr: mgr, store: store, opts: opts, ctx: ctx, cancel: cancel,
-		principals: map[string]bool{}, calls: map[string]*voiceCall{}, ended: map[string]string{}}
+		principals: map[string]*voiceSlot{}, calls: map[string]*voiceCall{}, ended: map[string]string{}}
 }
+
+// voiceSlot is a principal's reservation. tearingDown is closed once its
+// call has started closing the upstream; released when the slot is free.
+type voiceSlot struct {
+	tearingDown chan struct{}
+	released    chan struct{}
+	downOnce    sync.Once
+}
+
+func (s *voiceSlot) markTearingDown() { s.downOnce.Do(func() { close(s.tearingDown) }) }
 
 // reserve takes the principal's single call slot before any upstream is
-// opened, so two concurrent creates cannot both reach a provider.
-func (r *voiceCallRegistry) reserve(principal string) (ok, closed bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return false, true
+// opened, so two concurrent creates cannot both reach a provider. A slot
+// whose call is already closing its upstream is waited for, bounded by the
+// teardown budget, so redialing right after a drop is not refused.
+func (r *voiceCallRegistry) reserve(principal string) (slot *voiceSlot, closed bool) {
+	for attempt := 0; ; attempt++ {
+		r.mu.Lock()
+		if r.closed {
+			r.mu.Unlock()
+			return nil, true
+		}
+		cur := r.principals[principal]
+		if cur == nil {
+			slot = &voiceSlot{tearingDown: make(chan struct{}), released: make(chan struct{})}
+			r.principals[principal] = slot
+			r.wg.Add(1)
+			r.mu.Unlock()
+			return slot, false
+		}
+		r.mu.Unlock()
+		if attempt > 0 {
+			return nil, false
+		}
+		select {
+		case <-cur.tearingDown:
+		default:
+			return nil, false
+		}
+		select {
+		case <-cur.released:
+		case <-time.After(r.opts.Limits.Teardown):
+			return nil, false
+		}
 	}
-	if r.principals[principal] {
-		return false, false
-	}
-	r.principals[principal] = true
-	r.wg.Add(1)
-	return true, false
 }
 
-func (r *voiceCallRegistry) release(principal string) {
+func (r *voiceCallRegistry) freeSlot(principal string, slot *voiceSlot) {
 	r.mu.Lock()
-	delete(r.principals, principal)
+	if r.principals[principal] == slot {
+		delete(r.principals, principal)
+		close(slot.released)
+	}
 	r.mu.Unlock()
+}
+
+func (r *voiceCallRegistry) release(principal string, slot *voiceSlot) {
+	r.freeSlot(principal, slot)
 	r.wg.Done()
 }
 
@@ -91,11 +128,16 @@ func (r *voiceCallRegistry) register(c *voiceCall) bool {
 	return true
 }
 
-// finish retires an ended call: tombstone, admission and wait group.
+// releasePrincipal frees the principal's slot once the upstream is closed:
+// a new call may start while this one still writes its minutes.
+func (r *voiceCallRegistry) releasePrincipal(c *voiceCall) {
+	r.freeSlot(c.principal, c.slot)
+}
+
+// finish retires an ended call: tombstone and wait group.
 func (r *voiceCallRegistry) finish(c *voiceCall) {
 	r.mu.Lock()
 	delete(r.calls, c.id)
-	delete(r.principals, c.principal)
 	r.ended[c.id] = c.principal
 	r.endedOrder = append(r.endedOrder, c.id)
 	if len(r.endedOrder) > voiceTombstones {
@@ -190,12 +232,12 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	principal := identity.auditID()
-	reserved, closed := r.reserve(principal)
+	slot, closed := r.reserve(principal)
 	if closed {
 		voiceError(w, http.StatusServiceUnavailable, map[string]any{"error": "shutting_down"})
 		return
 	}
-	if !reserved {
+	if slot == nil {
 		voiceError(w, http.StatusConflict, map[string]any{"error": "call_active"})
 		return
 	}
@@ -207,7 +249,7 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 	})
 	cancel()
 	if err != nil {
-		r.release(principal)
+		r.release(principal, slot)
 		oe := voice.Classify(err)
 		slog.Info("voice call upstream refused", "provider", provider, "class", oe.Class, "status", oe.Status)
 		if provider.Paid() {
@@ -218,11 +260,12 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	c := newVoiceCall(r, id, principal, sess.ID, provider, adapter.Billing(), up)
+	c.slot = slot
 	if !r.register(c) {
 		ctx, cancel := context.WithTimeout(context.Background(), r.opts.Limits.Teardown)
 		_ = up.Close(ctx, "shutdown")
 		cancel()
-		r.release(principal)
+		r.release(principal, slot)
 		voiceError(w, http.StatusServiceUnavailable, map[string]any{"error": "shutting_down"})
 		return
 	}
