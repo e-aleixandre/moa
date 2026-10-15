@@ -458,6 +458,9 @@ func (s *Store) commit(provider, op string, expected *string, cred Credential) (
 		if err := keepKeyBesidePlan(disk, provider, cred); err != nil {
 			return false, nil, persistenceFailed(provider, op)
 		}
+		if err := keepVoiceKey(disk, provider, cred); err != nil {
+			return false, nil, persistenceFailed(provider, op)
+		}
 		disk[provider] = cred
 		// Fence the provider before the rename can expose the new login:
 		// until the write is confirmed durable no request may use it.

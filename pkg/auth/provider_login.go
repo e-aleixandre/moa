@@ -325,6 +325,14 @@ func (m *ProviderLoginManager) SaveAPIKey(provider, expectedGeneration, key stri
 	if provider == "anthropic" {
 		return m.store.SaveAnthropicAPIKey(expectedGeneration, key)
 	}
+	if slot, ok := voiceKeySlot(provider); ok {
+		gen, besidePlan, err := m.store.saveKeyBesidePlan(provider, slot, expectedGeneration, key)
+		if err != nil || besidePlan {
+			return gen, err
+		}
+		// No plan sign-in: the key is the primary credential, as before. The
+		// CAS rejects a sign-in that landed meanwhile.
+	}
 	return m.store.CommitLogin(provider, expectedGeneration, Credential{Type: "api_key", Key: key})
 }
 

@@ -165,6 +165,21 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 		}
 		r.PlanAPIKey = key
 	}
+	if (st.Provider == "openai" || st.Provider == "xai") && st.Source == core.CredentialSourceStore && st.Kind == "oauth" {
+		// Reported like Anthropic's so the page adds or removes the key
+		// beside the plan instead of offering to replace the sign-in.
+		key := &anthropicPlanKey{State: "store_unavailable"}
+		if gen, saveFailed, err := pc.store.ProviderAPIKeyStatus(st.Provider); err == nil {
+			key = &anthropicPlanKey{Generation: gen, State: "not_configured"}
+			switch {
+			case saveFailed:
+				key.State = "save_failed"
+			case gen != "":
+				key.State = "configured"
+			}
+		}
+		r.PlanAPIKey = key
+	}
 	r.Actions = []string{}
 	if st.Source == core.CredentialSourceStore && st.State != auth.StatusStoreUnavailable {
 		r.Actions = append(r.Actions, "sign_in", "api_key")
