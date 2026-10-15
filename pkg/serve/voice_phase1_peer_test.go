@@ -119,6 +119,7 @@ type vpRTC struct {
 	pcm        chan []byte
 	errs       chan error
 	once       sync.Once
+	closeOnce  sync.Once
 }
 
 func vpNewRTC(t vpRTCTestingT, onData func([]byte)) (*vpRTC, error) {
@@ -134,6 +135,10 @@ func vpNewRTC(t vpRTCTestingT, onData func([]byte)) (*vpRTC, error) {
 		return nil, err
 	}
 	var se webrtc.SettingEngine
+	// Do not let Pion close this fake from the SUT's DTLS close_notify: that
+	// internal pc.Close hits the pion/sctp Abort stall described below. The
+	// close is observed through the SCTP association instead.
+	se.DisableCloseByDTLS(true)
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 	se.SetIncludeLoopbackCandidate(true)
 	se.SetIPFilter(func(ip net.IP) bool { return ip.IsLoopback() })
@@ -170,6 +175,18 @@ func vpNewRTC(t vpRTCTestingT, onData func([]byte)) (*vpRTC, error) {
 			}
 		}
 	}()
+	// The upstream close is OBSERVED when the fake's SCTP association goes
+	// away: its read loop ends as a direct consequence of receiving the SUT's
+	// shutdown (SCTP ABORT / DTLS close_notify EOF). We deliberately do not
+	// wait for PeerConnectionStateClosed: that callback only fires after the
+	// fake's own pc.Close finishes, and pion/sctp v1.12.0 association.go:1128
+	// (Abort) waits 2x200ms there when the association was already closed by
+	// the remote. That stall is fixture-internal (real ChatGPT is not Pion),
+	// not SUT behaviour; see tmp/voz-producto/STATE-CLOSE-DIAG.md. A
+	// datachannel-only close resets one stream and leaves the association
+	// open, so it never reaches this hook. The fake's own pc.Close keeps
+	// running in the background and is awaited by the test cleanup.
+	pc.SCTP().OnClose(func(error) { p.markClosed() })
 	pc.OnDataChannel(p.bindDataChannel)
 	pc.OnTrack(p.readTrack)
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -423,12 +440,13 @@ func (p *vpRTC) Close() error {
 		p.closing = true
 		p.mu.Unlock()
 		err = p.pc.Close()
-		close(p.closed)
+		p.markClosed()
 		p.workers.Wait()
 		close(p.pcm)
 	})
 	return err
 }
+func (p *vpRTC) markClosed() { p.closeOnce.Do(func() { close(p.closed) }) }
 func vpRTCWait(ctx context.Context, ready, closed <-chan struct{}) error {
 	select {
 	case <-closed:
@@ -813,9 +831,11 @@ func TestChatGPTPlan_PeerAndControlGoneOnHangupClientLossAndShutdown(t *testing.
 				f.mgr.Shutdown()
 			}
 			vpClosedBy(t, p, start, budget)
-			if p.rtc.pc.ConnectionState() != webrtc.PeerConnectionStateClosed {
-				t.Fatal("direct peer survived controller teardown")
-			}
+			// vpClosedBy above is the SUT-side proof (the fake's association
+			// ended). The fake's own pc.Close, which is not part of the SUT
+			// budget (see vpNewRTC), runs to completion here so its workers and
+			// PCM channel end.
+			_ = p.rtc.Close()
 			select {
 			case _, ok := <-p.rtc.ReceivedPCM():
 				if ok {
