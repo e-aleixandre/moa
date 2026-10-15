@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -25,6 +26,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
+	"github.com/pion/webrtc/v4"
 )
 
 const vpDeadline = 3 * time.Second
@@ -41,10 +43,22 @@ type vpLimits struct {
 // These current options do NOT wire the absent voice adapters. Never register
 // test routes or implement policy here. Budgets are test-only, not defaults.
 func vpServerOptions(store *auth.Store, logins *auth.ProviderLoginManager, client *http.Client, limits vpLimits) []ServerOption {
+	// Same loopback-only ICE as the provider fixture: no STUN, no external host.
+	var se webrtc.SettingEngine
+	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	se.SetIncludeLoopbackCandidate(true)
+	se.SetIPFilter(func(ip net.IP) bool { return ip.IsLoopback() })
+	se.SetRemoteIPFilter(func(ip net.IP) bool { return ip.IsLoopback() })
+	se.SetICETimeouts(time.Second, 2*time.Second, 100*time.Millisecond)
 	return []ServerOption{WithProviderCredentials(store, logins), WithRealtimeClientSecretBroker(func() (string, bool) {
 		s, e := store.ResolveSnapshot(context.Background(), "openai")
 		return s.Token, e == nil && s.Kind == "api_key"
-	}, client)}
+	}, client), WithVoiceCalls(VoiceCallOptions{
+		HTTPClient:   client,
+		Limits:       VoiceCallLimits{Grace: limits.grace, Maximum: limits.maximum, Minutes: limits.minutes, Teardown: limits.teardown, BufferedBytes: limits.bufferedBytes},
+		PeerSettings: &se,
+		ICEServers:   []webrtc.ICEServer{},
+	})}
 }
 
 type vpBuffer struct {

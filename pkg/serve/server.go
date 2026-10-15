@@ -51,6 +51,7 @@ type serverOptions struct {
 	preview         *PreviewController
 	providerStore   *auth.Store
 	providerLogins  *auth.ProviderLoginManager
+	voice           VoiceCallOptions
 }
 
 // RealtimeAPIKeyFunc returns only a normal OpenAI API key. ok must be false
@@ -226,6 +227,12 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/voice/live/session", handleVoiceLiveSession(manager, o.realtimeKey, o.realtimeHTTP, voiceCalls))
 	mux.HandleFunc("POST /api/voice/live/close", handleVoiceLiveClose(voiceCalls))
 	mux.HandleFunc("POST /api/voice/live/heartbeat", handleVoiceLiveHeartbeat(voiceCalls))
+	// Voice calls: one registry per server, owned by the Manager lifecycle.
+	voiceRegistry := newVoiceCallRegistry(manager, o.providerStore, o.voice)
+	manager.attachVoiceCalls(voiceRegistry)
+	mux.HandleFunc("POST /api/voice/calls", voiceRegistry.handleCreate)
+	mux.HandleFunc("GET /api/voice/calls/{id}/ws", voiceRegistry.handleWS)
+	mux.HandleFunc("POST /api/voice/calls/{id}/hangup", voiceRegistry.handleHangup)
 	voiceAskPost, voiceAskGet := voiceLiveAskHandlers(manager)
 	mux.HandleFunc("POST /api/voice/live/ask", voiceAskPost)
 	mux.HandleFunc("GET /api/voice/live/ask", voiceAskGet)

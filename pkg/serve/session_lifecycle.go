@@ -1419,6 +1419,9 @@ const shutdownDrainBudget = 5 * time.Second
 // captures the complete final turn rather than a partial one. If the budget
 // expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
+	// Voice calls first: their minutes are written into sessions that are
+	// still alive, and no call keeps a provider open past shutdown.
+	m.closeVoiceCalls()
 	if m.tasksCancel != nil {
 		m.tasksCancel()
 	}

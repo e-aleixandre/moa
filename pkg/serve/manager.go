@@ -794,6 +794,11 @@ type Manager struct {
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
+	// voiceCalls are the voice call registries of this Manager's servers;
+	// Shutdown ends their calls before any session is torn down.
+	voiceCallsMu sync.Mutex
+	voiceCalls   []*voiceCallRegistry
+
 	providerFactory   func(model core.Model) (core.Provider, error)
 	compactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
 	// providerCredentialAvailable reports whether a provider has a usable

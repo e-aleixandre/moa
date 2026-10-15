@@ -24,6 +24,11 @@ func (m *Manager) ownerReadSession(own owner.Owner, id string, opts sessionReadO
 	if _, err := m.ownerSession(own, id); err != nil {
 		return core.ErrorResult(err.Error())
 	}
+	return m.readSession(id, opts)
+}
+
+// readSession renders a session for a reader whose scope was already checked.
+func (m *Manager) readSession(id string, opts sessionReadOptions) core.Result {
 	snapshot, err := m.conversationSnapshot(id)
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot read session %s: %v", id, err))
