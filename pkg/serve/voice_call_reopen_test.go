@@ -16,7 +16,9 @@ func TestVoiceCall_RecordsSurviveReopenAndAdmissionRehydrates(t *testing.T) {
 	p := f.up.peer(t, f.provider)
 	vpAwaitBrief(t, f, p)
 	p.user(t, "u", "REOPEN-LITERAL")
-	c.await("transcript", func(v map[string]any) bool { return v["type"] == "transcript" && strings.Contains(vpJSON(v), "REOPEN-LITERAL") })
+	c.await("transcript", func(v map[string]any) bool {
+		return v["type"] == "transcript" && strings.Contains(vpJSON(v), "REOPEN-LITERAL")
+	})
 	p.tool(t, "pass", "pass_to_session", map[string]any{"summary": "REOPEN-RELAY"})
 	if vpError(p.result(t, "pass")) {
 		t.Fatal("pass failed")
@@ -50,7 +52,13 @@ func TestVoiceCall_RecordsSurviveReopenAndAdmissionRehydrates(t *testing.T) {
 	if !strings.Contains(vpJSON(f.records("relay")), deliveryID) {
 		t.Error("relay delivery_id lost after reopen")
 	}
-	if text := vpTranscriptAttachment(t, f, f.records("minutes")[0]); !strings.Contains(text, "REOPEN-LITERAL") {
+	// The minutes are a display-only record: after a reopen they live in the
+	// saved transcript, not in the model's context.
+	saved := vpSavedVoice(f.saved(), "minutes")
+	if len(saved) != 1 {
+		t.Fatalf("saved minutes after reopen=%d, want 1", len(saved))
+	}
+	if text := vpTranscriptAttachment(t, f, saved[0]); !strings.Contains(text, "REOPEN-LITERAL") {
 		t.Error("transcript.md lost its content after reopen")
 	}
 	before := f.prov.calls.Load()

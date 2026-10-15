@@ -433,6 +433,13 @@ func (f *fakeAgent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]
 	return f.Send(ctx, prompt)
 }
 
+func (f *fakeAgent) AppendRecord(msg core.AgentMessage) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.messages = append(f.messages, msg)
+	return nil
+}
+
 func (f *fakeAgent) AppendMessage(msg core.AgentMessage) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

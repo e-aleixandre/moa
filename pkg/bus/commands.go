@@ -161,6 +161,13 @@ type AppendToConversation struct {
 	Message   core.AgentMessage
 }
 
+// AppendRecord adds a display-only session_event record, also while a run is
+// in flight (a voice call's minutes when the session is busy).
+type AppendRecord struct {
+	SessionID string
+	Message   core.AgentMessage
+}
+
 // AbortRun cancels a running agent.
 type AbortRun struct{ SessionID string }
 

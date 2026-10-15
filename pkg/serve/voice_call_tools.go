@@ -2,7 +2,6 @@ package serve
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/attachment"
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/voice"
@@ -282,11 +282,12 @@ func streamMessage(ctx context.Context, prov core.Provider, req core.Request) (c
 }
 
 // persistMinutes records the call in the called session exactly once:
-// always a minutes block with the literal transcript as transcript.md.
-// Without the model's end_call it says the call dropped instead of inventing
-// minutes. Passed comes from the server's ledger, already delivered and
-// never sent again. Only Decided or Still open wake the session (one run, or
-// one steer when busy); otherwise the block is a record without a run.
+// always a minutes record with the literal transcript as transcript.md,
+// saved to disk at hangup even while the session is busy. Without the
+// model's end_call it says the call dropped instead of inventing minutes.
+// Passed comes from the server's ledger, already delivered and never sent
+// again. Only Decided or Still open (which includes anything waiting for a
+// tap) wake the session: one run, or one steer when busy.
 func (c *voiceCall) persistMinutes(reason string) {
 	m := c.reg.mgr
 	sess, ok := m.Get(c.sessionID)
@@ -302,9 +303,7 @@ func (c *voiceCall) persistMinutes(reason string) {
 	if minutes != nil {
 		decided, open = minutes.decided, append([]string(nil), minutes.open...)
 	}
-	if b := sess.runtime.Context().SecretBroker; b != nil && len(b.Pending()) > 0 {
-		open = append(open, "A secret is waiting — answer it later on the secure sheet.")
-	}
+	open = append(open, voicePendingTaps(sess)...)
 	wake := len(decided) > 0 || len(open) > 0
 	seconds := int(time.Since(c.started).Seconds())
 
@@ -336,6 +335,7 @@ func (c *voiceCall) persistMinutes(reason string) {
 	b.WriteString("\n")
 	section("Still open", open)
 	b.WriteString("</voice_minutes>\n")
+	text := b.String()
 
 	custom := c.custom("minutes")
 	for k, v := range map[string]any{"billing": c.billing.Kind, "reason": reason, "seconds": seconds, "dropped": minutes == nil, "passed": ledger, "wake": wake} {
@@ -344,18 +344,9 @@ func (c *voiceCall) persistMinutes(reason string) {
 	if c.usage != nil && c.usage.Seconds != nil {
 		custom["usage_seconds"] = *c.usage.Seconds
 	}
-	deliveryID := c.id + "/minutes"
-	transcript := []byte(c.transcript.Markdown())
-	if wake {
-		atts := []Attachment{{Name: "transcript.md", Mime: "text/markdown", Data: base64.StdEncoding.EncodeToString(transcript)}}
-		if _, _, err := m.admitVoice(sess.ID, deliveryID, b.String(), atts, custom); err != nil {
-			slog.Warn("voice call minutes not delivered", "call", c.id, "error", err)
-		}
-		return
-	}
-	content := []core.Content{core.TextContent(b.String())}
+	content := []core.Content{core.TextContent(text)}
 	if m.attachStore != nil {
-		d, err := m.attachStore.PutRef(sess.ID, transcript, attachment.PutMeta{Name: "transcript.md", Mime: "text/markdown", Kind: "file"})
+		d, err := m.attachStore.PutRef(sess.ID, []byte(c.transcript.Markdown()), attachment.PutMeta{Name: "transcript.md", Mime: "text/markdown", Kind: "file"})
 		if err != nil {
 			slog.Warn("voice call transcript not saved", "call", c.id, "error", err)
 			content[0].Text += "\nThe transcript could not be saved.\n"
@@ -363,18 +354,44 @@ func (c *voiceCall) persistMinutes(reason string) {
 			content = append([]core.Content{{Type: "document", AttachmentID: d.ID, AttachmentSize: d.Size, MimeType: d.Mime, Filename: d.Name}}, content...)
 		}
 	}
-	msg := core.AgentMessage{Message: core.NewUserMessageWithContent(content), Custom: custom}
-	msg.EnsureMsgID()
-	record := func() {
-		if err := m.recordVoice(m.baseCtx, sess.ID, deliveryID, msg); err != nil {
-			slog.Warn("voice call minutes not saved", "call", c.id, "error", err)
-		}
-	}
-	if sess.runtime.Context().Agent.IsRunning() {
-		// A busy session takes the record once its run settles; the call has
-		// ended, so that wait stays off the hangup path.
-		go record()
+	// The record is display-only (the model never sees a session_event), so
+	// it can be saved at once, busy or not; the wake carries the same text to
+	// the model as an ordinary voice delivery and is the only part that may
+	// wait in the queue.
+	record := core.AgentMessage{Message: core.Message{Role: "session_event", Content: content, Timestamp: time.Now().Unix()}, Custom: custom}
+	record.EnsureMsgID()
+	if err := m.recordVoice(sess.ID, c.id+"/minutes", record); err != nil {
+		slog.Warn("voice call minutes not saved", "call", c.id, "error", err)
 		return
 	}
-	record()
+	if !wake {
+		return
+	}
+	wakeCustom := c.custom("minutes_wake")
+	wakeCustom["minutes_msg_id"] = record.MsgID
+	if _, _, err := m.admitVoice(sess.ID, c.id+"/minutes-wake", text+"\nThe observed transcript is attached to the minutes record of this call.", nil, wakeCustom); err != nil {
+		slog.Warn("voice call minutes did not wake the session", "call", c.id, "error", err)
+	}
+}
+
+// voicePendingTaps names what still waits for the owner's tap when a call
+// ends: a requires_tap question or a permission, and a secret request only
+// as a generic indicator. These are Still open, so the minutes wake.
+func voicePendingTaps(sess *ManagedSession) []string {
+	var out []string
+	info, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
+	if a := info.Ask; a != nil && a.RequiresTap {
+		var qs []string
+		for _, q := range a.Questions {
+			qs = append(qs, q.Text)
+		}
+		out = append(out, "Waiting for your tap: question \""+strings.Join(qs, "; ")+"\"")
+	}
+	if p := info.Permission; p != nil && !voiceSecretTool(p.ToolName) {
+		out = append(out, "Waiting for your tap: permission for "+p.ToolName)
+	}
+	if b := sess.runtime.Context().SecretBroker; b != nil && len(b.Pending()) > 0 {
+		out = append(out, "A secret is waiting — answer it later on the secure sheet.")
+	}
+	return out
 }

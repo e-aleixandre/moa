@@ -1064,6 +1064,23 @@ func (a *Agent) AppendMessage(msg core.AgentMessage) error {
 	return nil
 }
 
+// AppendRecord appends a display-only record (role session_event) and
+// announces it. Unlike AppendMessage it is allowed while a run is in flight:
+// the provider never receives session_event messages, so a record placed
+// between a tool call and its result changes nothing the model sees, the
+// same way the loop's own provider-wait notes do.
+func (a *Agent) AppendRecord(msg core.AgentMessage) error {
+	if msg.Role != "session_event" {
+		return fmt.Errorf("only session_event records can be appended while running")
+	}
+	a.lockCut()
+	msg.EnsureMsgID()
+	a.state.Messages = append(a.state.Messages, msg)
+	a.unlockCut()
+	a.announceUserMessage(msg, "")
+	return nil
+}
+
 // CompactionEpoch returns the current compaction epoch.
 func (a *Agent) CompactionEpoch() int {
 	a.mu.Lock()

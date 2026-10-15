@@ -18,10 +18,26 @@ import (
 
 func vpReadControl(t *testing.T, f *vpFixture, p *vpPeer) {
 	t.Helper()
-	f.appendUser("READ-CONTROL-PRIVATE")
+	marker := "READ-CONTROL-PRIVATE"
+	if f.sess.runtime.Context().Agent.IsRunning() {
+		// AppendToConversation is refused while a run is in flight (a session
+		// blocked in ask_user is one), long before voice existed. The positive
+		// control then reads the latest prompt the test itself sent instead.
+		marker = ""
+		for _, m := range f.sess.History() {
+			if m.Role == "user" && len(m.Custom) == 0 && len(m.Content) > 0 {
+				marker = m.Content[0].Text
+			}
+		}
+		if marker == "" {
+			t.Fatal("read control has no prompt to look for")
+		}
+	} else {
+		f.appendUser(marker)
+	}
 	p.tool(t, "read-control", "read_session", map[string]any{"session_id": f.sess.ID})
 	v := p.result(t, "read-control")
-	if vpError(v) || !strings.Contains(vpJSON(v), "READ-CONTROL-PRIVATE") {
+	if vpError(v) || !strings.Contains(vpJSON(v), marker) {
 		t.Fatalf("permitted read did not work: %v", v)
 	}
 }

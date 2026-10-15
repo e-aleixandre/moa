@@ -79,6 +79,8 @@ type AgentController interface {
 	// (custom) on the appended message.
 	SendWithContentCustomAnnounced(ctx context.Context, content []core.Content, msgID string, custom map[string]any) ([]core.AgentMessage, error)
 	AppendMessage(msg core.AgentMessage) error
+	// AppendRecord appends a session_event record, also while running.
+	AppendRecord(msg core.AgentMessage) error
 	SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error
 	LoadState(msgs []core.AgentMessage, compactionEpoch int) error
 

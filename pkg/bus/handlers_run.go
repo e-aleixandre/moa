@@ -382,6 +382,9 @@ func registerAppendHandler(sctx *SessionContext) {
 	b.OnCommand(func(cmd AppendToConversation) error {
 		return sctx.Agent.AppendMessage(cmd.Message)
 	})
+	b.OnCommand(func(cmd AppendRecord) error {
+		return sctx.Agent.AppendRecord(cmd.Message)
+	})
 
 }
 

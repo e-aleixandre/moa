@@ -1,8 +1,6 @@
 package serve
 
 import (
-	"context"
-	"errors"
 	"sync"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -28,15 +26,25 @@ type voiceReceipt struct {
 }
 
 // load rehydrates the receipts from the session's canonical record — its
-// messages and its queued steers — the first time this runtime admits a
-// voice delivery, so a reopened session never takes a delivery twice.
+// saved transcript (which keeps display-only records the model's context
+// drops on reopen), its not yet saved messages and its queued steers — the
+// first time this runtime admits a voice delivery, so a reopened session
+// never takes a delivery twice.
 func (a *voiceAdmission) load(sess *ManagedSession) {
 	if a.loaded {
 		return
 	}
 	a.loaded = true
 	a.receipts = map[string]voiceReceipt{}
-	ag := sess.runtime.Context().Agent
+	sctx := sess.runtime.Context()
+	if sctx.Tree != nil {
+		sctx.Tree.VisitDisplayMessages(func(m *core.AgentMessage) {
+			if id := voiceDeliveryID(m.Custom); id != "" {
+				a.receipts[id] = voiceReceipt{Action: "record", ID: m.MsgID}
+			}
+		})
+	}
+	ag := sctx.Agent
 	for _, m := range ag.Messages() {
 		if id := voiceDeliveryID(m.Custom); id != "" {
 			a.receipts[id] = voiceReceipt{Action: "record", ID: m.MsgID}
@@ -82,40 +90,26 @@ func (m *Manager) admitVoice(sessionID, deliveryID, text string, atts []Attachme
 	return r, false, nil
 }
 
-// recordVoice appends a voice record that must not start a run. An agent
-// that is running cannot take an append, so it waits for the session to
-// settle and tries again; a delivery_id already present is never appended
-// twice.
-func (m *Manager) recordVoice(ctx context.Context, sessionID, deliveryID string, msg core.AgentMessage) error {
-	for {
-		sess, ok := m.Get(sessionID)
-		if !ok {
-			return ErrNotFound
-		}
-		a := &sess.voiceAdmission
-		a.mu.Lock()
-		a.load(sess)
-		if _, ok := a.receipts[deliveryID]; ok {
-			a.mu.Unlock()
-			return nil
-		}
-		msg.Custom["delivery_id"] = deliveryID
-		err := sess.runtime.Bus.Execute(bus.AppendToConversation{SessionID: sess.ID, Message: msg})
-		if err == nil {
-			a.receipts[deliveryID] = voiceReceipt{Action: "record", ID: msg.MsgID}
-		}
-		a.mu.Unlock()
-		if err == nil {
-			// Persistence and live clients re-sync from the agent's messages, as
-			// for any other appended record.
-			sess.runtime.Bus.Publish(bus.CommandExecuted{SessionID: sess.ID, Command: "voice_call", Messages: sess.runtime.Context().Agent.Messages()})
-			return nil
-		}
-		if !sess.runtime.Context().Agent.IsRunning() {
-			return err
-		}
-		if !sess.runtime.WaitSettled(ctx) {
-			return errors.Join(err, ctx.Err())
-		}
+// recordVoice appends a display-only voice record (session_event) once per
+// delivery_id and saves the session to disk before returning, also while a
+// run is in flight.
+func (m *Manager) recordVoice(sessionID, deliveryID string, msg core.AgentMessage) error {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return ErrNotFound
 	}
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	if _, ok := a.receipts[deliveryID]; ok {
+		return nil
+	}
+	msg.Custom["delivery_id"] = deliveryID
+	msg.EnsureMsgID()
+	if err := sess.runtime.Bus.Execute(bus.AppendRecord{SessionID: sess.ID, Message: msg}); err != nil {
+		return err
+	}
+	a.receipts[deliveryID] = voiceReceipt{Action: "record", ID: msg.MsgID}
+	return sess.runtime.Flush()
 }

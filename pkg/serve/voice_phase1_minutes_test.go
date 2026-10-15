@@ -217,15 +217,26 @@ func TestVoiceCall_MinutesWakeBusySessionAsSingleSteer(t *testing.T) {
 	p.tool(t, "end", "end_call", map[string]any{"decided": []string{"BUSY-DECISION"}, "passed": []string{}, "open": []string{}})
 	c.hangup()
 	c.hangup()
-	pollUntil(t, vpDeadline, "one actual minutes steer", func() bool {
+	// Owner decision (16/10): the minutes record is saved to disk at hangup
+	// even while the session is busy; only the wake waits in the queue. The
+	// wake is therefore its own kind, so the record is still counted once.
+	pollUntil(t, vpDeadline, "one actual minutes wake steer", func() bool {
 		n := 0
 		for _, v := range f.sess.runtime.Context().Agent.PendingSteers() {
-			if v.Custom["source"] == "voice_call" && v.Custom["kind"] == "minutes" {
+			if v.Custom["source"] == "voice_call" && v.Custom["kind"] == "minutes_wake" {
 				n++
 			}
 		}
 		return n == 1
 	})
+	// Read the session file as a restart would, without flushing first.
+	onDisk, _, e := session.FindSessionReadOnly(f.mgr.sessionBaseDir, f.sess.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if ms := vpSavedVoice(onDisk, "minutes"); len(ms) != 1 || !strings.Contains(vpJSON(ms[0]), "BUSY-DECISION") {
+		t.Fatalf("minutes not on disk while the session is busy: %d records", len(ms))
+	}
 	release.Do(func() { close(gate) })
 	f.waitRecords("minutes", 1)
 	ctx, cancel := context.WithTimeout(context.Background(), vpDeadline)
