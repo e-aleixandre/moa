@@ -9,9 +9,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -32,6 +32,10 @@ type voiceCallRegistry struct {
 	mgr   *Manager
 	store *auth.Store
 	opts  VoiceCallOptions
+	// admission is the open-attempt budget shared with Live voice's rules:
+	// in-flight and global attempts count failures, the principal's
+	// allowance only counts calls that opened.
+	admission *voiceLiveAdmission
 
 	ctx    context.Context // cancelled on Close: aborts opens in flight
 	cancel context.CancelFunc
@@ -51,7 +55,7 @@ func newVoiceCallRegistry(mgr *Manager, store *auth.Store, opts VoiceCallOptions
 		opts.HTTPClient = &http.Client{}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &voiceCallRegistry{mgr: mgr, store: store, opts: opts, ctx: ctx, cancel: cancel,
+	return &voiceCallRegistry{mgr: mgr, store: store, opts: opts, admission: newVoiceLiveAdmission(), ctx: ctx, cancel: cancel,
 		principals: map[string]*voiceSlot{}, calls: map[string]*voiceCall{}, ended: map[string]string{}}
 }
 
@@ -231,6 +235,13 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	principal := identity.auditID()
+	retry, admitted := r.admission.acquire(principal)
+	if !admitted {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		voiceError(w, http.StatusTooManyRequests, map[string]any{"error": "rate_limited"})
+		return
+	}
+	defer r.admission.release()
 	slot, closed := r.reserve(principal)
 	if closed {
 		voiceError(w, http.StatusServiceUnavailable, map[string]any{"error": "shutting_down"})
@@ -269,6 +280,7 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		voiceError(w, http.StatusServiceUnavailable, map[string]any{"error": "shutting_down"})
 		return
 	}
+	r.admission.established(principal)
 	go c.run()
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, map[string]any{"call_id": id, "provider": provider, "billing": c.billing, "ws_url": "/api/voice/calls/" + id + "/ws"})
@@ -371,17 +383,25 @@ func (r *voiceCallRegistry) handleWS(w http.ResponseWriter, req *http.Request) {
 	c.detach(cl)
 }
 
-// voiceClient is the one browser/native transport of a call: a bounded queue
-// drained by a single writer with a write deadline.
+// voiceClientControls bounds the JSON frames queued towards the client.
+const voiceClientControls = 32
+
+// voiceClient is the one browser/native transport of a call: one FIFO,
+// budgeted separately for audio bytes and control frames, drained by a
+// single writer with a write deadline.
 type voiceClient struct {
-	conn    *websocket.Conn
-	out     chan voiceFrame
-	pending atomic.Int64 // audio bytes queued
-	limit   int64
-	ctx     context.Context
-	cancel  context.CancelFunc
-	done    chan struct{}
-	once    sync.Once
+	conn   *websocket.Conn
+	limit  int64 // audio bytes queued or being written
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+	once   sync.Once
+
+	mu       sync.Mutex
+	queue    []voiceFrame
+	audio    int64
+	controls int
+	wake     chan struct{} // capacity 1: the queue is not empty
 }
 
 type voiceFrame struct {
@@ -393,7 +413,7 @@ type voiceFrame struct {
 
 func newVoiceClient(conn *websocket.Conn, limit int) *voiceClient {
 	ctx, cancel := context.WithCancel(context.Background())
-	cl := &voiceClient{conn: conn, out: make(chan voiceFrame, 128), limit: int64(limit), ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	cl := &voiceClient{conn: conn, limit: int64(limit), ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1)}
 	go cl.write()
 	return cl
 }
@@ -401,48 +421,85 @@ func newVoiceClient(conn *websocket.Conn, limit int) *voiceClient {
 func (cl *voiceClient) write() {
 	defer close(cl.done)
 	for {
-		select {
-		case <-cl.ctx.Done():
+		f, ok := cl.next()
+		if !ok {
+			select {
+			case <-cl.ctx.Done():
+				return
+			case <-cl.wake:
+			}
+			continue
+		}
+		ctx, cancel := context.WithTimeout(cl.ctx, wsWriteTimeout)
+		err := cl.conn.Write(ctx, f.kind, f.data)
+		cancel()
+		cl.release(f)
+		if err != nil {
+			cl.cancel()
+			_ = cl.conn.CloseNow()
 			return
-		case f := <-cl.out:
-			ctx, cancel := context.WithTimeout(cl.ctx, wsWriteTimeout)
-			err := cl.conn.Write(ctx, f.kind, f.data)
-			cancel()
-			cl.pending.Add(-f.audio)
-			if err != nil {
-				cl.cancel()
-				_ = cl.conn.CloseNow()
-				return
-			}
-			if f.last {
-				_ = cl.conn.CloseNow()
-				return
-			}
+		}
+		if f.last {
+			_ = cl.conn.CloseNow()
+			return
 		}
 	}
 }
 
-func (cl *voiceClient) enqueue(f voiceFrame) bool {
-	select {
-	case cl.out <- f:
-		return true
-	default:
-		return false
+// next pops the oldest frame unless the writer must stop. A popped frame
+// keeps its budget until written.
+func (cl *voiceClient) next() (voiceFrame, bool) {
+	if cl.ctx.Err() != nil {
+		return voiceFrame{}, false
+	}
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	if len(cl.queue) == 0 {
+		return voiceFrame{}, false
+	}
+	f := cl.queue[0]
+	cl.queue[0] = voiceFrame{}
+	cl.queue = cl.queue[1:]
+	return f, true
+}
+
+func (cl *voiceClient) release(f voiceFrame) {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	if f.kind == websocket.MessageBinary {
+		cl.audio -= f.audio
+	} else {
+		cl.controls--
 	}
 }
 
-// sendAudio refuses instead of growing: a slow reader ends its call.
-func (cl *voiceClient) sendAudio(pcm []byte) bool {
-	n := int64(len(pcm))
-	if cl.pending.Add(n) > cl.limit {
-		cl.pending.Add(-n)
-		return false
+// enqueue refuses instead of growing: a slow reader ends its call.
+func (cl *voiceClient) enqueue(f voiceFrame) bool {
+	cl.mu.Lock()
+	if f.kind == websocket.MessageBinary {
+		if cl.audio+f.audio > cl.limit {
+			cl.mu.Unlock()
+			return false
+		}
+		cl.audio += f.audio
+	} else {
+		if cl.controls >= voiceClientControls {
+			cl.mu.Unlock()
+			return false
+		}
+		cl.controls++
 	}
-	if !cl.enqueue(voiceFrame{kind: websocket.MessageBinary, data: pcm, audio: n}) {
-		cl.pending.Add(-n)
-		return false
+	cl.queue = append(cl.queue, f)
+	cl.mu.Unlock()
+	select {
+	case cl.wake <- struct{}{}:
+	default:
 	}
 	return true
+}
+
+func (cl *voiceClient) sendAudio(pcm []byte) bool {
+	return cl.enqueue(voiceFrame{kind: websocket.MessageBinary, data: pcm, audio: int64(len(pcm))})
 }
 
 func (cl *voiceClient) sendJSON(v any) bool {

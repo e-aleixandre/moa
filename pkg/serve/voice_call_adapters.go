@@ -180,10 +180,11 @@ func (r *voiceCallRegistry) selectable(p voice.ProviderID) bool {
 	return snap.Kind == "oauth"
 }
 
-// defaultPlan picks a plan provider when the caller named none. It never
-// picks a paid provider: omitting provider is not consent to pay.
+// defaultPlan picks a plan provider when the caller named none: ChatGPT
+// first (full duplex), then Grok. It never picks a paid provider: omitting
+// provider is not consent to pay.
 func (r *voiceCallRegistry) defaultPlan() (voice.ProviderID, bool) {
-	for _, p := range []voice.ProviderID{voice.GrokPlan, voice.ChatGPTPlan} {
+	for _, p := range []voice.ProviderID{voice.ChatGPTPlan, voice.GrokPlan} {
 		if r.selectable(p) {
 			return p, true
 		}
