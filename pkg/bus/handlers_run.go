@@ -527,11 +527,7 @@ func steerAttachmentIDs(items []core.SteerItem) []string {
 // goalIterationMarkerText formats an iteration verdict for the persistent goal
 // marker, matching the wording the frontends use for the live event so the
 
-func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {
-	return startRunWithOrigin(sctx, label, RunOrigin{Explicit: true}, runFn)
-}
-
-// startRunWithOrigin is startRun carrying the run's provenance. The origin is
+// startRunWithOrigin starts a run carrying its provenance. The origin is
 // recorded between claiming the slot and launching — both under abortMu — so a
 // failed reservation cannot leave it behind for an unrelated run to pick up.
 func startRunWithOrigin(sctx *SessionContext, label string, origin RunOrigin, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {

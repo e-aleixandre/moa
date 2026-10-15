@@ -56,7 +56,7 @@ func wsPair(t *testing.T, live bool) (Upstream, *websocket.Conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	url := "ws" + strings.TrimPrefix(srv.URL, "http")
-	var a Adapter = NewRealtimeWS(RealtimeWSConfig{URL: url, ID: GrokPlan, Credentials: fixedCred{}})
+	a := Adapter(NewRealtimeWS(RealtimeWSConfig{URL: url, ID: GrokPlan, Credentials: fixedCred{}}))
 	if live {
 		a = NewLiveWS(LiveWSConfig{URL: url, Credentials: fixedCred{}})
 	}
