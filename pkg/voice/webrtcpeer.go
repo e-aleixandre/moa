@@ -33,6 +33,7 @@ var (
 	errPeerRemoteClosed = errors.New("voice peer closed by remote")
 	errPeerFailed       = errors.New("voice peer connection failed")
 	errControlOverflow  = errors.New("voice peer control backlog full")
+	errPCMOverflow      = errors.New("voice peer inbound audio backlog full")
 )
 
 // PeerConfig configures NewPeer.
@@ -67,6 +68,8 @@ type Peer struct {
 	ctlMu     sync.Mutex // guards ctlClosed and sends on control
 	ctlClosed bool
 	control   chan []byte
+	pcmMu     sync.Mutex   // guards pcmAudio and the send on pcm
+	pcmAudio  inboundAudio // PCM bytes waiting in pcm
 	pcm       chan []byte
 
 	sendMu  sync.Mutex // guards the outbound audio pipeline below
@@ -368,11 +371,20 @@ func (p *Peer) readTrack(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 			}
 			binary.LittleEndian.PutUint16(out[2*i:], uint16(int16(x)))
 		}
-		// Backpressure instead of a queue: the consumer paces the reader and
-		// Pion's receive buffer absorbs the rest.
-		select {
-		case p.pcm <- out:
-		case <-p.done:
+		// A consumer that falls more than the audio budget behind fails the
+		// peer instead of making it hold more.
+		p.pcmMu.Lock()
+		ok := p.pcmAudio.admit(len(p.pcm), len(out))
+		if ok {
+			select {
+			case p.pcm <- out:
+			default:
+				ok = false
+			}
+		}
+		p.pcmMu.Unlock()
+		if !ok {
+			p.fail(errPCMOverflow)
 			return
 		}
 	}

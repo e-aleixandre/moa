@@ -103,6 +103,13 @@ type HandoffResponder interface {
 	SendHandoffResult(ctx context.Context, itemID, text string) error
 }
 
+// UsageReporter is implemented by upstreams that keep the latest usage the
+// provider reported outside the event queue, so it survives backpressure and
+// a Close. Read it after Close; nil means nothing was reported.
+type UsageReporter interface {
+	Usage() *Usage
+}
+
 // Event is one normalized upstream event.
 type Event struct {
 	Kind EventKind

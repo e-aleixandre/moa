@@ -112,12 +112,13 @@ func (u *liveUpstream) parse(typ string, raw []byte) []Event {
 			return nil
 		}
 		return []Event{{Kind: EventAudio, PCM: pcm}}
-	case "session.closed":
-		usage := &Usage{Final: true}
-		if e.Usage != nil {
-			usage.Seconds = e.Usage.Seconds
+	// usage.seconds is a cumulative snapshot: the latest one is the running
+	// total, confirmed as final only by session.closed.
+	case "session.usage.updated", "session.closed":
+		if e.Usage == nil || e.Usage.Seconds == nil {
+			return nil
 		}
-		return []Event{{Kind: EventUsage, Usage: usage}}
+		return []Event{{Kind: EventUsage, Usage: &Usage{Seconds: e.Usage.Seconds, Final: typ == "session.closed"}}}
 	case "response.event":
 		return u.parseResponse(e.DelegationID, e.Event)
 	}

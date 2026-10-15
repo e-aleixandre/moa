@@ -85,7 +85,15 @@ type wsUpstream struct {
 	closedSignal chan struct{}
 	closedOnce   sync.Once
 	closeOnce    sync.Once
+	closeSent    bool // written once under closeOnce
+	teardownOnce sync.Once
 	workers      sync.WaitGroup
+	// inAudio bounds the PCM bytes waiting in events; reader-owned.
+	inAudio inboundAudio
+	// usage is the latest usage the provider reported. It is kept outside
+	// the event queue so a full queue or a Close cannot lose it.
+	usageMu sync.Mutex
+	usage   *Usage
 }
 
 func newWSUpstream(conn *websocket.Conn, parse func(string, []byte) []Event) *wsUpstream {
@@ -119,15 +127,53 @@ func (u *wsUpstream) read() {
 		if json.Unmarshal(data, &env) != nil {
 			continue
 		}
-		if u.closedType != "" && env.Type == u.closedType {
+		if env.Type == "error" {
+			if providerErrorFatal(data) {
+				u.emit(Event{Kind: EventFailed, Reason: FailProviderError})
+				return
+			}
+			continue
+		}
+		events := u.parse(env.Type, data)
+		for _, ev := range events {
+			if ev.Usage != nil {
+				u.setUsage(ev.Usage)
+			}
+		}
+		// The dialect's closed event ends the session even if the transport
+		// stays open; Close's wait is released only once its usage is kept.
+		closed := u.closedType != "" && env.Type == u.closedType
+		if closed {
 			u.closedOnce.Do(func() { close(u.closedSignal) })
 		}
-		for _, ev := range u.parse(env.Type, data) {
+		for _, ev := range events {
+			if !u.inAudio.admit(len(u.events), len(ev.PCM)) {
+				u.emit(Event{Kind: EventFailed, Reason: FailInboundOverflow})
+				return
+			}
 			if !u.emit(ev) {
 				return
 			}
 		}
+		if closed {
+			u.emit(Event{Kind: EventClosed, Reason: "session_closed"})
+			return
+		}
 	}
+}
+
+func (u *wsUpstream) setUsage(usage *Usage) {
+	u.usageMu.Lock()
+	u.usage = usage
+	u.usageMu.Unlock()
+}
+
+// Usage returns the latest usage the provider reported (Final only if it
+// confirmed finalization), or nil if none arrived.
+func (u *wsUpstream) Usage() *Usage {
+	u.usageMu.Lock()
+	defer u.usageMu.Unlock()
+	return u.usage
 }
 
 func (u *wsUpstream) emit(ev Event) bool {
@@ -209,15 +255,19 @@ func (u *wsUpstream) Events() <-chan Event { return u.events }
 
 // close sends the dialect's closing frame when there is one, waits for its
 // confirmation within ctx, then tears the socket and both workers down.
+// Every caller waits within its own ctx: only the frame is sent once.
 func (u *wsUpstream) close(ctx context.Context) error {
 	u.closeOnce.Do(func() {
-		if u.closeFrame != nil && u.send(u.closeFrame) == nil {
-			select {
-			case <-u.closedSignal:
-			case <-u.ctx.Done():
-			case <-ctx.Done():
-			}
+		u.closeSent = u.closeFrame != nil && u.send(u.closeFrame) == nil
+	})
+	if u.closeSent {
+		select {
+		case <-u.closedSignal:
+		case <-u.ctx.Done():
+		case <-ctx.Done():
 		}
+	}
+	u.teardownOnce.Do(func() {
 		u.cancel()
 		_ = u.conn.CloseNow()
 	})

@@ -158,6 +158,7 @@ type chatGPTUpstream struct {
 	stopOnce   sync.Once
 	closeOnce  sync.Once
 	readerDone chan struct{}
+	inAudio    inboundAudio // reader-owned
 }
 
 // read is the single reader: datachannel control and decoded media both
@@ -176,7 +177,7 @@ func (u *chatGPTUpstream) read() {
 				continue
 			}
 			for _, ev := range parseChatGPT(data) {
-				if !u.emit(ev) {
+				if !u.emit(ev) || ev.Kind == EventFailed {
 					return
 				}
 			}
@@ -194,6 +195,14 @@ func (u *chatGPTUpstream) read() {
 }
 
 func (u *chatGPTUpstream) emit(ev Event) bool {
+	if !u.inAudio.admit(len(u.events), len(ev.PCM)) {
+		ev = Event{Kind: EventFailed, Reason: FailInboundOverflow}
+		select {
+		case u.events <- ev:
+		case <-u.stop:
+		}
+		return false
+	}
 	select {
 	case u.events <- ev:
 		return true
@@ -225,6 +234,11 @@ func parseChatGPT(data []byte) []Event {
 		return nil
 	}
 	switch e.Type {
+	case "error":
+		if providerErrorFatal(data) {
+			return []Event{{Kind: EventFailed, Reason: FailProviderError}}
+		}
+		return nil
 	case "input_transcript.added":
 		return []Event{{Kind: EventTranscript, Role: "user", Text: e.Item.Text}}
 	case "output_transcript.added":

@@ -211,8 +211,11 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 		c.submit(voiceJob{handoff: &h})
 	case voice.EventUsage:
 		c.usage = ev.Usage
-	case voice.EventClosed, voice.EventFailed:
+	case voice.EventClosed:
 		c.requestEnd("upstream_closed")
+	case voice.EventFailed:
+		// A fatal provider error ends this call; there is no fallback.
+		c.requestEnd("upstream_failed")
 	}
 }
 
@@ -293,7 +296,7 @@ func (c *voiceCall) finishCall(client *voiceClient, events <-chan voice.Event) {
 	if client != nil {
 		client.finish(map[string]any{"type": "ended", "reason": reason})
 	}
-	if events != nil && !c.hasMinutes() && reason != "upstream_closed" {
+	if events != nil && !c.hasMinutes() && reason != "upstream_closed" && reason != "upstream_failed" {
 		ctx, cancel := context.WithTimeout(context.Background(), c.limits.Minutes)
 		if c.up.RequestMinutes(ctx) == nil {
 		wait:
@@ -334,6 +337,11 @@ drain:
 	}
 	<-closed
 	cancel()
+	if r, ok := c.up.(voice.UsageReporter); ok {
+		if u := r.Usage(); u != nil {
+			c.usage = u
+		}
+	}
 	c.reg.releasePrincipal(c)
 	c.workCancel()
 	<-c.workerDone
