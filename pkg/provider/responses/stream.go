@@ -42,6 +42,31 @@ type event struct {
 	// For error events
 	Message string `json:"message,omitempty"`
 	Code    string `json:"code,omitempty"`
+	// Nested error object, as sent by OpenAI/Codex:
+	// {"type":"error","error":{"code":...,"message":...,"type":...}}.
+	Error *struct {
+		Message string `json:"message"`
+		Code    string `json:"code"`
+		Type    string `json:"type"`
+	} `json:"error,omitempty"`
+}
+
+// errorDetail returns the code and message of an error event, preferring the
+// nested error object over the flat top-level fields. The nested type is the
+// code of last resort.
+func (e *event) errorDetail() (code, message string) {
+	code, message = e.Code, e.Message
+	if n := e.Error; n != nil {
+		if strings.TrimSpace(n.Code) != "" {
+			code = n.Code
+		} else if strings.TrimSpace(code) == "" {
+			code = n.Type
+		}
+		if strings.TrimSpace(n.Message) != "" {
+			message = n.Message
+		}
+	}
+	return code, message
 }
 
 // response is the response object carried by response.* events. It is a named
@@ -237,7 +262,7 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 		}
 		// For output_item.done events, preserve the raw JSON of the item so we
 		// can store it verbatim as ThinkingSignature (avoids losing unknown fields).
-		if ev.Type == eventError && strings.TrimSpace(ev.Message) == "" && strings.TrimSpace(ev.Code) == "" {
+		if code, msg := ev.errorDetail(); ev.Type == eventError && strings.TrimSpace(msg) == "" && strings.TrimSpace(code) == "" {
 			payload := data
 			if len(payload) > 4096 {
 				payload = payload[:4096]
@@ -503,11 +528,15 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 	case eventError:
 		errMsg := "stream error"
 		if !state.sanitizeErrors {
-			errMsg = ev.Message
-			if errMsg == "" {
-				errMsg = ev.Code
-			}
-			if errMsg == "" {
+			code, msg := ev.errorDetail()
+			switch {
+			case ev.Error != nil && code != "" && msg != "":
+				errMsg = code + ": " + msg
+			case msg != "":
+				errMsg = msg
+			case code != "":
+				errMsg = code
+			default:
 				errMsg = "unknown error"
 			}
 		}
