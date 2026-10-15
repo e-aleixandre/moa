@@ -414,7 +414,7 @@ func agentThread(ctx context.Context, q querier, a Actor, id int64) ([]ThreadEnt
 
 // AgentClose completes a task on the agent's checklist. A task another owner
 // sent needs an outcome (done by default) and a note, which the sender reads;
-// an outcome on anything else is refused. The sender of a task can read it
+// on anything else only the default outcome (done) is accepted, and ignored. The sender of a task can read it
 // but never close it.
 func (r *Repo) AgentClose(ctx context.Context, a Actor, id int64, outcome, note string) (AgentTask, error) {
 	note = strings.TrimSpace(note)
@@ -441,8 +441,10 @@ func (r *Repo) AgentClose(ctx context.Context, a Actor, id int64, outcome, note 
 				return false, invalid("task #%d was sent by %s: close it with a note (the result for done, the reason for cant_do)",
 					id, cur.Handoff.FromOwnerName)
 			}
-		} else if outcome != "" {
-			return false, invalid("outcome is only for tasks sent by another owner")
+		} else if outcome != "" && outcome != OutcomeDone {
+			// "done" is the schema default that models fill in; it carries
+			// nothing here. cant_do cannot be represented on an own task.
+			return false, invalid("outcome %q is only for tasks sent by another owner: this task is your own, so drop outcome, or delete or leave it open if you cannot do it", outcome)
 		}
 		changed := cur.Status != StatusDone
 		if changed {

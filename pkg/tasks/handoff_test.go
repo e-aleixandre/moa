@@ -326,6 +326,14 @@ func TestHandoffDoneRequiresNote(t *testing.T) {
 	if _, err := r.AgentClose(bg, actor("s1", "p"), own.ID, "", "notes"); err != nil {
 		t.Fatalf("done with a note on a checklist task: %v", err)
 	}
+	// The schema default is accepted and ignored on a task of one's own.
+	own2, _ := r.AgentCreate(bg, actor("s1", "p"), AgentInput{Title: "mine too"})
+	if _, err := r.AgentClose(bg, actor("s1", "p"), own2.ID, OutcomeDone, "notes"); err != nil {
+		t.Fatalf("outcome done on a checklist task: %v", err)
+	}
+	if got, _ := r.Get(bg, own2.ID); got.Status != StatusDone || got.Handoff != nil {
+		t.Fatalf("own task after close = %+v", got)
+	}
 }
 
 func TestCantDoNotifiesRequesterWithReason(t *testing.T) {
