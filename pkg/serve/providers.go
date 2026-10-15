@@ -503,6 +503,9 @@ func (pc *providerCredentials) apiKey(w http.ResponseWriter, r *http.Request, pr
 	var body struct {
 		Key                string  `json:"key"`
 		ExpectedGeneration *string `json:"expected_generation"`
+		// The plan_api_key generation the page saw. Optional for older pages,
+		// which then only guard the plan sign-in.
+		ExpectedKeyGeneration *string `json:"expected_key_generation"`
 	}
 	if !decodeProviderBody(w, r, provider, &body) {
 		return
@@ -511,7 +514,13 @@ func (pc *providerCredentials) apiKey(w http.ResponseWriter, r *http.Request, pr
 		writeProviderError(w, http.StatusBadRequest, provider, "invalid_request")
 		return
 	}
-	if _, err := pc.logins.SaveAPIKey(provider, *body.ExpectedGeneration, body.Key); err != nil {
+	var err error
+	if body.ExpectedKeyGeneration != nil {
+		_, err = pc.logins.SaveAPIKeyExpecting(provider, *body.ExpectedGeneration, *body.ExpectedKeyGeneration, body.Key)
+	} else {
+		_, err = pc.logins.SaveAPIKey(provider, *body.ExpectedGeneration, body.Key)
+	}
+	if err != nil {
 		writeProviderFailure(w, provider, "api_key", err)
 		return
 	}
