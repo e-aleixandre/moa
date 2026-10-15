@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,7 +34,13 @@ const voiceWorkQueue = 8
 type voiceJob struct {
 	tools   []voice.ToolCall
 	handoff *voice.Event
+	// do is session-side work of the call (the brief request, an answer to
+	// inject): it runs on the worker, so it stops with the call.
+	do func(context.Context)
 }
+
+// voiceNoteQueue bounds the worker's notices to the client.
+const voiceNoteQueue = 32
 
 // voiceCall is one call. A single controller goroutine (run) owns its state
 // transitions and the ending sequence; a single worker executes tools.
@@ -61,6 +68,7 @@ type voiceCall struct {
 	ending   atomic.Bool
 
 	work       chan voiceJob
+	notes      chan any // worker → client notices, forwarded by the controller
 	workCtx    context.Context
 	workCancel context.CancelFunc
 	workerDone chan struct{}
@@ -70,6 +78,11 @@ type voiceCall struct {
 	minutes     *voiceMinutes
 	minutesCh   chan struct{}
 	minutesOnce sync.Once
+	seq         int           // delivery sequence of this call
+	passed      []voicePassed // the server's ledger of accepted relays
+	asks        int           // ask_session requests accepted (budget)
+	askPending  bool
+	unsubs      []func() // bus subscriptions binding asks/brief to their run
 
 	// Controller-owned.
 	transcript voice.Transcript
@@ -87,7 +100,7 @@ func newVoiceCall(r *voiceCallRegistry, id, principal, sessionID string, provide
 	return &voiceCall{reg: r, id: id, principal: principal, sessionID: sessionID, provider: provider, billing: billing, up: up,
 		limits: r.opts.Limits, started: time.Now(), endCh: make(chan struct{}), done: make(chan struct{}),
 		attachCh: make(chan *voiceClient), detachCh: make(chan *voiceClient),
-		work: make(chan voiceJob, voiceWorkQueue), workCtx: ctx, workCancel: cancel, workerDone: make(chan struct{}),
+		work: make(chan voiceJob, voiceWorkQueue), notes: make(chan any, voiceNoteQueue), workCtx: ctx, workCancel: cancel, workerDone: make(chan struct{}),
 		results: map[string]voice.ToolResult{}, minutesCh: make(chan struct{})}
 }
 
@@ -126,6 +139,7 @@ func (c *voiceCall) detach(cl *voiceClient) {
 
 func (c *voiceCall) run() {
 	go c.worker()
+	c.submit(voiceJob{do: c.requestBrief})
 	maxT := time.NewTimer(c.limits.Maximum)
 	defer maxT.Stop()
 	// A created call with no client also expires: POST alone cannot leave
@@ -150,6 +164,8 @@ loop:
 			client = cl
 			grace.Stop()
 			c.toClient(client, map[string]any{"type": "state", "state": "listening"})
+		case v := <-c.notes:
+			c.toClient(client, v)
 		case cl := <-c.detachCh:
 			if cl == client {
 				client = nil
@@ -210,6 +226,10 @@ func (c *voiceCall) submit(job voiceJob) {
 	}
 	ctx, cancel := context.WithTimeout(c.workCtx, c.limits.Teardown)
 	defer cancel()
+	if job.do != nil {
+		slog.Warn("voice call work dropped: queue full", "call", c.id)
+		return
+	}
 	if job.handoff != nil {
 		if r, ok := c.up.(voice.HandoffResponder); ok {
 			_ = r.SendHandoffResult(ctx, job.handoff.ItemID, "moa is busy with earlier requests; try again in a moment.")
@@ -237,6 +257,10 @@ func (c *voiceCall) worker() {
 
 func (c *voiceCall) runJob(job voiceJob) {
 	ctx := c.workCtx
+	if job.do != nil {
+		job.do(ctx)
+		return
+	}
 	if job.handoff != nil {
 		text := c.runHandoff(ctx, job.handoff.Text)
 		if r, ok := c.up.(voice.HandoffResponder); ok {
@@ -313,6 +337,13 @@ drain:
 	c.reg.releasePrincipal(c)
 	c.workCancel()
 	<-c.workerDone
+	c.mu.Lock()
+	unsubs := c.unsubs
+	c.unsubs = nil
+	c.mu.Unlock()
+	for _, u := range unsubs {
+		u()
+	}
 	c.persistMinutes(reason)
 	c.reg.finish(c)
 	close(c.done)
@@ -328,5 +359,14 @@ func (c *voiceCall) handleEnding(ev voice.Event) {
 		c.handle(ev, nil)
 	case voice.EventUsage:
 		c.usage = ev.Usage
+	}
+}
+
+// note queues a notice for the client without blocking the worker; a full
+// queue drops it (notices are display only).
+func (c *voiceCall) note(v any) {
+	select {
+	case c.notes <- v:
+	default:
 	}
 }

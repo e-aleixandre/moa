@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/attachment"
-	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/voice"
@@ -115,10 +115,26 @@ func (c *voiceCall) executeOnce(_ context.Context, tc voice.ToolCall) voice.Tool
 		c.mu.Unlock()
 		c.minutesOnce.Do(func() { close(c.minutesCh) })
 		return voiceResult(tc.ID, map[string]any{"status": "ok"})
+	case "pass_to_session":
+		return c.passToSession(tc.ID, str("summary"))
+	case "answer_question":
+		answers, ok := stringList(args["answers"])
+		if !ok {
+			return voiceErrorResult(tc.ID, "answers must be a list of strings")
+		}
+		if a := str("answer"); a != "" {
+			if len(answers) > 0 {
+				return voiceErrorResult(tc.ID, "give either answer or answers, not both")
+			}
+			answers = []string{a}
+		}
+		return c.answerQuestion(tc.ID, str("ask_id"), answers)
+	case "request_tap":
+		return c.requestTap(tc.ID, str("item_id"))
+	case "ask_session":
+		return c.askSession(tc.ID, str("question"))
 	}
-	// ask_session, pass_to_session, answer_question and request_tap are the
-	// session bridge of the next gate. They fail honestly until then.
-	return voiceErrorResult(tc.ID, "not available yet")
+	return voiceErrorResult(tc.ID, "this tool is not available in a voice call")
 }
 
 func stringList(v any) ([]string, bool) {
@@ -267,9 +283,12 @@ func streamMessage(ctx context.Context, prov core.Provider, req core.Request) (c
 	return *final, nil
 }
 
-// persistMinutes appends the call's record to the called session: always a
-// minutes block with the literal transcript as transcript.md. Without the
-// model's end_call it says the call dropped instead of inventing minutes.
+// persistMinutes records the call in the called session exactly once:
+// always a minutes block with the literal transcript as transcript.md.
+// Without the model's end_call it says the call dropped instead of inventing
+// minutes. Passed comes from the server's ledger, already delivered and
+// never sent again. Only Decided or Still open wake the session (one run, or
+// one steer when busy); otherwise the block is a record without a run.
 func (c *voiceCall) persistMinutes(reason string) {
 	m := c.reg.mgr
 	sess, ok := m.Get(c.sessionID)
@@ -279,47 +298,85 @@ func (c *voiceCall) persistMinutes(reason string) {
 	}
 	c.mu.Lock()
 	minutes := c.minutes
+	passed := append([]voicePassed(nil), c.passed...)
 	c.mu.Unlock()
-	seconds := int(time.Since(c.started).Seconds())
-	var b strings.Builder
-	fmt.Fprintf(&b, "Voice call ended (%s) after %ds with %s, billing %s.\n\n", reason, seconds, c.provider, c.billing.Kind)
-	if minutes == nil {
-		b.WriteString("The call dropped before the voice model wrote its minutes. Only the observed transcript is attached.\n")
-	} else {
-		section := func(title string, items []string) {
-			fmt.Fprintf(&b, "%s:\n", title)
-			if len(items) == 0 {
-				b.WriteString("- (none)\n")
-			}
-			for _, it := range items {
-				fmt.Fprintf(&b, "- %s\n", it)
-			}
-			b.WriteString("\n")
-		}
-		section("Decided", minutes.decided)
-		section("Still open", minutes.open)
+	var decided, open []string
+	if minutes != nil {
+		decided, open = minutes.decided, append([]string(nil), minutes.open...)
 	}
-	content := []core.Content{core.TextContent(b.String())}
-	custom := map[string]any{"source": "voice_call", "kind": "minutes", "call_id": c.id, "provider": string(c.provider), "billing": c.billing.Kind, "reason": reason, "seconds": seconds, "dropped": minutes == nil}
+	if b := sess.runtime.Context().SecretBroker; b != nil && len(b.Pending()) > 0 {
+		open = append(open, "A secret is waiting — answer it later on the secure sheet.")
+	}
+	wake := len(decided) > 0 || len(open) > 0
+	seconds := int(time.Since(c.started).Seconds())
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "<voice_minutes>\nVoice call ended (%s) after %ds with %s, billing %s.\n\n", reason, seconds, c.provider, c.billing.Kind)
+	if minutes == nil {
+		b.WriteString("The call dropped before the voice model wrote its minutes. Only the observed transcript is attached.\n\n")
+	}
+	section := func(title string, items []string) {
+		fmt.Fprintf(&b, "%s:\n", title)
+		if len(items) == 0 {
+			b.WriteString("- (none)\n")
+		}
+		for _, it := range items {
+			fmt.Fprintf(&b, "- %s\n", voiceEscape(it, "voice_minutes"))
+		}
+		b.WriteString("\n")
+	}
+	section("Decided", decided)
+	b.WriteString("Passed to this session (already_delivered — do not execute again):\n")
+	if len(passed) == 0 {
+		b.WriteString("- (none)\n")
+	}
+	ledger := make([]map[string]any, 0, len(passed))
+	for _, p := range passed {
+		fmt.Fprintf(&b, "- [%s] already_delivered: %s\n", p.DeliveryID, voiceEscape(p.Summary, "voice_minutes"))
+		ledger = append(ledger, map[string]any{"delivery_id": p.DeliveryID, "already_delivered": true})
+	}
+	b.WriteString("\n")
+	section("Still open", open)
+	b.WriteString("</voice_minutes>\n")
+
+	custom := c.custom("minutes")
+	for k, v := range map[string]any{"billing": c.billing.Kind, "reason": reason, "seconds": seconds, "dropped": minutes == nil, "passed": ledger, "wake": wake} {
+		custom[k] = v
+	}
 	if c.usage != nil && c.usage.Seconds != nil {
 		custom["usage_seconds"] = *c.usage.Seconds
 	}
+	deliveryID := c.id + "/minutes"
+	transcript := []byte(c.transcript.Markdown())
+	if wake {
+		atts := []Attachment{{Name: "transcript.md", Mime: "text/markdown", Data: base64.StdEncoding.EncodeToString(transcript)}}
+		if _, _, err := m.admitVoice(sess.ID, deliveryID, b.String(), atts, custom); err != nil {
+			slog.Warn("voice call minutes not delivered", "call", c.id, "error", err)
+		}
+		return
+	}
+	content := []core.Content{core.TextContent(b.String())}
 	if m.attachStore != nil {
-		d, err := m.attachStore.PutRef(sess.ID, []byte(c.transcript.Markdown()), attachment.PutMeta{Name: "transcript.md", Mime: "text/markdown", Kind: "file"})
+		d, err := m.attachStore.PutRef(sess.ID, transcript, attachment.PutMeta{Name: "transcript.md", Mime: "text/markdown", Kind: "file"})
 		if err != nil {
 			slog.Warn("voice call transcript not saved", "call", c.id, "error", err)
 			content[0].Text += "\nThe transcript could not be saved.\n"
 		} else {
-			content = append(content, core.Content{Type: "document", AttachmentID: d.ID, AttachmentSize: d.Size, MimeType: d.Mime, Filename: d.Name})
+			content = append([]core.Content{{Type: "document", AttachmentID: d.ID, AttachmentSize: d.Size, MimeType: d.Mime, Filename: d.Name}}, content...)
 		}
 	}
 	msg := core.AgentMessage{Message: core.NewUserMessageWithContent(content), Custom: custom}
 	msg.EnsureMsgID()
-	if err := sess.runtime.Bus.Execute(bus.AppendToConversation{SessionID: sess.ID, Message: msg}); err != nil {
-		slog.Warn("voice call minutes not saved", "call", c.id, "error", err)
+	record := func() {
+		if err := m.recordVoice(m.baseCtx, sess.ID, deliveryID, msg); err != nil {
+			slog.Warn("voice call minutes not saved", "call", c.id, "error", err)
+		}
+	}
+	if sess.runtime.Context().Agent.IsRunning() {
+		// A busy session takes the record once its run settles; the call has
+		// ended, so that wait stays off the hangup path.
+		go record()
 		return
 	}
-	// Persistence and live clients re-sync from the agent's messages, as for
-	// any other appended record.
-	sess.runtime.Bus.Publish(bus.CommandExecuted{SessionID: sess.ID, Command: "voice_call", Messages: sess.runtime.Context().Agent.Messages()})
+	record()
 }

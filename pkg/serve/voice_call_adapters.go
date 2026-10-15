@@ -26,10 +26,13 @@ type VoiceCallLimits struct {
 	Teardown time.Duration
 	// BufferedBytes bounds the audio queued towards the client.
 	BufferedBytes int
+	// BriefChars bounds, in Unicode characters, the fallback context a call
+	// starts with and the brief injected later.
+	BriefChars int
 }
 
 func (l VoiceCallLimits) withDefaults() VoiceCallLimits {
-	d := VoiceCallLimits{Grace: 10 * time.Second, Maximum: 60 * time.Minute, Minutes: 8 * time.Second, Teardown: 2 * time.Second, BufferedBytes: voice.MaxPendingAudio}
+	d := VoiceCallLimits{Grace: 10 * time.Second, Maximum: 60 * time.Minute, Minutes: 8 * time.Second, Teardown: 2 * time.Second, BufferedBytes: voice.MaxPendingAudio, BriefChars: 8000}
 	if l.Grace > 0 {
 		d.Grace = l.Grace
 	}
@@ -44,6 +47,9 @@ func (l VoiceCallLimits) withDefaults() VoiceCallLimits {
 	}
 	if l.BufferedBytes > 0 {
 		d.BufferedBytes = l.BufferedBytes
+	}
+	if l.BriefChars > 0 {
+		d.BriefChars = l.BriefChars
 	}
 	return d
 }

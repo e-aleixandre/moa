@@ -600,6 +600,17 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 		if question, ok := custom["question"].(string); ok && question != "" {
 			projected["question"] = truncateHistoryString(question)
 		}
+		// Which record of the call this is (brief, question, relay, minutes),
+		// its admission identity, and for a relay the voice model's summary,
+		// labeled as such: none of them is a message the user typed.
+		for _, key := range []string{"kind", "delivery_id", "provider"} {
+			if value, ok := custom[key].(string); ok && value != "" {
+				projected[key] = value
+			}
+		}
+		if summary, ok := custom["model_summary"].(string); ok && summary != "" {
+			projected["model_summary"] = truncateHistoryString(summary)
+		}
 	}
 	// A batch of reports carries which sessions it is about: the block opens
 	// each of them. Stored as []map[string]string when delivered live, and as

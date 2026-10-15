@@ -245,6 +245,7 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 	up, err := adapter.Open(ctx, voice.CallSpec{
 		CallID: id, SessionID: sess.ID, Voice: voiceProviders[provider].voice,
 		Instructions: voice.CommonInstructions, BackendModel: voiceModel(), Tools: voice.ToolSpecs(),
+		InitialContext: r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
 	})
 	cancel()
 	if err != nil {

@@ -569,6 +569,10 @@ func (f *fakeAgent) SendWithContentAnnounced(ctx context.Context, content []core
 	return f.SendWithContentMsgID(ctx, content, msgID)
 }
 
+func (f *fakeAgent) SendWithContentCustomAnnounced(ctx context.Context, content []core.Content, msgID string, _ map[string]any) ([]core.AgentMessage, error) {
+	return f.SendWithContentAnnounced(ctx, content, msgID)
+}
+
 // announceToBus wires the fake's announce hook to publish the same bus event
 // the real agent produces through Bridge, so handler tests observe the live
 // announcement without a real agent.

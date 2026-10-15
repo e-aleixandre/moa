@@ -108,6 +108,10 @@ type SendPromptWithContent struct {
 	SteerID string
 	// AcceptedSteerID mirrors SendPrompt.AcceptedSteerID.
 	AcceptedSteerID *string
+	// Custom is the provenance of a non-typed producer (a voice call's record
+	// with its transcript attachment). It is kept on the user message, or on
+	// the steer when the prompt is queued, exactly like SendPrompt.Custom.
+	Custom map[string]any
 }
 
 // SteerAgent injects a steering message into a running agent.

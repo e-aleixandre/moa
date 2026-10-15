@@ -324,7 +324,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			// Carry the plain text alongside the content blocks: the Steered
 			// event (and every client rendering it) shows Text, so a queued
 			// send with attachments would otherwise surface as an empty chip.
-			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content}); err != nil {
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content, Custom: cmd.Custom}); err != nil {
 				return err
 			}
 			if cmd.AcceptedSteerID != nil {
@@ -362,7 +362,10 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		if cmd.AcceptedMsgID != nil {
 			*cmd.AcceptedMsgID = msgID
 		}
-		if err := startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
+		if err := startRunWithOrigin(sctx, label, originFromCustom(cmd.Custom), func(ctx context.Context) ([]core.AgentMessage, error) {
+			if cmd.Custom != nil {
+				return sctx.Agent.SendWithContentCustomAnnounced(ctx, cmd.Content, msgID, cmd.Custom)
+			}
 			return sctx.Agent.SendWithContentAnnounced(ctx, cmd.Content, msgID)
 		}); err != nil {
 			sctx.Agent.ReleaseNativeDocBytes(nativeBytes)

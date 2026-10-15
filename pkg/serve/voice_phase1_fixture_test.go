@@ -55,7 +55,7 @@ func vpServerOptions(store *auth.Store, logins *auth.ProviderLoginManager, clien
 		return s.Token, e == nil && s.Kind == "api_key"
 	}, client), WithVoiceCalls(VoiceCallOptions{
 		HTTPClient:   client,
-		Limits:       VoiceCallLimits{Grace: limits.grace, Maximum: limits.maximum, Minutes: limits.minutes, Teardown: limits.teardown, BufferedBytes: limits.bufferedBytes},
+		Limits:       VoiceCallLimits{Grace: limits.grace, Maximum: limits.maximum, Minutes: limits.minutes, Teardown: limits.teardown, BufferedBytes: limits.bufferedBytes, BriefChars: limits.briefChars},
 		PeerSettings: &se,
 		ICEServers:   []webrtc.ICEServer{},
 	})}
