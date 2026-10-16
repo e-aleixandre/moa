@@ -150,8 +150,11 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
     }
 
     // Unpairing, a re-pair, a revoked credential: the secret goes, so this
-    // device cannot decrypt invitations or answer any more.
+    // device cannot decrypt invitations or answer any more. A ringing
+    // invitation goes with it: its copy of the secret is never used again,
+    // and an answer in flight finds it gone (see answer).
     func forgetLocal() {
+        if let call = ringing { endRinging(call, reason: .failed) }
         IncomingCallSecretStore.delete()
         UserDefaults.standard.removeObject(forKey: Self.stateKey)
         pending?.done(nil)
