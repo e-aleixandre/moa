@@ -26,6 +26,7 @@ import (
 
 const (
 	deviceAuthorizationScheme = "Moa-Device"
+	voiceAuthorizationScheme  = "Moa-Voice"
 	devicePairingTTL          = 5 * time.Minute
 	deviceCredentialTTL       = 180 * 24 * time.Hour
 	devicePairingRate         = 5
@@ -45,6 +46,9 @@ type authIdentity struct {
 	// Header: the device presented its credential in the Authorization
 	// header, which only native code holds; a WebView cookie does not set it.
 	Header bool
+	// VoiceOnly: the narrow Moa-Voice credential, which may only answer,
+	// decline and join incoming calls (voiceOnlyRoute).
+	VoiceOnly bool
 }
 
 type authIdentityContextKey struct{}
@@ -91,6 +95,9 @@ type deviceStore struct {
 	leases       map[string]map[*deviceLease]struct{}
 	expiryTimers map[string]*time.Timer
 	onDeactivate func(string) error // cleanup after a revoke or expiry; revoke reports its failure
+	// voiceKey checks a Moa-Voice key against the device's incoming-call
+	// destination; nil when there is none (no Moa-Voice accepted).
+	voiceKey func(deviceID string, key []byte) bool
 }
 
 type deviceClaimBucket struct {
@@ -1009,6 +1016,39 @@ func parseDeviceAuthorization(header string) (string, bool) {
 	return parts[1], true
 }
 
+func (s *deviceStore) setVoiceKey(fn func(deviceID string, key []byte) bool) {
+	s.mu.Lock()
+	s.voiceKey = fn
+	s.mu.Unlock()
+}
+
+// authenticateVoice accepts "Moa-Voice <device id>.<b64u key>": a credential
+// the iPhone can read while locked, derived from its incoming-call secret.
+// It names an active device and nothing more: the identity it gives is
+// VoiceOnly. Revoking the device or deleting its VoIP destination ends it.
+func (s *deviceStore) authenticateVoice(credential string) (authIdentity, error) {
+	deviceID, encoded, ok := strings.Cut(credential, ".")
+	key, err := base64.RawURLEncoding.DecodeString(encoded)
+	if !ok || !validDeviceID(deviceID) || err != nil || len(key) != 32 {
+		return authIdentity{}, errInvalidDeviceCredential
+	}
+	s.mu.Lock()
+	check := s.voiceKey
+	s.mu.Unlock()
+	if check == nil || !s.isActive(deviceID) || !check(deviceID, key) {
+		return authIdentity{}, errInvalidDeviceCredential
+	}
+	return authIdentity{Kind: "device", DeviceID: deviceID, Header: true, VoiceOnly: true}, nil
+}
+
+func parseVoiceAuthorization(header string) (string, bool) {
+	parts := strings.Fields(header)
+	if len(parts) != 2 || parts[0] != voiceAuthorizationScheme {
+		return "", false
+	}
+	return parts[1], true
+}
+
 func isDeviceClaimRequest(r *http.Request) bool {
 	return r.Method == http.MethodPost && r.URL.Path == "/api/pulse/pairings/claim"
 }
@@ -1075,6 +1115,19 @@ func authMiddleware(token string, secureCookie bool, devices *deviceStore, next 
 				return
 			}
 		}
+		if credential, ok := parseVoiceAuthorization(r.Header.Get("Authorization")); ok && devices != nil {
+			if !deviceTransportAllowed(r) {
+				rejectInsecureDeviceTransport(w)
+				return
+			}
+			identity, err := devices.authenticateVoice(credential)
+			if err != nil {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, withDeviceStore(withAuthIdentity(r, identity), devices))
+			return
+		}
 		if _, err := r.Cookie(deviceSessionCookieName); err == nil {
 			if !deviceTransportAllowed(r) {
 				rejectInsecureDeviceTransport(w)
@@ -1120,6 +1173,23 @@ func networkOwnerMiddleware(devices *deviceStore, next http.Handler) http.Handle
 				return
 			}
 			identity.Header = true
+			next.ServeHTTP(w, withAuthIdentity(r, identity))
+			return
+		}
+		if credential, ok := parseVoiceAuthorization(r.Header.Get("Authorization")); ok {
+			if devices == nil {
+				http.Error(w, "device authentication unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if !deviceTransportAllowed(r) {
+				rejectInsecureDeviceTransport(w)
+				return
+			}
+			identity, err := devices.authenticateVoice(credential)
+			if err != nil {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 			next.ServeHTTP(w, withAuthIdentity(r, identity))
 			return
 		}

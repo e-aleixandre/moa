@@ -524,6 +524,13 @@ func vpNewFixture(t *testing.T, provider string, handlers ...mockHandler) *vpFix
 
 func vpNewFixtureWithLimits(t *testing.T, provider string, limits vpLimits, handlers ...mockHandler) *vpFixture {
 	t.Helper()
+	return vpBuildFixture(t, provider, limits, nil, handlers...)
+}
+
+// vpBuildFixture runs setup, if any, on the Manager before the server is
+// built from it (e.g. to wire push destinations NewServer attaches).
+func vpBuildFixture(t *testing.T, provider string, limits vpLimits, setup func(*vpFixture), handlers ...mockHandler) *vpFixture {
+	t.Helper()
 	clearProviderTestEnv(t)
 	root := t.TempDir()
 	t.Setenv("MOA_CONFIG_DIR", filepath.Join(root, "config"))
@@ -570,6 +577,9 @@ func vpNewFixtureWithLimits(t *testing.T, provider string, limits vpLimits, hand
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&f.log, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
+	if setup != nil {
+		setup(f)
+	}
 	f.start()
 	t.Cleanup(func() { f.srv.Close() })
 	return f

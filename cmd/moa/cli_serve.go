@@ -87,7 +87,12 @@ func runServe(args []string) {
 	// An unresolvable config dir disables push instead of dropping key files
 	// into whatever directory serve happened to be started from.
 	pushStore, pushDispatcher := buildPush(core.ConfigDir())
-	pushNative := buildNativePush(core.ConfigDir(), moaCfg.PushRelayURL)
+	pushNative := buildNativePush(core.ConfigDir(), moaCfg.PushRelayURL, "push_native.json")
+	// Incoming calls: the same relay, a separate destination per device.
+	var pushVoIP *push.NativeSender
+	if pushNative != nil {
+		pushVoIP = buildNativePush(core.ConfigDir(), moaCfg.PushRelayURL, "push_voip.json")
+	}
 
 	mgr := serve.NewManager(ctx, serve.ManagerConfig{
 		ProviderFactory: func(model core.Model) (core.Provider, error) {
@@ -102,6 +107,7 @@ func runServe(args []string) {
 		PushStore:              pushStore,
 		PushDispatcher:         pushDispatcher,
 		PushNative:             pushNative,
+		PushVoIP:               pushVoIP,
 		DefaultModel:           defaultModel,
 		WorkspaceRoot:          cwd,
 		MoaCfg:                 moaCfg,
@@ -246,7 +252,7 @@ func buildPush(cfgDir string) (*push.Store, *push.Dispatcher) {
 // buildNativePush opens the native push registrations and the sender to the
 // configured relay. On any error it logs and returns nil: serve runs without
 // native push, and Web Push is unaffected.
-func buildNativePush(cfgDir, relayURL string) *push.NativeSender {
+func buildNativePush(cfgDir, relayURL, file string) *push.NativeSender {
 	if cfgDir == "" {
 		fmt.Fprintln(os.Stderr, "⚠️  Native push disabled: cannot resolve the moa config directory")
 		return nil
@@ -259,7 +265,7 @@ func buildNativePush(cfgDir, relayURL string) *push.NativeSender {
 		fmt.Fprintf(os.Stderr, "⚠️  Native push disabled: push_relay_url: %v\n", err)
 		return nil
 	}
-	store, err := push.NewNativeStore(filepath.Join(cfgDir, "push_native.json"))
+	store, err := push.NewNativeStore(filepath.Join(cfgDir, file))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠️  Native push disabled: %v\n", err)
 		return nil

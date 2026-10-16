@@ -26,6 +26,12 @@ func routeAuthorizationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		access := serveRouteAccess(r)
 		identity, authenticated := requestAuthIdentity(r)
+		// The locked-phone voice credential reaches its few routes and no
+		// other, whatever the route's own policy.
+		if authenticated && identity.VoiceOnly && !voiceOnlyRoute(r) {
+			http.Error(w, "this credential only answers calls", http.StatusForbidden)
+			return
+		}
 
 		switch access {
 		case routeOwnerAdmin:
@@ -72,8 +78,11 @@ func serveRouteAccess(r *http.Request) routeAccess {
 		return routeNativeDevice
 	case r.Method == http.MethodPost && r.URL.Path == "/api/pulse/device/revoke":
 		return routeDeviceSession
-	case r.URL.Path == "/api/push/native" || r.URL.Path == "/api/push/native/status":
+	case r.URL.Path == "/api/push/native" || r.URL.Path == "/api/push/native/status",
+		r.URL.Path == "/api/push/voip" || r.URL.Path == "/api/push/voip/status":
 		return routeNativeDevice
+	case r.URL.Path == "/api/voice/invites" && r.Method == http.MethodPost:
+		return routeOwnerAdmin
 	case r.URL.Path == "/api/pulse/pairings" && r.Method == http.MethodPost:
 		return routeOwnerAdmin
 	case r.URL.Path == "/api/pulse/devices" && r.Method == http.MethodGet:
@@ -99,4 +108,22 @@ func isPulseDeviceRevokeRoute(path string) bool {
 	}
 	parts := strings.Split(strings.TrimPrefix(path, prefix), "/")
 	return len(parts) == 2 && parts[0] != "" && parts[1] == "revoke"
+}
+
+// voiceOnlyRoute lists what a Moa-Voice credential may do: follow, answer
+// and decline an invitation, and join and hang up its call.
+func voiceOnlyRoute(r *http.Request) bool {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/voice/"), "/")
+	if !strings.HasPrefix(r.URL.Path, "/api/voice/") || len(parts) < 2 || parts[1] == "" {
+		return false
+	}
+	switch {
+	case parts[0] == "invites" && len(parts) == 2:
+		return r.Method == http.MethodGet
+	case parts[0] == "invites" && len(parts) == 3:
+		return r.Method == http.MethodPost && (parts[2] == "answer" || parts[2] == "decline")
+	case parts[0] == "calls" && len(parts) == 3:
+		return (r.Method == http.MethodGet && parts[2] == "ws") || (r.Method == http.MethodPost && parts[2] == "hangup")
+	}
+	return false
 }

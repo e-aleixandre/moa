@@ -54,9 +54,9 @@ func reviewLifecycleFixture(t *testing.T, relayHandler http.Handler) *reviewLife
 	mgr := &Manager{pushNative: push.NewNativeSender(store, relay.URL)}
 	mgr.attachNativePush(devices)
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/push/native", handlePushNativeRegister(mgr))
-	mux.HandleFunc("DELETE /api/push/native", handlePushNativeDelete(mgr))
-	mux.HandleFunc("GET /api/push/native/status", handlePushNativeStatus(mgr))
+	mux.HandleFunc("POST /api/push/native", handlePushNativeRegister(mgr, alertDestination))
+	mux.HandleFunc("DELETE /api/push/native", handlePushNativeDelete(mgr, alertDestination))
+	mux.HandleFunc("GET /api/push/native/status", handlePushNativeStatus(mgr, alertDestination))
 	mux.HandleFunc("POST /api/pulse/pairings", handlePulsePairing(devices))
 	mux.HandleFunc("POST /api/pulse/pairings/claim", handlePulsePairingClaim(devices))
 	mux.HandleFunc("POST /api/pulse/devices/{id}/revoke", handlePulseDeviceRevoke(devices))

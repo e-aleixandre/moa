@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"crypto/hmac"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -26,15 +27,39 @@ var nativeHandlePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // device that is not active at send time. Registrations of devices that went
 // away while serve was down are dropped now.
 func (m *Manager) attachNativePush(devices *deviceStore) {
-	if m.pushNative == nil {
-		return
+	for _, native := range []*push.NativeSender{m.pushNative, m.pushVoIP} {
+		if native != nil {
+			attachNativeSender(native, devices)
+		}
 	}
+	if m.pushVoIP != nil && devices != nil {
+		devices.setVoiceKey(voiceKeyChecker(m.pushVoIP))
+	}
+}
+
+// voiceKeyChecker accepts a Moa-Voice key derived from the device's current
+// incoming-call secret, registered against this server's relay.
+func voiceKeyChecker(voip *push.NativeSender) func(string, []byte) bool {
+	return func(deviceID string, key []byte) bool {
+		reg, ok := voip.Store().Get(deviceID)
+		if !ok || reg.RelayURL != voip.RelayURL() {
+			return false
+		}
+		secret, err := base64.RawURLEncoding.DecodeString(reg.Secret)
+		if err != nil {
+			return false
+		}
+		want, err := push.VoiceAuthKey(secret)
+		return err == nil && hmac.Equal(want, key)
+	}
+}
+
+func attachNativeSender(native *push.NativeSender, devices *deviceStore) {
 	if devices == nil {
 		// Without a device store nobody can be checked, so nobody is sent to.
-		m.pushNative.SetActive(nil)
+		native.SetActive(nil)
 		return
 	}
-	native := m.pushNative
 	devices.addOnDeactivate(func(id string) error {
 		err := native.Forget(id)
 		if err != nil {
@@ -52,23 +77,33 @@ func (m *Manager) attachNativePush(devices *deviceStore) {
 	}
 }
 
-func nativeDevice(w http.ResponseWriter, r *http.Request, mgr *Manager) (authIdentity, *deviceStore, bool) {
-	if mgr.pushNative == nil {
+// pushDestination picks the store a /api/push route manages: alerts
+// (/api/push/native) or incoming calls (/api/push/voip, its own secret and
+// relay handle, so turning one off never touches the other).
+type pushDestination func(*Manager) *push.NativeSender
+
+func alertDestination(m *Manager) *push.NativeSender { return m.pushNative }
+func voipDestination(m *Manager) *push.NativeSender  { return m.pushVoIP }
+
+func nativeDevice(w http.ResponseWriter, r *http.Request, sender *push.NativeSender) (authIdentity, *deviceStore, bool) {
+	if sender == nil {
 		http.Error(w, "native push not available", http.StatusServiceUnavailable)
 		return authIdentity{}, nil, false
 	}
 	identity, ok := requestAuthIdentity(r)
 	devices, hasStore := requestDeviceStore(r)
-	if !ok || identity.Kind != "device" || !identity.Header || !hasStore || devices == nil {
+	if !ok || identity.Kind != "device" || !identity.Header || identity.VoiceOnly || !hasStore || devices == nil {
 		http.Error(w, "native device authentication required", http.StatusForbidden)
 		return authIdentity{}, nil, false
 	}
 	return identity, devices, true
 }
 
-func handlePushNativeRegister(mgr *Manager) http.HandlerFunc {
+func handlePushNativeRegister(mgr *Manager, dest pushDestination) http.HandlerFunc {
+	voip := dest(mgr) == mgr.pushVoIP && mgr.pushVoIP != nil
 	return func(w http.ResponseWriter, r *http.Request) {
-		identity, devices, ok := nativeDevice(w, r, mgr)
+		sender := dest(mgr)
+		identity, devices, ok := nativeDevice(w, r, sender)
 		if !ok {
 			return
 		}
@@ -92,7 +127,7 @@ func handlePushNativeRegister(mgr *Manager) http.HandlerFunc {
 			provider = *body.Provider
 		}
 		relay, err := push.NormalizeRelayURL(body.RelayURL)
-		if err != nil || relay != mgr.pushNative.RelayURL() {
+		if err != nil || relay != sender.RelayURL() {
 			// The app was built against another relay than this server sends to.
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "relay_mismatch"})
 			return
@@ -103,6 +138,7 @@ func handlePushNativeRegister(mgr *Manager) http.HandlerFunc {
 		if err != nil || len(secret) != 32 ||
 			len(body.Handle) < 40 || len(body.Handle) > 1024 || !nativeHandlePattern.MatchString(body.Handle) ||
 			(provider != "apns" && provider != "fcm") ||
+			(voip && provider != "apns") ||
 			(body.Env != "sandbox" && body.Env != "production") ||
 			(provider == "fcm" && body.Env != "production") ||
 			!expires.After(now) || expires.After(now.Add(nativeHandleMaxAge)) {
@@ -123,7 +159,7 @@ func handlePushNativeRegister(mgr *Manager) http.HandlerFunc {
 		// request either sees the registration and removes it, or makes this
 		// fail. It cannot be resurrected after the revoke returns.
 		err = devices.withActiveDevice(identity.DeviceID, func() error {
-			return mgr.pushNative.Store().Put(reg)
+			return sender.Store().Put(reg)
 		})
 		switch {
 		case errors.Is(err, errInvalidDeviceCredential):
@@ -134,18 +170,19 @@ func handlePushNativeRegister(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "could not store registration", http.StatusInternalServerError)
 			return
 		}
-		slog.Info("push native: device registered", "device", identity.DeviceID, "env", reg.Env, "provider", reg.Provider)
+		slog.Info("push native: device registered", "device", identity.DeviceID, "env", reg.Env, "provider", reg.Provider, "voip", voip)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func handlePushNativeDelete(mgr *Manager) http.HandlerFunc {
+func handlePushNativeDelete(mgr *Manager, dest pushDestination) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		identity, _, ok := nativeDevice(w, r, mgr)
+		sender := dest(mgr)
+		identity, _, ok := nativeDevice(w, r, sender)
 		if !ok {
 			return
 		}
-		if err := mgr.pushNative.Forget(identity.DeviceID); err != nil {
+		if err := sender.Forget(identity.DeviceID); err != nil {
 			http.Error(w, "could not remove registration", http.StatusInternalServerError)
 			return
 		}
@@ -156,20 +193,21 @@ func handlePushNativeDelete(mgr *Manager) http.HandlerFunc {
 // handlePushNativeStatus tells the app what this server knows about it,
 // without any secret: whether it is registered, against which relay, and how
 // the last send went.
-func handlePushNativeStatus(mgr *Manager) http.HandlerFunc {
+func handlePushNativeStatus(mgr *Manager, dest pushDestination) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		identity, _, ok := nativeDevice(w, r, mgr)
+		sender := dest(mgr)
+		identity, _, ok := nativeDevice(w, r, sender)
 		if !ok {
 			return
 		}
-		out := map[string]any{"registered": false, "relay_url": mgr.pushNative.RelayURL()}
-		if reg, ok := mgr.pushNative.Store().Get(identity.DeviceID); ok && reg.RelayURL == mgr.pushNative.RelayURL() {
+		out := map[string]any{"registered": false, "relay_url": sender.RelayURL()}
+		if reg, ok := sender.Store().Get(identity.DeviceID); ok && reg.RelayURL == sender.RelayURL() {
 			out["registered"] = true
 			out["env"] = reg.Env
 			out["provider"] = reg.ProviderName()
 			out["expires_at"] = reg.ExpiresAt.Unix()
 		}
-		if last, ok := mgr.pushNative.LastResult(identity.DeviceID); ok {
+		if last, ok := sender.LastResult(identity.DeviceID); ok {
 			out["last"] = last
 		}
 		writeJSON(w, http.StatusOK, out)
