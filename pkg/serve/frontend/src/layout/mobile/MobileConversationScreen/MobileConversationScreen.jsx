@@ -609,9 +609,10 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         /* Choosing an owner closes the drawer onto its conversation, exactly
            as choosing a session does. */
         onOpenOwner={(own) => { if (openOwnerConversation(own)) closeDrawer(); }}
-        /* A tap calls without opening the conversation: the call screen
-           comes up over the drawer. */
-        onCallOwner={(own) => { callOwner(own); }}
+        /* A tap calls without opening the conversation. The call screen
+           comes up and the drawer (with its scrim) closes, so leaving the
+           screen lands on a conversation whose composer is reachable. */
+        onCallOwner={(own) => { if (callOwner(own)) closeDrawer(); }}
         onCloseOwner={(own) => { closeOwner(own); }}
         onNewOwner={onNewOwnerFromDrawer}
         drawerCollapsed={chrome.drawerCollapsed}
