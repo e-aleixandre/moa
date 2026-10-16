@@ -245,7 +245,7 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		voiceError(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
 		return
 	}
-	status, out, retry := r.openCall(identity.auditID(), in.SessionID, in.Provider)
+	status, out, retry := r.openCall(r.ctx, identity.auditID(), in.SessionID, in.Provider)
 	if retry > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 	}
@@ -255,7 +255,8 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 // openCall opens a call for principal into a session: the one path behind
 // both a call the user places and an incoming invitation they answer. It
 // answers the HTTP status and body to send, and a Retry-After when limited.
-func (r *voiceCallRegistry) openCall(principal, sessionID, providerName string) (int, map[string]any, int) {
+// Ending scope (r.ctx or narrower) aborts an opening that has not answered.
+func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID, providerName string) (int, map[string]any, int) {
 	sess, ok := r.mgr.Get(sessionID)
 	if !ok {
 		return http.StatusNotFound, map[string]any{"error": "session_not_found"}, 0
@@ -287,13 +288,23 @@ func (r *voiceCallRegistry) openCall(principal, sessionID, providerName string) 
 	id := newVoiceCallID()
 	// Read once: the call keeps this model to its end, whatever Settings says later.
 	model := voiceModel()
-	ctx, cancel := context.WithTimeout(r.ctx, voiceOpenTimeout)
+	ctx, cancel := context.WithTimeout(scope, voiceOpenTimeout)
 	up, err := adapter.Open(ctx, voice.CallSpec{
 		CallID: id, SessionID: sess.ID, Voice: voiceProviders[provider].voice,
 		Instructions: voice.CommonInstructions, BackendModel: model, Tools: voice.ToolSpecs(),
 		InitialContext: r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
 	})
 	cancel()
+	if err == nil && scope.Err() != nil && r.ctx.Err() == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), r.opts.Limits.Teardown)
+		_ = up.Close(ctx, "unauthorized")
+		cancel()
+		err = scope.Err()
+	}
+	if err != nil && scope.Err() != nil && r.ctx.Err() == nil {
+		r.release(principal, slot)
+		return http.StatusUnauthorized, map[string]any{"error": "unauthenticated"}, 0
+	}
 	if err != nil {
 		r.release(principal, slot)
 		oe := voice.Classify(err)

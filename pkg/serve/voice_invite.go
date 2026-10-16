@@ -244,7 +244,7 @@ func (r *voiceCallRegistry) invite(id string) (*voiceInvite, bool) {
 
 // answer gives the call to the first principal that answers. The winner
 // answering again (a retry) gets the same result; anyone else gets 409.
-func (r *voiceCallRegistry) answer(id, principal string) (int, map[string]any) {
+func (r *voiceCallRegistry) answer(scope context.Context, id, principal string) (int, map[string]any) {
 	t := r.inviteTable()
 	t.mu.Lock()
 	inv, ok := t.byID[id]
@@ -276,7 +276,7 @@ func (r *voiceCallRegistry) answer(id, principal string) (int, map[string]any) {
 	}
 	t.mu.Unlock()
 
-	status, out, _ := r.openCall(principal, inv.sessionID, inv.provider)
+	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -360,10 +360,24 @@ func (r *voiceCallRegistry) handleInviteStatus(w http.ResponseWriter, req *http.
 		return
 	}
 	if req.URL.Query().Get("wait") == inviteRinging {
+		// The device's lease ends the wait when its access is withdrawn.
+		withdrawn := make(chan struct{})
+		var once sync.Once
+		lease, err := deviceLeaseForWebSocket(req, func(string) { once.Do(func() { close(withdrawn) }) })
+		if err != nil {
+			voiceError(w, http.StatusUnauthorized, map[string]any{"error": "unauthenticated"})
+			return
+		}
+		defer lease.release()
 		select {
 		case <-inv.left:
 		case <-time.After(voiceInvitePoll):
+		case <-withdrawn:
 		case <-req.Context().Done():
+			return
+		}
+		if deviceLeaseClosed(lease) {
+			voiceError(w, http.StatusUnauthorized, map[string]any{"error": "unauthenticated"})
 			return
 		}
 	}
@@ -377,7 +391,38 @@ func (r *voiceCallRegistry) handleInviteAnswer(w http.ResponseWriter, req *http.
 		voiceError(w, http.StatusUnauthorized, map[string]any{"error": "unauthenticated"})
 		return
 	}
-	status, out := r.answer(req.PathValue("id"), identity.auditID())
+	// The answer, and the call it opens, live under the device's lease:
+	// revoking the device, or withdrawing the VoIP destination of a
+	// Moa-Voice answer, aborts the opening or ends the call. The call's
+	// end releases it.
+	scope, cancel := context.WithCancel(r.ctx)
+	lease, err := deviceLeaseForWebSocket(req, func(string) { cancel() })
+	if err != nil {
+		cancel()
+		voiceError(w, http.StatusUnauthorized, map[string]any{"error": "unauthenticated"})
+		return
+	}
+	status, out := r.answer(scope, req.PathValue("id"), identity.auditID())
+	var c *voiceCall
+	if id, _ := out["call_id"].(string); status == http.StatusCreated {
+		c, _, _ = r.lookup(id)
+	}
+	if c == nil || lease == nil {
+		lease.release()
+		cancel()
+	} else {
+		stop := context.AfterFunc(scope, func() {
+			if r.ctx.Err() == nil { // not a server shutdown
+				c.requestEnd("device_revoked")
+			}
+		})
+		go func() {
+			<-c.done
+			stop()
+			lease.release()
+			cancel()
+		}()
+	}
 	voiceError(w, status, out)
 }
 

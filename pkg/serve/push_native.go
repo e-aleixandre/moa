@@ -178,13 +178,16 @@ func handlePushNativeRegister(mgr *Manager, dest pushDestination) http.HandlerFu
 func handlePushNativeDelete(mgr *Manager, dest pushDestination) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sender := dest(mgr)
-		identity, _, ok := nativeDevice(w, r, sender)
+		identity, devices, ok := nativeDevice(w, r, sender)
 		if !ok {
 			return
 		}
 		if err := sender.Forget(identity.DeviceID); err != nil {
 			http.Error(w, "could not remove registration", http.StatusInternalServerError)
 			return
+		}
+		if sender == mgr.pushVoIP {
+			devices.endVoiceAccess(identity.DeviceID)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

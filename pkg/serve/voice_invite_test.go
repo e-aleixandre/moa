@@ -27,6 +27,13 @@ type inviteFixture struct {
 // devices registered for VoIP the way the app does it.
 func newInviteFixture(t *testing.T, n int) *inviteFixture {
 	t.Helper()
+	return newInviteFixtureWith(t, n, false)
+}
+
+// newInviteFixtureWith also gives every device an alert destination when
+// alerts is set.
+func newInviteFixtureWith(t *testing.T, n int, alerts bool) *inviteFixture {
+	t.Helper()
 	if !deviceStoreLockSupported() {
 		t.Skip("device auth fails closed where advisory process locks are unavailable")
 	}
@@ -48,6 +55,13 @@ func newInviteFixture(t *testing.T, n int) *inviteFixture {
 	}
 	f := vpBuildFixture(t, "grok-plan", vpDefaultLimits(), func(f *vpFixture) {
 		f.mgr.pushVoIP = push.NewNativeSender(store, relayURL)
+		if alerts {
+			alertStore, err := push.NewNativeStore(filepath.Join(t.TempDir(), "push_native.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.mgr.pushNative = push.NewNativeSender(alertStore, relayURL)
+		}
 	})
 	inv := &inviteFixture{vpFixture: f, relay: relay, secret: secret}
 	owner := &http.Cookie{Name: authCookieName, Value: "vp-owner-token"}
@@ -57,6 +71,12 @@ func newInviteFixture(t *testing.T, n int) *inviteFixture {
 			relayURL, strings.Repeat("V", 80), time.Now().Add(90*24*time.Hour).Unix(), base64.RawURLEncoding.EncodeToString(secret))
 		if rec := pairingRequest(f.handler, http.MethodPost, "/api/push/voip", body, nil, d.Credential); rec.Code != http.StatusNoContent {
 			t.Fatalf("register voip = %d: %s", rec.Code, rec.Body)
+		}
+		if alerts {
+			alert := strings.Replace(body, strings.Repeat("V", 80), strings.Repeat("A", 80), 1)
+			if rec := pairingRequest(f.handler, http.MethodPost, "/api/push/native", alert, nil, d.Credential); rec.Code != http.StatusNoContent {
+				t.Fatalf("register alerts = %d: %s", rec.Code, rec.Body)
+			}
 		}
 		inv.devices = append(inv.devices, d)
 	}
