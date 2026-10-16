@@ -52,8 +52,10 @@ const (
 
 var (
 	errNoIncomingDevice = errors.New("no device can receive incoming calls")
-	errTooManyRinging   = errors.New("too many calls ringing")
-	errInviteNotFound   = errors.New("invitation not found")
+	// inviteLostClaim is the reason of an answer that lost its Claim.
+	inviteLostClaim   = "answered_elsewhere"
+	errTooManyRinging = errors.New("too many calls ringing")
+	errInviteNotFound = errors.New("invitation not found")
 )
 
 // RingOptions shapes one invitation.
@@ -64,6 +66,10 @@ type RingOptions struct {
 	// Intro is why moa calls: the voice speaks first and says it. nil is a
 	// test call, and the voice says so.
 	Intro *callIntro
+	// Claim, if set, is asked once the user answers and before the call
+	// opens; false makes the answer lose (answered_elsewhere): an owner's
+	// call request answered on another screen.
+	Claim func() bool
 }
 
 // InviteOutcome is how an invitation ended, for the caller that rang it.
@@ -77,6 +83,7 @@ type voiceInvite struct {
 	id, sessionID, name, provider string
 	expires                       time.Time
 	intro                         *callIntro // never nil: an incoming call always opens by saying why
+	claim                         func() bool
 
 	state    string
 	answerer string         // principal that won the answer
@@ -142,7 +149,7 @@ func (r *voiceCallRegistry) RingDevices(ctx context.Context, sessionID string, o
 		name = "moa"
 	}
 	inv := &voiceInvite{
-		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider, intro: incomingIntro(opts.Intro),
+		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider, intro: incomingIntro(opts.Intro), claim: opts.Claim,
 		expires: time.Now().Add(ttl), state: inviteRinging,
 		left: make(chan struct{}), resolved: make(chan struct{}),
 	}
@@ -280,7 +287,19 @@ func (r *voiceCallRegistry) answer(scope context.Context, id, principal string) 
 	}
 	t.mu.Unlock()
 
+	if inv.claim != nil && !inv.claim() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		inv.state, inv.reason = inviteFailed, inviteLostClaim
+		inv.status, inv.result = http.StatusConflict, map[string]any{"error": "answered_elsewhere"}
+		close(inv.resolved)
+		t.retire(id)
+		return inv.status, inv.result
+	}
 	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider, inv.intro)
+	if inv.claim != nil {
+		delete(out, "paid_option") // an owner's call never offers the paid API (I21)
+	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()

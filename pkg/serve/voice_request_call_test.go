@@ -50,13 +50,22 @@ type rcFix struct {
 	probe *pushProbe
 }
 
-func rcNewFixture(t *testing.T, provider, level string) *rcFix {
-	t.Helper()
+func rcHandlers() []mockHandler {
 	var hs []mockHandler
 	for range 24 {
 		hs = append(hs, rcHandler())
 	}
-	f := vpNewFixture(t, provider, hs...)
+	return hs
+}
+
+func rcNewFixture(t *testing.T, provider, level string) *rcFix {
+	t.Helper()
+	return rcWrap(t, vpNewFixture(t, provider, rcHandlers()...), level)
+}
+
+// rcWrap turns a voice fixture into an owner at level.
+func rcWrap(t *testing.T, f *vpFixture, level string) *rcFix {
+	t.Helper()
 	f.harnessOnly = true
 	probe := probePush(f.mgr, push.SummariesOff)
 	own, err := f.mgr.CreateOwner(CreateOwnerOpts{Root: t.TempDir(), Name: "Infra"})

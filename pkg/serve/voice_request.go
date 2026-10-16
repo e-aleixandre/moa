@@ -63,23 +63,6 @@ var whyText = map[string]string{
 // callAcceptWindow bounds the switch from a held request to its call.
 const callAcceptWindow = 30 * time.Second
 
-// CallRinger makes a device ring for a call request (native incoming call).
-// It is the "ring device" contract of phase 3; nil until a native ringer
-// exists, and then the push and the open app are the bell.
-type CallRinger interface {
-	Ring(ctx context.Context, r RingRequest) error
-	// Cancel stops the ring of callID: answered, written, missed or withdrawn.
-	Cancel(callID, reason string)
-}
-
-// RingRequest names the conversation to call and the request that rings.
-type RingRequest struct {
-	SessionID string
-	CallID    string
-	OwnerName string
-	Reason    string
-}
-
 type callRequest struct {
 	ID        string           `json:"id"`
 	SessionID string           `json:"session_id"`
@@ -93,6 +76,7 @@ type callRequest struct {
 	Expires   *time.Time       `json:"expires_at,omitempty"`
 	provider  voice.ProviderID // fixed when asked: answering never picks another
 	question  string           // the written fallback, what the call is about
+	invite    string           // the iPhones' ringing invitation (Ring), if any
 	why       string
 	stop      func() bool
 	done      chan struct{} // closed once terminal
@@ -103,10 +87,9 @@ type callRequestRegistry struct {
 	// ringOverride replaces the configured ring time (tests).
 	ringOverride time.Duration
 
-	mu     sync.Mutex
-	ringer CallRinger
-	live   map[string]*callRequest
-	subs   map[chan struct{}]struct{}
+	mu   sync.Mutex
+	live map[string]*callRequest
+	subs map[chan struct{}]struct{}
 }
 
 func (m *Manager) callRequests() *callRequestRegistry {
@@ -114,14 +97,6 @@ func (m *Manager) callRequests() *callRequestRegistry {
 		m.callReqs = &callRequestRegistry{m: m, live: map[string]*callRequest{}, subs: map[chan struct{}]struct{}{}}
 	})
 	return m.callReqs
-}
-
-// SetCallRinger installs the native ringer (phase 3).
-func (m *Manager) SetCallRinger(r CallRinger) {
-	reg := m.callRequests()
-	reg.mu.Lock()
-	reg.ringer = r
-	reg.mu.Unlock()
 }
 
 func (r *callRequestRegistry) ringTime() time.Duration {
@@ -197,7 +172,10 @@ func (r *callRequestRegistry) resolve(id string, from []string, state, why strin
 		r.mu.Unlock()
 		return nil, false
 	}
-	wasRinging := req.State == crRinging
+	invite := ""
+	if req.State == crRinging {
+		invite = req.invite
+	}
 	if req.stop != nil {
 		req.stop()
 		req.stop = nil
@@ -207,11 +185,14 @@ func (r *callRequestRegistry) resolve(id string, from []string, state, why strin
 		delete(r.live, id)
 		close(req.done)
 	}
-	ringer := r.ringer
 	r.changedLocked()
 	r.mu.Unlock()
-	if ringer != nil && wasRinging && req.Level == owner.CallRing {
-		ringer.Cancel(id, state)
+	if invite != "" {
+		// No-op once the iPhone is answering: that answer claimed this
+		// request through the invitation and lost or won on its own.
+		if vr := r.m.voiceRegistry(); vr != nil {
+			vr.CancelInvite(invite)
+		}
 	}
 	return req, true
 }
@@ -223,34 +204,81 @@ func (r *callRequestRegistry) outcome(req *callRequest) (state, why string) {
 	return req.State, req.why
 }
 
-// announce tells the user a request rings: the urgent push (none while the
-// conversation is in view) and, for Ring, the native ringer.
+// announce tells the user a request rings. Ring rings the iPhones through
+// CallKit when one can ring; otherwise, and for Ask first, it is the urgent
+// call_request push (none while the conversation is in view). Open apps ring
+// from the requests feed either way.
 func (r *callRequestRegistry) announce(req *callRequest) {
 	if !r.isState(req.ID, crRinging) {
 		return
 	}
+	if req.Level == owner.CallRing && r.ringDevices(req) {
+		return
+	}
+	sess, ok := r.m.Get(req.SessionID)
+	if !ok || r.m.pushPolicy == nil {
+		return
+	}
 	id := req.ID
-	if sess, ok := r.m.Get(req.SessionID); ok && r.m.pushPolicy != nil {
-		headline := req.OwnerName + " wants to talk"
-		if req.Level == owner.CallRing {
-			headline = req.OwnerName + " is calling"
-		}
-		r.m.pushPolicy.Handle(push.Signal{
-			Kind: push.KindCallRequest, SessionID: req.SessionID, Title: sess.title(), Headline: headline,
-			RequestID: id, Watched: sess.presence.watched(),
-			StillPending: func() bool { return r.isState(id, crRinging) },
-		})
+	headline := req.OwnerName + " wants to talk"
+	if req.Level == owner.CallRing {
+		headline = req.OwnerName + " is calling"
+	}
+	r.m.pushPolicy.Handle(push.Signal{
+		Kind: push.KindCallRequest, SessionID: req.SessionID, Title: sess.title(), Headline: headline,
+		RequestID: id, Watched: sess.presence.watched(),
+		StillPending: func() bool { return r.isState(id, crRinging) },
+	})
+}
+
+// ringDevices rings the iPhones for req and follows the invitation to its
+// end. Answering on an iPhone claims the request first, so it and an answer
+// on the web have one winner. It reports whether an iPhone rings.
+func (r *callRequestRegistry) ringDevices(req *callRequest) bool {
+	vr := r.m.voiceRegistry()
+	if vr == nil || !vr.CanRing() {
+		return false
+	}
+	id := req.ID
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	inviteID, err := vr.RingDevices(ctx, req.SessionID, RingOptions{
+		Name: req.OwnerName, Provider: string(req.provider), TTL: r.ringTime(), Intro: req.intro(),
+		Claim: func() bool { _, ok := r.resolve(id, []string{crRinging}, crConnecting, ""); return ok },
+	})
+	cancel()
+	if err != nil {
+		slog.Info("call request: no iPhone rang", "err", err)
+		return false
 	}
 	r.mu.Lock()
-	ringer := r.ringer
-	r.mu.Unlock()
-	if ringer != nil && req.Level == owner.CallRing {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := ringer.Ring(ctx, RingRequest{SessionID: req.SessionID, CallID: id, OwnerName: req.OwnerName, Reason: req.Reason}); err != nil {
-			slog.Info("call request: ring failed", "err", err)
-		}
+	stillRinging := r.live[id] != nil && r.live[id].State == crRinging
+	if stillRinging {
+		r.live[id].invite = inviteID
 	}
+	r.mu.Unlock()
+	if !stillRinging {
+		vr.CancelInvite(inviteID)
+		return true
+	}
+	go func() {
+		out, err := vr.WaitInvite(context.Background(), inviteID)
+		if err != nil {
+			return
+		}
+		switch out.State {
+		case inviteAnswered:
+			r.resolve(id, []string{crConnecting}, crAnswered, "")
+		case inviteFailed:
+			if out.Reason != inviteLostClaim {
+				r.resolve(id, []string{crConnecting}, crWritten, whyPlanFailed)
+			}
+		case inviteDeclined:
+			r.resolve(id, []string{crRinging}, crWritten, whyDeclined)
+		case inviteExpired:
+			r.resolve(id, []string{crRinging}, crWritten, whyMissed)
+		}
+	}()
+	return true
 }
 
 func (r *callRequestRegistry) isState(id, state string) bool {

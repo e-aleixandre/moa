@@ -32,7 +32,7 @@ func newInviteFixture(t *testing.T, n int) *inviteFixture {
 
 // newInviteFixtureWith also gives every device an alert destination when
 // alerts is set.
-func newInviteFixtureWith(t *testing.T, n int, alerts bool) *inviteFixture {
+func newInviteFixtureWith(t *testing.T, n int, alerts bool, handlers ...mockHandler) *inviteFixture {
 	t.Helper()
 	if !deviceStoreLockSupported() {
 		t.Skip("device auth fails closed where advisory process locks are unavailable")
@@ -62,7 +62,7 @@ func newInviteFixtureWith(t *testing.T, n int, alerts bool) *inviteFixture {
 			}
 			f.mgr.pushNative = push.NewNativeSender(alertStore, relayURL)
 		}
-	})
+	}, handlers...)
 	inv := &inviteFixture{vpFixture: f, relay: relay, secret: secret}
 	owner := &http.Cookie{Name: authCookieName, Value: "vp-owner-token"}
 	for i := range n {
