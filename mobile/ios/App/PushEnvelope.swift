@@ -49,6 +49,11 @@ enum PushEnvelope {
         let thread: String
         let title: String
         let body: String
+        // Incoming call envelopes (k = "call") carry the invitation, which is
+        // also the CallKit UUID, and its expiry.
+        var kind: String? = nil
+        var invite: String? = nil
+        var expires: Date? = nil
     }
 
     private struct Plaintext: Decodable {
@@ -60,6 +65,8 @@ enum PushEnvelope {
         let th: String
         let t: String
         let b: String
+        let k: String?
+        let inv: String?
     }
 
     // HKDF-SHA256 with an empty salt; the label is the info.
@@ -125,7 +132,10 @@ enum PushEnvelope {
             level: Level(rawValue: plaintext.lvl) ?? .active,
             thread: plaintext.th,
             title: plaintext.t,
-            body: plaintext.b
+            body: plaintext.b,
+            kind: plaintext.k,
+            invite: plaintext.inv,
+            expires: Date(timeIntervalSince1970: TimeInterval(plaintext.exp))
         )
     }
 

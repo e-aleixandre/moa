@@ -199,6 +199,9 @@ function useBootstrap() {
         afterVisibilityChange();
         reconnectAll();
         startPolling();
+        // A call started while the page was away (from CarPlay) shows here
+        // too; one already shown is left alone.
+        adoptNativeCall();
         // On a weak link these refreshes would share its bandwidth with the
         // open conversation's init — the one thing the user is waiting for —
         // so they wait until it lands (or fails).

@@ -229,14 +229,23 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/voice/calls/{id}/ws", voiceRegistry.handleWS)
 	mux.HandleFunc("POST /api/voice/calls/{id}/hangup", voiceRegistry.handleHangup)
 	mux.HandleFunc("GET /api/voice/status", voiceRegistry.handleStatus)
+	mux.HandleFunc("GET /api/voice/directory", voiceRegistry.handleDirectory)
+	mux.HandleFunc("POST /api/voice/owners/{id}/call", voiceRegistry.handleOwnerCall)
+	mux.HandleFunc("POST /api/voice/invites", voiceRegistry.handleInviteCreate)
+	mux.HandleFunc("GET /api/voice/invites/{id}", voiceRegistry.handleInviteStatus)
+	mux.HandleFunc("POST /api/voice/invites/{id}/answer", voiceRegistry.handleInviteAnswer)
+	mux.HandleFunc("POST /api/voice/invites/{id}/decline", voiceRegistry.handleInviteDecline)
 	mux.HandleFunc("GET /api/activity", handleActivity(manager))
 	mux.HandleFunc("PATCH /api/voice/settings", voiceRegistry.handleSettings)
 	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
-	mux.HandleFunc("POST /api/push/native", handlePushNativeRegister(manager))
-	mux.HandleFunc("DELETE /api/push/native", handlePushNativeDelete(manager))
-	mux.HandleFunc("GET /api/push/native/status", handlePushNativeStatus(manager))
+	mux.HandleFunc("POST /api/push/native", handlePushNativeRegister(manager, alertDestination))
+	mux.HandleFunc("DELETE /api/push/native", handlePushNativeDelete(manager, alertDestination))
+	mux.HandleFunc("GET /api/push/native/status", handlePushNativeStatus(manager, alertDestination))
+	mux.HandleFunc("POST /api/push/voip", handlePushNativeRegister(manager, voipDestination))
+	mux.HandleFunc("DELETE /api/push/voip", handlePushNativeDelete(manager, voipDestination))
+	mux.HandleFunc("GET /api/push/voip/status", handlePushNativeStatus(manager, voipDestination))
 	// wake-on-event: the owner's inbox. Deciding where an event goes is the
 	// owner's call, so these sit on the normal browser auth, not the automation
 	// token — that token may write events and nothing else.
@@ -318,7 +327,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 func pulseNoStoreMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session", "/api/push/native", "/api/push/native/status":
+		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session", "/api/push/native", "/api/push/native/status", "/api/push/voip", "/api/push/voip/status":
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)

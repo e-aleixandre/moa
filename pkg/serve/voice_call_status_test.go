@@ -8,6 +8,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/voice"
 )
 
 func vsStatus(t *testing.T, f *vpFixture) voiceStatus {
@@ -268,5 +269,108 @@ func TestVoiceCall_ChatGPTNoTurnEndNoLatency(t *testing.T) {
 	u, minutes := vsEndAndUsage(t, f, c, p)
 	if u.TurnEndLatencyCount != 0 || u.TurnEndLatencyMsMax != 0 || strings.Contains(minutes, "turn_end_latency") {
 		t.Fatalf("usage = %+v / %s, want no turn-end latency", u, minutes)
+	}
+}
+
+// ChatGPT's stream carries silence between replies: a silent frame after the
+// user's turn.done is not the reply starting.
+func TestVoiceCall_ChatGPTTurnEndLatencySkipsSilence(t *testing.T) {
+	f := vpNewFixture(t, "chatgpt-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.user(t, "u1", "hello")
+	p.audio(t, make([]byte, 960))
+	time.Sleep(120 * time.Millisecond)
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "two audio frames", func() bool {
+		n := 0
+		for _, fr := range c.snapshot() {
+			if fr.kind == websocket.MessageBinary {
+				n++
+			}
+		}
+		return n >= 2
+	})
+	u, _ := vsEndAndUsage(t, f, c, p)
+	if u.TurnEndLatencyCount != 1 || u.TurnEndLatencyMsP50 < 110 {
+		t.Fatalf("turn-end latency = %+v, want one sample of about 120ms (silence does not end the wait)", u)
+	}
+}
+
+// The user's turn.done can arrive after ChatGPT's reply began: there was no
+// wait, so no sample.
+func TestVoiceCall_ChatGPTLateTurnDoneNotMeasured(t *testing.T) {
+	f := vpNewFixture(t, "chatgpt-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.assistant(t, "a1", "Two plus", false)
+	p.user(t, "u1", "how much is two plus two")
+	time.Sleep(50 * time.Millisecond)
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "audio frame", func() bool {
+		for _, fr := range c.snapshot() {
+			if fr.kind == websocket.MessageBinary {
+				return true
+			}
+		}
+		return false
+	})
+	p.assistant(t, "a1", "Two plus two is four.", true)
+	u, _ := vsEndAndUsage(t, f, c, p)
+	if u.TurnEndLatencyCount != 0 {
+		t.Fatalf("turn-end latency = %+v, want no sample for a turn.done after the reply began", u)
+	}
+}
+
+// The reply's audio can arrive before the user's turn.done, with no
+// assistant text yet (RTP and the datachannel are independent): the next
+// voiced packet is that same reply, not its onset, so no sample.
+func TestVoiceCall_ChatGPTTurnDoneAfterReplyAudioNotMeasured(t *testing.T) {
+	f := vpNewFixture(t, "chatgpt-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	frames := func(want int) func() bool {
+		return func() bool {
+			n := 0
+			for _, fr := range c.snapshot() {
+				if fr.kind == websocket.MessageBinary {
+					n++
+				}
+			}
+			return n >= want
+		}
+	}
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "reply audio before the user's turn.done", frames(1))
+	p.user(t, "u1", "question")
+	c.await("user final transcript", func(v map[string]any) bool {
+		return v["type"] == "transcript" && v["role"] == "user" && v["final"] == true
+	})
+	time.Sleep(30 * time.Millisecond)
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "more of the same reply", frames(2))
+	u, _ := vsEndAndUsage(t, f, c, p)
+	if u.TurnEndLatencyCount != 0 {
+		t.Fatalf("turn-end latency = %+v, want no sample: the reply's audio began before turn.done", u)
+	}
+}
+
+// Once the reply's audio has gone quiet, the next user turn.done is measured.
+func TestVoiceCall_TurnEndAfterReplyAudioUnit(t *testing.T) {
+	c := &voiceCall{}
+	c.handle(voice.Event{Kind: voice.EventAudio, PCM: vpPCM()}, nil)
+	c.handle(voice.Event{Kind: voice.EventUserTurnEnded}, nil)
+	c.handle(voice.Event{Kind: voice.EventAudio, PCM: vpPCM()}, nil)
+	if len(c.turnLat) != 0 {
+		t.Fatalf("samples = %d, want none while the reply's audio is flowing", len(c.turnLat))
+	}
+	c.lastVoiced = time.Now().Add(-2 * voiceReplyAudioGap)
+	c.handle(voice.Event{Kind: voice.EventUserTurnEnded}, nil)
+	c.handle(voice.Event{Kind: voice.EventAudio, PCM: vpPCM()}, nil)
+	if len(c.turnLat) != 1 {
+		t.Fatalf("samples = %d, want one for a turn.done after the reply went quiet", len(c.turnLat))
 	}
 }

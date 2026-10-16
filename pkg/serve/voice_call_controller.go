@@ -165,6 +165,32 @@ type voiceCall struct {
 	// turnEnded is the same for the ChatGPT plan's user turn.done, kept
 	// apart because its reference is not speech_stopped.
 	turnEnded time.Time
+	// answered is whether ChatGPT's reply has already begun (its transcript
+	// is arriving): the user's turn.done can come after the reply started
+	// (archived call: 0.9 s after its first audio), and then there was no
+	// wait to measure. The assistant's turn.done closes the reply.
+	answered bool
+	// lastVoiced is when the provider last sent voiced audio. Its audio and
+	// text travel apart, so a reply can be heard before any of its text:
+	// a turn.done while that audio still flows is not associable either.
+	lastVoiced time.Time
+}
+
+// voiceReplyAudioGap is how long the provider's audio must have been quiet
+// for a user turn.done to start a wait: longer than a pause inside a reply,
+// shorter than the user speaking a turn after it.
+const voiceReplyAudioGap = time.Second
+
+// pcmVoiced tells a reply's sound from the silence ChatGPT's stream carries
+// between replies (archived calls: silent 20 ms frames peak at 16 or less).
+func pcmVoiced(pcm []byte) bool {
+	for i := 0; i+1 < len(pcm); i += 2 {
+		v := int16(uint16(pcm[i]) | uint16(pcm[i+1])<<8)
+		if v > 256 || v < -256 {
+			return true
+		}
+	}
+	return false
 }
 
 // voiceMinutes is what the model reported through end_call. Its "passed"
@@ -356,13 +382,16 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 			c.mu.Unlock()
 			c.speechStopped = time.Time{}
 		}
-		if !c.turnEnded.IsZero() {
-			c.mu.Lock()
-			if len(c.turnLat) < voiceMaxLatencySamples {
-				c.turnLat = append(c.turnLat, time.Since(c.turnEnded))
+		if pcmVoiced(ev.PCM) {
+			if !c.turnEnded.IsZero() {
+				c.mu.Lock()
+				if len(c.turnLat) < voiceMaxLatencySamples {
+					c.turnLat = append(c.turnLat, time.Since(c.turnEnded))
+				}
+				c.mu.Unlock()
+				c.turnEnded = time.Time{}
 			}
-			c.mu.Unlock()
-			c.turnEnded = time.Time{}
+			c.lastVoiced = time.Now()
 		}
 		if client != nil && !client.sendAudio(ev.PCM) {
 			c.requestEnd("slow_client")
@@ -370,7 +399,9 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 	case voice.EventSpeechStopped:
 		c.speechStopped = time.Now()
 	case voice.EventUserTurnEnded:
-		c.turnEnded = time.Now()
+		if !c.answered && time.Since(c.lastVoiced) >= voiceReplyAudioGap {
+			c.turnEnded = time.Now()
+		}
 	case voice.EventSpeechStarted:
 		c.turnEnded = time.Time{}
 		c.speechStopped = time.Time{} // the user kept talking: not a turn end
@@ -379,6 +410,9 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 	case voice.EventTranscript:
 		if ev.Role == "user" && !ev.Final {
 			c.turnEnded = time.Time{} // the user is still talking: not a turn end
+		}
+		if ev.Role == "assistant" {
+			c.answered = !ev.Final
 		}
 		if err := c.addTranscript(ev); err != nil {
 			c.journalEnd(err)

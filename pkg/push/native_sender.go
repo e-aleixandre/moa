@@ -330,9 +330,14 @@ func (s *NativeSender) finish(deviceID string, f *nativeFlight) {
 // Notify sends n to every registered, still-paired device. Best-effort: a
 // failure is recorded for the device's status and logged without content.
 func (s *NativeSender) Notify(ctx context.Context, n Notification) {
+	s.Deliver(ctx, n)
+}
+
+// Deliver is Notify that reports how many devices the relay accepted it for.
+func (s *NativeSender) Deliver(ctx context.Context, n Notification) (delivered int) {
 	for _, r := range s.store.All() {
 		if ctx.Err() != nil {
-			return
+			return delivered
 		}
 		if r.RelayURL != s.relayURL {
 			continue
@@ -342,35 +347,38 @@ func (s *NativeSender) Notify(ctx context.Context, n Notification) {
 			s.record(r, "handle_expired", "")
 			continue
 		}
-		s.send(ctx, r, n, now)
+		if s.send(ctx, r, n, now) {
+			delivered++
+		}
 	}
+	return delivered
 }
 
-func (s *NativeSender) send(parent context.Context, r NativeRegistration, n Notification, now time.Time) {
+func (s *NativeSender) send(parent context.Context, r NativeRegistration, n Notification, now time.Time) bool {
 	ctx, flight, ok := s.admit(parent, r)
 	if !ok {
-		return
+		return false
 	}
 	defer s.finish(r.DeviceID, flight)
 	secret, err := b64u.DecodeString(r.Secret)
 	if err != nil {
 		s.record(r, "failed", "bad secret")
-		return
+		return false
 	}
 	keys, err := DeriveDeviceKeys(secret)
 	if err != nil {
 		s.record(r, "failed", "bad secret")
-		return
+		return false
 	}
 	body, sig, err := BuildSend(keys, r.Handle, n, now)
 	if err != nil {
 		s.record(r, "failed", "envelope")
-		return
+		return false
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.relayURL+"/v1/send", bytes.NewReader(body))
 	if err != nil {
 		s.record(r, "failed", "request")
-		return
+		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Moa-Sig", sig)
@@ -380,7 +388,7 @@ func (s *NativeSender) send(parent context.Context, r NativeRegistration, n Noti
 		// of the status anyway.
 		slog.Warn("push native: relay unreachable", "device", r.DeviceID)
 		s.record(r, "failed", "relay unreachable")
-		return
+		return false
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	var reply struct {
@@ -394,6 +402,7 @@ func (s *NativeSender) send(parent context.Context, r NativeRegistration, n Noti
 	switch {
 	case resp.StatusCode == http.StatusOK:
 		s.record(r, "ok", "")
+		return true
 	case resp.StatusCode == http.StatusGone:
 		// APNs no longer knows this token: the app registers again when it
 		// gets a new one.
@@ -408,6 +417,7 @@ func (s *NativeSender) send(parent context.Context, r NativeRegistration, n Noti
 		slog.Warn("push native: send rejected", "device", r.DeviceID, "status", resp.StatusCode, "provider", r.ProviderName(), "error", cutUTF8(reply.Error, 32), "relay_status", reply.Status, "reason", reason)
 		s.record(r, "rejected", strings.TrimSpace(fmt.Sprintf("%d %s %s", resp.StatusCode, cutUTF8(reply.Error, 32), reason)))
 	}
+	return false
 }
 
 // Senders delivers through several transports, in order.

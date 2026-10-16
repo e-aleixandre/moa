@@ -28,6 +28,16 @@ type Notification struct {
 	// present it: passive means no sound, replacing the previous one of its tag.
 	Kind  Kind  `json:"kind,omitempty"`
 	Level Level `json:"level,omitempty"`
+	// Call makes this an incoming call invitation. It is only ever sent to
+	// VoIP destinations, never through the notification policy.
+	Call *CallInvite `json:"-"`
+}
+
+// CallInvite names the invitation a VoIP push rings for: its ID is the
+// CallKit UUID, and the envelope expires with the invitation.
+type CallInvite struct {
+	ID      string
+	Expires time.Time
 }
 
 const (

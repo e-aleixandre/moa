@@ -52,6 +52,9 @@ type voiceCallRegistry struct {
 	endedOrder []string
 	recent     []voiceUsage   // usage of the last calls, newest last, bounded
 	wg         sync.WaitGroup // reservations and controllers
+
+	invitesOnce sync.Once
+	invites     *voiceInvites // incoming-call invitations (voice_invite.go)
 }
 
 func newVoiceCallRegistry(mgr *Manager, store *auth.Store, opts VoiceCallOptions) *voiceCallRegistry {
@@ -243,62 +246,91 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		voiceError(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
 		return
 	}
-	sess, ok := r.mgr.Get(in.SessionID)
-	if !ok {
-		voiceError(w, http.StatusNotFound, map[string]any{"error": "session_not_found"})
-		return
+	status, out, retry := r.openCall(r.ctx, identity.auditID(), in.SessionID, in.Provider)
+	if retry > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
 	}
-	provider := voice.ProviderID(in.Provider)
+	voiceError(w, status, out)
+}
+
+// openCall opens a call for principal into a session: the one path behind
+// both a call the user places and an incoming invitation they answer. It
+// answers the HTTP status and body to send, and a Retry-After when limited.
+// Ending scope (r.ctx or narrower) aborts an opening that has not answered.
+func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID, providerName string) (int, map[string]any, int) {
+	if _, ok := r.mgr.Get(sessionID); !ok {
+		return http.StatusNotFound, map[string]any{"error": "session_not_found"}, 0
+	}
+	return r.openCallWith(scope, principal, providerName, func() (*ManagedSession, int, map[string]any) {
+		if sess, ok := r.mgr.Get(sessionID); ok {
+			return sess, 0, nil
+		}
+		return nil, http.StatusNotFound, map[string]any{"error": "session_not_found"}
+	})
+}
+
+// openCallWith is openCall with the session resolved only once the plan,
+// the admission budget and the principal's slot have all said yes: a
+// resolver with side effects (reopening an owner) runs for admitted calls
+// and never for refused ones.
+func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, providerName string, resolve func() (*ManagedSession, int, map[string]any)) (int, map[string]any, int) {
+	provider := voice.ProviderID(providerName)
 	if provider == "" {
 		p, found := r.defaultPlan()
 		if !found {
-			voiceError(w, http.StatusServiceUnavailable, r.planUnavailable("", "no_plan"))
-			return
+			return http.StatusServiceUnavailable, r.planUnavailable("", "no_plan"), 0
 		}
 		provider = p
 	}
 	adapter, creds, ok := r.adapter(provider)
 	if !ok {
-		voiceError(w, http.StatusBadRequest, map[string]any{"error": "unknown_provider"})
-		return
+		return http.StatusBadRequest, map[string]any{"error": "unknown_provider"}, 0
 	}
-	principal := identity.auditID()
 	retry, admitted := r.admission.acquire(principal)
 	if !admitted {
-		w.Header().Set("Retry-After", strconv.Itoa(retry))
-		voiceError(w, http.StatusTooManyRequests, map[string]any{"error": "rate_limited"})
-		return
+		return http.StatusTooManyRequests, map[string]any{"error": "rate_limited"}, retry
 	}
 	defer r.admission.release()
 	slot, closed := r.reserve(principal)
 	if closed {
-		voiceError(w, http.StatusServiceUnavailable, map[string]any{"error": "shutting_down"})
-		return
+		return http.StatusServiceUnavailable, map[string]any{"error": "shutting_down"}, 0
 	}
 	if slot == nil {
-		voiceError(w, http.StatusConflict, map[string]any{"error": "call_active"})
-		return
+		return http.StatusConflict, map[string]any{"error": "call_active"}, 0
+	}
+	sess, status, out := resolve()
+	if sess == nil {
+		r.release(principal, slot)
+		return status, out, 0
 	}
 	id := newVoiceCallID()
 	// Read once: the call keeps this model to its end, whatever Settings says later.
 	model := voiceModel()
-	ctx, cancel := context.WithTimeout(r.ctx, voiceOpenTimeout)
+	ctx, cancel := context.WithTimeout(scope, voiceOpenTimeout)
 	up, err := adapter.Open(ctx, voice.CallSpec{
 		CallID: id, SessionID: sess.ID, Voice: voiceProviders[provider].voice,
 		Instructions: voice.CommonInstructions, BackendModel: model, Tools: voice.ToolSpecs(),
 		InitialContext: r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
 	})
 	cancel()
+	if err == nil && scope.Err() != nil && r.ctx.Err() == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), r.opts.Limits.Teardown)
+		_ = up.Close(ctx, "unauthorized")
+		cancel()
+		err = scope.Err()
+	}
+	if err != nil && scope.Err() != nil && r.ctx.Err() == nil {
+		r.release(principal, slot)
+		return http.StatusUnauthorized, map[string]any{"error": "unauthenticated"}, 0
+	}
 	if err != nil {
 		r.release(principal, slot)
 		oe := voice.Classify(err)
 		slog.Info("voice call upstream refused", "provider", provider, "class", oe.Class, "status", oe.Status)
 		if provider.Paid() {
-			voiceError(w, http.StatusBadGateway, map[string]any{"error": "provider_unavailable", "reason": oe.Class})
-			return
+			return http.StatusBadGateway, map[string]any{"error": "provider_unavailable", "reason": oe.Class}, 0
 		}
-		voiceError(w, http.StatusServiceUnavailable, r.planUnavailable(provider, oe.Class))
-		return
+		return http.StatusServiceUnavailable, r.planUnavailable(provider, oe.Class), 0
 	}
 	c := newVoiceCall(r, id, principal, sess.ID, provider, adapter.Billing(), up)
 	c.costStart = sessionCostUSD(sess)
@@ -313,13 +345,11 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		_ = up.Close(ctx, "shutdown")
 		cancel()
 		r.release(principal, slot)
-		voiceError(w, http.StatusServiceUnavailable, map[string]any{"error": "shutting_down"})
-		return
+		return http.StatusServiceUnavailable, map[string]any{"error": "shutting_down"}, 0
 	}
 	r.admission.established(principal)
 	go c.run()
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusCreated, map[string]any{"call_id": id, "provider": provider, "billing": c.billing, "ws_url": "/api/voice/calls/" + id + "/ws"})
+	return http.StatusCreated, map[string]any{"call_id": id, "provider": provider, "billing": c.billing, "ws_url": "/api/voice/calls/" + id + "/ws"}, 0
 }
 
 // planUnavailable never starts the paid alternative: it only names it when

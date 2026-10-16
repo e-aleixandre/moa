@@ -251,3 +251,37 @@ Selected by `"provider":"fcm"` in `/v1/register`. Differences from `apns`:
 - relay → FCM: token, collapse key, envelope (as strings in `data`), the
   service account's OAuth token.
 - never in clear: title, body, session id, project, kind, level, destination.
+
+## Type `voip` (incoming calls, APNs only)
+
+A second, separate destination per iPhone rings incoming voice calls through
+PushKit. It is additive: a client that never sends `type` gets alerts exactly
+as before.
+
+- **Register**: `/v1/register` takes an optional `"type":"alert"|"voip"`
+  (absent = `alert`; `voip` with `provider:"fcm"` is `400`). The token is the
+  PushKit VoIP token (same hex format) and the app uses its own secret `S_v`
+  for it, never the alert secret.
+- **Sealed type**: for `voip` the challenge and handle json gain a last field
+  `"y":"voip"` (`{"t","e","k","x","y"}`); absent `y` means `alert`, so every
+  blob sealed before this opens identically. `y` is inside the AEAD: a handle
+  issued for alerts never sends VoIP and the reverse.
+- **Challenge**: a VoIP push (the only proof of holding a VoIP token):
+  `apns-push-type: voip`, `apns-topic: <APNS_TOPIC>.voip`, `apns-priority: 10`,
+  `apns-expiration: 0`, body `{"r":"<c>"}`. The app confirms it only for a
+  registration it started in the foreground, and reports it to CallKit (then
+  ends it at once) whenever the system requires a report. `/v1/confirm`
+  answers an extra `"type":"alert"|"voip"`.
+- **Send**: `/v1/send` is unchanged. For a `voip` handle the relay sends
+  `apns-push-type: voip`, topic `<APNS_TOPIC>.voip`, priority 10,
+  `apns-expiration: 0` (deliver now or never), no collapse id, body
+  `{"e":{"v":1,"k":"…","c":"…"}}` (no `aps`: the app decrypts and reports the
+  call itself). About 2.8 KB, under the 5120-byte VoIP limit.
+- **Envelope**: the same sealed 2048-byte envelope (§3), with `"k":"call"`,
+  `"d":"session"`, `"t"` the caller name, `"exp"` the invitation's expiry and
+  an extra `"inv":"<UUID>"`, the invitation id the app reports as the CallKit
+  call UUID. APNs and the relay see that the push is VoIP (accepted, N6);
+  never who calls or for which session.
+- **Rate limits**: same budgets, in a `voip` namespace.
+- Cancelling a ringing call never uses another push: the app follows the
+  invitation on its moa server.

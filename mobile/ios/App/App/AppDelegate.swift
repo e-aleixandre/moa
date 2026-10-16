@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import CarPlay
 import UserNotifications
 
 @UIApplicationMain
@@ -12,6 +13,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Capacitor's own router is off (ios.handleApplicationNotifications).
         UNUserNotificationCenter.current().delegate = self
         NativePushRegistration.shared.start()
+        // PushKit before anything else: a VoIP push that launched the app is
+        // delivered as soon as the registry exists, and must ring at once.
+        NativeIncomingCalls.shared.start()
         return true
     }
 
@@ -71,6 +75,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        if #available(iOS 26.4, *), connectingSceneSession.role == .carTemplateApplication {
+            let config = UISceneConfiguration(name: "CarPlay Configuration", sessionRole: connectingSceneSession.role)
+            config.sceneClass = CPTemplateApplicationScene.self
+            config.delegateClass = CarPlaySceneDelegate.self
+            return config
+        }
         let config = UISceneConfiguration(name: "Default Configuration",
                                           sessionRole: connectingSceneSession.role)
         config.delegateClass = SceneDelegate.self

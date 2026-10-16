@@ -231,9 +231,15 @@ export class VoiceCallController {
       await this.audio.start((pcm) => this.capture(gen, ws, pcm), {
         onPlayback: (e) => { if (gen === this.gen) this.playback(e); },
       });
-    } catch {
+    } catch (err) {
       // A hangup while the microphone was opening is not a microphone error.
       if (gen !== this.gen || this.s.phase === 'ending') return;
+      // The app's own audio failed (not the user's permission): the page
+      // takes the call over, whether or not the app's close has arrived yet.
+      if (this.fallback && err?.message === 'audio_failed') {
+        this.useFallback(callId, wsURL, 'audio_failed');
+        return;
+      }
       // No microphone: end the call on the server too, so nothing keeps
       // running for a call that cannot hear.
       this.sendJSON({ type: 'hangup' });
