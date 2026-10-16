@@ -295,9 +295,14 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
         call.answering = true
         ringing = call
         NativeVoiceCallManager.configureSessionForCall()
-        post(call, "answer") { [weak self] status, object in
+        post(call, "invites/" + call.invite + "/answer") { [weak self] status, object in
             guard let self, self.ringing?.uuid == call.uuid else {
+                // Ended or forgotten while the answer was in flight: the
+                // call the server opened for it is hung up, not joined.
                 action.fail()
+                if status == 201, let id = object?["call_id"] as? String, PushEnvelope.base64URLDecode(id) != nil {
+                    self?.post(call, "calls/" + id + "/hangup") { _, _ in }
+                }
                 return
             }
             self.ringing = nil
@@ -319,11 +324,13 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
     }
 
     // decline returns false when the action is not about a ringing invitation.
+    // While its answer is in flight, End only drops it: the answer's reply
+    // then hangs up whatever call it got.
     func decline(_ action: CXEndCallAction) -> Bool {
-        guard let call = ringing, call.uuid == action.callUUID, !call.answering else { return false }
+        guard let call = ringing, call.uuid == action.callUUID else { return false }
         ringing = nil
         action.fulfill()
-        post(call, "decline") { _, _ in }
+        if !call.answering { post(call, "invites/" + call.invite + "/decline") { _, _ in } }
         return true
     }
 
@@ -331,8 +338,9 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
         ringing = nil
     }
 
-    private func post(_ call: Ringing, _ verb: String, done: @escaping (Int, [String: Any]?) -> Void) {
-        guard let url = URL(string: call.stored.origin + "/api/voice/invites/" + call.invite + "/" + verb) else {
+    // post sends to /api/voice/<path> with the invitation's Moa-Voice key.
+    private func post(_ call: Ringing, _ path: String, done: @escaping (Int, [String: Any]?) -> Void) {
+        guard let url = URL(string: call.stored.origin + "/api/voice/" + path) else {
             done(0, nil)
             return
         }
