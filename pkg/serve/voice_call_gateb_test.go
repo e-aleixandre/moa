@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -302,5 +303,55 @@ func TestVoicePrompts_PassedAndDecisionCheck(t *testing.T) {
 	}
 	if !strings.Contains(voiceRelayPrompt("x"), voiceCheckDecisions) {
 		t.Fatal("relay prompt lacks the recorded-decisions check")
+	}
+}
+
+// The provider's tool-call id is upstream-only: it must reach neither the
+// persisted session nor any client frame, while the delivery stays stable.
+func TestVoiceCall_UpstreamToolIDNeverPersisted(t *testing.T) {
+	const sentinel = "call_SENTINELUPSTREAM"
+	f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)
+	sock := f.sessionSocket()
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.tool(t, sentinel+"-pass", "pass_to_session", map[string]any{"summary": "SENTINEL-RELAY"})
+	if vpError(p.result(t, sentinel+"-pass")) {
+		t.Fatal("pass failed")
+	}
+	p.tool(t, sentinel+"-ask", "ask_session", map[string]any{"question": "SENTINEL-QUESTION?"})
+	if vpError(p.result(t, sentinel+"-ask")) {
+		t.Fatal("ask failed")
+	}
+	f.waitRecords("relay", 1)
+	ctx, cancel := context.WithTimeout(context.Background(), vpDeadline)
+	defer cancel()
+	if !f.sess.runtime.WaitSettled(ctx) {
+		t.Fatal("session did not settle")
+	}
+	c.hangup()
+	f.waitRecords("minutes", 1)
+	saved, err := json.Marshal(f.saved())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	var frames strings.Builder
+	for _, fr := range c.frames {
+		frames.Write(fr.data)
+	}
+	c.mu.Unlock()
+	sock.mu.Lock()
+	sockFrames := vpJSON(sock.frames)
+	sock.mu.Unlock()
+	for name, got := range map[string]string{
+		"history":     vpJSON(f.sess.History()),
+		"saved":       string(saved),
+		"call frames": frames.String(),
+		"session ws":  sockFrames,
+	} {
+		if strings.Contains(got, "SENTINELUPSTREAM") {
+			t.Errorf("%s contains the upstream tool-call id", name)
+		}
 	}
 }

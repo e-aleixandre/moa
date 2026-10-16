@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -46,12 +48,15 @@ func (c *voiceCall) nextDelivery() string {
 }
 
 // toolDelivery is the delivery identity of a provider ToolCall: a retried
-// call is the same delivery, whether or not its result is still cached.
+// call is the same delivery, whether or not its result is still cached. The
+// provider's id is hashed: deliveries are persisted and shown to clients, and
+// upstream ids never leave the provider connection.
 func (c *voiceCall) toolDelivery(toolID string) string {
 	if toolID == "" {
 		return c.nextDelivery()
 	}
-	return c.id + "/tool/" + toolID
+	sum := sha256.Sum256([]byte(toolID))
+	return c.id + "/tool/" + hex.EncodeToString(sum[:8])
 }
 
 func (c *voiceCall) custom(kind string) map[string]any {
