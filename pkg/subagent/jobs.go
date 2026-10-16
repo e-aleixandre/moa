@@ -61,9 +61,9 @@ type job struct {
 	// daybreak is whether the child runs with the Daybreak program, fixed at
 	// launch: a parent's later change does not reach a running child.
 	daybreak bool
-	messages              []core.AgentMessage
-	usage                 *core.Usage
-	costUSD               float64
+	messages []core.AgentMessage
+	usage    *core.Usage
+	costUSD  float64
 	// contextPct is how full the child's OWN context window is (0-100), or -1
 	// when its model is unknown so no window can be measured. The parent's
 	// percentage says nothing about a child: they hold different transcripts
