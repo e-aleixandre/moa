@@ -70,6 +70,7 @@ func (sp *servePersister) snapshot(messages []core.AgentMessage, epoch int, meta
 	snapshot.Messages = make([]core.AgentMessage, len(messages))
 	copy(snapshot.Messages, messages)
 	snapshot.CompactionEpoch = epoch
+	sp.settleVoiceOwed(&snapshot)
 	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
 
 	store := sp.store
@@ -117,6 +118,7 @@ func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, m
 	snapshot.Entries = make([]session.Entry, len(entries))
 	copy(snapshot.Entries, entries)
 	snapshot.LeafID = leafID
+	sp.settleVoiceOwed(&snapshot)
 	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
 	// Clear v1 fields
 	snapshot.Messages = nil
@@ -245,19 +247,67 @@ func (sp *servePersister) recordOwnerDetached(detached bool) error {
 	return nil
 }
 
-// setVoiceWake sets or clears the voice wake marker for the next save. It
-// lives in the preserved set, which every snapshot carries forward.
-func (sp *servePersister) setVoiceWake(on bool) {
+// markVoiceOwed sets the voice marker for the next save. It lives in the
+// preserved set, which every snapshot carries forward until settleVoiceOwed
+// finds nothing owed in what it saves.
+func (sp *servePersister) markVoiceOwed() {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
-	if !on {
-		delete(sp.preserved, session.MetaVoiceWake)
-		return
-	}
 	if sp.preserved == nil {
 		sp.preserved = make(map[string]any, 1)
 	}
 	sp.preserved[session.MetaVoiceWake] = true
+}
+
+// settleVoiceOwed drops the voice marker from the snapshot about to be saved
+// once that snapshot owes nothing: every minutes record asking for a wake
+// holds its wake. The save that persists the last owed delivery is the one
+// that clears the marker, so no later boot loads the session for nothing.
+// Called under sp.mu.
+func (sp *servePersister) settleVoiceOwed(s *session.Session) {
+	if sp.preserved[session.MetaVoiceWake] != true {
+		return
+	}
+	if !voiceOwes(savedMessages(s)) {
+		delete(sp.preserved, session.MetaVoiceWake)
+	}
+}
+
+// voiceOwes reports whether msgs hold a minutes record whose wake they do
+// not hold.
+func voiceOwes(msgs []core.AgentMessage) bool {
+	saved := map[string]bool{}
+	var wakes []string
+	for _, m := range msgs {
+		id := voiceDeliveryID(m.Custom)
+		if id == "" {
+			continue
+		}
+		saved[id] = true
+		if m.Custom["kind"] == "minutes" && m.Custom["wake"] == true {
+			wakes = append(wakes, voiceWakeID(id))
+		}
+	}
+	for _, w := range wakes {
+		if !saved[w] {
+			return true
+		}
+	}
+	return false
+}
+
+// savedMessages is every message of a session file, whatever its format.
+func savedMessages(s *session.Session) []core.AgentMessage {
+	if len(s.Entries) == 0 {
+		return s.Messages
+	}
+	out := make([]core.AgentMessage, 0, len(s.Entries))
+	for _, e := range s.Entries {
+		if e.Type == session.EntryMessage {
+			out = append(out, e.Message)
+		}
+	}
+	return out
 }
 
 // markDeleted prevents future Snapshot calls from writing to disk.

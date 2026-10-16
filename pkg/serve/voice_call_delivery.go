@@ -107,9 +107,9 @@ func voiceWakeID(minutesID string) string { return minutesID + "/wake" }
 // wakeVoiceMinutes admits the wake of every saved minutes record that asks
 // for one (wake=true) and whose wake this session has not taken: at hangup,
 // and after a restart that lost it before it was admitted or while it
-// waited in the steer queue. Once every such wake is saved in the
-// transcript the session's voice wake marker is cleared. It reports how
-// many wakes it admitted.
+// waited in the steer queue. The save that holds the last owed wake clears
+// the session's voice marker (servePersister.settleVoiceOwed). It reports
+// how many wakes it admitted.
 func (m *Manager) wakeVoiceMinutes(sess *ManagedSession) int {
 	tree := sess.runtime.Context().Tree
 	if tree == nil {
@@ -131,13 +131,12 @@ func (m *Manager) wakeVoiceMinutes(sess *ManagedSession) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.load(sess)
-	admitted, unsaved := 0, false
+	admitted := 0
 	for _, rec := range owed {
 		wakeID := voiceWakeID(voiceDeliveryID(rec.Custom))
 		if saved[wakeID] {
 			continue
 		}
-		unsaved = true
 		custom := map[string]any{"source": "voice_call", "kind": "minutes_wake", "call_id": rec.Custom["call_id"], "provider": rec.Custom["provider"], "minutes_msg_id": rec.MsgID}
 		_, dup, err := m.admitVoiceLocked(sess, wakeID, m.voiceWakeText(sess, rec), nil, custom)
 		if err != nil {
@@ -147,9 +146,6 @@ func (m *Manager) wakeVoiceMinutes(sess *ManagedSession) int {
 		if !dup {
 			admitted++
 		}
-	}
-	if !unsaved && sess.persister != nil {
-		sess.persister.setVoiceWake(false)
 	}
 	return admitted
 }

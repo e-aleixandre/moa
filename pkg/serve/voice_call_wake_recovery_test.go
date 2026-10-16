@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,23 +19,36 @@ import (
 
 type vwCrashState struct {
 	Root, Base, Workspace, SessionID, WakeID string
-	Queued, DiskMinutes, DiskWake            int
+	Queued, DiskMinutes, DiskWake, DiskRelay int
+	// Set by the wake_saved_* phases: saves that held the wake with the
+	// marker still set, whether the marker was on disk while the wake was
+	// owed, and whether it was still on disk at the checkpoint.
+	Violations             int64
+	MarkedOwed, MarkedLast bool
 }
 
 // vwCrash writes the checkpoint and exits without shutdown, cleanup or a
 // final flush: a process crash at this point.
 func vwCrash(t *testing.T, f *vpFixture, wakeID string) {
+	vwCrashWith(t, f, wakeID, nil)
+}
+
+func vwCrashWith(t *testing.T, f *vpFixture, wakeID string, edit func(*vwCrashState)) {
 	t.Helper()
 	saved, _, err := session.FindSessionReadOnly(f.mgr.sessionBaseDir, f.sess.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := vwCrashState{Root: f.root, Base: f.mgr.sessionBaseDir, Workspace: f.mgr.workspaceRoot, SessionID: f.sess.ID, WakeID: wakeID,
-		DiskMinutes: len(vpSavedVoice(saved, "minutes")), DiskWake: len(vpSavedVoice(saved, "minutes_wake"))}
+		DiskMinutes: len(vpSavedVoice(saved, "minutes")), DiskWake: len(vpSavedVoice(saved, "minutes_wake")), DiskRelay: len(vpSavedVoice(saved, "relay")),
+		MarkedLast: saved.Metadata[session.MetaVoiceWake] == true}
 	for _, q := range f.sess.runtime.Context().Agent.PendingSteers() {
 		if voiceDeliveryID(q.Custom) == wakeID {
 			s.Queued++
 		}
+	}
+	if edit != nil {
+		edit(&s)
 	}
 	data, _ := json.Marshal(s)
 	if err := os.WriteFile(os.Getenv("MOA_VOICE_WAKE_MANIFEST"), data, 0600); err != nil {
@@ -51,14 +65,23 @@ func TestVoiceWakeCrashChild(t *testing.T) {
 	if phase == "" {
 		t.Skip("child process of TestVoiceWakeSurvivesCrash")
 	}
+	release := make(chan struct{})
 	h := func(ctx context.Context, r core.Request) (<-chan core.AssistantEvent, error) {
 		if strings.Contains(vpLastUser(r), "VOICE-WAKE-HOLD-RUN") {
-			<-ctx.Done()
-			return nil, ctx.Err()
+			select {
+			case <-release:
+				return simpleResponse("HELD-RUN-DONE"), nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 		return simpleResponse("BRIEF-READY"), nil
 	}
 	f := vpNewFixture(t, "grok-plan", h, h, h, h, h, h)
+	if phase == "wake_saved_idle" || phase == "wake_saved_busy" {
+		vwWakeSaved(t, f, phase, release)
+		return
+	}
 	if phase == "between_record_and_wake" {
 		f.sess.runtime.Bus.Drain(2 * time.Second)
 		if err := f.sess.runtime.Flush(); err != nil {
@@ -80,6 +103,18 @@ func TestVoiceWakeCrashChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	pollUntil(t, vpDeadline, "held run", func() bool { return sessState(f.sess) == StateRunning })
+	if phase == "busy_relay" {
+		p.tool(t, "relay", "pass_to_session", map[string]any{"summary": "RECOVER-THIS-RELAY"})
+		result := p.result(t, "relay")
+		delivery, _ := result["delivery_id"].(string)
+		if result["status"] != "delivered" || result["queued"] != true || delivery == "" {
+			t.Fatalf("relay was not accepted as queued: %v", result)
+		}
+		// Crash right after the reply: no Flush, no shutdown. Whatever makes
+		// the relay survive was saved before the spokesperson heard
+		// "delivered".
+		vwCrash(t, f, delivery)
+	}
 	p.tool(t, "end", "end_call", map[string]any{"decided": []string{"RECOVER-THIS-DECISION"}, "passed": []string{}, "open": []string{}})
 	c.hangup()
 	wakeID := voiceWakeID(c.c.ID + "/minutes")
@@ -95,6 +130,86 @@ func TestVoiceWakeCrashChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	vwCrash(t, f, wakeID)
+}
+
+// vwWakeSaved runs a call to its minutes wake and checks every save of the
+// session: the one that holds the wake must not carry the marker any more.
+func vwWakeSaved(t *testing.T, f *vpFixture, phase string, release chan struct{}) {
+	f.sess.runtime.Bus.Drain(2 * time.Second)
+	var violations atomic.Int64
+	prev := f.sess.persister.onSaved
+	f.sess.persister.onSaved = func() {
+		if prev != nil {
+			prev()
+		}
+		saved, _, err := session.FindSessionReadOnly(f.mgr.sessionBaseDir, f.sess.ID)
+		if err == nil && len(vpSavedVoice(saved, "minutes_wake")) > 0 && saved.Metadata[session.MetaVoiceWake] == true {
+			violations.Add(1)
+		}
+	}
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	if phase == "wake_saved_busy" {
+		if _, _, _, err := f.mgr.Send(f.sess.ID, "VOICE-WAKE-HOLD-RUN", nil, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		pollUntil(t, vpDeadline, "held run", func() bool { return sessState(f.sess) == StateRunning })
+	}
+	p.tool(t, "end", "end_call", map[string]any{"decided": []string{"WAKE-SAVED-DECISION"}, "passed": []string{}, "open": []string{}})
+	c.hangup()
+	id := voiceWakeID(c.c.ID + "/minutes")
+	markedOwed := false
+	if phase == "wake_saved_busy" {
+		pollUntil(t, vpDeadline, "wake queued as a steer", func() bool {
+			for _, q := range f.sess.runtime.Context().Agent.PendingSteers() {
+				if voiceDeliveryID(q.Custom) == id {
+					return true
+				}
+			}
+			return false
+		})
+		saved, _, err := session.FindSessionReadOnly(f.mgr.sessionBaseDir, f.sess.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		markedOwed = saved.Metadata[session.MetaVoiceWake] == true && len(vpSavedVoice(saved, "minutes_wake")) == 0
+		close(release)
+	}
+	// No Flush: the session's own saves must persist the wake and drop the
+	// marker. The checkpoint records whatever is on disk by the deadline.
+	deadline := time.Now().Add(vpDeadline)
+	for time.Now().Before(deadline) {
+		saved, _, err := session.FindSessionReadOnly(f.mgr.sessionBaseDir, f.sess.ID)
+		if err == nil && len(vpSavedVoice(saved, "minutes_wake")) == 1 && saved.Metadata[session.MetaVoiceWake] != true {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	vwCrashWith(t, f, id, func(s *vwCrashState) {
+		s.Violations = violations.Load()
+		s.MarkedOwed = markedOwed
+	})
+}
+
+func vwRunChild(t *testing.T, phase string) vwCrashState {
+	t.Helper()
+	manifest := filepath.Join(t.TempDir(), "checkpoint.json")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestVoiceWakeCrashChild$", "-test.timeout=60s")
+	cmd.Env = append(os.Environ(), "MOA_VOICE_WAKE_PHASE="+phase, "MOA_VOICE_WAKE_MANIFEST="+manifest)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child failed: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s vwCrashState
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(s.Root) })
+	return s
 }
 
 func vwRestart(t *testing.T, s vwCrashState, handlers ...mockHandler) (*Manager, *mockProvider, func()) {
@@ -114,17 +229,23 @@ func vwRestart(t *testing.T, s vwCrashState, handlers ...mockHandler) (*Manager,
 }
 
 func vwSavedWakes(t *testing.T, s vwCrashState) (wakes int, marked bool) {
+	return vwSaved(t, s, "minutes_wake")
+}
+
+// vwSaved counts the saved voice records of kind carrying the checkpoint's
+// delivery ID, and reports the session header's voice marker.
+func vwSaved(t *testing.T, s vwCrashState, kind string) (n int, marked bool) {
 	t.Helper()
 	saved, _, err := session.FindSessionReadOnly(s.Base, s.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range vpSavedVoice(saved, "minutes_wake") {
+	for _, m := range vpSavedVoice(saved, kind) {
 		if voiceDeliveryID(m.Custom) == s.WakeID {
-			wakes++
+			n++
 		}
 	}
-	return wakes, saved.Metadata[session.MetaVoiceWake] == true
+	return n, saved.Metadata[session.MetaVoiceWake] == true
 }
 
 // Minutes that must wake their session wake it exactly once, even when the
@@ -133,21 +254,7 @@ func vwSavedWakes(t *testing.T, s vwCrashState) (wakes int, marked bool) {
 func TestVoiceWakeSurvivesCrash(t *testing.T) {
 	for _, phase := range []string{"between_record_and_wake", "busy_minutes"} {
 		t.Run(phase, func(t *testing.T) {
-			manifest := filepath.Join(t.TempDir(), "checkpoint.json")
-			cmd := exec.Command(os.Args[0], "-test.run=^TestVoiceWakeCrashChild$", "-test.timeout=60s")
-			cmd.Env = append(os.Environ(), "MOA_VOICE_WAKE_PHASE="+phase, "MOA_VOICE_WAKE_MANIFEST="+manifest)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("child failed: %v\n%s", err, out)
-			}
-			data, err := os.ReadFile(manifest)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var s vwCrashState
-			if err := json.Unmarshal(data, &s); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = os.RemoveAll(s.Root) })
+			s := vwRunChild(t, phase)
 			if s.DiskMinutes != 1 || s.DiskWake != 0 || (phase == "busy_minutes" && s.Queued != 1) {
 				t.Fatalf("invalid checkpoint: %+v", s)
 			}
@@ -186,6 +293,35 @@ func TestVoiceWakeSurvivesCrash(t *testing.T) {
 				if n, marked := vwSavedWakes(t, s); n != 1 || marked {
 					t.Fatalf("restart %d: saved wakes=%d marker=%v, want 1 and cleared", restart, n, marked)
 				}
+			}
+		})
+	}
+}
+
+// The marker is dropped by the save that holds the wake, idle (the wake's
+// run) or busy (the run the wake was steered into), so a later boot loads
+// nothing.
+func TestVoiceWakeMarkerClearedWhenWakeSaved(t *testing.T) {
+	for _, phase := range []string{"wake_saved_idle", "wake_saved_busy"} {
+		t.Run(phase, func(t *testing.T) {
+			s := vwRunChild(t, phase)
+			if s.DiskMinutes != 1 || s.DiskWake != 1 {
+				t.Fatalf("the wake was not saved by the checkpoint: %+v", s)
+			}
+			if phase == "wake_saved_busy" && !s.MarkedOwed {
+				t.Fatal("the marker was not on disk while the queued wake was owed")
+			}
+			if s.Violations != 0 || s.MarkedLast {
+				t.Fatalf("the marker outlived the saved wake: %d saves held both, marker at checkpoint=%v", s.Violations, s.MarkedLast)
+			}
+			m, p, stop := vwRestart(t, s)
+			vpStable(t, func() bool { return p.calls.Load() == 0 }, "a boot woke a session that owed nothing")
+			if _, loaded := m.Get(s.SessionID); loaded {
+				t.Fatal("a boot loaded a session that owed nothing")
+			}
+			stop()
+			if n, marked := vwSavedWakes(t, s); n != 1 || marked {
+				t.Fatalf("after the boot: saved wakes=%d marker=%v, want 1 and cleared", n, marked)
 			}
 		})
 	}

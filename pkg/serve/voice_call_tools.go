@@ -377,7 +377,7 @@ func (c *voiceCall) persistMinutes(reason string) {
 	// The marker is saved with the record, so a restart that loses the
 	// wake finds it from the session header alone.
 	if wake && sess.persister != nil {
-		sess.persister.setVoiceWake(true)
+		sess.persister.markVoiceOwed()
 	}
 	if err := m.recordVoice(sess.ID, c.id+"/minutes", record); err != nil {
 		slog.Warn("voice call minutes not saved", "call", c.id, "error", err)

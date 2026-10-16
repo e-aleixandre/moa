@@ -118,10 +118,11 @@ const (
 	// writing false, and binaries that predate it simply see an attached
 	// session.
 	MetaOwnerDetached = "owner_detached"
-	// MetaVoiceWake marks a session whose transcript may hold voice call
-	// minutes that wake it and whose wake is not saved yet. It is only an
-	// index for the startup scan, which reads session headers alone; the
-	// minutes record itself says whether, and which, wake is owed.
+	// MetaVoiceWake marks a session whose transcript holds voice call
+	// minutes that wake it and whose wake is not saved yet; the save that
+	// holds the wake drops it. It is only an index for the startup scan,
+	// which reads session headers alone; the minutes record itself says
+	// whether, and which, wake is owed.
 	MetaVoiceWake = "voice_wake"
 	// MetaLegacyTasks is where versions before the shared task database kept a
 	// session's checklist. Nothing reads or writes it any more; it is carried
