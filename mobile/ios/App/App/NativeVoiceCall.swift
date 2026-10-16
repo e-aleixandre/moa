@@ -107,6 +107,21 @@ final class NativeCallMessageHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
+// What a call opened from native code (CarPlay) hears about it, besides
+// what the page is told. Delivered on the main queue.
+enum NativeCallEvent: Equatable {
+    case open
+    case playback(String) // "playing" | "drained"
+    case mute(Bool)
+    // serverEnded: the server said "ended" first (a hangup it completed, or
+    // the agent ending the call), so the close is not a failure.
+    case close(reason: String, serverEnded: Bool)
+}
+
+protocol NativeCallObserver: AnyObject {
+    func nativeCall(_ id: String, didReceive event: NativeCallEvent)
+}
+
 // One voice call at a time, as the server allows. Everything here runs on
 // the main queue (CallKit and URLSession delegates are bound to it) except
 // the microphone tap, which only sends frames.
@@ -138,6 +153,10 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         var serverEnded = false
         var hangingUp = false
         var finished = false
+        // false: opened by startNative, with no system call behind it.
+        var callKit = true
+        weak var observer: NativeCallObserver?
+        var interruptionObserver: NSObjectProtocol?
         init(id: String, name: String, sessionId: String, callId: String, origin: String, task: URLSessionWebSocketTask,
              uuid: UUID = UUID(), incoming: Bool = false) {
             self.id = id
@@ -254,6 +273,57 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         return true
     }
 
+    // MARK: Native calls (CarPlay)
+
+    var hasCall: Bool { call.map { !$0.finished } ?? false }
+
+    // startNative runs a call created by native code without CallKit: in
+    // CarPlay the app's own voice screen must stay visible while recording,
+    // which a system call would cover. The audio session is set up by hand,
+    // as when CallKit is unavailable. nil: refused (a call is on, or the URL
+    // is not the paired server's call socket).
+    func startNative(name: String, sessionId: String, origin: String, url: URL, authorization: String,
+                     observer: NativeCallObserver) -> String? {
+        guard !hasCall, let url = Self.callURL(url.absoluteString) else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        let task = session.webSocketTask(with: request)
+        let call = Call(id: "car-" + UUID().uuidString, name: String(name.prefix(80)), sessionId: String(sessionId.prefix(128)),
+                        callId: url.pathComponents.dropLast().last ?? "", origin: origin, task: task)
+        call.callKit = false
+        call.started = true
+        call.observer = observer
+        call.audioWanted = AVAudioSession.sharedInstance().recordPermission == .granted
+        // A phone call takes the audio session from a call with no system
+        // call to share it with; this one ends instead of hanging silent.
+        call.interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self, weak call] note in
+            guard
+                let self, let call, self.call === call,
+                let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                AVAudioSession.InterruptionType(rawValue: raw) == .began
+            else { return }
+            self.finish(call, remote: false, why: "interrupted")
+        }
+        self.call = call
+        task.resume()
+        receive(call)
+        activateWithoutCallKit(call, callKitError: "none")
+        callLog.info("native voice call opening")
+        return call.finished ? nil : call.id
+    }
+
+    func hangUpNative(id: String) {
+        guard let call, call.id == id, !call.callKit, !call.finished else { return }
+        hangUp(call, why: "native_hangup")
+    }
+
+    func setMutedNative(id: String, muted: Bool) {
+        guard let call, call.id == id, !call.callKit, !call.finished else { return }
+        applyMute(call, muted: muted, fromSystem: true)
+    }
+
     static func configureSessionForCall() {
         do {
             try configureSession()
@@ -338,6 +408,10 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     // applied so far: an earlier request may still be pending.
     func setMutedFromPage(id: String, muted: Bool) {
         guard let call = current(id) else { return }
+        if !call.callKit {
+            applyMute(call, muted: muted, fromSystem: false)
+            return
+        }
         let action = CXSetMutedCallAction(call: call.uuid, muted: muted)
         callController.request(CXTransaction(action: action)) { [weak self] error in
             guard error != nil else { return }
@@ -401,7 +475,10 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         let audio = NativeCallAudio()
         audio.muted = call.muted
         audio.onFrame = NativeCallAudio.sender(for: call.task)
-        audio.onPlayback = { [weak self] event in self?.emit(call, "playback", event) }
+        audio.onPlayback = { [weak self] event in
+            self?.emit(call, "playback", event)
+            call.observer?.nativeCall(call.id, didReceive: .playback(event))
+        }
         audio.onFailure = { [weak self] in
             guard let self, self.call === call else { return }
             callLog.error("voice audio lost after a route change")
@@ -433,6 +510,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             call.task.send(.string(text)) { _ in }
         }
         if fromSystem { emit(call, "mute", muted) }
+        call.observer?.nativeCall(call.id, didReceive: .mute(muted))
     }
 
     // finish ends the call once: audio off, socket closed, system call ended
@@ -450,12 +528,19 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         if call.manualSession {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
-        if remote {
+        if let observer = call.interruptionObserver {
+            NotificationCenter.default.removeObserver(observer)
+            call.interruptionObserver = nil
+        }
+        if !call.callKit {
+            // No system call to end.
+        } else if remote {
             provider.reportCall(with: call.uuid, endedAt: Date(), reason: call.serverEnded || call.hangingUp ? .remoteEnded : .failed)
         } else {
             callController.request(CXTransaction(action: CXEndCallAction(call: call.uuid))) { _ in }
         }
         if !call.pageClosed { emit(call, "close", reason) }
+        call.observer?.nativeCall(call.id, didReceive: .close(reason: reason, serverEnded: call.serverEnded))
         if self.call === call { self.call = nil }
         callLog.info("voice call finished remote=\(remote, privacy: .public) server_ended=\(call.serverEnded, privacy: .public)")
     }
@@ -489,7 +574,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
 
     func providerDidReset(_ provider: CXProvider) {
         NativeIncomingCalls.shared.reset()
-        if let call { finish(call, remote: false, why: "provider_reset") }
+        if let call, call.callKit { finish(call, remote: false, why: "provider_reset") }
     }
 
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
@@ -528,9 +613,13 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         if NativeIncomingCalls.shared.decline(action) { return }
         action.fulfill()
         guard let call, call.uuid == action.callUUID, !call.finished else { return }
-        // Hung up from the lock screen, a headset or the car: silence now,
-        // and let the server end the call so its record is saved; the page
-        // learns it from the server's "ended".
+        hangUp(call, why: "system_hangup")
+    }
+
+    // Hung up from the lock screen, a headset or the car: silence now,
+    // and let the server end the call so its record is saved; the page
+    // learns it from the server's "ended".
+    private func hangUp(_ call: Call, why: String) {
         call.audioWanted = false
         call.audio?.stop()
         call.audio = nil
@@ -539,10 +628,10 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             call.task.send(.string("{\"type\":\"hangup\"}")) { _ in }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                 guard let self, self.call === call else { return }
-                self.finish(call, remote: true, why: "system_hangup_timeout")
+                self.finish(call, remote: true, why: "\(why)_timeout")
             }
         } else {
-            finish(call, remote: true, why: "system_hangup_before_open")
+            finish(call, remote: true, why: "\(why)_before_open")
         }
     }
 
@@ -571,8 +660,9 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         guard let call, call.task === webSocketTask else { return }
         call.open = true
         // Connected is reported only for an outgoing call CallKit has started.
-        if call.started && !call.incoming { provider.reportOutgoingCall(with: call.uuid, connectedAt: Date()) }
+        if call.started && !call.incoming && call.callKit { provider.reportOutgoingCall(with: call.uuid, connectedAt: Date()) }
         emit(call, "open")
+        call.observer?.nativeCall(call.id, didReceive: .open)
     }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {

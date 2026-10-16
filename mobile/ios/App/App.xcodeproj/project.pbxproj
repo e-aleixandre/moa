@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E0000000000000000000C001 /* CarPlayOwners.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000C001 /* CarPlayOwners.swift */; };
+		E0000000000000000000C002 /* CarPlayCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000C002 /* CarPlayCall.swift */; };
+		E0000000000000000000C003 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000C003 /* CarPlaySceneDelegate.swift */; };
+		E0000000000000000000C004 /* CarPlayOwners.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000C001 /* CarPlayOwners.swift */; };
+		E0000000000000000000C005 /* CarPlayOwnersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000C005 /* CarPlayOwnersTests.swift */; };
 		B00000000000000000000001 /* PushEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* PushEnvelope.swift */; };
 		B00000000000000000000002 /* NativePushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* NativePushRegistration.swift */; };
 		B00000000000000000000003 /* NativePushBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* NativePushBridge.swift */; };
@@ -97,6 +102,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		E1000000000000000000C001 /* CarPlayOwners.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayOwners.swift; sourceTree = "<group>"; };
+		E1000000000000000000C002 /* CarPlayCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayCall.swift; sourceTree = "<group>"; };
+		E1000000000000000000C003 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
+		E1000000000000000000C004 /* App-CarPlaySim.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "App-CarPlaySim.entitlements"; sourceTree = "<group>"; };
+		E1000000000000000000C005 /* CarPlayOwnersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayOwnersTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000001 /* PushEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushEnvelope.swift; sourceTree = "<group>"; };
 		B10000000000000000000002 /* NativePushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePushRegistration.swift; sourceTree = "<group>"; };
 		B10000000000000000000003 /* NativePushBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePushBridge.swift; sourceTree = "<group>"; };
@@ -233,6 +243,9 @@
 				B10000000000000000000003 /* NativePushBridge.swift */,
 				D1000000000000000000A001 /* NativeVoiceCall.swift */,
 				D1000000000000000000A002 /* NativeIncomingCall.swift */,
+				E1000000000000000000C001 /* CarPlayOwners.swift */,
+				E1000000000000000000C002 /* CarPlayCall.swift */,
+				E1000000000000000000C003 /* CarPlaySceneDelegate.swift */,
 				B20000000000000000000001 /* Localizable.strings */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -241,6 +254,7 @@
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
 				A10000000000000000000004 /* App.entitlements */,
+				E1000000000000000000C004 /* App-CarPlaySim.entitlements */,
 				A1000000000000000000000C /* PrivacyInfo.xcprivacy */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
@@ -290,6 +304,7 @@
 				BA6D4BE125E99C1D9ED870A6 /* ShareBodyWriterTests.swift */,
 				039A9BF7103BA0E1B896C1A7 /* ShareClientTests.swift */,
 				C1A0000000000000000000A1 /* ShareControllerTests.swift */,
+				E1000000000000000000C005 /* CarPlayOwnersTests.swift */,
 			);
 			path = PushEnvelopeTests;
 			sourceTree = "<group>";
@@ -533,6 +548,9 @@
 				B00000000000000000000003 /* NativePushBridge.swift in Sources */,
 				D0000000000000000000A001 /* NativeVoiceCall.swift in Sources */,
 				D0000000000000000000A002 /* NativeIncomingCall.swift in Sources */,
+				E0000000000000000000C001 /* CarPlayOwners.swift in Sources */,
+				E0000000000000000000C002 /* CarPlayCall.swift in Sources */,
+				E0000000000000000000C003 /* CarPlaySceneDelegate.swift in Sources */,
 				9793AE35C5F3186239D34C6F /* KeychainGroups.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -568,6 +586,8 @@
 				C1B0000000000000000000A1 /* ShareControllerTests.swift in Sources */,
 				C1B0000000000000000000A2 /* ShareViewController.swift in Sources */,
 				C1B0000000000000000000A3 /* SharedInbox.swift in Sources */,
+				E0000000000000000000C004 /* CarPlayOwners.swift in Sources */,
+				E0000000000000000000C005 /* CarPlayOwnersTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
