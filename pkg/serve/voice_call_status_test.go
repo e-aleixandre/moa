@@ -212,3 +212,43 @@ func TestVoiceCall_NoSpeechStoppedNoLatency(t *testing.T) {
 		t.Fatalf("usage = %+v / %s, want no speech latency", u, minutes)
 	}
 }
+
+// ChatGPT has no speech_stopped: its latency starts at the user's turn.done
+// and lands in its own fields, never in the speech ones.
+func TestVoiceCall_ChatGPTTurnEndLatency(t *testing.T) {
+	f := vpNewFixture(t, "chatgpt-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.user(t, "u1", "hello")
+	time.Sleep(80 * time.Millisecond)
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "audio frame", func() bool {
+		for _, fr := range c.snapshot() {
+			if fr.kind == websocket.MessageBinary {
+				return true
+			}
+		}
+		return false
+	})
+	u, minutes := vsEndAndUsage(t, f, c, p)
+	if u.TurnEndLatencyCount != 1 || u.TurnEndLatencyMsP50 < 70 || u.TurnEndLatencyMsMax != u.TurnEndLatencyMsP50 || u.TurnEndLatencyMsMax > 5000 {
+		t.Fatalf("turn-end latency = %+v, want one sample of about 80ms", u)
+	}
+	if u.SpeechLatencyCount != 0 || strings.Contains(minutes, "speech_latency") || !strings.Contains(minutes, `"turn_end_latency_count":1`) {
+		t.Fatalf("usage = %+v / %s", u, minutes)
+	}
+}
+
+// Audio with no user turn.done is not a sample.
+func TestVoiceCall_ChatGPTNoTurnEndNoLatency(t *testing.T) {
+	f := vpNewFixture(t, "chatgpt-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.audio(t, vpPCM())
+	u, minutes := vsEndAndUsage(t, f, c, p)
+	if u.TurnEndLatencyCount != 0 || u.TurnEndLatencyMsMax != 0 || strings.Contains(minutes, "turn_end_latency") {
+		t.Fatalf("usage = %+v / %s, want no turn-end latency", u, minutes)
+	}
+}

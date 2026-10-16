@@ -247,7 +247,11 @@ func parseChatGPT(data []byte) []Event {
 		if e.Turn.Role != "user" && e.Turn.Role != "assistant" {
 			return nil
 		}
-		return []Event{{Kind: EventTranscript, Role: e.Turn.Role, ItemID: e.Turn.ID, Text: e.Turn.Transcript, Final: true}}
+		final := Event{Kind: EventTranscript, Role: e.Turn.Role, ItemID: e.Turn.ID, Text: e.Turn.Transcript, Final: true}
+		if e.Turn.Role == "user" {
+			return []Event{final, {Kind: EventUserTurnEnded}}
+		}
+		return []Event{final}
 	case "delegation.created":
 		if e.Item.Type != "delegation" || e.Item.Target != "client" || e.Item.ID == "" {
 			return nil

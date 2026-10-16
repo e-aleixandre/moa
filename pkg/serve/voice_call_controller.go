@@ -142,6 +142,7 @@ type voiceCall struct {
 	askPending bool
 	askLatency []time.Duration // ask_session asked → answered, per answered ask
 	speechLat  []time.Duration // speech_stopped → first provider audio, per turn (only providers that emit speech_stopped)
+	turnLat    []time.Duration // user turn.done → first provider audio, per turn (ChatGPT plan only)
 	costStart  float64         // the session's text spend when the call opened
 	unsubs     []func()        // bus subscriptions binding asks/brief to their run
 
@@ -151,6 +152,9 @@ type voiceCall struct {
 	// speechStopped is when the provider last reported the user stopped
 	// talking; the first audio frame after it closes one latency sample.
 	speechStopped time.Time
+	// turnEnded is the same for the ChatGPT plan's user turn.done, kept
+	// apart because its reference is not speech_stopped.
+	turnEnded time.Time
 }
 
 // voiceMinutes is what the model reported through end_call. Its "passed"
@@ -267,16 +271,30 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 			c.mu.Unlock()
 			c.speechStopped = time.Time{}
 		}
+		if !c.turnEnded.IsZero() {
+			c.mu.Lock()
+			if len(c.turnLat) < voiceMaxLatencySamples {
+				c.turnLat = append(c.turnLat, time.Since(c.turnEnded))
+			}
+			c.mu.Unlock()
+			c.turnEnded = time.Time{}
+		}
 		if client != nil && !client.sendAudio(ev.PCM) {
 			c.requestEnd("slow_client")
 		}
 	case voice.EventSpeechStopped:
 		c.speechStopped = time.Now()
+	case voice.EventUserTurnEnded:
+		c.turnEnded = time.Now()
 	case voice.EventSpeechStarted:
+		c.turnEnded = time.Time{}
 		c.speechStopped = time.Time{} // the user kept talking: not a turn end
 		// Every provider's barge-in empties the client's playback the same way.
 		c.toClient(client, map[string]any{"type": "state", "state": "listening", "interrupt": true})
 	case voice.EventTranscript:
+		if ev.Role == "user" && !ev.Final {
+			c.turnEnded = time.Time{} // the user is still talking: not a turn end
+		}
 		if c.transcript.Add(ev) != nil {
 			c.requestEnd("transcript_limit")
 			return

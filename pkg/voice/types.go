@@ -34,6 +34,11 @@ const (
 	EventReady         EventKind = "ready"
 	EventSpeechStarted EventKind = "speech_started"
 	EventSpeechStopped EventKind = "speech_stopped"
+	// EventUserTurnEnded is the end of the user's turn as the ChatGPT plan
+	// reports it (datachannel turn.done, role user). It is a different
+	// reference from EventSpeechStopped: it trails the end of speech by the
+	// provider's transcription, so the two latencies are never comparable.
+	EventUserTurnEnded EventKind = "user_turn_ended"
 	EventTranscript    EventKind = "transcript"
 	EventAudio         EventKind = "audio"
 	EventToolBatch     EventKind = "tool_batch"

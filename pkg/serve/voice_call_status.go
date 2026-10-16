@@ -59,9 +59,15 @@ type voiceUsage struct {
 	// Speech latency: the user stops talking (provider's speech_stopped) →
 	// first audio back, as moa saw it. Absent when the provider reports no
 	// speech_stopped; zero would claim an instant answer.
-	SpeechLatencyCount  int     `json:"speech_latency_count,omitempty"`
-	SpeechLatencyMsP50  int64   `json:"speech_latency_ms_p50,omitempty"`
-	SpeechLatencyMsMax  int64   `json:"speech_latency_ms_max,omitempty"`
+	SpeechLatencyCount int   `json:"speech_latency_count,omitempty"`
+	SpeechLatencyMsP50 int64 `json:"speech_latency_ms_p50,omitempty"`
+	SpeechLatencyMsMax int64 `json:"speech_latency_ms_max,omitempty"`
+	// Turn-end latency (ChatGPT plan): the user's turn.done → first audio
+	// back. A different reference from the speech latency above (it includes
+	// the provider's transcription), so it has its own fields.
+	TurnEndLatencyCount int     `json:"turn_end_latency_count,omitempty"`
+	TurnEndLatencyMsP50 int64   `json:"turn_end_latency_ms_p50,omitempty"`
+	TurnEndLatencyMsMax int64   `json:"turn_end_latency_ms_max,omitempty"`
 	SessionCostDeltaUSD float64 `json:"session_cost_delta_usd"`
 }
 
@@ -77,6 +83,7 @@ func (c *voiceCall) usageRecord(sess *ManagedSession, seconds, deliveries int) v
 	c.mu.Lock()
 	asks, lat := c.asks, append([]time.Duration(nil), c.askLatency...)
 	speech := append([]time.Duration(nil), c.speechLat...)
+	turn := append([]time.Duration(nil), c.turnLat...)
 	c.mu.Unlock()
 	u := voiceUsage{CallID: c.id, SessionID: c.sessionID, Provider: c.provider, Billing: c.billing.Kind,
 		EndedAt: time.Now().Unix(), Seconds: seconds, Deliveries: deliveries, Asks: asks,
@@ -97,6 +104,12 @@ func (c *voiceCall) usageRecord(sess *ManagedSession, seconds, deliveries int) v
 		u.SpeechLatencyCount = len(speech)
 		u.SpeechLatencyMsP50 = speech[(len(speech)-1)/2].Milliseconds()
 		u.SpeechLatencyMsMax = speech[len(speech)-1].Milliseconds()
+	}
+	if len(turn) > 0 {
+		sort.Slice(turn, func(i, j int) bool { return turn[i] < turn[j] })
+		u.TurnEndLatencyCount = len(turn)
+		u.TurnEndLatencyMsP50 = turn[(len(turn)-1)/2].Milliseconds()
+		u.TurnEndLatencyMsMax = turn[len(turn)-1].Milliseconds()
 	}
 	return u
 }
