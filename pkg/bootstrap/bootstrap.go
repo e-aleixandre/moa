@@ -88,13 +88,14 @@ type SessionConfig struct {
 	// Context for MCP servers and subagent async jobs. Required.
 	Ctx context.Context
 
-	// Agent tuning. Zero values use package defaults.
-	ThinkingLevel string // Default: "medium"
-	Fast          bool   // Premium speed for this session when the model supports it.
-	Daybreak      bool   // Ask for the Daybreak program on OpenAI requests.
 	// DaybreakCatalog snapshots the account's model catalog for Daybreak; nil
 	// behaves as a catalog that was never loaded.
-	DaybreakCatalog     func() core.DaybreakAvailability
+	DaybreakCatalog func() core.DaybreakAvailability
+
+	// Agent tuning. Zero values use package defaults.
+	ThinkingLevel       string        // Default: "medium"
+	Fast                bool          // Premium speed for this session when the model supports it.
+	Daybreak            bool          // Ask for the Daybreak program on OpenAI requests.
 	MaxTurns            int           // 0 = unlimited (default). Overrides config.json.
 	MaxToolCallsPerTurn int           // 0 = unlimited (default). Overrides config.json.
 	MaxRunDuration      time.Duration // 0 = unlimited (default). Overrides config.json.
@@ -192,23 +193,24 @@ type SessionConfig struct {
 
 // Session is a fully wired session ready for agent.Run/Send.
 type Session struct {
-	Agent *agent.Agent
 	// DaybreakCatalog is SessionConfig.DaybreakCatalog, handed to the runtime.
 	DaybreakCatalog func() core.DaybreakAvailability
-	ToolReg         *core.Registry
-	TaskStore       *tasks.Scope
-	Goal            *goal.Goal
-	AskBridge       *askuser.Bridge
-	SecretBroker    *secretaction.Broker // nil unless EnableSecretActions
-	Gate            *permission.Gate
-	MCPManager      *mcp.Manager
-	MCPController   *mcp.Controller
-	MCPPolicy       core.MCPDisablePolicy
-	PathPolicy      *tool.PathPolicy
-	AgentsMD        string
-	Skills          []skill.Skill
-	SkillsIndex     string
-	SystemPrompt    string
+
+	Agent         *agent.Agent
+	ToolReg       *core.Registry
+	TaskStore     *tasks.Scope
+	Goal          *goal.Goal
+	AskBridge     *askuser.Bridge
+	SecretBroker  *secretaction.Broker // nil unless EnableSecretActions
+	Gate          *permission.Gate
+	MCPManager    *mcp.Manager
+	MCPController *mcp.Controller
+	MCPPolicy     core.MCPDisablePolicy
+	PathPolicy    *tool.PathPolicy
+	AgentsMD      string
+	Skills        []skill.Skill
+	SkillsIndex   string
+	SystemPrompt  string
 	// BuildBasePrompt regenerates the base system prompt from a tool-spec set,
 	// reading the on-disk inputs (AGENTS.md, skill and memory indexes) through
 	// Sources so a rebuild reflects a reload rather than the values the session
