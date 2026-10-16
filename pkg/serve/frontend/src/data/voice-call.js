@@ -110,13 +110,17 @@ function initialState(sessionId) {
 export class VoiceCallController {
   // audio is one engine, or createAudio builds a fresh one for every call
   // (a browser engine releases everything it acquired when it stops).
-  constructor({ sessionId, fetch: fetchImpl, WebSocket: WebSocketImpl, audio, createAudio, onState, now } = {}) {
+  // fallback ({WebSocket, createAudio}) is the page's own transport, used
+  // when another transport (the iOS app's) drops before it ever had audio.
+  constructor({ sessionId, fetch: fetchImpl, WebSocket: WebSocketImpl, audio, createAudio, onState, now, fallback, onFallback } = {}) {
     this.sessionId = sessionId;
     this.fetch = fetchImpl || ((...args) => globalThis.fetch(...args));
     this.WebSocket = WebSocketImpl || globalThis.WebSocket;
     this.audio = audio;
     this.createAudio = createAudio || null;
     this.onState = onState || (() => {});
+    this.fallback = fallback || null;
+    this.onFallback = onFallback || (() => {});
     this.now = now || (() => Date.now());
     this.s = initialState(sessionId);
     this.ws = null;
@@ -208,9 +212,14 @@ export class VoiceCallController {
     this.ws = ws;
     const opened = new Promise((resolve) => {
       ws.onopen = () => resolve(true);
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         resolve(false);
-        if (gen === this.gen) this.finish(this.s.phase === 'ending' ? 'hangup' : 'client_lost');
+        if (gen !== this.gen) return;
+        if (this.fallback && !this.audioReady && this.s.phase !== 'ending') {
+          this.useFallback(callId, wsURL, ev?.reason || 'closed_before_audio');
+          return;
+        }
+        this.finish(this.s.phase === 'ending' ? 'hangup' : 'client_lost');
       };
     });
     ws.onerror = () => {};
@@ -239,6 +248,23 @@ export class VoiceCallController {
     if (this.heldPhase && this.s.phase === 'connecting') this.set({ phase: this.heldPhase });
     this.heldPhase = '';
     if (this.s.muted) this.audio.setMuted?.(true);
+  }
+
+  // useFallback reattaches the same call over the page's own socket and
+  // audio; the server keeps a call open for a few seconds without a client.
+  useFallback(callId, wsURL, note) {
+    const { WebSocket: WebSocketImpl, createAudio } = this.fallback;
+    this.fallback = null;
+    const gen = ++this.gen;
+    this.audio?.stop?.();
+    this.WebSocket = WebSocketImpl;
+    this.createAudio = createAudio;
+    this.audio = createAudio();
+    this.audio.prepare?.();
+    this.onFallback(note);
+    const path = typeof wsURL === 'string' && wsURL.startsWith('/') ? wsURL : `/api/voice/calls/${encodeURIComponent(callId)}/ws`;
+    const sep = path.includes('?') ? '&' : '?';
+    this.connect(gen, { call_id: callId, ws_url: `${path}${sep}client_note=${encodeURIComponent(`native:${note}`.slice(0, 120))}` });
   }
 
   capture(gen, ws, pcm) {

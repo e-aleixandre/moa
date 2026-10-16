@@ -50,7 +50,7 @@ export function createNativeCallDeps(bridge, { name = () => '', sessionId = () =
         if (ws.readyState === 3) return;
         ws.readyState = 3;
         sockets.delete(id);
-        ws.onclose?.();
+        ws.onclose?.({ reason: typeof ev.data === 'string' ? ev.data : '' });
         return;
       default:
     }

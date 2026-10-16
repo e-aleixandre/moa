@@ -28,10 +28,21 @@ function partyName(sessionId) {
 // Injectable for tests: the controller's I/O boundary. Inside the iOS app
 // the socket and audio are the app's own (a system call that survives the
 // lock screen); elsewhere they are the page's.
-const nativeBridge = nativeCallBridge();
+// Off until the iOS app's native call is proven on a device: build 7 closes
+// its socket right after it opens, so every call goes through the page.
+const NATIVE_CALLS = false;
+const nativeBridge = NATIVE_CALLS ? nativeCallBridge() : null;
+const webDeps = { fetch: undefined, WebSocket: undefined, createAudio: () => createCallAudio({ claimWakeLock }) };
+const webFallback = { WebSocket: globalThis.WebSocket, createAudio: webDeps.createAudio };
 const browserDeps = nativeBridge
-  ? { fetch: undefined, ...createNativeCallDeps(nativeBridge, { name: () => callName, sessionId: () => callSession }) }
-  : { fetch: undefined, WebSocket: undefined, createAudio: () => createCallAudio({ claimWakeLock }) };
+  ? { fetch: undefined, ...createNativeCallDeps(nativeBridge, { name: () => callName, sessionId: () => callSession }), fallback: webFallback }
+  : webDeps;
+
+// A native call that dropped before it had audio is taken over by the page;
+// later calls on this page go straight to the page's own transport.
+function nativeFailed() {
+  if (deps === browserDeps) deps = webDeps;
+}
 let deps = browserDeps;
 export function __setVoiceCallDepsForTests(next) {
   controller = null;
@@ -64,6 +75,8 @@ export function startVoiceCall(sessionId, { provider, screen } = {}) {
       fetch: deps.fetch,
       WebSocket: deps.WebSocket,
       createAudio: deps.createAudio,
+      fallback: deps.fallback,
+      onFallback: nativeFailed,
       onState: (state) => publish(sessionId, state),
     });
   }

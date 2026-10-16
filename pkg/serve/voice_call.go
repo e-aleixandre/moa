@@ -382,27 +382,35 @@ func sameOrigin(origin, host string) bool {
 // open WebSockets with cookies), only a native header credential may come
 // without one, and the call must belong to the caller's principal.
 func (r *voiceCallRegistry) handleWS(w http.ResponseWriter, req *http.Request) {
+	callID := req.PathValue("id")
+	// client_note is a short, client-chosen diagnostic (e.g. why the iOS app
+	// handed the call to the page); it is only logged.
+	note := voiceClientNote(req.URL.Query().Get("client_note"))
 	identity, ok := requestAuthIdentity(req)
+	refuse := func(status int, why string) {
+		slog.Info("voice call socket refused", "call", callID, "status", status, "why", why, "header_auth", identity.Header, "note", note)
+		http.Error(w, why, status)
+	}
 	if !ok {
-		http.Error(w, "unauthenticated", http.StatusUnauthorized)
+		refuse(http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	if !identity.Header && !sameOrigin(req.Header.Get("Origin"), req.Host) {
-		http.Error(w, "same-origin upgrade required", http.StatusForbidden)
+		refuse(http.StatusForbidden, "same-origin upgrade required")
 		return
 	}
-	c, principal, found := r.lookup(req.PathValue("id"))
+	c, principal, found := r.lookup(callID)
 	if !found || c == nil {
-		http.Error(w, "call not found", http.StatusNotFound)
+		refuse(http.StatusNotFound, "call not found")
 		return
 	}
 	if principal != identity.auditID() {
-		http.Error(w, "not your call", http.StatusForbidden)
+		refuse(http.StatusForbidden, "not your call")
 		return
 	}
 	lease, err := deviceLeaseForWebSocket(req, func(string) { c.requestEnd("device_revoked") })
 	if err != nil {
-		http.Error(w, "device unavailable", http.StatusServiceUnavailable)
+		refuse(http.StatusServiceUnavailable, "device unavailable")
 		return
 	}
 	if lease != nil {
@@ -410,6 +418,7 @@ func (r *voiceCallRegistry) handleWS(w http.ResponseWriter, req *http.Request) {
 	}
 	conn, err := websocket.Accept(w, req, wsAcceptOptions())
 	if err != nil {
+		slog.Info("voice call socket upgrade failed", "call", callID, "err", err, "note", note)
 		return
 	}
 	conn.SetReadLimit(voice.MaxControlJSON)
@@ -419,8 +428,25 @@ func (r *voiceCallRegistry) handleWS(w http.ResponseWriter, req *http.Request) {
 		cl.finish(map[string]any{"type": "ended", "reason": c.endReason()})
 		return
 	}
-	c.readClient(cl)
+	attached := time.Now()
+	slog.Info("voice call socket attached", "call", callID, "header_auth", identity.Header, "note", note)
+	readErr := c.readClient(cl)
+	slog.Info("voice call socket detached", "call", callID, "after", time.Since(attached).Round(time.Millisecond),
+		"close_status", websocket.CloseStatus(readErr), "err", readErr)
 	c.detach(cl)
+}
+
+// voiceClientNote keeps a logged client note short and printable.
+func voiceClientNote(s string) string {
+	if len(s) > 120 {
+		s = s[:120]
+	}
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // voiceClientControls bounds the JSON frames queued towards the client.
@@ -578,23 +604,25 @@ func (cl *voiceClient) kill() {
 // readClient accepts binary PCM and the three controls. Anything else is a
 // protocol violation that ends the call: the client can never inject
 // transcripts, tool calls, signaling or credentials.
-func (c *voiceCall) readClient(cl *voiceClient) {
+// readClient reads until the client goes or the call ends it; the error is
+// why the read stopped (nil when the call itself ended it), for the log.
+func (c *voiceCall) readClient(cl *voiceClient) error {
 	for {
 		kind, data, err := cl.conn.Read(cl.ctx)
 		if err != nil {
-			return
+			return err
 		}
 		if kind == websocket.MessageBinary {
 			if len(data) == 0 || len(data)%2 != 0 || len(data) > voice.MaxPCMFrameBytes {
 				c.requestEnd("protocol_violation")
-				return
+				return nil
 			}
 			if c.muted.Load() || c.ending.Load() {
 				continue
 			}
 			if err := c.up.SendAudio(cl.ctx, data); err != nil {
 				c.requestEnd("audio_backpressure")
-				return
+				return nil
 			}
 			continue
 		}
@@ -604,7 +632,7 @@ func (c *voiceCall) readClient(cl *voiceClient) {
 		}
 		if json.Unmarshal(data, &msg) != nil {
 			c.requestEnd("protocol_violation")
-			return
+			return nil
 		}
 		switch msg.Type {
 		case "ping":
@@ -612,15 +640,15 @@ func (c *voiceCall) readClient(cl *voiceClient) {
 		case "mute":
 			if msg.Muted == nil {
 				c.requestEnd("protocol_violation")
-				return
+				return nil
 			}
 			c.muted.Store(*msg.Muted)
 		case "hangup":
 			c.requestEnd("hangup")
-			return
+			return nil
 		default:
 			c.requestEnd("protocol_violation")
-			return
+			return nil
 		}
 	}
 }

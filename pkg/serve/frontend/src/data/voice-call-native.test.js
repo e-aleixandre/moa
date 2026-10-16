@@ -198,3 +198,41 @@ test('native call: hanging up while the app opens the microphone ends as hangup,
   expect(c.state().endedReason).toBe('hangup');
   expect(c.state().message).toBe('');
 });
+
+test('native call: the app dropping the call before audio hands the same call to the page', async () => {
+  const { b } = await injectedBridge();
+  const deps = createNativeCallDeps(b, { name: () => 'X' });
+  const opened = [];
+  class PageSocket {
+    constructor(url) { this.url = url; this.readyState = 0; opened.push(this); }
+    send() {}
+    close() { this.readyState = 3; }
+  }
+  const pageAudio = { started: 0, prepare() {}, async start() { this.started++; }, stop() {}, play() {}, interrupt() {}, setMuted() {} };
+  const notes = [];
+  const fetch = async () => ({ status: 201, ok: true, json: async () => ({ call_id: 'k1', ws_url: '/api/voice/calls/k1/ws' }) });
+  const c = new VoiceCallController({
+    sessionId: 's1', fetch, WebSocket: deps.WebSocket, createAudio: deps.createAudio,
+    fallback: { WebSocket: PageSocket, createAudio: () => pageAudio }, onFallback: (n) => notes.push(n),
+  });
+  const started = c.start();
+  await flush();
+  const id = c.ws.id;
+  b.__event({ id, type: 'open' });
+  await flush();
+  b.__event({ id, type: 'close' }); // build 7: the app closed it 70 ms after open
+  await flush();
+  expect(opened).toHaveLength(1);
+  expect(opened[0].url).toBe('wss://moa.example/api/voice/calls/k1/ws?client_note=native%3Aclosed_before_audio');
+  expect(notes).toEqual(['closed_before_audio']);
+  expect(c.state().phase).toBe('connecting');
+  opened[0].readyState = 1;
+  opened[0].onopen();
+  await flush();
+  expect(pageAudio.started).toBe(1);
+  expect(c.state().active).toBe(true);
+  // Once on the page's socket, a drop is a real loss.
+  opened[0].onclose();
+  expect(c.state().endedReason).toBe('client_lost');
+  await started;
+});
