@@ -31,7 +31,9 @@ test("the pairing screen links the privacy policy without leaving the app page",
 
 test("the build declares its privacy posture", () => {
   expect(appPlist).toMatch(/<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/);
-  expect(appPlist).not.toContain("UIBackgroundModes");
+  // The only background mode is audio, for a voice call that goes on with
+  // the screen locked; App Review rejects modes the app does not use.
+  expect(appPlist).toMatch(/<key>UIBackgroundModes<\/key>\s*<array>\s*<string>audio<\/string>\s*<\/array>/);
   expect(appManifest).toMatch(/<key>NSPrivacyTracking<\/key>\s*<false\/>/);
   expect(appManifest).toMatch(/<key>NSPrivacyCollectedDataTypes<\/key>\s*<array\/>/);
   expect(appManifest).toContain("<string>CA92.1</string>");

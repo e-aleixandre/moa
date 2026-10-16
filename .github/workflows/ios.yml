@@ -115,9 +115,9 @@ jobs:
           /usr/libexec/PlistBuddy -c \
             'Add :NSMicrophoneUsageDescription string "moa uses the microphone to dictate messages."' \
             ios/App/App/Info.plist
-          # No UIBackgroundModes: the app does not record or play audio in the
-          # background, and declaring a mode it does not use is grounds for
-          # App Review to reject it.
+          # UIBackgroundModes is only audio, declared in Info.plist, for voice
+          # calls that go on with the screen locked; declaring a mode the app
+          # does not use is grounds for App Review to reject it.
 
       # The icon is generated from one 1024px source rather than committed as
       # a catalogue of twenty crops: the crops are derived, and a derived file

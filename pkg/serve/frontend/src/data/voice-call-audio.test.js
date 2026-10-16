@@ -208,6 +208,21 @@ test('engine: stop releases microphone, AudioContext, nodes, module URL and wake
   expect(playback.port.posted.filter((m) => m.type === 'pcm')).toHaveLength(1);
 });
 
+test('engine: the audio session is play-and-record before the context exists, and restored on stop', async () => {
+  const b = fakeBrowser();
+  const seen = [];
+  const audioSession = { _t: 'auto', get type() { return this._t; }, set type(v) { this._t = v; seen.push(v); } };
+  const Ctx = b.deps.AudioContextImpl;
+  b.deps.AudioContextImpl = class extends Ctx { constructor() { super(); b.log.push(`ctx.session:${audioSession.type}`); } };
+  const engine = createCallAudio({ ...b.deps, audioSession });
+  engine.prepare();
+  await engine.start(() => {});
+  expect(b.log).toContain('ctx.session:play-and-record');
+  engine.stop();
+  engine.stop();
+  expect(seen).toEqual(['play-and-record', 'auto']);
+});
+
 test('engine: stopping while the microphone prompt is open still releases the microphone', async () => {
   const b = fakeBrowser();
   let grant;

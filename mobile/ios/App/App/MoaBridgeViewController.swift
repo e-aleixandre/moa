@@ -9,6 +9,7 @@ final class MoaBridgeViewController: CAPBridgeViewController {
     private let deviceAuthHandler = DeviceAuthMessageHandler()
     private let nativePushHandler = NativePushMessageHandler()
     private let savedSecretsHandler = SavedSecretsMessageHandler()
+    private let voiceAudioSession = VoiceAudioSessionController()
     private var serverRecovery: PairedServerRecoveryController?
 
     override func webView(with frame: CGRect, configuration: WKWebViewConfiguration) -> WKWebView {
@@ -47,6 +48,7 @@ final class MoaBridgeViewController: CAPBridgeViewController {
         nativePushHandler.webView = webView
         savedSecretsHandler.webView = webView
         PushNavigator.shared.webView = webView
+        if let webView { voiceAudioSession.attach(to: webView) }
         if let webView, let capacitorDelegate = webView.navigationDelegate {
             let recovery = PairedServerRecoveryController(webView: webView, forwardingTo: capacitorDelegate)
             serverRecovery = recovery

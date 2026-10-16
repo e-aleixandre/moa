@@ -253,8 +253,10 @@ export function createCallAudio({
   claimWakeLock = null,
   URLImpl = globalThis.URL,
   BlobImpl = globalThis.Blob,
+  audioSession = globalThis.navigator?.audioSession,
 } = {}) {
   let ctx = null;
+  let priorSessionType = null;
   let stream = null;
   let source = null;
   let capture = null;
@@ -274,6 +276,13 @@ export function createCallAudio({
     // start sounding from a gesture, and the call is opened after a fetch.
     prepare() {
       if (stopped || ctx || !AudioContextImpl) return;
+      // WebKit keeps Web Audio running in the background (screen locked, app
+      // installed with the audio background mode) only for a play-and-record
+      // session, and must know it before the context exists.
+      if (audioSession && priorSessionType === null) {
+        priorSessionType = audioSession.type || 'auto';
+        try { audioSession.type = 'play-and-record'; } catch { /* unsupported */ }
+      }
       ctx = new AudioContextImpl();
       ctx.resume?.()?.catch?.(() => {});
     },
@@ -353,6 +362,9 @@ export function createCallAudio({
       moduleURL = '';
       releaseWake?.();
       releaseWake = null;
+      if (audioSession && priorSessionType !== null) {
+        try { audioSession.type = priorSessionType; } catch { /* unsupported */ }
+      }
     },
   };
   return engine;

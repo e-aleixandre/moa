@@ -307,7 +307,8 @@ no collected data types, and one required-reason API, `UserDefaults` (reason
 API -- the App Group is a file container, not shared `UserDefaults` -- so they
 have no manifest; add one if that changes. `Info.plist` sets
 `ITSAppUsesNonExemptEncryption` to `false`: the container uses HTTPS and Apple's
-CryptoKit only. It declares no `UIBackgroundModes`. The pairing screen links the
+CryptoKit only. Its only `UIBackgroundModes` entry is `audio`, so a voice call
+goes on with the screen locked (`App/VoiceAudioSession.swift`). The pairing screen links the
 privacy policy (`https://letmoa.run/privacy`), which opens in the system browser.
 
 The minimum iOS version is 15.5. Capacitor 8 itself needs only 15.0; 15.5 was
