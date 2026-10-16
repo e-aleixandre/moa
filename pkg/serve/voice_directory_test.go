@@ -56,8 +56,14 @@ func TestVoiceOwnerCallReopensAClosedOwnerAndOpensTheCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	var call vpCreated
-	_ = json.Unmarshal(f.mustRequest("POST", "/api/voice/owners/"+own.ID+"/call", map[string]any{}, f.voice(0), http.StatusCreated), &call)
+	body := f.mustRequest("POST", "/api/voice/owners/"+own.ID+"/call", map[string]any{}, f.voice(0), http.StatusCreated)
+	_ = json.Unmarshal(body, &call)
 	f.created = true
+	var created map[string]any
+	_ = json.Unmarshal(body, &created)
+	if created["session_id"] != own.SessionID {
+		t.Fatalf("owner call names session %v, want the owner's %s", created["session_id"], own.SessionID)
+	}
 	if call.ID == "" || call.WSURL != "/api/voice/calls/"+call.ID+"/ws" {
 		t.Fatalf("owner call = %+v", call)
 	}

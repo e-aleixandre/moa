@@ -92,5 +92,10 @@ func (r *voiceCallRegistry) handleOwnerCall(w http.ResponseWriter, req *http.Req
 	if retry > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 	}
+	if status == http.StatusCreated {
+		// The phone needs it to hand a call started in the car over to the
+		// page that shows that conversation.
+		out["session_id"] = sessionID
+	}
 	voiceError(w, status, out)
 }
