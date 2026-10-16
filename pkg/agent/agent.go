@@ -1726,7 +1726,7 @@ func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	}
 
 	a.mu.Lock()
-	a.state.Messages = compacted
+	a.state.Messages = keepAppendedRecords(compacted, msgs, a.state.Messages)
 	a.state.CompactionEpoch++
 	slot := a.config.SessionCheckpoint
 	a.mu.Unlock()
@@ -1933,6 +1933,25 @@ func interruptedMarkerText(ctx context.Context, err error) string {
 // Callers must hold a.mu (or otherwise own the slice). Kept as a package helper
 // so every state-mutating entry point can enforce the "no anonymous message in
 // state" invariant that the tree syncer relies on for deduplication.
+// keepAppendedRecords is replacement followed by the records AppendRecord
+// added to cur after captured was read. A compaction or trim computes its
+// replacement from captured with the lock released, and AppendRecord is the
+// only writer allowed meanwhile: adopting the replacement alone would drop a
+// record before it is ever saved. Caller holds the state lock.
+func keepAppendedRecords(replacement, captured, cur []core.AgentMessage) []core.AgentMessage {
+	n := len(captured)
+	if len(cur) <= n || (n > 0 && cur[n-1].MsgID != captured[n-1].MsgID) {
+		return replacement
+	}
+	out := replacement[:len(replacement):len(replacement)]
+	for _, m := range cur[n:] {
+		if m.Role == "session_event" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func ensureMsgIDs(msgs []core.AgentMessage) {
 	for i := range msgs {
 		msgs[i].EnsureMsgID()

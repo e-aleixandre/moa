@@ -15,7 +15,10 @@ func tryTrim(cfg *loopConfig, settings *core.CompactionSettings, estimateBefore,
 
 	// Plan over the same message slice the request would use, and from the
 	// watermark already reached: a trim only ever moves forward.
-	plan, ok := core.PlanTrim(cfg.state.Messages, settings.KeepRecent, cfg.state.TrimWatermarkMsgID)
+	cfg.stateMu.Lock()
+	captured := cfg.state.Messages
+	cfg.stateMu.Unlock()
+	plan, ok := core.PlanTrim(captured, settings.KeepRecent, cfg.state.TrimWatermarkMsgID)
 	if !ok {
 		return false
 	}
@@ -45,7 +48,7 @@ func tryTrim(cfg *loopConfig, settings *core.CompactionSettings, estimateBefore,
 	copy(pre, cfg.state.Messages)
 
 	cfg.stateMu.Lock()
-	cfg.state.Messages = plan.Messages
+	cfg.state.Messages = keepAppendedRecords(plan.Messages, captured, cfg.state.Messages)
 	cfg.state.TrimWatermarkMsgID = plan.WatermarkMsgID
 	// Same epoch as a compaction: the anchored usage describes a request that
 	// no longer exists, so the estimator falls back to chars/4 until the next

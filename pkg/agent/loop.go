@@ -539,9 +539,12 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					cfg.stateMu.Unlock()
 					originals = append([]core.AgentMessage(nil), cfg.state.Messages...)
 				}
+				cfg.stateMu.Lock()
+				captured := cfg.state.Messages
+				cfg.stateMu.Unlock()
 				result, compacted, sumModel, fallbackNotice, err := compactWithSessionFallback(
 					ctx, sumProvider, sumModel, compactOpts, fallbackNotice, cfg.provider, cfg.model, sessionOpts,
-					cfg.state.Messages, estimate.Tokens, window, *compactionSettings, "",
+					captured, estimate.Tokens, window, *compactionSettings, "",
 					// The retry is one more request: it obeys the budget like any.
 					func() bool { _, _, over := cfg.overBudget(); return !over },
 				)
@@ -584,7 +587,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 						}
 					}
 					cfg.stateMu.Lock()
-					cfg.state.Messages = compacted
+					cfg.state.Messages = keepAppendedRecords(compacted, captured, cfg.state.Messages)
 					cfg.state.CompactionEpoch++
 					cfg.stateMu.Unlock()
 					if cfg.promptAfterCompaction != nil {

@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -111,5 +112,13 @@ func (m *Manager) recordVoice(sessionID, deliveryID string, msg core.AgentMessag
 		return err
 	}
 	a.receipts[deliveryID] = voiceReceipt{Action: "record", ID: msg.MsgID}
-	return sess.runtime.Flush()
+	if err := sess.runtime.Flush(); err != nil {
+		return err
+	}
+	// The saved snapshot is the tree's: a record missing from it after the
+	// Flush was never saved, whatever replaced the agent's history meanwhile.
+	if tree := sess.runtime.Context().Tree; tree != nil && !tree.HasMsgID(msg.MsgID) {
+		return fmt.Errorf("voice record %s was not saved", deliveryID)
+	}
+	return nil
 }
