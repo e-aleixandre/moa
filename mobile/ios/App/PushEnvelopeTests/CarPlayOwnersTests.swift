@@ -74,6 +74,8 @@ final class CarPlayOwnersTests: XCTestCase {
                        .started(wsPath: "/api/voice/calls/c1/ws"))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 201, data: json(["ws_url": "https://evil/ws"])), .alert(.unreachable))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 409, data: json(["error": "call_active"])), .alert(.callActive))
+        XCTAssertEqual(CarPlayCallStartModel.outcome(status: 409, data: json(["error": "owner_busy", "retryable": true])),
+                       .alert(.unreachable))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 503, data: json(["error": "plan_unavailable", "reason": "no_plan",
                                                                                "paid_option": ["provider": "xai"]])), .alert(.noPlan))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 503, data: json(["error": "no_plan"])), .alert(.noPlan))

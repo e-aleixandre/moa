@@ -131,6 +131,10 @@ enum CarPlayCallStartModel {
                 return .alert(.unreachable)
             }
             return .started(wsPath: ws)
+        case (409, "owner_busy"):
+            // The owner is being reopened by another request: retryable, but
+            // the car does not retry on its own.
+            return .alert(.unreachable)
         case (409, "call_active"):
             return .alert(.callActive)
         case (503, "plan_unavailable"), (503, "no_plan"), (502, "provider_unavailable"):
