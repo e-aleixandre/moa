@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Copy, MoreHorizontal, Trash2 } from "lucide-preact";
+import { Archive, ArchiveRestore, Copy, MoreHorizontal, PhoneCall, Trash2 } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { ActionMenu } from "../ActionMenu/ActionMenu.jsx";
 import { copyToClipboard } from "../../data/util/format.js";
@@ -17,6 +17,11 @@ export function SessionCardMenu({
   // (`saved` = closed), the wording says so, and Delete is not offered: it
   // would leave the owner's sessions without an owner.
   owner = false,
+  // An open owner can be called from here. `callState` is "" (free), "here"
+  // (already on a call with it: nothing to offer, the row opens the call bar)
+  // or "elsewhere" (another call runs: shown, but resting).
+  onCall,
+  callState = "",
 }) {
   const [open, setOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -29,6 +34,16 @@ export function SessionCardMenu({
 
   const noun = owner ? "owner" : "session";
   const actions = [
+    ...(owner && onCall && !session.saved && callState !== "here"
+      ? [{
+          id: "call",
+          icon: PhoneCall,
+          label: "Call",
+          disabled: callState === "elsewhere",
+          title: callState === "elsewhere" ? "Hang up your other call first" : undefined,
+          onClick: () => onCall(),
+        }]
+      : []),
     session.saved
       ? { id: "reopen", icon: ArchiveRestore, label: `Reopen ${noun}`, onClick: () => onReopen?.(session.id) }
       : { id: "close", icon: Archive, label: `Close ${noun}`, onClick: () => onClose?.(session.id) },

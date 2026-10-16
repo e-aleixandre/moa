@@ -210,13 +210,15 @@ function sectionWorst(section) {
 }
 
 // The same ⋯ menu as a session row, on an owner: a closed owner is a saved one.
-function OwnerMenu({ owner, onClose, onReopen }) {
+function OwnerMenu({ owner, onClose, onReopen, onCall, callState }) {
   return (
     <SessionCardMenu
       owner
       session={{ id: owner.id, saved: owner.session_state === "saved" }}
       onClose={() => onClose?.(owner)}
       onReopen={() => onReopen?.(owner)}
+      onCall={onCall ? () => onCall(owner) : undefined}
+      callState={callState}
       scrollContainerSelector=".zl-list"
     />
   );
@@ -330,7 +332,7 @@ export function Sidebar({
   owners = [],
   activeOwnerId = null,
   onOpenOwner,
-  // The owner row's ☎: calls that owner (data/voice-call-session.js).
+  // The owner menu's Call: calls that owner (data/voice-call-session.js).
   onCallOwner,
   // Close on an owner's ⋯ (the session menu, same gesture). Reopening is
   // opening it.
@@ -572,14 +574,27 @@ export function Sidebar({
                         heading has just named it. A project with no owner is
                         exactly what it is today. */}
                     {sectionOwner && (
-                      <OwnerRow
-                        owner={sectionOwner}
-                        project
-                        active={sectionOwner.id === activeOwnerId}
-                        onOpen={onOpenOwner}
-                        onCall={callable ? onCallOwner : undefined}
-                        call={ownerCall(sectionOwner)}
-                      />
+                      <div
+                        class={`zl-session${onCloseOwner ? " is-menu ofl-omenu" : ""}`}
+                        data-owner={sectionOwner.id}
+                      >
+                        <OwnerRow
+                          owner={sectionOwner}
+                          project
+                          active={sectionOwner.id === activeOwnerId}
+                          onOpen={onOpenOwner}
+                          call={ownerCall(sectionOwner)}
+                        />
+                        {onCloseOwner && (
+                          <OwnerMenu
+                            owner={sectionOwner}
+                            onClose={onCloseOwner}
+                            onReopen={onOpenOwner}
+                            onCall={callable && sectionOwner.session_id ? onCallOwner : undefined}
+                            callState={ownerCall(sectionOwner)}
+                          />
+                        )}
+                      </div>
                     )}
                     {shownSessions.map((s) => row(s, true))}
                     {hiddenSaved > 0 && (
@@ -622,10 +637,9 @@ export function Sidebar({
                             owner={owner}
                             active={owner.id === activeOwnerId}
                             onOpen={onOpenOwner}
-                            onCall={callable ? onCallOwner : undefined}
-                            call={ownerCall(owner)}
+                                call={ownerCall(owner)}
                           />
-                          {onCloseOwner && <OwnerMenu owner={owner} onClose={onCloseOwner} onReopen={onOpenOwner} />}
+                          {onCloseOwner && <OwnerMenu owner={owner} onClose={onCloseOwner} onReopen={onOpenOwner} onCall={callable && owner.session_id ? onCallOwner : undefined} callState={ownerCall(owner)} />}
                         </div>
                       ))}
                       {closedOwners.length > 0 && (

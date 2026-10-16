@@ -150,6 +150,8 @@ export function ActionMenu({
                 role="menuitem"
                 class={`action-menu-item${action.active ? " is-active" : ""}${action.danger ? " is-danger" : ""}`}
                 aria-pressed={action.active || undefined}
+                disabled={action.disabled || undefined}
+                title={action.title}
                 onMouseDown={keepFocus}
                 onClick={() => run(action)}
               >

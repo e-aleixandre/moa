@@ -42,11 +42,10 @@ function ChevronIcon() {
    height rhythm and the same two-line grammar, so the column keeps its beat,
    but the avatar and the missing age say "this is not one of the sessions
    below" before you have read a word. */
-// `onCall` adds the row's call button (☎): a tap calls this owner without
-// opening its conversation. `call` is "here" while the call is with this
-// owner (the button then returns to it) and "elsewhere" while another call
-// runs (the button rests).
-export function OwnerRow({ owner, project = false, active = false, onOpen, onCall, call = "" }) {
+// `call` is "here" while a voice call runs with this owner: the row wears a small
+// green phone beside its name; tapping the row opens the conversation, where the
+// call bar is. Starting a call lives in the owner's ⋯ menu.
+export function OwnerRow({ owner, project = false, active = false, onOpen, call = "" }) {
   const { lead, tail, stated } = ownerLine(owner);
   const state = ownerState(owner);
   const place = projectName(owner.root);
@@ -65,7 +64,7 @@ export function OwnerRow({ owner, project = false, active = false, onOpen, onCal
   // An owner whose children all stopped has no lead and, without anything
   // waiting, no second line: the row is its name (ownerLine).
   const said = [lead?.text, tail].filter(Boolean);
-  const label = `${owner.name}, project owner${said.length ? `. ${said.join(". ")}` : ""}`;
+  const label = `${owner.name}, project owner${call === "here" ? ", on a call" : ""}${said.length ? `. ${said.join(". ")}` : ""}`;
   return (
     <span class="zl-row-slot">
       <button
@@ -85,6 +84,7 @@ export function OwnerRow({ owner, project = false, active = false, onOpen, onCal
                 272px column it cost exactly the width that truncated
                 "2 waiting on you", which is the clause this row exists for. */}
             {project && <span class="ow-orow-kind zl-data" aria-hidden="true">owner</span>}
+            {call === "here" && <PhoneCall class="ow-orow-live" size={13} aria-hidden="true" />}
             <span class="zl-row-meta">
               <Dot state={ownerDotState(owner)} />
             </span>
@@ -111,18 +111,6 @@ export function OwnerRow({ owner, project = false, active = false, onOpen, onCal
           )}
         </span>
       </button>
-      {onCall && owner.session_id && (
-        <button
-          type="button"
-          class={`ow-orow-call${call === "here" ? " is-here" : ""}`}
-          aria-label={call === "here" ? `Back to the call with ${owner.name}` : `Call ${owner.name}`}
-          title={call === "elsewhere" ? "Hang up your other call first" : call === "here" ? "Back to the call" : `Call ${owner.name}`}
-          disabled={call === "elsewhere"}
-          onClick={() => onCall(owner)}
-        >
-          <PhoneCall size={15} aria-hidden="true" />
-        </button>
-      )}
     </span>
   );
 }

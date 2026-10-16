@@ -252,40 +252,6 @@ button.zl-group.ow-sec .zl-dot { flex: none; }
 }
 
 
-/* ── The owner row's call button (☎) ─────────────────────────────────────
-   A sibling of the row's button, never nested in it. With a thumb it is
-   always there; with a pointer it appears on hover or focus, beside the ⋯. */
-.zl-row-slot:has(.ow-orow-call) { position: relative; }
-.ow-orow-call {
-  position: absolute;
-  top: 50%;
-  right: 8px;
-  transform: translateY(-50%);
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 999px;
-  background: var(--zl-raised);
-  color: var(--zl-green);
-  cursor: pointer;
-}
-.ow-orow-call:disabled { color: var(--zl-t4); cursor: default; }
-.ow-orow-call.is-here { background: color-mix(in oklch, var(--zl-green) 22%, var(--zl-raised)); }
-.ofl-omenu .ow-orow-call { right: 40px; }
-/* A thumb target is 44px; the pointer density keeps the compact 36px. */
-.zl-side-body.is-phone .ow-orow-call { width: 44px; height: 44px; right: 4px; }
-.zl-side-body.is-phone .ofl-omenu .ow-orow-call { right: 40px; }
-.zl-side-body.is-phone .zl-row-slot:has(.ow-orow-call) .ow-orow { padding-right: 56px; }
-.zl-side-body.is-phone .ofl-omenu .zl-row-slot:has(.ow-orow-call) .ow-orow { padding-right: 88px; }
-.zl-side-body:not(.is-phone) .ow-orow-call:not(.is-here) {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--motion-exit-base) var(--motion-ease);
-}
-.zl-side-body:not(.is-phone) .zl-row-slot:focus-within .ow-orow-call { opacity: 1; pointer-events: auto; }
-@media (hover: hover) {
-  .zl-side-body:not(.is-phone) .zl-row-slot:hover .ow-orow-call { opacity: 1; pointer-events: auto; }
-  .zl-side-body:not(.is-phone) .zl-row-slot:hover .ow-orow .zl-row-meta { opacity: 0; }
-}
+/* A call is running with this owner: a small green phone beside the name. Not a
+   control; the row itself opens the conversation. */
+.ow-orow-live { flex: none; color: var(--zl-green); }
