@@ -28,7 +28,10 @@ export function planOptions(status) {
     return {
       id,
       label: voiceName(id),
-      desc: ready ? 'Included in your plan.' : 'Sign in under Providers to use it.',
+      desc: ready ? 'Included in your plan.' : 'Not signed in.',
+      // A plan that is not signed in cannot be chosen: it would be saved
+      // and then fail every call. The way forward is the Providers page.
+      action: ready ? '' : 'Sign in under Providers',
       on: (status?.provider || '') === id,
       ready,
     };

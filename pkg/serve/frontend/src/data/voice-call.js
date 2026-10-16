@@ -50,7 +50,7 @@ const START_COPY = {
   session_not_found: 'This conversation is no longer open. Reopen it and call again.',
   shutting_down: 'moa is restarting. Call again in a moment.',
   unauthenticated: 'Sign in to moa again, then call.',
-  unknown_provider: 'That voice provider is not available. Pick another in Settings → Voice.',
+  unknown_provider: 'That voice provider is not available. Pick another in Settings → Calls.',
   microphone: 'Allow the microphone for moa, then call again.',
   network: 'Could not reach moa. Check the connection and call again.',
 };

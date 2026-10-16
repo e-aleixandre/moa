@@ -530,9 +530,9 @@ function useVoiceSettings(active) {
   return { status, loaded, save };
 }
 
-// Voice calls: which plan a call uses, which paid provider is offered when
+// Calls: which plan a call uses, which paid provider is offered when
 // the plan fails (only ever on a tap), and what recent calls measured.
-function VoicePage({ state, onProviders }) {
+export function VoicePage({ state, onProviders }) {
   const { status, loaded, save } = state;
   if (loaded && !status) return <p class="zl-set-empty">Voice settings are unavailable on this server.</p>;
   const plans = planOptions(status);
@@ -554,7 +554,12 @@ function VoicePage({ state, onProviders }) {
           onPick={() => save({ provider: "" })}
         />
         {plans.map((o) => (
-          <Option key={o.id} label={o.label} desc={o.desc} on={o.on} disabled={!loaded} onPick={() => save({ provider: o.id })} />
+          <div key={o.id} class="zl-set-opt-wrap">
+            <Option label={o.label} desc={o.desc} on={o.on} disabled={!loaded || !o.ready} onPick={() => save({ provider: o.id })} />
+            {loaded && o.action && onProviders && (
+              <button type="button" class="zl-set-link zl-set-inline" onClick={onProviders}>{o.action}</button>
+            )}
+          </div>
         ))}
       </div>
       <span class="zl-set-k is-page">If the plan fails, offer</span>
@@ -570,7 +575,7 @@ function VoicePage({ state, onProviders }) {
           <Option key={o.id} label={o.label} desc={o.desc} on={o.on} disabled={!loaded} onPick={() => save({ paid_provider: o.id })} />
         ))}
       </div>
-      {plans.some((o) => !o.ready) && onProviders && (
+      {paid.some((o) => !o.ready) && onProviders && (
         <button type="button" class="zl-set-link zl-set-inline" onClick={onProviders}>Open Providers</button>
       )}
       {status?.backend_model && (
