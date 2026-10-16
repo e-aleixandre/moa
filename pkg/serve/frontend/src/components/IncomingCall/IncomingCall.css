@@ -46,8 +46,8 @@
   border-radius: var(--zl-r-md);
   font: inherit; font-weight: 500; cursor: pointer;
 }
-.icall-answer { border: 1px solid var(--zl-accent-line); background: var(--zl-accent-dim); color: var(--zl-t1); }
-.icall-answer:hover { background: var(--zl-accent-med); }
+.icall-answer { border: 1px solid var(--zl-accent); background: var(--zl-accent); color: var(--zl-accent-ink); font-weight: var(--weight-semibold, 600); }
+@media (hover: hover) { .icall-answer:hover { background: color-mix(in srgb, var(--zl-accent) 88%, white); } }
 .icall-write { border: 1px solid var(--zl-line); background: transparent; color: var(--zl-t2); }
 .icall-write:hover { color: var(--zl-t1); background: var(--zl-hi); }
 
@@ -94,6 +94,6 @@
   border-radius: var(--zl-r-md);
   font: inherit; font-weight: 500; cursor: pointer;
 }
-.hcall-call { border: 1px solid var(--zl-accent-line); background: var(--zl-accent-dim); color: var(--zl-t1); }
+.hcall-call { border: 1px solid var(--zl-accent); background: var(--zl-accent); color: var(--zl-accent-ink); font-weight: var(--weight-semibold, 600); }
 .hcall-cancel { border: 1px solid var(--zl-line); background: transparent; color: var(--zl-t2); }
 .vcall-screen .hcall { width: 100%; max-width: 420px; margin-top: 18px; }

@@ -137,6 +137,10 @@ test("a request_call history result becomes one compact ledger row", () => {
   const rows = JSON.stringify(blocks);
   expect(rows).toContain("Missed call · no answer");
   expect(rows).toContain("Deploy is blocked");
+  const row = blocks.flatMap((b) => b.blocks || []).flatMap((b) => b.rows || []).find((r) => String(r.toolLabel).startsWith("Missed call"));
+  expect(row.status).toBe("warn");
+  const answered = projectStream({ messages: [{ ...msgs[1], callRequest: { id: "r2", outcome: "answered" } }] });
+  expect(answered.flatMap((b) => b.blocks || []).flatMap((b) => b.rows || [])[0].status).toBe("ok");
 });
 
 test("the sidebar roster repaints when a request to talk arrives or ends", async () => {

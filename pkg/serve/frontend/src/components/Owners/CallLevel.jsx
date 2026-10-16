@@ -10,7 +10,7 @@ import "./CallLevel.css";
    per-minute cost, in place — no modal over the owner's panel — and only
    Confirm sends it; Cancel leaves the level as it was. */
 
-export function CallLevelField({ owner, status, onProviders, label = true }) {
+export function CallLevelField({ owner, status, onProviders, label = true, hint = true }) {
   const current = ownerCallLevel(owner);
   const [pending, setPending] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -57,7 +57,7 @@ export function CallLevelField({ owner, status, onProviders, label = true }) {
           </button>
         ))}
       </div>
-      <p class="ow-hint">{CALL_LEVEL_HELP}</p>
+      {hint && <p class="ow-hint">{CALL_LEVEL_HELP}</p>}
       {pending && (
         <div class="cl-confirm" role="alertdialog" aria-label="Confirm call cost">
           <p class="cl-confirm-t">{pending.text}</p>

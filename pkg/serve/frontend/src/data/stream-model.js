@@ -1185,7 +1185,8 @@ function toLedgerRow(msg) {
       row.arg = { text: mark.reason };
       row.argTail = false;
       if (mark.reason) row.detail = mark.reason;
-      row.status = 'ok';
+      // A missed or written call is not a success: amber mark, like a rejection.
+      row.status = mark.answered ? 'ok' : 'warn';
       row.out = '';
       delete row.echo;
       return row;

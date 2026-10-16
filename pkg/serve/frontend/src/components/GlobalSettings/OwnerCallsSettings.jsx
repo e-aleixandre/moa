@@ -3,6 +3,7 @@ import { Field } from "../../primitives/Field/Field.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { CallLevelField } from "../Owners/CallLevel.jsx";
+import { CALL_LEVEL_HELP } from "../../data/owner-calls.js";
 import { ownerState } from "../../data/owners-model.js";
 import {
   PAUSE_OPTIONS, RING_DEFAULT, RING_MAX, RING_MIN, callsPatch, deviceTimeZone, hoursBlock,
@@ -119,6 +120,8 @@ export function OwnerCallsSettings({ state, onProviders }) {
       {owners.length === 0 ? (
         <p class="zl-set-empty">No owners yet.</p>
       ) : (
+        <>
+        <p class="ow-hint oc-help">{CALL_LEVEL_HELP}</p>
         <ul class="oc-owners">
           {owners.map((o) => (
             <li key={o.id} class="oc-owner">
@@ -126,10 +129,11 @@ export function OwnerCallsSettings({ state, onProviders }) {
                 <OwnerAvatarFor owner={o} state={ownerState(o)} size={24} />
                 <span class="oc-owner-n">{o.name}</span>
               </div>
-              <CallLevelField owner={o} status={status} onProviders={onProviders} label={false} />
+              <CallLevelField owner={o} status={status} onProviders={onProviders} label={false} hint={false} />
             </li>
           ))}
         </ul>
+        </>
       )}
       {loaded && status && (
         <>
