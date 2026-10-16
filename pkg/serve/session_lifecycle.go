@@ -587,6 +587,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// it from.
 	if opts != nil && opts.ownerSession {
 		core.RegisterOrLog(bs.ToolReg, newSessionsTool(m, core.CodebaseKey(bs.CWD)))
+		core.RegisterOrLog(bs.ToolReg, m.newRequestCallTool(id, bs.AskBridge))
 	}
 
 	// Build RuntimeConfig from bootstrap session + serve-specific fields.

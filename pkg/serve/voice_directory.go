@@ -87,7 +87,7 @@ func (r *voiceCallRegistry) handleOwnerCall(w http.ResponseWriter, req *http.Req
 	}
 	// The owner is reopened only for a call already admitted: a refused one
 	// (no plan, rate limited, a call already on) leaves it closed.
-	status, out, retry := r.openCallWith(scope, identity.auditID(), "", func() (*ManagedSession, int, map[string]any) {
+	status, out, retry := r.openCallWith(scope, identity.auditID(), "", nil, func() (*ManagedSession, int, map[string]any) {
 		if scope.Err() != nil {
 			return nil, http.StatusUnauthorized, map[string]any{"error": "unauthenticated"}
 		}

@@ -1,0 +1,478 @@
+package serve
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/owner"
+	"github.com/e-aleixandre/moa/pkg/push"
+	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/voice"
+)
+
+// An owner asks to talk to the user (request_call). The policy lives here,
+// in code: owners start at Never, a call never falls from a failed plan to a
+// paid API, one request rings once, and whatever does not become a call
+// becomes the owner's written question.
+//
+// Requests live in memory. A restart ends the owner's run that waits on one,
+// exactly as it ends a pending ask_user, so there is nothing to rebuild.
+
+// Call request states. The first four are live.
+const (
+	crRinging    = "ringing"    // announced; missed after the ring time
+	crHeld       = "held"       // the user is on a call: waits for Call or Cancel
+	crAccepted   = "accepted"   // Call chosen on a held request; the call is being switched
+	crConnecting = "connecting" // answered; the call is opening
+	crAnswered   = "answered"
+	crWritten    = "written"
+	crCancelled  = "cancelled"
+)
+
+// Why a request became the written question (also told to the owner).
+const (
+	whyNever        = "never"
+	whyPaused       = "paused"
+	whyOutsideHours = "outside_hours"
+	whyNoPlan       = "no_plan"
+	whyBusy         = "busy"
+	whyMissed       = "missed"
+	whyDeclined     = "declined"
+	whyPlanFailed   = "plan_failed"
+)
+
+var whyText = map[string]string{
+	whyNever:        "calls from you are turned off (Never)",
+	whyPaused:       "the user paused calls",
+	whyOutsideHours: "it is outside the hours the user allows calls",
+	whyNoPlan:       "no voice plan is signed in and the user has not accepted the cost of the paid provider for your calls",
+	whyBusy:         "the user is already on a call with you or another owner is calling",
+	whyMissed:       "the user did not answer",
+	whyDeclined:     "the user chose to answer in writing",
+	whyPlanFailed:   "the voice plan failed when the user answered; calls never fall back to a paid API",
+}
+
+// callAcceptWindow bounds the switch from a held request to its call.
+const callAcceptWindow = 30 * time.Second
+
+// CallRinger makes a device ring for a call request (native incoming call).
+// It is the "ring device" contract of phase 3; nil until a native ringer
+// exists, and then the push and the open app are the bell.
+type CallRinger interface {
+	Ring(ctx context.Context, r RingRequest) error
+	// Cancel stops the ring of callID: answered, written, missed or withdrawn.
+	Cancel(callID, reason string)
+}
+
+// RingRequest names the conversation to call and the request that rings.
+type RingRequest struct {
+	SessionID string
+	CallID    string
+	OwnerName string
+	Reason    string
+}
+
+type callRequest struct {
+	ID        string           `json:"id"`
+	SessionID string           `json:"session_id"`
+	OwnerID   string           `json:"owner_id"`
+	OwnerName string           `json:"owner_name"`
+	Reason    string           `json:"reason"`
+	Urgency   string           `json:"urgency"`
+	Level     string           `json:"level"`
+	State     string           `json:"state"`
+	Created   time.Time        `json:"created"`
+	Expires   *time.Time       `json:"expires_at,omitempty"`
+	provider  voice.ProviderID // fixed when asked: answering never picks another
+	question  string           // the written fallback, what the call is about
+	why       string
+	stop      func() bool
+	done      chan struct{} // closed once terminal
+}
+
+type callRequestRegistry struct {
+	m *Manager
+	// ringOverride replaces the configured ring time (tests).
+	ringOverride time.Duration
+
+	mu     sync.Mutex
+	ringer CallRinger
+	live   map[string]*callRequest
+	subs   map[chan struct{}]struct{}
+}
+
+func (m *Manager) callRequests() *callRequestRegistry {
+	m.callReqOnce.Do(func() {
+		m.callReqs = &callRequestRegistry{m: m, live: map[string]*callRequest{}, subs: map[chan struct{}]struct{}{}}
+	})
+	return m.callReqs
+}
+
+// SetCallRinger installs the native ringer (phase 3).
+func (m *Manager) SetCallRinger(r CallRinger) {
+	reg := m.callRequests()
+	reg.mu.Lock()
+	reg.ringer = r
+	reg.mu.Unlock()
+}
+
+func (r *callRequestRegistry) ringTime() time.Duration {
+	if r.ringOverride > 0 {
+		return r.ringOverride
+	}
+	if s := voiceSettings().Calls.RingSeconds; s > 0 {
+		return time.Duration(s) * time.Second
+	}
+	return core.DefaultCallRingSeconds * time.Second
+}
+
+// open applies the policy. It returns the live request, or why there is no
+// call (then nothing was announced).
+func (r *callRequestRegistry) open(sessionID string, own owner.Owner, reason, urgency, question string) (*callRequest, string) {
+	level := own.Calls()
+	if level == owner.CallNever {
+		return nil, whyNever
+	}
+	now := time.Now()
+	calls := voiceSettings().Calls
+	if until, err := time.Parse(time.RFC3339, calls.PausedUntil); err == nil && now.Before(until) {
+		return nil, whyPaused
+	}
+	if !callHoursAllow(calls.Hours, now) {
+		return nil, whyOutsideHours
+	}
+	provider, ok := r.m.ownerCallProvider(own)
+	if !ok {
+		return nil, whyNoPlan
+	}
+	onCall, withThisOwner := r.m.voiceCallState(sessionID)
+	if withThisOwner {
+		return nil, whyBusy
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.live) > 0 {
+		return nil, whyBusy
+	}
+	req := &callRequest{
+		ID: newVoiceCallID(), SessionID: sessionID, OwnerID: own.ID, OwnerName: own.Name,
+		Reason: reason, Urgency: urgency, Level: level, State: crRinging, Created: now,
+		provider: provider, question: question, done: make(chan struct{}),
+	}
+	if onCall {
+		req.State = crHeld
+	} else {
+		r.arm(req, r.ringTime())
+	}
+	r.live[req.ID] = req
+	r.changedLocked()
+	return req, ""
+}
+
+// arm (under mu) makes req missed after d unless it changes state first.
+func (r *callRequestRegistry) arm(req *callRequest, d time.Duration) {
+	if req.stop != nil {
+		req.stop()
+	}
+	exp := time.Now().Add(d)
+	req.Expires = &exp
+	id, state := req.ID, req.State
+	req.stop = time.AfterFunc(d, func() { r.resolve(id, []string{state}, crWritten, whyMissed) }).Stop
+}
+
+// resolve moves a live request from one of from to state. It is the only way
+// out of a live state, under one lock: the first caller wins.
+func (r *callRequestRegistry) resolve(id string, from []string, state, why string) (*callRequest, bool) {
+	r.mu.Lock()
+	req, ok := r.live[id]
+	if !ok || !slices.Contains(from, req.State) {
+		r.mu.Unlock()
+		return nil, false
+	}
+	wasRinging := req.State == crRinging
+	if req.stop != nil {
+		req.stop()
+		req.stop = nil
+	}
+	req.State, req.why, req.Expires = state, why, nil
+	if state == crAnswered || state == crWritten || state == crCancelled {
+		delete(r.live, id)
+		close(req.done)
+	}
+	ringer := r.ringer
+	r.changedLocked()
+	r.mu.Unlock()
+	if ringer != nil && wasRinging && req.Level == owner.CallRing {
+		ringer.Cancel(id, state)
+	}
+	return req, true
+}
+
+// outcome reads a request's final state and why.
+func (r *callRequestRegistry) outcome(req *callRequest) (state, why string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return req.State, req.why
+}
+
+// announce tells the user a request rings: the urgent push (none while the
+// conversation is in view) and, for Ring, the native ringer.
+func (r *callRequestRegistry) announce(req *callRequest) {
+	if !r.isState(req.ID, crRinging) {
+		return
+	}
+	id := req.ID
+	if sess, ok := r.m.Get(req.SessionID); ok && r.m.pushPolicy != nil {
+		headline := req.OwnerName + " wants to talk"
+		if req.Level == owner.CallRing {
+			headline = req.OwnerName + " is calling"
+		}
+		r.m.pushPolicy.Handle(push.Signal{
+			Kind: push.KindCallRequest, SessionID: req.SessionID, Title: sess.title(), Headline: headline,
+			RequestID: id, Watched: sess.presence.watched(),
+			StillPending: func() bool { return r.isState(id, crRinging) },
+		})
+	}
+	r.mu.Lock()
+	ringer := r.ringer
+	r.mu.Unlock()
+	if ringer != nil && req.Level == owner.CallRing {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := ringer.Ring(ctx, RingRequest{SessionID: req.SessionID, CallID: id, OwnerName: req.OwnerName, Reason: req.Reason}); err != nil {
+			slog.Info("call request: ring failed", "err", err)
+		}
+	}
+}
+
+func (r *callRequestRegistry) isState(id, state string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	req, ok := r.live[id]
+	return ok && req.State == state
+}
+
+// claim takes a ringing or accepted request of sessionID for the call that
+// answers it.
+func (r *callRequestRegistry) claim(id, sessionID string) (*callRequest, bool) {
+	r.mu.Lock()
+	req, ok := r.live[id]
+	r.mu.Unlock()
+	if !ok || req.SessionID != sessionID {
+		return nil, false
+	}
+	return r.resolve(id, []string{crRinging, crAccepted}, crConnecting, "")
+}
+
+// callsEnded writes every held request once no call is left: the user hung
+// up without choosing.
+func (r *callRequestRegistry) callsEnded() {
+	r.mu.Lock()
+	var held []string
+	for id, req := range r.live {
+		if req.State == crHeld {
+			held = append(held, id)
+		}
+	}
+	r.mu.Unlock()
+	for _, id := range held {
+		r.resolve(id, []string{crHeld}, crWritten, whyMissed)
+	}
+}
+
+// accept chooses Call on a held request.
+func (r *callRequestRegistry) accept(id string) bool {
+	if _, ok := r.resolve(id, []string{crHeld}, crAccepted, ""); !ok {
+		return false
+	}
+	r.mu.Lock()
+	if req, ok := r.live[id]; ok && req.State == crAccepted {
+		r.arm(req, callAcceptWindow)
+	}
+	r.mu.Unlock()
+	return true
+}
+
+func (r *callRequestRegistry) snapshot() []callRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]callRequest, 0, len(r.live))
+	for _, req := range r.live {
+		c := *req
+		c.done, c.stop = nil, nil
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Created.Before(out[j].Created) })
+	return out
+}
+
+func (r *callRequestRegistry) changedLocked() {
+	for ch := range r.subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (r *callRequestRegistry) subscribe() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	r.mu.Lock()
+	r.subs[ch] = struct{}{}
+	r.mu.Unlock()
+	return ch, func() {
+		r.mu.Lock()
+		delete(r.subs, ch)
+		r.mu.Unlock()
+	}
+}
+
+// callHoursAllow reports whether now is inside the allowed daily window. nil
+// allows any time; so does an unreadable window, so a broken setting never
+// silences calls the user turned on (settings validate it on save).
+func callHoursAllow(h *core.VoiceCallHours, now time.Time) bool {
+	if h == nil {
+		return true
+	}
+	from, ok1 := parseHHMM(h.From)
+	until, ok2 := parseHHMM(h.Until)
+	loc, err := time.LoadLocation(h.TZ)
+	if !ok1 || !ok2 || err != nil || from == until {
+		return true
+	}
+	t := now.In(loc)
+	m := t.Hour()*60 + t.Minute()
+	if from < until {
+		return m >= from && m < until
+	}
+	return m >= from || m < until
+}
+
+func parseHHMM(s string) (int, bool) {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return 0, false
+	}
+	return t.Hour()*60 + t.Minute(), true
+}
+
+// voiceRegistry is the registry whose credentials decide availability.
+func (m *Manager) voiceRegistry() *voiceCallRegistry {
+	m.voiceCallsMu.Lock()
+	defer m.voiceCallsMu.Unlock()
+	if len(m.voiceCalls) == 0 {
+		return nil
+	}
+	return m.voiceCalls[0]
+}
+
+func (m *Manager) voicePlanSignedIn() bool {
+	r := m.voiceRegistry()
+	if r == nil {
+		return false
+	}
+	_, ok := r.defaultPlan()
+	return ok
+}
+
+// ownerCallsPaidProvider is the paid provider owner calls would use without
+// a plan: the one chosen in Settings, else the first with a key.
+func (m *Manager) ownerCallsPaidProvider() voice.ProviderID {
+	if p := voice.ProviderID(voiceSettings().PaidProvider); p.Paid() {
+		return p
+	}
+	r := m.voiceRegistry()
+	if r == nil {
+		return ""
+	}
+	for _, p := range []voice.ProviderID{voice.XAIAPI, voice.OpenAILiveAPI} {
+		if r.selectable(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// ownerCallProvider is the provider a call request of own uses: a plan when
+// one is signed in, else the paid provider whose cost the user accepted for
+// this owner, while it is still the chosen one and has a key (I21, I22).
+func (m *Manager) ownerCallProvider(own owner.Owner) (voice.ProviderID, bool) {
+	r := m.voiceRegistry()
+	if r == nil {
+		return "", false
+	}
+	if p, ok := r.defaultPlan(); ok {
+		return p, true
+	}
+	paid := m.ownerCallsPaidProvider()
+	if paid == "" || own.CallCostAck == nil || own.CallCostAck.Provider != string(paid) || !r.selectable(paid) {
+		return "", false
+	}
+	return paid, true
+}
+
+// setCallLevel validates a level change: without a plan, any level but
+// never needs the cost of the current paid provider accepted (I22).
+func (m *Manager) setCallLevel(own *owner.Owner, level string, ack *string) error {
+	level = strings.TrimSpace(level)
+	if !owner.ValidCallLevel(level) {
+		return fmt.Errorf("%w: must be never, ask_first or ring", ErrInvalidCallLevel)
+	}
+	if level != owner.CallNever && !m.voicePlanSignedIn() {
+		paid := m.ownerCallsPaidProvider()
+		if paid == "" {
+			return fmt.Errorf("%w: no voice plan is signed in and no paid provider has a key", ErrInvalidCallLevel)
+		}
+		if ack == nil || strings.TrimSpace(*ack) != string(paid) {
+			return fmt.Errorf("%w: accept the per-minute cost of %s first (cost_ack_provider)", ErrInvalidCallLevel, paid)
+		}
+		own.CallCostAck = &owner.CallCostAck{Provider: string(paid), At: time.Now().UTC()}
+	}
+	own.CallLevel = level
+	return nil
+}
+
+// voiceCallState reports whether any call is active, and whether one is with
+// sessionID.
+func (m *Manager) voiceCallState(sessionID string) (active, with bool) {
+	m.voiceCallsMu.Lock()
+	regs := append([]*voiceCallRegistry(nil), m.voiceCalls...)
+	m.voiceCallsMu.Unlock()
+	for _, reg := range regs {
+		reg.mu.Lock()
+		for _, c := range reg.calls {
+			active = true
+			if c.sessionID == sessionID {
+				with = true
+			}
+		}
+		reg.mu.Unlock()
+	}
+	return active, with
+}
+
+// callingOwner is the owner whose own conversation sessionID is.
+func (m *Manager) callingOwner(sessionID string) (owner.Owner, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok || sess.Kind != session.KindOwner {
+		return owner.Owner{}, errors.New("request_call is only available to project owners")
+	}
+	ref := m.ownerRefFor(sess.CWD)
+	store, err := m.ownerStore()
+	if err != nil || ref.id == "" {
+		return owner.Owner{}, errors.New("this conversation has no owner")
+	}
+	own, found, err := store.FindByID(ref.id)
+	if err != nil || !found || own.SessionID != sessionID {
+		return owner.Owner{}, errors.New("request_call is only available in the owner's own conversation")
+	}
+	return own, nil
+}

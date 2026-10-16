@@ -61,6 +61,9 @@ type RingOptions struct {
 	Name     string        // shown by CallKit; the session title when empty
 	Provider string        // the voice provider to open on answer; the default plan when empty
 	TTL      time.Duration // how long it rings; voiceInviteTTL when zero
+	// Intro is why moa calls: the voice speaks first and says it. nil is a
+	// test call, and the voice says so.
+	Intro *callIntro
 }
 
 // InviteOutcome is how an invitation ended, for the caller that rang it.
@@ -73,6 +76,7 @@ type InviteOutcome struct {
 type voiceInvite struct {
 	id, sessionID, name, provider string
 	expires                       time.Time
+	intro                         *callIntro // never nil: an incoming call always opens by saying why
 
 	state    string
 	answerer string         // principal that won the answer
@@ -138,7 +142,7 @@ func (r *voiceCallRegistry) RingDevices(ctx context.Context, sessionID string, o
 		name = "moa"
 	}
 	inv := &voiceInvite{
-		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider,
+		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider, intro: incomingIntro(opts.Intro),
 		expires: time.Now().Add(ttl), state: inviteRinging,
 		left: make(chan struct{}), resolved: make(chan struct{}),
 	}
@@ -276,7 +280,7 @@ func (r *voiceCallRegistry) answer(scope context.Context, id, principal string) 
 	}
 	t.mu.Unlock()
 
-	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider)
+	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider, inv.intro)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -315,6 +319,8 @@ func (r *voiceCallRegistry) handleInviteCreate(w http.ResponseWriter, req *http.
 	var in struct {
 		SessionID string `json:"session_id"`
 		Name      string `json:"name"`
+		// Reason, optional, is what the voice opens the test call with.
+		Reason string `json:"reason"`
 		Provider  string `json:"provider"`
 	}
 	if err := json.NewDecoder(io.LimitReader(req.Body, voice.MaxControlJSON)).Decode(&in); err != nil || in.SessionID == "" {
@@ -327,7 +333,7 @@ func (r *voiceCallRegistry) handleInviteCreate(w http.ResponseWriter, req *http.
 			return
 		}
 	}
-	id, err := r.RingDevices(req.Context(), in.SessionID, RingOptions{Name: in.Name, Provider: in.Provider})
+	id, err := r.RingDevices(req.Context(), in.SessionID, RingOptions{Name: in.Name, Provider: in.Provider, Intro: testIntro(in.Reason)})
 	switch {
 	case errors.Is(err, errInviteNotFound):
 		voiceError(w, http.StatusNotFound, map[string]any{"error": "session_not_found"})

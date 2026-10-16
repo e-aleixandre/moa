@@ -241,6 +241,17 @@ func (p *Policy) decide(s Signal) decision {
 			d.delay = p.grace
 		}
 		return d
+	case KindCallRequest:
+		// An owner asks to talk. Urgent like a question, and on the same tag
+		// so the written question that may follow replaces it. In view, the
+		// app rings itself: no push.
+		if s.Watched {
+			return decision{}
+		}
+		setTitle("moa wants to talk")
+		n.Level = LevelUrgent
+		n.Tag = "req:" + s.SessionID
+		return decision{send: true, n: n}
 	case KindDone:
 		if s.Watched {
 			return decision{}

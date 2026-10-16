@@ -178,6 +178,9 @@ func (r *voiceCallRegistry) finish(c *voiceCall) {
 		r.endedOrder = r.endedOrder[1:]
 	}
 	r.mu.Unlock()
+	if active, _ := r.mgr.voiceCallState(""); !active {
+		r.mgr.callRequests().callsEnded()
+	}
 	r.wg.Done()
 }
 
@@ -240,12 +243,37 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		SessionID string `json:"session_id"`
 		Provider  string `json:"provider"`
 		Note      string `json:"note"`
+		// CallRequestID answers an owner's request_call: its provider and
+		// reason are fixed by the request, never chosen here.
+		CallRequestID string `json:"call_request_id"`
 	}
 	if err := json.NewDecoder(io.LimitReader(req.Body, voice.MaxControlJSON)).Decode(&in); err != nil {
 		voiceError(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
 		return
 	}
-	status, out, retry := r.openCall(r.ctx, identity.auditID(), in.SessionID, in.Provider)
+	var intro *callIntro
+	var answering *callRequest
+	if in.CallRequestID != "" {
+		req, ok := r.mgr.callRequests().claim(in.CallRequestID, in.SessionID)
+		if !ok {
+			voiceError(w, http.StatusConflict, map[string]any{"error": "request_not_live"})
+			return
+		}
+		answering, in.Provider = req, string(req.provider)
+		intro = req.intro()
+	}
+	status, out, retry := r.openCall(r.ctx, identity.auditID(), in.SessionID, in.Provider, intro)
+	if answering != nil {
+		// An owner's call is the plan it was asked with or nothing: any
+		// failure makes it the written question and offers no paid API (I21).
+		reg := r.mgr.callRequests()
+		if status == http.StatusCreated {
+			reg.resolve(answering.ID, []string{crConnecting}, crAnswered, "")
+		} else {
+			reg.resolve(answering.ID, []string{crConnecting}, crWritten, whyPlanFailed)
+			delete(out, "paid_option")
+		}
+	}
 	if retry > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 	}
@@ -256,11 +284,11 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 // both a call the user places and an incoming invitation they answer. It
 // answers the HTTP status and body to send, and a Retry-After when limited.
 // Ending scope (r.ctx or narrower) aborts an opening that has not answered.
-func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID, providerName string) (int, map[string]any, int) {
+func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID, providerName string, intro *callIntro) (int, map[string]any, int) {
 	if _, ok := r.mgr.Get(sessionID); !ok {
 		return http.StatusNotFound, map[string]any{"error": "session_not_found"}, 0
 	}
-	return r.openCallWith(scope, principal, providerName, func() (*ManagedSession, int, map[string]any) {
+	return r.openCallWith(scope, principal, providerName, intro, func() (*ManagedSession, int, map[string]any) {
 		if sess, ok := r.mgr.Get(sessionID); ok {
 			return sess, 0, nil
 		}
@@ -272,7 +300,7 @@ func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID
 // the admission budget and the principal's slot have all said yes: a
 // resolver with side effects (reopening an owner) runs for admitted calls
 // and never for refused ones.
-func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, providerName string, resolve func() (*ManagedSession, int, map[string]any)) (int, map[string]any, int) {
+func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, providerName string, intro *callIntro, resolve func() (*ManagedSession, int, map[string]any)) (int, map[string]any, int) {
 	provider := voice.ProviderID(providerName)
 	if provider == "" {
 		p, found := r.defaultPlan()
@@ -309,7 +337,7 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 	up, err := adapter.Open(ctx, voice.CallSpec{
 		CallID: id, SessionID: sess.ID, Voice: voiceProviders[provider].voice,
 		Instructions: voice.CommonInstructions, BackendModel: model, Tools: voice.ToolSpecs(),
-		InitialContext: r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
+		InitialContext: intro.context() + r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
 	})
 	cancel()
 	if err == nil && scope.Err() != nil && r.ctx.Err() == nil {
@@ -682,3 +710,4 @@ func (c *voiceCall) readClient(cl *voiceClient) error {
 		}
 	}
 }
+
