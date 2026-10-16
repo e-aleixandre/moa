@@ -155,7 +155,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	resolvedModel, knownModel := core.ResolveModel(*modelFlag)
+	resolvedModel, daybreak, knownModel := core.ResolveModelDaybreak(*modelFlag)
 	if !knownModel {
 		fmt.Fprintf(os.Stderr, "warning: unrecognized model %q — context management disabled\n", *modelFlag)
 	}
@@ -234,6 +234,8 @@ func main() {
 		MCPDisableSources:   &mcpDisableSources,
 		Ctx:                 ctx,
 		ThinkingLevel:       *thinking,
+		Daybreak:            daybreak,
+		DaybreakCatalog:     newDaybreakCatalogs(authStore).Snapshot,
 		MaxTurns:            *maxTurns,
 		MaxBudget:           resolvedBudget,
 		DisableSandbox:      *yolo,

@@ -213,6 +213,7 @@ type buildOpts struct {
 	initialThinking        string // applied via SetThinking after construction
 	initialPermissionMode  string // applied via SetPermissionMode after construction
 	initialFast            bool   // applied during construction, before any request can run
+	initialDaybreak        bool   // likewise; also set by a Daybreak model spec
 	titleSource            string // how the resumed title was set (session.TitleSource*)
 
 	// V2 session tree
@@ -255,10 +256,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	cwd = canonical
 
 	// Resolve model.
-	model := m.defaultModel
+	// "daybreak" (and the retired alias a session may have been saved under)
+	// is GPT-6 Sol with the program on.
+	model, daybreak := m.defaultModel, m.defaultDaybreak
 	if modelSpec != "" {
-		model, _ = core.ResolveModel(modelSpec)
+		model, daybreak, _ = core.ResolveModelDaybreak(modelSpec)
 	}
+	daybreak = daybreak || (opts != nil && opts.initialDaybreak)
 	initialFast := opts != nil && opts.initialFast && core.SupportsFast(model.ID)
 
 	// Create provider.
@@ -321,6 +325,8 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		OwnerSession:        opts != nil && opts.ownerSession,
 		CreatorTZ:           creatorTZ,
 		Fast:                initialFast,
+		Daybreak:            daybreak,
+		DaybreakCatalog:     m.daybreakCatalog,
 		BeforeWrite:         cpStore.Capture,
 		AttachmentScope:     attachScope,
 		OnAsyncJobChange: func(count int) {
@@ -670,6 +676,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	}
 
 	sess = &ManagedSession{
+		daybreakCatalog:     m.daybreakCatalog,
 		ID:                  id,
 		serverInstance:      m.serverInstance,
 		Title:               title,
@@ -1325,7 +1332,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 	}
 	// The saved level is the model's effort; SetThinking expects a selector
 	// position and would raise Sol/Astra a notch on every resume.
-	if model, ok := core.ResolveModel(modelID); ok {
+	if model, _, ok := core.ResolveModelDaybreak(modelID); ok {
 		savedThinking = core.ThinkingPosition(model, savedThinking)
 	}
 
@@ -1335,6 +1342,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 		initialCompactionEpoch: saved.CompactionEpoch,
 		initialThinking:        savedThinking,
 		initialFast:            saved.FastMeta(),
+		initialDaybreak:        saved.DaybreakMeta(),
 		initialEntries:         saved.Entries,
 		initialLeafID:          saved.LeafID,
 		initialMetadata:        saved.Metadata,

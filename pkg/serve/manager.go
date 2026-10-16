@@ -184,6 +184,8 @@ type ManagedSession struct {
 	// can replace the model. This keeps the model used to clamp fast mode, the
 	// agent state, and the ConfigChanged event in one ordered operation.
 	fastConfigMu sync.Mutex
+	// daybreakCatalog is the manager's account catalog (nil = never loaded).
+	daybreakCatalog func() core.DaybreakAvailability
 	// beforeFastConfigLock and afterFastConfigLock are test hooks around the
 	// fast/configuration serialization boundary.
 	beforeFastConfigLock func()
@@ -507,10 +509,12 @@ func (s *ManagedSession) info() SessionInfo {
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
 	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
 
-	fastOn := false
+	fastOn, daybreakOn := false, false
 	if agent := s.runtime.Context().Agent; agent != nil {
 		fastOn = agent.Fast()
+		daybreakOn = agent.Daybreak()
 	}
+	daybreakSupported := s.daybreakAvailability().Sendable(model)
 
 	mcpSummary := s.mcpSummary()
 
@@ -524,32 +528,34 @@ func (s *ManagedSession) info() SessionInfo {
 			streaming, _, _ := s.runtime.Context().SnapshotInFlightWithCut()
 			return streaming.ProviderExecution
 		}(),
-		ID:             s.ID,
-		Title:          s.Title,
-		State:          SessionState(state),
-		Model:          modelDisplayName(model),
-		Provider:       model.Provider,
-		Thinking:       thinking,
-		Fast:           fastOn,
-		FastSupported:  core.SupportsFast(model.ID),
-		FastNote:       core.FastNote(model.ID),
-		CWD:            s.CWD,
-		Created:        s.Created,
-		Updated:        s.Updated,
-		Origin:         nonUserOrigin(s.Origin),
-		Kind:           s.Kind,
-		ownerDetached:  s.ownerDetached.Load(),
-		Error:          stateErr,
-		ErrorDetail:    stateErrDetail,
-		UntrustedMCP:   s.infra.UntrustedMCP,
-		MCP:            mcpSummary,
-		ContextPercent: ctxPct,
-		ContextWindow:  model.MaxInput,
-		CompactAt:      compactAt,
-		CompactAtMin:   compactAtMin,
-		PermissionMode: permMode,
-		CostUSD:        cost,
-		ServerInstance: s.serverInstance,
+		ID:                s.ID,
+		Title:             s.Title,
+		State:             SessionState(state),
+		Model:             modelDisplayName(model),
+		Provider:          model.Provider,
+		Thinking:          thinking,
+		Fast:              fastOn,
+		FastSupported:     core.SupportsFast(model.ID),
+		FastNote:          core.FastNote(model.ID),
+		Daybreak:          daybreakOn,
+		DaybreakSupported: daybreakSupported,
+		CWD:               s.CWD,
+		Created:           s.Created,
+		Updated:           s.Updated,
+		Origin:            nonUserOrigin(s.Origin),
+		Kind:              s.Kind,
+		ownerDetached:     s.ownerDetached.Load(),
+		Error:             stateErr,
+		ErrorDetail:       stateErrDetail,
+		UntrustedMCP:      s.infra.UntrustedMCP,
+		MCP:               mcpSummary,
+		ContextPercent:    ctxPct,
+		ContextWindow:     model.MaxInput,
+		CompactAt:         compactAt,
+		CompactAtMin:      compactAtMin,
+		PermissionMode:    permMode,
+		CostUSD:           cost,
+		ServerInstance:    s.serverInstance,
 
 		BriefAttempting: s.briefAttempting,
 		BriefProgress:   s.briefProgress,

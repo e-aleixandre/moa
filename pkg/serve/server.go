@@ -121,7 +121,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 
 	static := newStaticServer()
 
-	mux.HandleFunc("GET /api/models", handleListModels())
+	mux.HandleFunc("GET /api/models", handleListModels(manager))
 	mux.HandleFunc("GET /api/model-preferences", handleModelPreferences(manager))
 	mux.HandleFunc("PATCH /api/model-preferences", handleModelPreferences(manager))
 	mux.HandleFunc("GET /api/subagent-models", handleSubagentModels(manager))
@@ -435,7 +435,7 @@ func csrfMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func handleListModels() http.HandlerFunc {
+func handleListModels(mgr *Manager) http.HandlerFunc {
 	type modelInfo struct {
 		ID               string   `json:"id"`
 		Name             string   `json:"name"`
@@ -443,20 +443,28 @@ func handleListModels() http.HandlerFunc {
 		Alias            string   `json:"alias,omitempty"`
 		MaxInput         int      `json:"max_input,omitempty"`
 		ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+		// DaybreakSupported is set only when the account's catalog is known
+		// to offer Daybreak on this model over the selected transport.
+		DaybreakSupported bool `json:"daybreak_supported,omitempty"`
 	}
 	entries := core.ListModels()
-	models := make([]modelInfo, len(entries))
-	for i, e := range entries {
-		models[i] = modelInfo{
-			ID:               e.Model.ID,
-			Name:             e.Model.Name,
-			Provider:         e.Model.Provider,
-			Alias:            e.Alias,
-			MaxInput:         e.Model.MaxInput,
-			ReasoningEfforts: core.ReasoningEffortsForModel(e.Model),
-		}
-	}
 	return func(w http.ResponseWriter, _ *http.Request) {
+		var availability core.DaybreakAvailability
+		if mgr != nil && mgr.daybreakCatalog != nil {
+			availability = mgr.daybreakCatalog()
+		}
+		models := make([]modelInfo, len(entries))
+		for i, e := range entries {
+			models[i] = modelInfo{
+				ID:                e.Model.ID,
+				Name:              e.Model.Name,
+				Provider:          e.Model.Provider,
+				Alias:             e.Alias,
+				MaxInput:          e.Model.MaxInput,
+				ReasoningEfforts:  core.ReasoningEffortsForModel(e.Model),
+				DaybreakSupported: availability.Known && availability.Sendable(e.Model),
+			}
+		}
 		writeJSON(w, http.StatusOK, models)
 	}
 }
