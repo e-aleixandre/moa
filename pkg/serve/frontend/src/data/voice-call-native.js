@@ -9,17 +9,19 @@
 // this page: the app sends the microphone and plays the provider itself,
 // and only the JSON control frames are mirrored here for the interface.
 //
-// Bridge (v1): open(url, {name}) → id; send(id, text); close(id);
-// startAudio(id) → Promise; stopAudio(id); interrupt(id); setMuted(id, muted).
-// Events arrive through bridge.onevent({id, type, data}) with type
-// open | message | close | playback | mute.
+// Bridge (v1): open(url, {name, sessionId}) → id; send(id, text); close(id);
+// startAudio(id) → Promise; stopAudio(id); setMuted(id, muted);
+// active() → Promise<{id, sessionId, callId, muted} | null>, the call the app
+// is still carrying when this document loads (a reload, or the page killed
+// in the background). Events arrive through bridge.onevent({id, type, data})
+// with type open | message | close | playback | mute.
 
 export function nativeCallBridge(win = globalThis.window) {
   const b = win?.MoaNativeCall;
   return b && b.version >= 1 && typeof b.open === 'function' ? b : null;
 }
 
-export function createNativeCallDeps(bridge, { name = () => '' } = {}) {
+export function createNativeCallDeps(bridge, { name = () => '', sessionId = () => '' } = {}) {
   const sockets = new Map();
   const engines = new Map();
 
@@ -55,6 +57,7 @@ export function createNativeCallDeps(bridge, { name = () => '' } = {}) {
   };
 
   let current = null;
+  let adopting = null;
 
   class NativeCallSocket {
     constructor(url) {
@@ -65,7 +68,18 @@ export function createNativeCallDeps(bridge, { name = () => '' } = {}) {
       this.onclose = null;
       this.onerror = null;
       this.onmessage = null;
-      this.id = bridge.open(String(url), { name: name() || 'moa' });
+      if (adopting) {
+        // The app's call already runs: this socket only mirrors it.
+        this.id = adopting;
+        adopting = null;
+        queueMicrotask(() => {
+          if (this.readyState !== 0) return;
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      } else {
+        this.id = bridge.open(String(url), { name: name() || 'moa', sessionId: sessionId() || '' });
+      }
       sockets.set(this.id, this);
       current = this.id;
     }
@@ -98,7 +112,10 @@ export function createNativeCallDeps(bridge, { name = () => '' } = {}) {
         if (stopped) throw new Error('audio stopped');
       },
       play() {},
-      interrupt() { if (id !== null) bridge.interrupt(id); },
+      // The app clears its own playback on the server's barge-in as it
+      // arrives; repeating it from this mirror, later, would cut the next
+      // reply instead.
+      interrupt() {},
       setMuted(muted) { if (id !== null) bridge.setMuted(id, !!muted); },
       stop() {
         if (stopped) return;
@@ -111,5 +128,8 @@ export function createNativeCallDeps(bridge, { name = () => '' } = {}) {
     };
   }
 
-  return { WebSocket: NativeCallSocket, createAudio, supported: true };
+  // adopt makes the next socket attach to the app's running call id.
+  function adopt(id) { adopting = id; }
+
+  return { WebSocket: NativeCallSocket, createAudio, adopt, supported: true };
 }

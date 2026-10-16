@@ -20,6 +20,7 @@ import { loadProviderStatus } from "./data/providers.js";
 import { startTasksSync, resumeTasksSync } from "./data/tasks.js";
 import { TasksScreen } from "./components/Tasks/TasksScreen.jsx";
 import { VoiceCallScreen } from "./components/VoiceCall/VoiceCall.jsx";
+import { adoptNativeCall } from "./data/voice-call-session.js";
 import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
 import { afterPendingInits, getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
@@ -158,6 +159,8 @@ function useBootstrap() {
       .catch(() => {})
       .finally(() => {
         if (mounted) setStoreState({ sessionsLoaded: true });
+        // A call the iOS app kept through a reload shows again, named.
+        if (mounted) adoptNativeCall();
       });
     startPolling();
     startUsagePolling();

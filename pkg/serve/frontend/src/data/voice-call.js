@@ -181,6 +181,17 @@ export class VoiceCallController {
     await this.connect(gen, data);
   }
 
+  // adopt mirrors a call that already runs elsewhere on this device (the
+  // iOS app kept it through a reload): no POST, the socket attaches to it.
+  async adopt({ callId, muted = false } = {}) {
+    if (this.s.active || !callId) return;
+    const gen = ++this.gen;
+    if (this.createAudio) this.audio = this.createAudio();
+    this.set({ ...initialState(this.sessionId), phase: 'connecting', callId, muted: !!muted, startedAt: this.now() });
+    await this.connect(gen, { call_id: callId });
+    if (gen === this.gen && this.s.phase === 'connecting') this.set({ phase: 'listening' });
+  }
+
   fail(error, reason, paidOption) {
     this.audio?.stop?.();
     this.set({ phase: 'failed', error, reason, message: startFailureMessage(error, reason), paidOption });

@@ -23,11 +23,18 @@ enum NativeServerBinding {
     static func bind(_ origin: String) {
         DocumentGeneration.shared.bump()
         UserDefaults.standard.set(origin, forKey: key)
+        voiceCallBindingChanged()
     }
 
     static func clear() {
         DocumentGeneration.shared.bump()
         UserDefaults.standard.removeObject(forKey: key)
+        voiceCallBindingChanged()
+    }
+
+    // A voice call belongs to the server it was opened with.
+    private static func voiceCallBindingChanged() {
+        DispatchQueue.main.async { NativeVoiceCallManager.shared.bindingChanged() }
     }
 
     static func matches(_ securityOrigin: WKSecurityOrigin) -> Bool {

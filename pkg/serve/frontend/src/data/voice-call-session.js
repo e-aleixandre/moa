@@ -15,6 +15,7 @@ import { sessionTitle } from './util/format.js';
 
 let controller = null;
 let callName = '';
+let callSession = '';
 
 // The name the phone shows for the call: the owner, or the conversation.
 function partyName(sessionId) {
@@ -29,7 +30,7 @@ function partyName(sessionId) {
 // lock screen); elsewhere they are the page's.
 const nativeBridge = nativeCallBridge();
 const browserDeps = nativeBridge
-  ? { fetch: undefined, ...createNativeCallDeps(nativeBridge, { name: () => callName }) }
+  ? { fetch: undefined, ...createNativeCallDeps(nativeBridge, { name: () => callName, sessionId: () => callSession }) }
   : { fetch: undefined, WebSocket: undefined, createAudio: () => createCallAudio({ claimWakeLock }) };
 let deps = browserDeps;
 export function __setVoiceCallDepsForTests(next) {
@@ -67,9 +68,31 @@ export function startVoiceCall(sessionId, { provider, screen } = {}) {
     });
   }
   callName = partyName(sessionId);
+  callSession = sessionId;
   const showScreen = screen ?? !!store.get().isMobile;
   setState({ voiceCall: { ...controller.state(), sessionId, screen: showScreen } });
   controller.start(provider ? { provider } : {});
+  return true;
+}
+
+// adoptNativeCall shows again the call the iOS app kept running while this
+// document was reloaded, so it can still be muted and hung up from here.
+export async function adoptNativeCall() {
+  if (!deps.adopt || !nativeBridge?.active) return false;
+  let snap = null;
+  try { snap = await nativeBridge.active(); } catch { return false; }
+  if (!snap?.id || !snap.sessionId || !snap.callId || store.get().voiceCall?.active) return false;
+  deps.adopt(snap.id);
+  controller = new VoiceCallController({
+    sessionId: snap.sessionId,
+    fetch: deps.fetch,
+    WebSocket: deps.WebSocket,
+    createAudio: deps.createAudio,
+    onState: (state) => publish(snap.sessionId, state),
+  });
+  callName = partyName(snap.sessionId);
+  callSession = snap.sessionId;
+  controller.adopt({ callId: snap.callId, muted: !!snap.muted });
   return true;
 }
 
