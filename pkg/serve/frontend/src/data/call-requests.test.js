@@ -152,3 +152,9 @@ test("the sidebar roster repaints when a request to talk arrives or ends", async
   expect(selectDesktopChrome(withRequests([])).owners[0].wantsToTalk).toBe(false);
   __resetDesktopChromeForTests();
 });
+
+test("the call's own name says whose question waits when the surface is not told", async () => {
+  const { callStatus } = await import("./voice-call-view.js");
+  const failed = { phase: "failed", error: "plan_unavailable", callRequestId: "r1", name: "Infra" };
+  expect(callStatus(failed)).toBe("The call could not connect. Infra's question is waiting in writing.");
+});

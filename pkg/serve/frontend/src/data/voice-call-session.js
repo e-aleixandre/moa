@@ -57,7 +57,8 @@ export function voiceCallSupported() {
 
 function publish(sessionId, state) {
   const prev = store.get().voiceCall;
-  setState({ voiceCall: { ...state, sessionId, screen: prev?.sessionId === sessionId ? !!prev.screen : false } });
+  // `name` lets a surface that is not told the party (the composer's row) still say who.
+  setState({ voiceCall: { ...state, sessionId, name: partyName(sessionId), screen: prev?.sessionId === sessionId ? !!prev.screen : false } });
 }
 
 // startVoiceCall calls sessionId. Without provider the server uses the plan;

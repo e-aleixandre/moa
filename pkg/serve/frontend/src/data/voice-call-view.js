@@ -20,7 +20,7 @@ export function callStatus(call, name = '') {
     case 'ended': return call.message || 'Call ended';
     case 'failed':
       if (call.callRequestId && call.error === 'plan_unavailable') {
-        return `The call could not connect. ${name || 'The owner'}'s question is waiting in writing.`;
+        return `The call could not connect. ${name || call.name || 'The owner'}'s question is waiting in writing.`;
       }
       return call.message || 'The call could not start.';
     default: return '';
