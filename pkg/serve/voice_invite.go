@@ -106,15 +106,21 @@ func newInviteID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// CanRing reports whether any device has an incoming-call destination; when
+// none does, a caller falls back to a notification instead of ringing.
+func (r *voiceCallRegistry) CanRing() bool {
+	return r.mgr.pushVoIP != nil && len(r.mgr.pushVoIP.Store().All()) > 0
+}
+
 // RingDevices rings every paired device with an incoming-call destination
 // for a call into sessionID. It returns once the relay took (or refused) the
 // pushes; the invitation then rings until answered, declined, cancelled or
 // expired: WaitInvite reports how it ended.
 func (r *voiceCallRegistry) RingDevices(ctx context.Context, sessionID string, opts RingOptions) (string, error) {
-	voip := r.mgr.pushVoIP
-	if voip == nil || len(voip.Store().All()) == 0 {
+	if !r.CanRing() {
 		return "", errNoIncomingDevice
 	}
+	voip := r.mgr.pushVoIP
 	sess, ok := r.mgr.Get(sessionID)
 	if !ok {
 		return "", fmt.Errorf("session %s: %w", sessionID, errInviteNotFound)

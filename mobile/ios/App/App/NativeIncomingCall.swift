@@ -211,8 +211,9 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
             return
         }
         if ringing?.uuid == uuid {
-            // The same invitation twice (APNs may repeat): already ringing.
-            if mustReport { NativeVoiceCallManager.shared.reportFailedIncoming(name: content.title, completion: completion) } else { completion() }
+            // The same invitation twice (APNs may repeat): reporting the same
+            // UUID again is refused by CallKit and leaves the ringing call be.
+            NativeVoiceCallManager.shared.reportIncoming(uuid: uuid, name: content.title) { _ in completion() }
             return
         }
         let name = content.title.isEmpty ? "moa" : String(content.title.prefix(80))
