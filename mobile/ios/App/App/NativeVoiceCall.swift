@@ -117,7 +117,8 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
 
     private final class Call {
         let id: String
-        let uuid = UUID()
+        let uuid: UUID
+        let incoming: Bool
         let name: String
         let sessionId: String
         let callId: String
@@ -137,8 +138,11 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         var serverEnded = false
         var hangingUp = false
         var finished = false
-        init(id: String, name: String, sessionId: String, callId: String, origin: String, task: URLSessionWebSocketTask) {
+        init(id: String, name: String, sessionId: String, callId: String, origin: String, task: URLSessionWebSocketTask,
+             uuid: UUID = UUID(), incoming: Bool = false) {
             self.id = id
+            self.uuid = uuid
+            self.incoming = incoming
             self.name = name
             self.sessionId = sessionId
             self.callId = callId
@@ -151,7 +155,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     // the page's engine does (PENDING_MAX_SECONDS of 24 kHz s16le).
     private static let pendingMaxBytes = 24000 * 2 * 4
 
-    private let provider: CXProvider
+    let provider: CXProvider
     private let callController = CXCallController()
     private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
     private var call: Call?
@@ -195,6 +199,67 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             DispatchQueue.main.async { self?.activateWithoutCallKit(call, callKitError: Self.code(error)) }
         }
         callLog.info("voice call opening")
+    }
+
+    // MARK: Incoming calls (NativeIncomingCalls)
+
+    // reportIncoming shows a ringing call at once; nothing about it runs
+    // until it is answered.
+    func reportIncoming(uuid: UUID, name: String, completion: @escaping (Error?) -> Void) {
+        let update = CXCallUpdate()
+        update.localizedCallerName = name
+        update.remoteHandle = CXHandle(type: .generic, value: name)
+        update.hasVideo = false
+        update.supportsHolding = false
+        update.supportsGrouping = false
+        update.supportsUngrouping = false
+        update.supportsDTMF = false
+        provider.reportNewIncomingCall(with: uuid, update: update) { error in
+            DispatchQueue.main.async { completion(error) }
+        }
+    }
+
+    // reportFailedIncoming meets PushKit's duty to report a push that is not
+    // a call this app can ring (a registration challenge, an envelope that
+    // does not open): a call shown and ended as failed at once.
+    func reportFailedIncoming(name: String, completion: @escaping () -> Void) {
+        let uuid = UUID()
+        reportIncoming(uuid: uuid, name: name) { [weak self] _ in
+            self?.provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+            completion()
+        }
+    }
+
+    // startIncoming runs an answered invitation's call like an outgoing one:
+    // same socket, engine and teardown. The system already has the call.
+    func startIncoming(uuid: UUID, name: String, sessionId: String, origin: String, url: URL, authorization: String) -> Bool {
+        if let existing = call { finish(existing, remote: false, why: "replaced") }
+        guard let url = Self.callURL(url.absoluteString) else { return false }
+        var request = URLRequest(url: url)
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        let task = session.webSocketTask(with: request)
+        let call = Call(id: "in-" + uuid.uuidString, name: String(name.prefix(80)), sessionId: String(sessionId.prefix(128)),
+                        callId: url.pathComponents.dropLast().last ?? "", origin: origin, task: task, uuid: uuid, incoming: true)
+        call.started = true
+        // Answering is the consent to the microphone; it cannot be asked for
+        // on a locked screen, so a call without it ends with that reason.
+        call.audioWanted = AVAudioSession.sharedInstance().recordPermission == .granted
+        self.call = call
+        task.resume()
+        receive(call)
+        if !call.audioWanted {
+            DispatchQueue.main.async { self.finish(call, remote: false, why: "mic_not_granted") }
+        }
+        callLog.info("incoming voice call answered")
+        return true
+    }
+
+    static func configureSessionForCall() {
+        do {
+            try configureSession()
+        } catch {
+            callLog.error("voice session category: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     // The live call, if this id names it and the app is still paired with
@@ -422,6 +487,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     // MARK: CXProviderDelegate
 
     func providerDidReset(_ provider: CXProvider) {
+        NativeIncomingCalls.shared.reset()
         if let call { finish(call, remote: false, why: "provider_reset") }
     }
 
@@ -453,7 +519,12 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         action.fulfill()
     }
 
+    func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+        if !NativeIncomingCalls.shared.answer(action) { action.fail() }
+    }
+
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+        if NativeIncomingCalls.shared.decline(action) { return }
         action.fulfill()
         guard let call, call.uuid == action.callUUID, !call.finished else { return }
         // Hung up from the lock screen, a headset or the car: silence now,
@@ -498,8 +569,8 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         guard let call, call.task === webSocketTask else { return }
         call.open = true
-        // Connected is reported only for a call CallKit has started.
-        if call.started { provider.reportOutgoingCall(with: call.uuid, connectedAt: Date()) }
+        // Connected is reported only for an outgoing call CallKit has started.
+        if call.started && !call.incoming { provider.reportOutgoingCall(with: call.uuid, connectedAt: Date()) }
         emit(call, "open")
     }
 

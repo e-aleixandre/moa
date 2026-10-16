@@ -204,6 +204,8 @@ final class NativePushRegistration {
     @discardableResult
     func forgetLocal() -> Bool {
         operations.invalidate()
+        // Whatever ends push for this pairing ends incoming calls too.
+        NativeIncomingCalls.shared.forgetLocal()
         finishTokenWaiters(.failure(NativePushError.cancelled))
         finishPending(pending?.id, .failure(NativePushError.cancelled))
         let removed = deleteSecret()
@@ -611,14 +613,14 @@ final class NativePushRegistration {
 
     // MARK: - Helpers
 
-    static var relayAllowlist: PushRelayAllowlist {
+    nonisolated static var relayAllowlist: PushRelayAllowlist {
         PushRelayAllowlist(plistValue: Bundle.main.object(forInfoDictionaryKey: "MoaPushRelayURLs"))
     }
 
     // Xcode-installed builds carry a development profile and talk to the
     // APNs sandbox; TestFlight and App Store builds carry no development
     // profile and use production.
-    static var apsEnvironment: String {
+    nonisolated static var apsEnvironment: String {
         guard
             let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
             let data = try? Data(contentsOf: url),

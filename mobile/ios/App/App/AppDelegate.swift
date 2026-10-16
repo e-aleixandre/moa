@@ -12,6 +12,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Capacitor's own router is off (ios.handleApplicationNotifications).
         UNUserNotificationCenter.current().delegate = self
         NativePushRegistration.shared.start()
+        // PushKit before anything else: a VoIP push that launched the app is
+        // delivered as soon as the registry exists, and must ring at once.
+        NativeIncomingCalls.shared.start()
         return true
     }
 

@@ -11,6 +11,7 @@
 		B00000000000000000000002 /* NativePushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* NativePushRegistration.swift */; };
 		B00000000000000000000003 /* NativePushBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* NativePushBridge.swift */; };
 		D0000000000000000000A001 /* NativeVoiceCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000A001 /* NativeVoiceCall.swift */; };
+		D0000000000000000000A002 /* NativeIncomingCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000A002 /* NativeIncomingCall.swift */; };
 		B00000000000000000000004 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* Localizable.strings */; };
 		B00000000000000000000005 /* PushEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* PushEnvelope.swift */; };
 		B00000000000000000000006 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000006 /* NotificationService.swift */; };
@@ -100,6 +101,7 @@
 		B10000000000000000000002 /* NativePushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePushRegistration.swift; sourceTree = "<group>"; };
 		B10000000000000000000003 /* NativePushBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePushBridge.swift; sourceTree = "<group>"; };
 		D1000000000000000000A001 /* NativeVoiceCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVoiceCall.swift; sourceTree = "<group>"; };
+		D1000000000000000000A002 /* NativeIncomingCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeIncomingCall.swift; sourceTree = "<group>"; };
 		B10000000000000000000004 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		B10000000000000000000005 /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/Localizable.strings; sourceTree = "<group>"; };
 		B10000000000000000000006 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
@@ -230,6 +232,7 @@
 				B10000000000000000000002 /* NativePushRegistration.swift */,
 				B10000000000000000000003 /* NativePushBridge.swift */,
 				D1000000000000000000A001 /* NativeVoiceCall.swift */,
+				D1000000000000000000A002 /* NativeIncomingCall.swift */,
 				B20000000000000000000001 /* Localizable.strings */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -529,6 +532,7 @@
 				B00000000000000000000002 /* NativePushRegistration.swift in Sources */,
 				B00000000000000000000003 /* NativePushBridge.swift in Sources */,
 				D0000000000000000000A001 /* NativeVoiceCall.swift in Sources */,
+				D0000000000000000000A002 /* NativeIncomingCall.swift in Sources */,
 				9793AE35C5F3186239D34C6F /* KeychainGroups.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
