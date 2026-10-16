@@ -27,6 +27,9 @@ type nativeRelay struct {
 	mu   sync.Mutex
 	got  []push.EnvelopeContent
 	raw  []string
+	// onDeliver, if set, runs before the relay answers: a device acting
+	// while the server is still delivering.
+	onDeliver func(push.EnvelopeContent)
 }
 
 func (f *nativeRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +52,11 @@ func (f *nativeRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.got = append(f.got, content)
 	f.raw = append(f.raw, string(body))
+	hook := f.onDeliver
 	f.mu.Unlock()
+	if hook != nil {
+		hook(content)
+	}
 	_, _ = io.WriteString(w, `{"ok":true}`)
 }
 

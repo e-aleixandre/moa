@@ -250,13 +250,16 @@ func (r *callRequestRegistry) ringDevices(req *callRequest) bool {
 		slog.Info("call request: no iPhone rang", "err", err)
 		return false
 	}
+	// The iPhone may have been answered (the request is connecting) before
+	// RingDevices returned: the follower must run then too, or the request
+	// never learns how that answer ended.
 	r.mu.Lock()
-	stillRinging := r.live[id] != nil && r.live[id].State == crRinging
-	if stillRinging {
-		r.live[id].invite = inviteID
+	live := r.live[id]
+	if live != nil && live.State == crRinging {
+		live.invite = inviteID
 	}
 	r.mu.Unlock()
-	if !stillRinging {
+	if live == nil {
 		vr.CancelInvite(inviteID)
 		return true
 	}

@@ -3,6 +3,7 @@ package serve
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -177,4 +178,35 @@ func TestRequestCallRing_IPhoneAndWebOneWinner(t *testing.T) {
 		f.created = true
 		f.dial(c, hdr, false).send(map[string]any{"type": "hangup"})
 	}
+}
+
+// The iPhone answers before RingDevices has returned (the push arrived and
+// the user tapped at once): the request still ends answered.
+func TestRequestCallRing_AnsweredWhileStillDelivering(t *testing.T) {
+	f, inv := rcRingFixture(t, "ring")
+	var once sync.Once
+	created := make(chan vpCreated, 1)
+	inv.relay.mu.Lock()
+	inv.relay.onDeliver = func(c push.EnvelopeContent) {
+		if c.Kind != push.KindCall {
+			return
+		}
+		once.Do(func() {
+			var call vpCreated
+			code, body, _, _ := f.request("POST", "/api/voice/invites/"+c.Invite+"/answer", map[string]any{}, inv.voice(0))
+			if code != http.StatusCreated {
+				t.Errorf("early answer = %d: %s", code, body)
+			}
+			_ = json.Unmarshal(body, &call)
+			created <- call
+		})
+	}
+	inv.relay.mu.Unlock()
+	f.ask()
+	c := <-created
+	f.created = true
+	if outcome, _ := rcOutcome(t, f.result()); outcome != "answered" {
+		t.Fatalf("outcome = %s, want answered", outcome)
+	}
+	f.dial(c, inv.voice(0), false).send(map[string]any{"type": "hangup"})
 }
