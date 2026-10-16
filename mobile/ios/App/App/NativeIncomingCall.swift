@@ -124,6 +124,9 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
     private var ringing: Ringing?
     private var pending: Pending?
     private var registering = false
+    // Moved on by forgetLocal: registration work started before it stops
+    // before writing S_v, state or a destination.
+    private var generation = 0
     private var lastRefresh: Date?
     private let delegate = IncomingSessionDelegate()
     private lazy var session: URLSession = {
@@ -155,6 +158,8 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
     // and an answer in flight finds it gone (see answer).
     func forgetLocal() {
         if let call = ringing { endRinging(call, reason: .failed) }
+        generation += 1
+        registering = false
         IncomingCallSecretStore.delete()
         UserDefaults.standard.removeObject(forKey: Self.stateKey)
         pending?.done(nil)
@@ -381,8 +386,9 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
         lastRefresh = Date()
         registering = true
         let env = NativePushRegistration.apsEnvironment
+        let generation = generation
         server("GET", paired, "api/push/voip/status", nil) { [weak self] status, object in
-            guard let self else { return }
+            guard let self, self.generation == generation else { return }
             guard status == 200, let object else {
                 // An older server without incoming calls (404), or offline.
                 self.registering = false
@@ -408,18 +414,19 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
                 self.registering = false
                 return
             }
-            self.register(secret: secret, paired: paired, relay: relay, token: token, env: env)
+            self.register(secret: secret, paired: paired, relay: relay, token: token, env: env, generation: generation)
         }
     }
 
-    private func register(secret: IncomingCallSecret, paired: StoredDeviceCredential, relay: String, token: String, env: String) {
+    private func register(secret: IncomingCallSecret, paired: StoredDeviceCredential, relay: String, token: String, env: String,
+                          generation: Int) {
         guard let keys = PushEnvelope.deriveKeys(secret: secret.secret), let url = URL(string: relay + "/v1/register") else {
             registering = false
             return
         }
         pending?.done(nil)
         pending = Pending(token: token, env: env, relay: relay, sendKey: keys.send, startedAt: Date()) { [weak self] handle in
-            guard let self else { return }
+            guard let self, self.generation == generation else { return }
             self.pending = nil
             guard let handle else {
                 self.registering = false
@@ -430,6 +437,11 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
                 "secret": PushEnvelope.base64URLEncode(secret.secret), "env": env
             ]
             self.server("POST", paired, "api/push/voip", body) { status, _ in
+                guard self.generation == generation else {
+                    // Forgotten while this was on its way: what it created goes.
+                    if (200..<300).contains(status) { self.server("DELETE", paired, "api/push/voip", nil) { _, _ in } }
+                    return
+                }
                 self.registering = false
                 if (200..<300).contains(status) {
                     self.saveState(State(origin: secret.origin, token: token, env: env))
