@@ -99,7 +99,34 @@ func (m *Manager) admitVoiceLocked(sess *ManagedSession, deliveryID, text string
 	}
 	r := voiceReceipt{Action: action, ID: id}
 	a.receipts[deliveryID] = r
+	if action == "steer" {
+		// A record waiting behind a running turn is not in the transcript
+		// until the turn reads it; the session's clients show it meanwhile.
+		if label, _ := voiceQueuedText(custom); label != "" {
+			sess.runtime.Bus.Publish(bus.SteerQueued{SessionID: sess.ID, ID: id, Text: label})
+		}
+	}
 	return r, false, nil
+}
+
+// voiceQueuedText is what the queue says about a voice call's record that
+// waits behind a running turn. ok reports that custom is a call's record;
+// the label is empty for the ones that are never shown (the minutes' wake).
+func voiceQueuedText(custom map[string]any) (label string, ok bool) {
+	if custom["source"] != "voice_call" {
+		return "", false
+	}
+	summary, _ := custom["model_summary"].(string)
+	question, _ := custom["question"].(string)
+	switch custom["kind"] {
+	case "relay":
+		return "Passed on to this session: " + summary, true
+	case "question":
+		return "Asked this session: " + question, true
+	case "brief":
+		return "Asked this session for a brief", true
+	}
+	return "", true
 }
 
 // admitVoiceRelay admits a pass_to_session relay like admitVoice, but first

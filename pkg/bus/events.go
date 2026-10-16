@@ -271,6 +271,15 @@ type Steered struct {
 	Custom    map[string]any
 }
 
+// SteerQueued is published when a message is queued behind a running turn and
+// the clients of the session must show it before the agent reads it (Steered
+// follows, under the same ID, when it does). Text is what the queue line says.
+type SteerQueued struct {
+	SessionID string
+	ID        string
+	Text      string
+}
+
 // SteersCanceled is published when all queued (not yet delivered) steers are
 // dropped, so every client of the shared session queue clears its chips.
 type SteersCanceled struct {

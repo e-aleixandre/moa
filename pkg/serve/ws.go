@@ -321,6 +321,8 @@ func wsEventFromBus(event any) (Event, bool) {
 			data.Content = sanitized.Content
 		}
 		return Event{Type: "user_message", Data: data}, true
+	case bus.SteerQueued:
+		return Event{Type: "steer_queued", Data: SteerQueuedData{ID: e.ID, Text: truncateHistoryString(e.Text), NonRecallable: true}}, true
 	case bus.CommandQueued:
 		return Event{Type: "command_queued", Data: CommandQueuedData{ID: e.ID, Raw: e.Raw}}, true
 	case bus.CommandDequeued:
@@ -818,15 +820,24 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 
 	if len(pendingSteers) > 0 {
-		data.PendingSteers = make([]PendingSteerData, len(pendingSteers))
-		for i, s := range pendingSteers {
-			data.PendingSteers[i] = PendingSteerData{
+		data.PendingSteers = make([]PendingSteerData, 0, len(pendingSteers))
+		for _, s := range pendingSteers {
+			entry := PendingSteerData{
 				ID:            s.ID,
 				Text:          s.Text,
 				Command:       s.IsBarrier(),
 				Images:        countImageContent(s.Content),
 				NonRecallable: isTaskNotice(s.Custom),
 			}
+			if label, ok := voiceQueuedText(s.Custom); ok {
+				// The call's records read as what they are, never as the
+				// prompt wrapped around them, and are not the owner's text.
+				if label == "" {
+					continue
+				}
+				entry.Text, entry.NonRecallable = truncateHistoryString(label), true
+			}
+			data.PendingSteers = append(data.PendingSteers, entry)
 		}
 	}
 

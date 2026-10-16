@@ -424,6 +424,16 @@ type UserMessageData struct {
 	Custom    map[string]any `json:"custom,omitempty"`
 }
 
+// SteerQueuedData is sent when a message is queued behind a running turn that
+// the session's clients did not queue themselves (a voice call's relay or
+// question). The client shows it in the queue under ID; the steer event that
+// delivers it carries the same ID.
+type SteerQueuedData struct {
+	ID            string `json:"id"`
+	Text          string `json:"text"`
+	NonRecallable bool   `json:"non_recallable,omitempty"`
+}
+
 // CommandQueuedData is sent when a slash command is enqueued as a barrier in the
 // unified queue rail (issued while the session was busy). The client renders a
 // queued command chip keyed by ID, distinct from a queued message chip.

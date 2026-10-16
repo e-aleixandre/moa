@@ -1218,7 +1218,8 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 			for _, steer := range discarded {
 				// A task notice is not the owner's text: it is kept in the
 				// transcript instead, so it must not come back to the composer.
-				if isTaskNotice(steer.Custom) {
+				// Neither is a voice call's record.
+				if _, voice := voiceQueuedText(steer.Custom); isTaskNotice(steer.Custom) || voice {
 					continue
 				}
 				ids = append(ids, steer.ID)
@@ -1298,7 +1299,7 @@ func readSteerOperation(w http.ResponseWriter, r *http.Request) (steerOperation,
 func recallableSteers(discarded []core.SteerItem) []PendingSteerData {
 	steers := make([]PendingSteerData, 0, len(discarded))
 	for _, steer := range discarded {
-		if steer.Internal || isTaskNotice(steer.Custom) {
+		if _, voice := voiceQueuedText(steer.Custom); steer.Internal || isTaskNotice(steer.Custom) || voice {
 			continue
 		}
 		steers = append(steers, PendingSteerData{

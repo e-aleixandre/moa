@@ -397,6 +397,22 @@ function chronologicalSubagentOutcomes(outcomes) {
   });
 }
 
+// handleWsSteerQueued puts a message another party queued behind the running
+// turn (a voice call's relay or question) in this client's queue, so it shows
+// before the agent reads it. The steer event that delivers it carries the same
+// ID and retires the line; it can overtake this frame, so a message already
+// delivered under that ID is not queued again.
+export function handleWsSteerQueued(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !data?.id) return;
+  if ((sess.messages || []).some(m => m._steer_id === data.id)) return;
+  const steers = sess.pendingSteers || [];
+  if (steers.some(s => s.id === data.id)) return;
+  updateSession(id, {
+    pendingSteers: [...steers, { id: data.id, text: data.text || '', confirmed: true, non_recallable: !!data.non_recallable }],
+  });
+}
+
 // handleWsSteersCanceled clears the shared queue on every client when the
 // queued (not yet delivered) steers were dropped (e.g. dequeued for editing).
 // `opId` is the stop_id or recall_id the server echoes: when it is one of this
