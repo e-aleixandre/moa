@@ -346,7 +346,7 @@ func (c *voiceCall) persistMinutes(reason string) {
 	for _, p := range passed {
 		fmt.Fprintf(&b, "- [%s] already_delivered: %s\n", p.DeliveryID, voiceEscape(p.Summary, "voice_minutes"))
 		ledger = append(ledger, map[string]any{"delivery_id": p.DeliveryID, "already_delivered": true})
-		items.Passed = append(items.Passed, voiceMinutesPassed{DeliveryID: p.DeliveryID, Summary: p.Summary})
+		items.Passed = append(items.Passed, voiceMinutesPassed(p))
 	}
 	b.WriteString("\n")
 	section("Still open", open)
