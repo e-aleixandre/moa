@@ -170,6 +170,7 @@ func (m *Manager) voiceWakeText(sess *ManagedSession, rec core.AgentMessage) str
 			transcript = c.AttachmentID
 		}
 	}
+	b.WriteString("\n" + voiceCheckDecisions)
 	path := ""
 	if transcript != "" && m.attachStore != nil {
 		p, err := m.attachStore.EnsureView(sess.ID, transcript)

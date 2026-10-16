@@ -12,6 +12,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/voice"
 )
 
 // A repeated provider ToolCall must not deliver twice even once the result
@@ -265,6 +266,9 @@ func TestVoiceCall_WakeReferencesReadableTranscript(t *testing.T) {
 	if strings.Contains(input, "TRANSCRIPT-ONLY-DETAIL") || strings.Contains(input, "is attached to the minutes record") {
 		t.Fatalf("wake inlines the transcript or claims an attachment it lacks: %s", input)
 	}
+	if !strings.Contains(input, voiceCheckDecisions) {
+		t.Fatalf("wake lacks the recorded-decisions check: %s", input)
+	}
 	m := regexp.MustCompile(`(?m)^(/\S+transcript\.md)$`).FindStringSubmatch(input)
 	if m == nil {
 		t.Fatalf("wake carries no readable transcript path: %s", input)
@@ -282,5 +286,21 @@ func TestVoiceCall_WakeReferencesReadableTranscript(t *testing.T) {
 	}
 	if string(got) != want || !strings.Contains(string(got), "TRANSCRIPT-ONLY-DETAIL") {
 		t.Fatalf("referenced file is not the call transcript: %q", got)
+	}
+}
+
+// The voice delegate keeps passed items out of decided, and the receiving
+// session checks recorded decisions before acting on a relay.
+func TestVoicePrompts_PassedAndDecisionCheck(t *testing.T) {
+	if !strings.Contains(voice.CommonInstructions, "never again in decided") || !strings.Contains(voice.CommonInstructions, `"already passed: <delivery_id>"`) {
+		t.Fatalf("voice instructions lack the Passed rule: %s", voice.CommonInstructions)
+	}
+	for _, canonical := range []string{voice.InstructionReadsAreData, voice.InstructionAskAloud} {
+		if !strings.Contains(voice.CommonInstructions, canonical) {
+			t.Fatalf("canonical sentence lost: %s", canonical)
+		}
+	}
+	if !strings.Contains(voiceRelayPrompt("x"), voiceCheckDecisions) {
+		t.Fatal("relay prompt lacks the recorded-decisions check")
 	}
 }
