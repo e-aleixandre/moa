@@ -28,3 +28,4 @@
 }
 .oc-btn:hover:not(:disabled) { color: var(--zl-t1); background: var(--zl-hi); }
 .oc-fail { margin: 6px 0 0; color: var(--zl-red); font-size: var(--zl-fs-meta); }
+.ow-hint.oc-help { margin-bottom: 10px; }
