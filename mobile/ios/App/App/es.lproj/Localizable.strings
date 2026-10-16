@@ -9,6 +9,7 @@
 "CARPLAY_NOT_SET_UP" = "moa aún no está listo para llamadas";
 "CARPLAY_ERROR_NO_PLAN" = "No hay ningún plan de voz disponible";
 "CARPLAY_ERROR_CALL_ACTIVE" = "Ya hay una llamada en curso";
+"CARPLAY_ERROR_CALL_FAILED" = "La llamada ha fallado, inténtalo de nuevo";
 "CARPLAY_ERROR_UNREACHABLE" = "No se puede conectar con tu servidor de moa";
 "CARPLAY_ERROR_MIC_OFF" = "moa no tiene acceso al micrófono";
 "CARPLAY_OK" = "OK";

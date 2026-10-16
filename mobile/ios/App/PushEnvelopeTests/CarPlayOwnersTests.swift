@@ -58,7 +58,7 @@ final class CarPlayOwnersTests: XCTestCase {
     }
 
     func testNoTextAsksToPickUpTheIPhone() {
-        let texts = [CarPlayText.notSetUp, CarPlayText.noPlan, CarPlayText.callActive, CarPlayText.unreachable, CarPlayText.micOff]
+        let texts = [CarPlayText.notSetUp, CarPlayText.noPlan, CarPlayText.callActive, CarPlayText.unreachable, CarPlayText.callFailed, CarPlayText.micOff]
         for text in texts {
             XCTAssertFalse(text.lowercased().contains("iphone"), text)
             XCTAssertFalse(text.lowercased().contains("pick up"), text)
@@ -78,11 +78,12 @@ final class CarPlayOwnersTests: XCTestCase {
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 201, data: json(["ws_url": "https://evil/ws"])), .alert(.unreachable))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 409, data: json(["error": "call_active"])), .alert(.callActive))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 409, data: json(["error": "owner_busy", "retryable": true])),
-                       .alert(.unreachable))
+                       .alert(.callFailed))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 503, data: json(["error": "plan_unavailable", "reason": "no_plan",
                                                                                "paid_option": ["provider": "xai"]])), .alert(.noPlan))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 503, data: json(["error": "no_plan"])), .alert(.noPlan))
-        XCTAssertEqual(CarPlayCallStartModel.outcome(status: 502, data: json(["error": "provider_unavailable"])), .alert(.noPlan))
+        XCTAssertEqual(CarPlayCallStartModel.outcome(status: 502, data: json(["error": "provider_unavailable"])), .alert(.callFailed))
+        XCTAssertEqual(CarPlayCallStartModel.outcome(status: 503, data: json(["error": "plan_unavailable", "reason": "auth"])), .alert(.callFailed))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 503, data: json(["error": "shutting_down"])), .alert(.unreachable))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 429, data: json(["error": "rate_limited"])), .alert(.unreachable))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 404, data: json(["error": "owner_not_found"])), .reload)

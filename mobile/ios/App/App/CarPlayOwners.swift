@@ -17,6 +17,7 @@ enum CarPlayText {
     static var noPlan: String { NSLocalizedString("CARPLAY_ERROR_NO_PLAN", value: "No voice plan available", comment: "CarPlay alert") }
     static var callActive: String { NSLocalizedString("CARPLAY_ERROR_CALL_ACTIVE", value: "A call is already in progress", comment: "CarPlay alert") }
     static var unreachable: String { NSLocalizedString("CARPLAY_ERROR_UNREACHABLE", value: "Can't reach your moa server", comment: "CarPlay alert") }
+    static var callFailed: String { NSLocalizedString("CARPLAY_ERROR_CALL_FAILED", value: "Call failed, try again", comment: "CarPlay alert: the call could not start for a reason other than a missing plan") }
     static var micOff: String { NSLocalizedString("CARPLAY_ERROR_MIC_OFF", value: "Microphone access is off for moa", comment: "CarPlay alert") }
     static var ok: String { NSLocalizedString("CARPLAY_OK", value: "OK", comment: "CarPlay alert button") }
     static var connecting: String { NSLocalizedString("CARPLAY_CONNECTING", value: "Connecting…", comment: "CarPlay voice state") }
@@ -35,13 +36,14 @@ enum CarPlayText {
         case .noPlan: return noPlan
         case .callActive: return callActive
         case .unreachable: return unreachable
+        case .callFailed: return callFailed
         case .micOff: return micOff
         }
     }
 }
 
 enum CarPlayAlert: Equatable {
-    case noPlan, callActive, unreachable, micOff
+    case noPlan, callActive, unreachable, callFailed, micOff
 }
 
 // MARK: Directory → list
@@ -136,13 +138,17 @@ enum CarPlayCallStartModel {
         case (409, "owner_busy"):
             // The owner is being reopened by another request: retryable, but
             // the car does not retry on its own.
-            return .alert(.unreachable)
+            return .alert(.callFailed)
         case (409, "call_active"):
             return .alert(.callActive)
-        case (503, "plan_unavailable"), (503, "no_plan"), (502, "provider_unavailable"):
+        case (503, "plan_unavailable") where body["reason"] as? String == "no_plan", (503, "no_plan"):
             // No payment is offered in the car, even when the server names a
             // paid alternative.
             return .alert(.noPlan)
+        case (503, "plan_unavailable"), (502, "provider_unavailable"):
+            // A plan exists but its provider refused the call: saying there
+            // is no plan would be false.
+            return .alert(.callFailed)
         case (404, _), (409, "owner_has_no_conversation"), (401, _), (403, _):
             return .reload
         default:
