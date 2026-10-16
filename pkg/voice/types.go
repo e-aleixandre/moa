@@ -84,6 +84,9 @@ type CallSpec struct {
 	InitialContext string
 	BackendModel   core.Model
 	Tools          []core.ToolSpec
+	// SpeakFirst asks the provider for a response before any user audio:
+	// moa placed this call, so the voice opens it (InitialContext says why).
+	SpeakFirst bool
 }
 
 // Adapter opens upstream calls for one provider.

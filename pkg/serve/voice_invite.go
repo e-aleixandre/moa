@@ -320,8 +320,8 @@ func (r *voiceCallRegistry) handleInviteCreate(w http.ResponseWriter, req *http.
 		SessionID string `json:"session_id"`
 		Name      string `json:"name"`
 		// Reason, optional, is what the voice opens the test call with.
-		Reason string `json:"reason"`
-		Provider  string `json:"provider"`
+		Reason   string `json:"reason"`
+		Provider string `json:"provider"`
 	}
 	if err := json.NewDecoder(io.LimitReader(req.Body, voice.MaxControlJSON)).Decode(&in); err != nil || in.SessionID == "" {
 		voiceError(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})

@@ -68,6 +68,12 @@ func (a *realtimeWS) Open(ctx context.Context, spec CallSpec) (Upstream, error) 
 	up := &realtimeUpstream{}
 	up.wsUpstream = newWSUpstream(conn, up.parse)
 	up.start()
+	if spec.SpeakFirst {
+		if err := up.send(map[string]any{"type": "response.create"}); err != nil {
+			_ = up.close(ctx)
+			return nil, err
+		}
+	}
 	return up, nil
 }
 
