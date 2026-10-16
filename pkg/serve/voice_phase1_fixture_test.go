@@ -505,6 +505,7 @@ type vpFixture struct {
 	voiceText        *vpVoiceText
 	backendMu        sync.Mutex
 	backendPlans     []auth.CredentialSnapshot // plan each handoff backend was bound to
+	backendModels    []string                  // model each handoff backend was built for
 	sess             *ManagedSession
 	root, provider   string
 	log, clientBytes vpBuffer
@@ -576,9 +577,10 @@ func vpNewFixtureWithLimits(t *testing.T, provider string, limits vpLimits, hand
 func (f *vpFixture) start() {
 	logins := auth.NewProviderLoginManagerWithHTTPClient(context.Background(), f.store, f.up.client())
 	f.t.Cleanup(logins.Close)
-	backend := func(_ core.Model, plan auth.CredentialSnapshot) (core.Provider, error) {
+	backend := func(model core.Model, plan auth.CredentialSnapshot) (core.Provider, error) {
 		f.backendMu.Lock()
 		f.backendPlans = append(f.backendPlans, plan)
+		f.backendModels = append(f.backendModels, model.ID)
 		f.backendMu.Unlock()
 		return f.voiceText, nil
 	}

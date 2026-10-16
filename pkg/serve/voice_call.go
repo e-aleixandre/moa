@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/e-aleixandre/moa/pkg/auth"
+	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/voice"
 )
 
@@ -45,6 +46,7 @@ type voiceCallRegistry struct {
 	principals map[string]*voiceSlot              // one reservation per principal
 	calls      map[string]*voiceCall              // active calls by ID
 	plans      map[string]auth.CredentialSnapshot // plan sign-in each ChatGPT-plan call opened with
+	models     map[string]core.Model              // backend model each call opened with, kept until it finishes
 	ended      map[string]string                  // tombstone: call ID → principal
 	endedOrder []string
 	recent     []voiceUsage   // usage of the last calls, newest last, bounded
@@ -58,7 +60,7 @@ func newVoiceCallRegistry(mgr *Manager, store *auth.Store, opts VoiceCallOptions
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &voiceCallRegistry{mgr: mgr, store: store, opts: opts, admission: newVoiceOpenBudget(), ctx: ctx, cancel: cancel,
-		principals: map[string]*voiceSlot{}, calls: map[string]*voiceCall{}, plans: map[string]auth.CredentialSnapshot{}, ended: map[string]string{}}
+		principals: map[string]*voiceSlot{}, calls: map[string]*voiceCall{}, plans: map[string]auth.CredentialSnapshot{}, models: map[string]core.Model{}, ended: map[string]string{}}
 }
 
 // voiceSlot is a principal's reservation. tearingDown is closed once its
@@ -124,17 +126,26 @@ func (r *voiceCallRegistry) release(principal string, slot *voiceSlot) {
 // register publishes an opened call with the plan sign-in it was opened
 // with, if any. It fails when the registry closed while the upstream was
 // opening; the caller then closes that upstream.
-func (r *voiceCallRegistry) register(c *voiceCall, plan *auth.CredentialSnapshot) bool {
+func (r *voiceCallRegistry) register(c *voiceCall, plan *auth.CredentialSnapshot, model core.Model) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		return false
 	}
 	r.calls[c.id] = c
+	r.models[c.id] = model
 	if plan != nil {
 		r.plans[c.id] = *plan
 	}
 	return true
+}
+
+// openedModel is the backend model call id opened with.
+func (r *voiceCallRegistry) openedModel(id string) (core.Model, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, ok := r.models[id]
+	return m, ok
 }
 
 // openedPlan is the plan sign-in call id was opened with.
@@ -156,6 +167,7 @@ func (r *voiceCallRegistry) finish(c *voiceCall) {
 	r.mu.Lock()
 	delete(r.calls, c.id)
 	delete(r.plans, c.id)
+	delete(r.models, c.id)
 	r.ended[c.id] = c.principal
 	r.endedOrder = append(r.endedOrder, c.id)
 	if len(r.endedOrder) > voiceTombstones {
@@ -267,10 +279,12 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	id := newVoiceCallID()
+	// Read once: the call keeps this model to its end, whatever Settings says later.
+	model := voiceModel()
 	ctx, cancel := context.WithTimeout(r.ctx, voiceOpenTimeout)
 	up, err := adapter.Open(ctx, voice.CallSpec{
 		CallID: id, SessionID: sess.ID, Voice: voiceProviders[provider].voice,
-		Instructions: voice.CommonInstructions, BackendModel: voiceModel(), Tools: voice.ToolSpecs(),
+		Instructions: voice.CommonInstructions, BackendModel: model, Tools: voice.ToolSpecs(),
 		InitialContext: r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
 	})
 	cancel()
@@ -293,7 +307,7 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		opened := creds.opened()
 		plan = &opened
 	}
-	if !r.register(c, plan) {
+	if !r.register(c, plan, model) {
 		ctx, cancel := context.WithTimeout(context.Background(), r.opts.Limits.Teardown)
 		_ = up.Close(ctx, "shutdown")
 		cancel()

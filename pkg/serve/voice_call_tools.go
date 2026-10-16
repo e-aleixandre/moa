@@ -340,9 +340,9 @@ func (c *voiceCall) backendLoop(ctx context.Context, input string, tools []core.
 // sign-in the call was opened with, never to the text selection: a text API
 // key must never pay for a plan call, nor another account serve it.
 func (r *voiceCallRegistry) backendProvider(id string) (core.Provider, core.Model, error) {
-	model := voiceModel()
+	model, hasModel := r.openedModel(id)
 	plan, ok := r.openedPlan(id)
-	if !ok || r.opts.Backend == nil {
+	if !hasModel || !ok || r.opts.Backend == nil {
 		return nil, model, errors.New("backend needs the plan sign-in")
 	}
 	prov, err := r.opts.Backend(model, plan)

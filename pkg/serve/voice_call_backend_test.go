@@ -43,3 +43,30 @@ func TestChatGPTPlan_HandoffUsesOpenedPlanDespiteTextEnvironment(t *testing.T) {
 		}
 	}
 }
+
+// The backend model is fixed when the call opens: changing it in Settings
+// while the call runs applies to the next call, never to this one.
+func TestChatGPTPlan_BackendModelIsFixedAtOpen(t *testing.T) {
+	f := vpNewFixture(t, "chatgpt-plan")
+	f.mustRequest("PATCH", "/api/voice/settings", map[string]any{"backend_model": "gpt-6-sol"}, f.owner(), 200)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpReadControl(t, f, p)
+	p.tool(t, "h1", "read_session", map[string]any{})
+	p.result(t, "h1")
+	f.mustRequest("PATCH", "/api/voice/settings", map[string]any{"backend_model": "gpt-6-luna"}, f.owner(), 200)
+	p.tool(t, "h2", "read_session", map[string]any{})
+	p.result(t, "h2")
+	c.hangup()
+	f.backendMu.Lock()
+	models := append([]string(nil), f.backendModels...)
+	f.backendMu.Unlock()
+	if len(models) < 2 {
+		t.Fatalf("handoff backends built = %v, want at least 2", models)
+	}
+	for _, m := range models {
+		if m != "gpt-6-sol" {
+			t.Fatalf("backend models = %v, want gpt-6-sol for the whole call", models)
+		}
+	}
+}
