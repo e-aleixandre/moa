@@ -271,6 +271,7 @@ export function SubagentStatusStrip({ view, compact = false, sessionId, jobId })
       ctxPercent={view.contextPercent >= 0 ? view.contextPercent : undefined}
       modelName={view.model}
       modelMark={`var(--${view.accent})`}
+      daybreak={!!view.daybreak}
       thinking={view.thinking || "off"}
       thinkingPosition={catalogThinkingPosition(catalog, { model: view.modelSpec, thinking: view.thinking || "off" })}
       onModel={sessionId && jobId ? () => setOpen(true) : undefined}

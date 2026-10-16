@@ -741,6 +741,15 @@ func (j *Jobs) Snapshot() []JobInfo {
 	return infos
 }
 
+// Daybreak reports whether jobID was launched with the Daybreak program.
+func (j *Jobs) Daybreak(jobID string) bool {
+	if j == nil || j.store == nil {
+		return false
+	}
+	snap, ok := j.store.snapshot(jobID)
+	return ok && snap.Daybreak
+}
+
 // Messages returns a defensive deep copy of the stored transcript for jobID.
 func (j *Jobs) Messages(jobID string) []core.AgentMessage {
 	if j == nil || j.store == nil {

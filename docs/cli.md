@@ -144,7 +144,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
 | `muse` | `muse-spark-1.3` (Meta) |
 | `sol` | `gpt-6.1-sol` |
-| `daybreak` | `gpt-daybreak-blue-latest` (moving alias for the current flagship, with safeguards for defensive cybersecurity work; needs Daybreak provisioning) |
+| `daybreak` | `gpt-6-sol` with the Daybreak mode on (needs Daybreak provisioning and the ChatGPT plan login). In `subagent_allowed_models` it allows GPT-6 Sol with Daybreak. The retired `gpt-daybreak-blue-latest` means the same |
 | `terra` | `gpt-5.6-terra` |
 | `luna` | `gpt-6-luna` |
 | `gpt-5.6` | `gpt-5.6-sol` |

@@ -178,6 +178,8 @@ type SubagentInitData struct {
 	// by the client to derive a deterministic accent color that survives
 	// reconnects (instead of one derived from array/map position).
 	AccentIndex int `json:"accent_index"`
+	// Daybreak is whether the child runs with the Daybreak program.
+	Daybreak bool `json:"daybreak,omitempty"`
 }
 
 // BashJobInitData restores a live/recent background command after reconnect.
@@ -543,7 +545,8 @@ type SubagentStartData struct {
 	// AccentIndex is the subagent's stable per-session creation ordinal (see
 	// SubagentInitData.AccentIndex). Never omitted: 0 is a valid ordinal
 	// (the session's first subagent).
-	AccentIndex int `json:"accent_index"`
+	AccentIndex int  `json:"accent_index"`
+	Daybreak    bool `json:"daybreak,omitempty"`
 }
 
 // SubagentUsageData carries a subagent's accumulated usage/cost while it is

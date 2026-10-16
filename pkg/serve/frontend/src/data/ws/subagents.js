@@ -142,6 +142,7 @@ export function handleWsSubagentStart(id, data) {
     // See initSubagents: preserved across a promotion echo (existing wins if
     // the live event omits it, though the backend always sends it).
     accentIndex: data.accent_index ?? (existing && existing.accentIndex),
+    daybreak: data.daybreak ?? !!(existing && existing.daybreak),
   };
   // A start can race the parent's already-materialized tool row. Attach the
   // durable job ID immediately so the launch acknowledgement never projects

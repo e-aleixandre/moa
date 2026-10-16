@@ -371,6 +371,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.SubagentStarted:
 		data := SubagentStartData{
 			JobID: e.JobID, OriginToolCallID: e.OriginToolCallID, Task: e.Task, Title: e.Title, Model: e.Model, Thinking: e.Thinking, Async: e.Async, AccentIndex: e.AccentIndex,
+			Daybreak: e.Daybreak,
 		}
 		if !e.StartedAt.IsZero() {
 			data.StartedAtMs = e.StartedAt.UnixMilli()
@@ -1006,6 +1007,7 @@ func liveSubagentInitData(subagents []bus.SubagentSnapshot) []SubagentInitData {
 			LiveTools:         liveToolInitData(sa.LiveTools),
 			ContextPercent:    sa.ContextPercent,
 			AccentIndex:       sa.AccentIndex,
+			Daybreak:          sa.Daybreak,
 		}
 		if !sa.StartedAt.IsZero() {
 			sad.StartedAtMs = sa.StartedAt.UnixMilli()

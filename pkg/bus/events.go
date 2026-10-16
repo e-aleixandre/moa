@@ -633,6 +633,8 @@ type SubagentStarted struct {
 	// clients to derive a deterministic accent color that survives WS
 	// reconnects instead of one derived from map iteration order.
 	AccentIndex int
+	// Daybreak is whether the child runs with the Daybreak program.
+	Daybreak bool
 }
 
 // SubagentTitleChanged updates the one-shot generated identity of a child.

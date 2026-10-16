@@ -383,6 +383,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentStarted{
 					SessionID: s.ID, JobID: jobID, OriginToolCallID: originToolCallID, Task: task, Model: model, Thinking: thinking, Async: async, StartedAt: startedAt, AccentIndex: accentIndex,
+					Daybreak: s.subagents.Daybreak(jobID),
 				})
 			}
 		},
@@ -823,6 +824,7 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 			CostUSD:           info.CostUSD,
 			ContextPercent:    info.ContextPercent,
 			AccentIndex:       info.AccentIndex,
+			Daybreak:          info.Daybreak,
 		})
 	}
 	return out

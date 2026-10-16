@@ -32,7 +32,7 @@ import { fmtCost } from "../../data/util/usage-pills.js";
 import { paletteShortcut } from "../../data/util/shortcut.js";
 import { Plus } from "lucide-preact";
 import { addToast } from "../../data/notifications.js";
-import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast, stopRun } from "../../data/session-actions.js";
+import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast, daybreakSelectorProps, stopRun } from "../../data/session-actions.js";
 import { toggleSessionPanel, sessionPanelView, openSessionPanel, taskPanelPage } from "../../data/session-panel.js";
 import { PinnedTaskLine } from "../../components/Tasks/PinnedTaskLine.jsx";
 import { useOwnerStatusItem } from "../../components/Owners/OwnerChipEntry.jsx";
@@ -239,6 +239,7 @@ export function ConversationScreen() {
             fast={!!session.fast}
             fastSupported={!!session.fastSupported}
             fastNote={session.fastNote || ""}
+            {...daybreakSelectorProps(session)}
             onFastChange={(value) => {
               setSessionFast(session.id, value).catch((error) => addToast({
                 title: "Could not change fast mode",
