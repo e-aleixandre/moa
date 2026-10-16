@@ -161,7 +161,16 @@ type voiceCall struct {
 	// (archived call: 0.9 s after its first audio), and then there was no
 	// wait to measure. The assistant's turn.done closes the reply.
 	answered bool
+	// lastVoiced is when the provider last sent voiced audio. Its audio and
+	// text travel apart, so a reply can be heard before any of its text:
+	// a turn.done while that audio still flows is not associable either.
+	lastVoiced time.Time
 }
+
+// voiceReplyAudioGap is how long the provider's audio must have been quiet
+// for a user turn.done to start a wait: longer than a pause inside a reply,
+// shorter than the user speaking a turn after it.
+const voiceReplyAudioGap = time.Second
 
 // pcmVoiced tells a reply's sound from the silence ChatGPT's stream carries
 // between replies (archived calls: silent 20 ms frames peak at 16 or less).
@@ -309,6 +318,7 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 				c.mu.Unlock()
 				c.turnEnded = time.Time{}
 			}
+			c.lastVoiced = time.Now()
 		}
 		if client != nil && !client.sendAudio(ev.PCM) {
 			c.requestEnd("slow_client")
@@ -316,7 +326,7 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 	case voice.EventSpeechStopped:
 		c.speechStopped = time.Now()
 	case voice.EventUserTurnEnded:
-		if !c.answered {
+		if !c.answered && time.Since(c.lastVoiced) >= voiceReplyAudioGap {
 			c.turnEnded = time.Now()
 		}
 	case voice.EventSpeechStarted:

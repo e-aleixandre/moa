@@ -8,6 +8,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/voice"
 )
 
 func vsStatus(t *testing.T, f *vpFixture) voiceStatus {
@@ -315,5 +316,56 @@ func TestVoiceCall_ChatGPTLateTurnDoneNotMeasured(t *testing.T) {
 	u, _ := vsEndAndUsage(t, f, c, p)
 	if u.TurnEndLatencyCount != 0 {
 		t.Fatalf("turn-end latency = %+v, want no sample for a turn.done after the reply began", u)
+	}
+}
+
+// The reply's audio can arrive before the user's turn.done, with no
+// assistant text yet (RTP and the datachannel are independent): the next
+// voiced packet is that same reply, not its onset, so no sample.
+func TestVoiceCall_ChatGPTTurnDoneAfterReplyAudioNotMeasured(t *testing.T) {
+	f := vpNewFixture(t, "chatgpt-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	frames := func(want int) func() bool {
+		return func() bool {
+			n := 0
+			for _, fr := range c.snapshot() {
+				if fr.kind == websocket.MessageBinary {
+					n++
+				}
+			}
+			return n >= want
+		}
+	}
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "reply audio before the user's turn.done", frames(1))
+	p.user(t, "u1", "question")
+	c.await("user final transcript", func(v map[string]any) bool {
+		return v["type"] == "transcript" && v["role"] == "user" && v["final"] == true
+	})
+	time.Sleep(30 * time.Millisecond)
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "more of the same reply", frames(2))
+	u, _ := vsEndAndUsage(t, f, c, p)
+	if u.TurnEndLatencyCount != 0 {
+		t.Fatalf("turn-end latency = %+v, want no sample: the reply's audio began before turn.done", u)
+	}
+}
+
+// Once the reply's audio has gone quiet, the next user turn.done is measured.
+func TestVoiceCall_TurnEndAfterReplyAudioUnit(t *testing.T) {
+	c := &voiceCall{}
+	c.handle(voice.Event{Kind: voice.EventAudio, PCM: vpPCM()}, nil)
+	c.handle(voice.Event{Kind: voice.EventUserTurnEnded}, nil)
+	c.handle(voice.Event{Kind: voice.EventAudio, PCM: vpPCM()}, nil)
+	if len(c.turnLat) != 0 {
+		t.Fatalf("samples = %d, want none while the reply's audio is flowing", len(c.turnLat))
+	}
+	c.lastVoiced = time.Now().Add(-2 * voiceReplyAudioGap)
+	c.handle(voice.Event{Kind: voice.EventUserTurnEnded}, nil)
+	c.handle(voice.Event{Kind: voice.EventAudio, PCM: vpPCM()}, nil)
+	if len(c.turnLat) != 1 {
+		t.Fatalf("samples = %d, want one for a turn.done after the reply went quiet", len(c.turnLat))
 	}
 }
