@@ -162,7 +162,7 @@ final class NativePushRegistration {
     // lands after a POST that was in flight, and before any later enable.
     func disable() async throws {
         let paired = try? credentialStore.load()
-        let removed = forgetLocal()
+        let removed = forgetAlerts()
         if let paired {
             UserDefaults.standard.set(paired.origin, forKey: Self.pendingDeleteKey)
             _ = await operations.enqueue { await self.deleteServerRegistration(paired) }.result
@@ -195,17 +195,23 @@ final class NativePushRegistration {
         return result
     }
 
-    // Deletes the push secret, local bookkeeping and every delivered or
-    // pending notification. Called on disable, unpair, revocation, credential
-    // expiry and any pairing change, with or without network. It also ends the
-    // current generation: every operation started before it stops at its next
-    // check, and waits for a token or a challenge end now.
-    // Returns false if S could not be deleted; it stays marked and is retried.
+    // Ends this pairing's push: alerts and incoming calls. Called on unpair,
+    // revocation, credential expiry and any pairing change, with or without
+    // network. Returns false if S could not be deleted; it stays marked and
+    // is retried.
     @discardableResult
     func forgetLocal() -> Bool {
-        operations.invalidate()
-        // Whatever ends push for this pairing ends incoming calls too.
         NativeIncomingCalls.shared.forgetLocal()
+        return forgetAlerts()
+    }
+
+    // Deletes the push secret, local bookkeeping and every delivered or
+    // pending notification; incoming calls keep their own destination, so
+    // turning alerts off leaves them be. It also ends the current generation:
+    // every operation started before it stops at its next check, and waits
+    // for a token or a challenge end now.
+    private func forgetAlerts() -> Bool {
+        operations.invalidate()
         finishTokenWaiters(.failure(NativePushError.cancelled))
         finishPending(pending?.id, .failure(NativePushError.cancelled))
         let removed = deleteSecret()
