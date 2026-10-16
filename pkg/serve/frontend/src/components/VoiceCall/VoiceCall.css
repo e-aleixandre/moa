@@ -67,6 +67,10 @@
   color: var(--zl-t3);
   cursor: pointer;
 }
+/* Mute and Dismiss are thumb targets on the phone: 44px square. */
+@media (max-width: 768px) {
+  .vcall-icon { width: 44px; height: 44px; }
+}
 .vcall-icon:hover { color: var(--zl-t1); background: var(--zl-hi); }
 .vcall-icon.is-on { color: var(--zl-red); }
 .vcall-bar-tap {
