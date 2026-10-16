@@ -4,6 +4,8 @@
 
 .vcall-bar {
   flex: 1 0 100%;
+  min-width: 0;
+  max-width: 100%;
   order: 0;
   display: flex;
   flex-direction: column;
@@ -16,6 +18,7 @@
   align-items: center;
   gap: 8px;
   min-height: 32px;
+  min-width: 0;
   padding: 0 6px;
 }
 .vcall-spring { flex: 1 1 auto; min-width: 0; }
@@ -37,7 +40,12 @@
 @media (prefers-reduced-motion: reduce) { .vcall-dot { animation: none !important; } }
 
 .vcall-bar-phase {
-  flex: none;
+  /* Text shrinks with an ellipsis so the 44px icons always stay on screen. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--zl-t1);
   font-weight: 500;
   font-size: inherit;
@@ -47,10 +55,14 @@
   font-family: inherit;
 }
 .is-failed .vcall-bar-phase,
-.is-ended .vcall-bar-phase { white-space: normal; flex: 1 1 auto; font-weight: 400; color: var(--zl-t2); }
+.is-ended .vcall-bar-phase { white-space: normal; overflow: visible; flex: 1 1 auto; font-weight: 400; color: var(--zl-t2); }
 .vcall-bar-phase.is-link { cursor: pointer; }
 .vcall-bar-meta {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--mono);
   font-size: var(--zl-fs-meta);
   color: var(--zl-t3);

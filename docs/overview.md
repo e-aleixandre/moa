@@ -19,7 +19,7 @@ Moa is a coding agent runtime in Go. One core, two interfaces: web UI and headle
 - **[Rewind](./serve.md#rewind)**: go back to any message of yours, edit it and send it again; the branch you leave stays reachable
 - **[Native app](./mobile.md)**: the iOS and Android shell around the web UI, with push notifications, a share sheet and passwords kept behind Face ID on iOS
 - **[Artifacts](./serve.md#files-sent-by-the-agent)**: files the agent sends you stay reachable from the conversation
-- **Voice input**: dictate messages in the web UI, or hand the conversation to a voice delegate and get its minutes back as a draft
+- **Voice input**: dictate messages in the web UI, or call a conversation and get the minutes in it, with the transcript to download
 - **[Live Preview](./serve.md#live-preview)**: watch the web app the agent is building inside the conversation, at a chosen viewport width, and tap an element to tell the agent what should change about it
 - **[Wake on event](./automation.md#event-hooks)**: give an external system (CI, error tracker, mail watcher) its own webhook URL and let what it sends reach a session, or wait in an inbox for you to place it
 - **[Project owners](./owners.md)**: a standing agent per codebase that keeps the project's book, starts and directs its sessions, receives their reports and answers what the book already answers

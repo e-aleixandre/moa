@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,21 +42,27 @@ const voiceRecentCalls = 20
 // text spend changed while the call was open: it includes anything else that
 // session ran meanwhile, so it is a delta, not the call's cost.
 type voiceUsage struct {
-	CallID              string           `json:"call_id"`
-	SessionID           string           `json:"session_id"`
-	Provider            voice.ProviderID `json:"provider"`
-	Billing             string           `json:"billing"`
-	EndedAt             int64            `json:"ended_at"`
-	Seconds             int              `json:"seconds"`                    // wall clock, opened → ended
-	ProviderSeconds     *float64         `json:"provider_seconds,omitempty"` // as the provider reported it
-	InputTokens         *int64           `json:"input_tokens,omitempty"`
-	OutputTokens        *int64           `json:"output_tokens,omitempty"`
-	TotalTokens         *int64           `json:"total_tokens,omitempty"`
-	Deliveries          int              `json:"deliveries"`
-	Asks                int              `json:"asks"`
-	AskLatencyMsMax     int64            `json:"ask_latency_ms_max,omitempty"`
-	AskLatencyMsMean    int64            `json:"ask_latency_ms_mean,omitempty"`
-	SessionCostDeltaUSD float64          `json:"session_cost_delta_usd"`
+	CallID           string           `json:"call_id"`
+	SessionID        string           `json:"session_id"`
+	Provider         voice.ProviderID `json:"provider"`
+	Billing          string           `json:"billing"`
+	EndedAt          int64            `json:"ended_at"`
+	Seconds          int              `json:"seconds"`                    // wall clock, opened → ended
+	ProviderSeconds  *float64         `json:"provider_seconds,omitempty"` // as the provider reported it
+	InputTokens      *int64           `json:"input_tokens,omitempty"`
+	OutputTokens     *int64           `json:"output_tokens,omitempty"`
+	TotalTokens      *int64           `json:"total_tokens,omitempty"`
+	Deliveries       int              `json:"deliveries"`
+	Asks             int              `json:"asks"`
+	AskLatencyMsMax  int64            `json:"ask_latency_ms_max,omitempty"`
+	AskLatencyMsMean int64            `json:"ask_latency_ms_mean,omitempty"`
+	// Speech latency: the user stops talking (provider's speech_stopped) →
+	// first audio back, as moa saw it. Absent when the provider reports no
+	// speech_stopped; zero would claim an instant answer.
+	SpeechLatencyCount  int     `json:"speech_latency_count,omitempty"`
+	SpeechLatencyMsP50  int64   `json:"speech_latency_ms_p50,omitempty"`
+	SpeechLatencyMsMax  int64   `json:"speech_latency_ms_max,omitempty"`
+	SessionCostDeltaUSD float64 `json:"session_cost_delta_usd"`
 }
 
 func sessionCostUSD(sess *ManagedSession) float64 {
@@ -69,6 +76,7 @@ func sessionCostUSD(sess *ManagedSession) float64 {
 func (c *voiceCall) usageRecord(sess *ManagedSession, seconds, deliveries int) voiceUsage {
 	c.mu.Lock()
 	asks, lat := c.asks, append([]time.Duration(nil), c.askLatency...)
+	speech := append([]time.Duration(nil), c.speechLat...)
 	c.mu.Unlock()
 	u := voiceUsage{CallID: c.id, SessionID: c.sessionID, Provider: c.provider, Billing: c.billing.Kind,
 		EndedAt: time.Now().Unix(), Seconds: seconds, Deliveries: deliveries, Asks: asks,
@@ -83,6 +91,12 @@ func (c *voiceCall) usageRecord(sess *ManagedSession, seconds, deliveries int) v
 			u.AskLatencyMsMax = max(u.AskLatencyMsMax, d.Milliseconds())
 		}
 		u.AskLatencyMsMean = (sum / time.Duration(len(lat))).Milliseconds()
+	}
+	if len(speech) > 0 {
+		sort.Slice(speech, func(i, j int) bool { return speech[i] < speech[j] })
+		u.SpeechLatencyCount = len(speech)
+		u.SpeechLatencyMsP50 = speech[(len(speech)-1)/2].Milliseconds()
+		u.SpeechLatencyMsMax = speech[len(speech)-1].Milliseconds()
 	}
 	return u
 }

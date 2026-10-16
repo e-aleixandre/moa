@@ -141,12 +141,16 @@ type voiceCall struct {
 	asks       int // ask_session requests accepted (budget)
 	askPending bool
 	askLatency []time.Duration // ask_session asked → answered, per answered ask
+	speechLat  []time.Duration // speech_stopped → first provider audio, per turn (only providers that emit speech_stopped)
 	costStart  float64         // the session's text spend when the call opened
 	unsubs     []func()        // bus subscriptions binding asks/brief to their run
 
 	// Controller-owned.
 	transcript voice.Transcript
 	usage      *voice.Usage
+	// speechStopped is when the provider last reported the user stopped
+	// talking; the first audio frame after it closes one latency sample.
+	speechStopped time.Time
 }
 
 // voiceMinutes is what the model reported through end_call. Its "passed"
@@ -249,13 +253,27 @@ func (c *voiceCall) toClient(client *voiceClient, v any) {
 	}
 }
 
+// voiceMaxLatencySamples bounds the per-call latency samples kept.
+const voiceMaxLatencySamples = 1000
+
 func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 	switch ev.Kind {
 	case voice.EventAudio:
+		if !c.speechStopped.IsZero() {
+			c.mu.Lock()
+			if len(c.speechLat) < voiceMaxLatencySamples {
+				c.speechLat = append(c.speechLat, time.Since(c.speechStopped))
+			}
+			c.mu.Unlock()
+			c.speechStopped = time.Time{}
+		}
 		if client != nil && !client.sendAudio(ev.PCM) {
 			c.requestEnd("slow_client")
 		}
+	case voice.EventSpeechStopped:
+		c.speechStopped = time.Now()
 	case voice.EventSpeechStarted:
+		c.speechStopped = time.Time{} // the user kept talking: not a turn end
 		// Every provider's barge-in empties the client's playback the same way.
 		c.toClient(client, map[string]any{"type": "state", "state": "listening", "interrupt": true})
 	case voice.EventTranscript:

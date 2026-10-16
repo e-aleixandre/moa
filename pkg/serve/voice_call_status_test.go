@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -150,5 +151,64 @@ func TestVoiceLiveRetired(t *testing.T) {
 	_ = json.Unmarshal(f.mustRequest("GET", "/api/capabilities", nil, f.owner(), 200), &caps)
 	if v, ok := caps["voice_live"]; !ok || v != false {
 		t.Fatalf("voice_live = %v (present %v), want false", v, ok)
+	}
+}
+
+// vsEndAndUsage ends the call and returns what it measured, from both the
+// status route and the minutes record.
+func vsEndAndUsage(t *testing.T, f *vpFixture, c *vpCall, p *vpPeer) (voiceUsage, string) {
+	t.Helper()
+	p.tool(t, "end", "end_call", map[string]any{"decided": []string{"D"}, "passed": []string{}, "open": []string{}})
+	c.hangup()
+	minutes := f.waitRecords("minutes", 1)[0]
+	deadline := time.Now().Add(vpDeadline)
+	for f.mgr.ActiveVoiceCalls() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	s := vsStatus(t, f)
+	if len(s.Recent) != 1 {
+		t.Fatalf("recent usage = %+v", s.Recent)
+	}
+	return s.Recent[0], vpJSON(minutes.Custom["usage"])
+}
+
+// The user stops talking, the provider answers later: the call records how
+// long moa saw that take.
+func TestVoiceCall_SpeechToAudioLatency(t *testing.T) {
+	f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.emit(t, map[string]any{"type": "input_audio_buffer.speech_stopped"})
+	time.Sleep(80 * time.Millisecond)
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "audio frame", func() bool {
+		for _, fr := range c.snapshot() {
+			if fr.kind == websocket.MessageBinary {
+				return true
+			}
+		}
+		return false
+	})
+	u, minutes := vsEndAndUsage(t, f, c, p)
+	if u.SpeechLatencyCount != 1 || u.SpeechLatencyMsP50 < 70 || u.SpeechLatencyMsMax != u.SpeechLatencyMsP50 || u.SpeechLatencyMsMax > 5000 {
+		t.Fatalf("speech latency = %+v, want one sample of about 80ms", u)
+	}
+	if !strings.Contains(minutes, `"speech_latency_count":1`) || !strings.Contains(minutes, `"speech_latency_ms_p50"`) {
+		t.Fatalf("minutes usage = %s", minutes)
+	}
+}
+
+// Audio without a speech_stopped is not a sample; zero would claim an
+// instant answer.
+func TestVoiceCall_NoSpeechStoppedNoLatency(t *testing.T) {
+	f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.audio(t, vpPCM())
+	u, minutes := vsEndAndUsage(t, f, c, p)
+	if u.SpeechLatencyCount != 0 || u.SpeechLatencyMsMax != 0 || strings.Contains(minutes, "speech_latency") {
+		t.Fatalf("usage = %+v / %s, want no speech latency", u, minutes)
 	}
 }

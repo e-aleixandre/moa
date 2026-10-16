@@ -489,8 +489,9 @@ owner's row in the sidebar. The call runs over your ChatGPT or Grok plan
 Moa carries the audio, so the browser never talks to the provider.
 
 - During the call you can ask about the session, pass it work, and answer what
-  waits for you. Questions, permissions and secrets still need a tap on their
-  own card; the voice only points at them.
+  waits for you. You can answer ordinary questions by voice. A question marked
+  tap-only and every permission need a tap on their own card, and a secret is
+  never given by voice: the call points you to the card.
 - If the plan cannot take the call, you get the reason and, when one is set up,
   a button to call with a paid API instead. Nothing paid starts without that
   tap.
@@ -498,6 +499,12 @@ Moa carries the audio, so the browser never talks to the provider.
   this session, Still open — with `transcript.md` to download. Your draft is
   left as it was. If the call drops, the minutes say so and the transcript
   remains.
+- Keep the app open and the screen on during a call; it can drop if the app
+  goes to the background or the phone locks.
+- **Uses your plan** means the call runs on your ChatGPT or Grok subscription,
+  not that it is free. How much of the plan's quota it uses, and whether an
+  account that also has API credits is charged, is not verified: check your
+  provider's usage page.
 - **Settings › Voice** lists which providers are ready, the paid provider to
   offer, the model that works for the call, and what recent calls measured.
   The spend shown there is how much the session's own spend changed while the
