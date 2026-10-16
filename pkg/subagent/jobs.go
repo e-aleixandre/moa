@@ -58,6 +58,9 @@ type job struct {
 	resultClaimed         bool // completion result owner: a waiter or async notification
 	notifyAsyncCompletion bool // async notification owns the terminal result
 	childAgent            *agent.Agent
+	// daybreak is whether the child runs with the Daybreak program, fixed at
+	// launch: a parent's later change does not reach a running child.
+	daybreak bool
 	messages              []core.AgentMessage
 	usage                 *core.Usage
 	costUSD               float64
@@ -99,6 +102,7 @@ type jobSnapshot struct {
 	CostUSD          float64
 	ContextPercent   int
 	AccentIndex      int
+	Daybreak         bool
 }
 
 type jobStore struct {
@@ -252,7 +256,19 @@ func snapshotLocked(j *job) jobSnapshot {
 		CostUSD:          j.costUSD,
 		ContextPercent:   j.contextPct,
 		AccentIndex:      j.accentIndex,
+		Daybreak:         j.daybreak,
 	}
+}
+
+// setDaybreak records the child's Daybreak program before it starts.
+func (s *jobStore) setDaybreak(id string, on bool) {
+	j, ok := s.get(id)
+	if !ok {
+		return
+	}
+	j.mu.Lock()
+	j.daybreak = on
+	j.mu.Unlock()
 }
 
 func (s *jobStore) setTitle(id, title string) {
@@ -719,6 +735,7 @@ func (j *Jobs) Snapshot() []JobInfo {
 			CostUSD:           snap.CostUSD,
 			ContextPercent:    snap.ContextPercent,
 			AccentIndex:       snap.AccentIndex,
+			Daybreak:          snap.Daybreak,
 		})
 	}
 	return infos

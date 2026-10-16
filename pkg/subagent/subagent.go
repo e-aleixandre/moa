@@ -402,10 +402,12 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			seedMsgs := resumed.Messages
 			resumedFrom, _ := params["resume"].(string)
 			resumedFrom = strings.TrimSpace(resumedFrom)
-			model, errResult := resolveModel(defaultModel(cfg, resumed), params, currentAllowedModels(cfg))
+			fallback, fallbackDaybreak := defaultModel(cfg, resumed)
+			model, explicitDaybreak, errResult := resolveModel(fallback, fallbackDaybreak, params, currentAllowedModels(cfg))
 			if errResult != nil {
 				return *errResult, nil
 			}
+			daybreak, daybreakNote := childDaybreak(cfg, model, explicitDaybreak)
 			thinkingLevel, errResult := resolveThinking(model, defaultThinking(cfg, resumed, model), params)
 			if errResult != nil {
 				return *errResult, nil
@@ -445,6 +447,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				}
 				jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 				job := jobs.createWithOrigin(task, model.ID, jobCancel, originToolCallID, thinkingLevel)
+				jobs.setDaybreak(job.id, daybreak)
 				// Isolate the child's shell state: seed a copy from the parent
 				// (read from the spawning ctx). Always tag the child context with
 				// its job ID so every child tool execution, including async bash,
@@ -462,7 +465,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				}
 				go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, nil, true, resumedFrom, owner)
 				started := "Subagent started in background.\nJob ID: " + job.id + "\nUse subagent_wait to block until it finishes, subagent_status to peek at progress, or subagent_cancel to stop. You'll also be notified when it completes."
-				return taggedWithJob(core.TextResult(started), job.id), nil
+				return taggedWithJob(withDaybreakNote(core.TextResult(started), daybreakNote), job.id), nil
 			}
 
 			// Sync: the child still runs in its own goroutine (unified with
@@ -475,6 +478,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			// it has not been promoted.
 			jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 			job := jobs.createSyncWithOrigin(task, model.ID, jobCancel, originToolCallID, thinkingLevel)
+			jobs.setDaybreak(job.id, daybreak)
 			// Isolate the child's shell state (subshell semantics): seed a
 			// copy from the parent. Always tag the child ctx with the job's own
 			// ID (stable across a promotion) so all child tool executions retain
@@ -490,7 +494,8 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				go generateTitle(cfg, jobs, job.id, task)
 			}
 			go runJob(jobCtx, cfg, jobs, job, provider, model, thinkingLevel, maxRunDuration, systemPrompt, childReg, task, seedMsgs, onUpdate, true, resumedFrom, owner)
-			return awaitSyncResult(cfg, jobs, job, task, model)
+			res, err := awaitSyncResult(cfg, jobs, job, task, model)
+			return withDaybreakNote(res, daybreakNote), err
 		},
 	}
 	tool.SpecFunc = func() core.ToolSpec {
@@ -976,6 +981,10 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		// snapshot lands before OnChildEnd, async notifications and close(done).
 		defer finishFingerprints()
 	}
+	j.mu.Lock()
+	daybreak := j.daybreak
+	j.mu.Unlock()
+	child.SetDaybreak(daybreak)
 	jobs.setChildAgent(j.id, child)
 	if cfg.SaveChildWait != nil {
 		child.SetProviderWaitSave(func(ctx context.Context) error {
@@ -1583,25 +1592,28 @@ func canonicalExistingPath(path string) (string, bool) {
 // inheriting the parent's (or a resumed child's) model is not a delegation
 // choice the agent makes, and refusing it would leave the tool unusable on a
 // session whose own model the owner never allowlisted.
-func resolveModel(defaultModel core.Model, params map[string]any, allowedModels []string) (core.Model, *core.Result) {
+//
+// The returned bool reports whether the spec itself asks for Daybreak
+// ("daybreak" or the retired alias, which mean GPT-6 Sol with the program).
+func resolveModel(defaultModel core.Model, defaultDaybreak bool, params map[string]any, allowedModels []string) (core.Model, bool, *core.Result) {
 	modelSpec, _ := params["model"].(string)
 	if strings.TrimSpace(modelSpec) == "" {
-		return defaultModel, nil
+		return defaultModel, defaultDaybreak, nil
 	}
-	model, ok := core.ResolveModel(modelSpec)
+	model, daybreak, ok := core.ResolveModelDaybreak(modelSpec)
 	if ok {
-		if !core.IsModelAllowed(model, allowedModels) {
+		if !core.IsModelAllowedFor(model, daybreak, allowedModels) {
 			res := core.ErrorResult(modelErrorMessage(modelSpec, fmt.Sprintf("model %q is not available for subagents", modelSpec), allowedModels))
-			return core.Model{}, &res
+			return core.Model{}, false, &res
 		}
-		return model, nil
+		return model, daybreak, nil
 	}
 	// A custom "provider/model-id" spec cannot be checked against a list of
 	// known model IDs, so an active allowlist rejects it outright rather than
 	// letting an unlisted model in through the custom-spec door.
 	if len(allowedModels) > 0 {
 		res := core.ErrorResult(modelErrorMessage(modelSpec, fmt.Sprintf("model %q is not available for subagents", modelSpec), allowedModels))
-		return core.Model{}, &res
+		return core.Model{}, false, &res
 	}
 	// A spec that doesn't resolve used to be accepted as a custom model as
 	// long as it carried any "provider/" prefix, so a typo like "openai/Sol"
@@ -1611,13 +1623,46 @@ func resolveModel(defaultModel core.Model, params map[string]any, allowedModels 
 	// a known model, which is a typo rather than a deliberate choice.
 	if err := core.ValidateModelSpec(modelSpec); err != nil {
 		res := core.ErrorResult(modelErrorMessage(modelSpec, err.Error(), allowedModels))
-		return core.Model{}, &res
+		return core.Model{}, false, &res
 	}
 	if model.Provider == "" {
 		res := core.ErrorResult(modelErrorMessage(modelSpec, "unknown model: "+modelSpec, allowedModels))
-		return core.Model{}, &res
+		return core.Model{}, false, &res
 	}
-	return model, nil
+	return model, false, nil
+}
+
+// childDaybreak decides whether a child launches with the Daybreak program:
+// when its spec asks for it or its parent has it on at launch. Daybreak is an
+// OpenAI program, so another provider's child runs standard without comment.
+// An OpenAI model the known catalog rules out runs standard as asked, and the
+// returned note says so to the agent that launched it.
+func childDaybreak(cfg Config, model core.Model, explicit bool) (bool, string) {
+	want := explicit || (cfg.CurrentDaybreak != nil && cfg.CurrentDaybreak())
+	if !want || model.Provider != "openai" {
+		return false, ""
+	}
+	var availability core.DaybreakAvailability
+	if cfg.DaybreakCatalog != nil {
+		availability = cfg.DaybreakCatalog()
+	}
+	if availability.Rejects(model) {
+		name := model.Name
+		if name == "" {
+			name = model.ID
+		}
+		return false, "Daybreak not applied: " + name + " doesn't support it"
+	}
+	return true, ""
+}
+
+// withDaybreakNote appends the one-line Daybreak note to a launch result.
+func withDaybreakNote(res core.Result, note string) core.Result {
+	if note == "" {
+		return res
+	}
+	res.Content = append(res.Content, core.TextContent("\n"+note))
+	return res
 }
 
 // modelErrorMessage turns a rejected model spec into one that teaches the
@@ -1676,17 +1721,20 @@ func resolveMaxDuration(params map[string]any) (time.Duration, *core.Result) {
 // transcript; anything else (a new subagent, an old transcript without the
 // field, or a recorded model that no longer resolves — renamed/retired)
 // inherits the parent's current model, which is the historical behaviour.
-func defaultModel(cfg Config, resumed ResumedTranscript) core.Model {
+//
+// A resumed child recorded under the retired Daybreak alias continues on
+// GPT-6 Sol with Daybreak, which the returned bool reports.
+func defaultModel(cfg Config, resumed ResumedTranscript) (core.Model, bool) {
 	parent := currentModel(cfg)
 	spec := strings.TrimSpace(resumed.Model)
 	if spec == "" {
-		return parent
+		return parent, false
 	}
-	model, ok := core.ResolveModel(spec)
+	model, daybreak, ok := core.ResolveModelDaybreak(spec)
 	if ok || model.Provider != "" {
-		return model
+		return model, daybreak
 	}
-	return parent
+	return parent, false
 }
 
 // defaultThinking mirrors defaultModel for the thinking level: the resumed
