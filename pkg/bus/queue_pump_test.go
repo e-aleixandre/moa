@@ -337,7 +337,13 @@ func TestPump_EmptyQueueNoop(t *testing.T) {
 func TestPump_SendPromptGatedWhenQueueNonEmpty(t *testing.T) {
 	b := NewLocalBus()
 	defer b.Close()
-	fa := &fakeAgent{}
+	// The barrier's compaction is held, so the queue is observed at a fixed
+	// point: once it is released the pump legitimately drains it.
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	releaseCompact := func() { once.Do(func() { close(release) }) }
+	defer releaseCompact()
+	fa := &fakeAgent{compactHook: func() { close(entered); <-release }}
 	sctx := newTestSessionContextWithState(b, fa)
 	RegisterHandlers(sctx)
 
@@ -347,19 +353,42 @@ func TestPump_SendPromptGatedWhenQueueNonEmpty(t *testing.T) {
 	if err := b.Execute(SendPrompt{Text: "later message"}); err != nil {
 		t.Fatalf("SendPrompt: %v", err)
 	}
-	b.Drain(time.Second)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pump did not reach the barrier")
+	}
 
-	// The prompt must not have started a run.
+	// The prompt must not have started a run: it waits behind the barrier.
 	if fa.wasSendCalled() {
 		t.Fatal("SendPrompt started a run despite a non-empty queue (jumped the barrier)")
 	}
-	// It was appended to the queue behind the barrier.
 	pending := fa.PendingSteers()
-	if len(pending) != 2 || pending[0].ID != "c1" || pending[1].Text != "later message" {
-		t.Fatalf("expected [barrier c1, steer 'later message'], got %+v", pending)
+	if len(pending) == 0 || pending[len(pending)-1].Text != "later message" {
+		t.Fatalf("expected the prompt queued behind the barrier, got %+v", pending)
 	}
-	if pending[1].IsBarrier() {
+	if pending[len(pending)-1].IsBarrier() {
 		t.Fatal("the gated prompt must be a steer, not a barrier")
+	}
+
+	// Released, the barrier's work runs first and the steer is delivered by
+	// the queue, never as a direct run.
+	releaseCompact()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		fa.mu.Lock()
+		delivered := len(fa.sentItems) == 1 && fa.sentItems[0].Text == "later message"
+		fa.mu.Unlock()
+		if delivered {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the gated steer was not delivered after the barrier")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if fa.wasSendCalled() || !fa.wasCompactCalled() {
+		t.Fatalf("direct run=%v compact=%v, want false, true", fa.wasSendCalled(), fa.wasCompactCalled())
 	}
 }
 
