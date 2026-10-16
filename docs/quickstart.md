@@ -125,9 +125,11 @@ naming the provider to sign in to again. Switching that session to a model from
 a provider that is still authenticated is enough to keep working. A one-shot CLI
 run reports the problem before it starts, since it has nothing to fall back to.
 
-For voice in the web UI — dictation and live calls with a voice delegate — and
-for Pulse Realtime, store a plain OpenAI API key in a separate slot, so the agent
-itself can stay on an OpenAI OAuth subscription:
+Calls need no API key: they run on your ChatGPT or Grok plan, and a paid API is
+used only if you choose it when a call offers it (see [Calls](./serve.md#calls)).
+For dictation in the web UI and for Pulse Realtime, store a plain OpenAI API key
+in a separate slot, so the agent itself can stay on an OpenAI OAuth
+subscription:
 
 ```bash
 moa --login openai-transcribe
@@ -197,7 +199,8 @@ loaded at all (see [Configuration](./configuration.md#project-directory-moa)).
 
 **Voice input does nothing** — it needs `moa --login openai-transcribe` (or a
 plain `OPENAI_API_KEY`), and browsers only grant microphone access over HTTPS or
-on localhost. Without that key the composer shows no phone button (**Talk live**).
+on localhost. A call (the composer's phone button) needs a ChatGPT or Grok
+sign-in instead; see [Calls](./serve.md#calls).
 
 ## Next
 

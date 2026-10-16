@@ -24,7 +24,7 @@ describe("how Devices is reached", () => {
 
   test("the row sits in an Access section, after Subagents and before About", () => {
     const keys = [...jsx.matchAll(/class="zl-set-k">([^<]+)</g)].map((m) => m[1]);
-    expect(keys).toEqual(["Context", "Notifications", "Subagents", "Access", "About"]);
+    expect(keys).toEqual(["Context", "Notifications", "Voice", "Subagents", "Access", "About"]);
   });
 
   test("the row states its count on the right, like every other row's value", () => {

@@ -108,6 +108,10 @@ type SendPromptWithContent struct {
 	SteerID string
 	// AcceptedSteerID mirrors SendPrompt.AcceptedSteerID.
 	AcceptedSteerID *string
+	// Custom is the provenance of a non-typed producer (a voice call's record
+	// with its transcript attachment). It is kept on the user message, or on
+	// the steer when the prompt is queued, exactly like SendPrompt.Custom.
+	Custom map[string]any
 }
 
 // SteerAgent injects a steering message into a running agent.
@@ -153,6 +157,13 @@ type CancelSteer struct {
 
 // AppendToConversation adds a message to the conversation without running the agent.
 type AppendToConversation struct {
+	SessionID string
+	Message   core.AgentMessage
+}
+
+// AppendRecord adds a display-only session_event record, also while a run is
+// in flight (a voice call's minutes when the session is busy).
+type AppendRecord struct {
 	SessionID string
 	Message   core.AgentMessage
 }

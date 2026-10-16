@@ -50,6 +50,8 @@ const (
 // ManagedSession wraps a bus.SessionRuntime with metadata for the web dashboard.
 type ManagedSession struct {
 	subagentSaveMu sync.Mutex
+	// voiceAdmission admits each voice call delivery once (voice_call_delivery.go).
+	voiceAdmission voiceAdmission
 	// Immutable after construction.
 	ID      string    `json:"id"`
 	CWD     string    `json:"cwd"`
@@ -805,6 +807,11 @@ type Manager struct {
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
+	// voiceCalls are the voice call registries of this Manager's servers;
+	// Shutdown ends their calls before any session is torn down.
+	voiceCallsMu sync.Mutex
+	voiceCalls   []*voiceCallRegistry
+
 	providerFactory   func(model core.Model) (core.Provider, error)
 	compactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
 	// providerCredentialAvailable reports whether a provider has a usable
@@ -816,6 +823,7 @@ type Manager struct {
 	pushDispatcher              *push.Dispatcher   // nil when Web Push is unavailable
 	pushPolicy                  *push.Policy       // decides what reaches the transports; nil without any
 	pushNative                  *push.NativeSender // nil when native push is unavailable
+	pushVoIP                    *push.NativeSender // incoming-call destinations; never in the notification policy
 	// wake-on-event: the external event inbox and the file backing it. events is
 	// nil when that file could not be opened, which disables the feature instead
 	// of the server.
@@ -951,6 +959,7 @@ type ManagerConfig struct {
 	PushStore       *push.Store        // optional; enables Web Push
 	PushDispatcher  *push.Dispatcher   // optional; enables Web Push
 	PushNative      *push.NativeSender // optional; enables native push through the relay
+	PushVoIP        *push.NativeSender // optional; VoIP destinations that ring incoming calls
 	DefaultModel    core.Model
 	// DefaultDaybreak turns Daybreak on for new sessions on the default model
 	// (the "daybreak" spec as the default).
@@ -1123,6 +1132,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		m.pushNative = cfg.PushNative
 		senders = append(senders, cfg.PushNative)
 	}
+	m.pushVoIP = cfg.PushVoIP
 	if len(senders) > 0 {
 		m.pushPolicy = push.NewPolicy(senders, push.PolicyConfig{
 			Summaries: push.ParseSummaries(cfg.MoaCfg.PushSummaries),
@@ -1198,6 +1208,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 				slog.Warn("attachment startup reconcile", "error", err)
 			}
 		}
+	}
+	if summariesErr == nil {
+		m.recoverOwedVoice(summaries)
 	}
 	return m
 }
@@ -1436,7 +1449,7 @@ retryAfterTerminalRun:
 	}
 	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{
 		Content: content, MsgID: msgID, AcceptedMsgID: &accepted,
-		SteerID: steerID, AcceptedSteerID: &acceptedSteer,
+		SteerID: steerID, AcceptedSteerID: &acceptedSteer, Custom: custom,
 	}); err != nil {
 		// The message never entered the conversation — roll back any files
 		// written for it so they don't orphan and count against the quota.

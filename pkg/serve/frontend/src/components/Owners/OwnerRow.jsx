@@ -2,6 +2,7 @@ import { Dot } from "../SessionRow/SessionRow.jsx";
 import { projectName } from "../../data/util/format.js";
 import { ownerDotState, ownerLine, ownerState } from "../../data/owners-model.js";
 import { OwnerAvatarFor } from "./OwnerAvatar.jsx";
+import { PhoneCall } from "lucide-preact";
 import "./OwnerAvatar.css";
 import "./OwnerRow.css";
 
@@ -41,7 +42,10 @@ function ChevronIcon() {
    height rhythm and the same two-line grammar, so the column keeps its beat,
    but the avatar and the missing age say "this is not one of the sessions
    below" before you have read a word. */
-export function OwnerRow({ owner, project = false, active = false, onOpen }) {
+// `call` is "here" while a voice call runs with this owner: the row wears a small
+// green phone beside its name; tapping the row opens the conversation, where the
+// call bar is. Starting a call lives in the owner's ⋯ menu.
+export function OwnerRow({ owner, project = false, active = false, onOpen, call = "" }) {
   const { lead, tail, stated } = ownerLine(owner);
   const state = ownerState(owner);
   const place = projectName(owner.root);
@@ -60,7 +64,7 @@ export function OwnerRow({ owner, project = false, active = false, onOpen }) {
   // An owner whose children all stopped has no lead and, without anything
   // waiting, no second line: the row is its name (ownerLine).
   const said = [lead?.text, tail].filter(Boolean);
-  const label = `${owner.name}, project owner${said.length ? `. ${said.join(". ")}` : ""}`;
+  const label = `${owner.name}, project owner${call === "here" ? ", on a call" : ""}${said.length ? `. ${said.join(". ")}` : ""}`;
   return (
     <span class="zl-row-slot">
       <button
@@ -80,6 +84,7 @@ export function OwnerRow({ owner, project = false, active = false, onOpen }) {
                 272px column it cost exactly the width that truncated
                 "2 waiting on you", which is the clause this row exists for. */}
             {project && <span class="ow-orow-kind zl-data" aria-hidden="true">owner</span>}
+            {call === "here" && <PhoneCall class="ow-orow-live" size={13} aria-hidden="true" />}
             <span class="zl-row-meta">
               <Dot state={ownerDotState(owner)} />
             </span>

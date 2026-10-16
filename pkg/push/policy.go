@@ -22,6 +22,7 @@ const (
 	KindFailed     Kind = "failed"     // a run errored
 	KindDigest     Kind = "digest"     // an owner finished digesting a report
 	KindEvent      Kind = "event"      // a wake-on-event source delivered something
+	KindCall       Kind = "call"       // an incoming voice call invitation (VoIP destinations only)
 )
 
 // Level is how hard a notification should interrupt.

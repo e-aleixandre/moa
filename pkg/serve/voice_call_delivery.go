@@ -1,0 +1,433 @@
+package serve
+
+import (
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
+)
+
+// voiceAdmission is the voice-only idempotent admission of one session
+// runtime. Manager.send does not dedup by message ID, so a repeated tool call,
+// hangup or reconnect would otherwise deliver twice: every voice delivery
+// claims its delivery_id here, under the same lock that admits its run or
+// steer, and a claimed ID returns the earlier receipt instead.
+type voiceAdmission struct {
+	mu       sync.Mutex
+	loaded   bool
+	receipts map[string]voiceReceipt
+	// watching is set once the session's canceled steers are watched for
+	// owed relays (watchCanceledVoiceRelays).
+	watching bool
+	// wakeSteers maps the queued steer of a minutes wake to its delivery, so
+	// that a Stop that drops it can be told apart from any other canceled
+	// steer.
+	wakeSteers map[string]voiceWakeSteer
+}
+
+type voiceWakeSteer struct{ deliveryID, callID string }
+
+// voiceReceipt is how a delivery was admitted. A rehydrated receipt only
+// knows that it was.
+type voiceReceipt struct {
+	Action string // send | steer | record
+	ID     string
+}
+
+// load rehydrates the receipts from the session's canonical record — its
+// saved transcript (which keeps display-only records the model's context
+// drops on reopen), its not yet saved messages and its queued steers — the
+// first time this runtime admits a voice delivery, so a reopened session
+// never takes a delivery twice.
+func (a *voiceAdmission) load(sess *ManagedSession) {
+	if a.loaded {
+		return
+	}
+	a.loaded = true
+	a.receipts = map[string]voiceReceipt{}
+	sctx := sess.runtime.Context()
+	if sctx.Tree != nil {
+		sctx.Tree.VisitDisplayMessages(func(m *core.AgentMessage) {
+			if id := voiceDeliveryID(m.Custom); id != "" {
+				a.receipts[id] = voiceReceipt{Action: "record", ID: m.MsgID}
+			}
+		})
+	}
+	ag := sctx.Agent
+	for _, m := range ag.Messages() {
+		if id := voiceDeliveryID(m.Custom); id != "" {
+			a.receipts[id] = voiceReceipt{Action: "record", ID: m.MsgID}
+		}
+	}
+	for _, s := range ag.PendingSteers() {
+		if id := voiceDeliveryID(s.Custom); id != "" {
+			a.receipts[id] = voiceReceipt{Action: "steer", ID: s.ID}
+		}
+	}
+}
+
+func voiceDeliveryID(custom map[string]any) string {
+	if custom["source"] != "voice_call" {
+		return ""
+	}
+	id, _ := custom["delivery_id"].(string)
+	return id
+}
+
+// admitVoice delivers a voice record through the ordinary send path (a run
+// when idle, the steer queue when busy) at most once per delivery_id.
+// duplicate reports that the ID was already admitted; nothing was sent.
+func (m *Manager) admitVoice(sessionID, deliveryID, text string, atts []Attachment, custom map[string]any) (r voiceReceipt, duplicate bool, err error) {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return voiceReceipt{}, false, ErrNotFound
+	}
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	return m.admitVoiceLocked(sess, deliveryID, text, atts, custom)
+}
+
+func (m *Manager) admitVoiceLocked(sess *ManagedSession, deliveryID, text string, atts []Attachment, custom map[string]any) (voiceReceipt, bool, error) {
+	a := &sess.voiceAdmission
+	if prev, ok := a.receipts[deliveryID]; ok {
+		return prev, true, nil
+	}
+	custom["delivery_id"] = deliveryID
+	action, id, _, err := m.send(sess.ID, text, atts, core.NewSteerID(), core.NewMsgID(), custom)
+	if err != nil {
+		return voiceReceipt{}, false, err
+	}
+	r := voiceReceipt{Action: action, ID: id}
+	a.receipts[deliveryID] = r
+	if action == "steer" {
+		// A record waiting behind a running turn is not in the transcript
+		// until the turn reads it; the session's clients show it meanwhile.
+		if label, _ := voiceQueuedText(custom); label != "" {
+			sess.runtime.Bus.Publish(bus.SteerQueued{SessionID: sess.ID, ID: id, Text: label})
+		}
+	}
+	return r, false, nil
+}
+
+// voiceQueuedText is what the queue says about a voice call's record that
+// waits behind a running turn. ok reports that custom is a call's record;
+// the label is empty for the ones that are never shown (the minutes' wake).
+func voiceQueuedText(custom map[string]any) (label string, ok bool) {
+	if custom["source"] != "voice_call" {
+		return "", false
+	}
+	summary, _ := custom["model_summary"].(string)
+	question, _ := custom["question"].(string)
+	switch custom["kind"] {
+	case "relay":
+		return "Passed on to this session: " + summary, true
+	case "question":
+		return "Asked this session: " + question, true
+	case "brief":
+		return "Asked this session for a brief", true
+	}
+	return "", true
+}
+
+// admitVoiceRelay admits a pass_to_session relay like admitVoice, but first
+// saves it in the session header as owed: a relay queued behind a busy run
+// lives only in memory until that run takes it, and the spokesperson is
+// told it was delivered. The save that holds the relay as a message drops
+// it from the header (servePersister.settleVoiceOwed); a restart before
+// that admits it again (recoverOwedVoice). custom carries model_summary,
+// from which the relay is rebuilt.
+func (m *Manager) admitVoiceRelay(sessionID, deliveryID string, custom map[string]any) (voiceReceipt, bool, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return voiceReceipt{}, false, ErrNotFound
+	}
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	if prev, ok := a.receipts[deliveryID]; ok {
+		return prev, true, nil
+	}
+	summary, _ := custom["model_summary"].(string)
+	sp := sess.persister
+	if sp != nil {
+		m.watchCanceledVoiceRelays(sess)
+		sp.oweVoiceRelay(deliveryID, map[string]any{"call_id": custom["call_id"], "provider": custom["provider"], "summary": summary})
+		if err := sess.runtime.Flush(); err != nil {
+			sp.forgetVoiceRelay(deliveryID)
+			return voiceReceipt{}, false, err
+		}
+	}
+	r, dup, err := m.admitVoiceLocked(sess, deliveryID, voiceRelayPrompt(summary), nil, custom)
+	if err != nil && sp != nil {
+		sp.forgetVoiceRelay(deliveryID)
+		if ferr := sess.runtime.Flush(); ferr != nil {
+			slog.Warn("voice relay withdrawal not saved", "session", sess.ID, "delivery", deliveryID, "error", ferr)
+		}
+	}
+	return r, dup, err
+}
+
+// watchCanceledVoiceRelays makes a queued relay that is canceled with its
+// steer (Stop, queue recall) no longer owed: it was dropped on purpose and
+// a restart must not deliver it. A queued minutes wake dropped the same way
+// is consumed too (stoppedVoiceWake), while its minutes stay. Called with
+// the admission lock held.
+func (m *Manager) watchCanceledVoiceRelays(sess *ManagedSession) {
+	a := &sess.voiceAdmission
+	if a.watching {
+		return
+	}
+	a.watching = true
+	sess.runtime.Bus.Subscribe(func(e bus.SteersCanceled) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		canceled := map[string]bool{}
+		for _, id := range e.SteerIDs {
+			canceled[id] = true
+		}
+		dropped := false
+		for _, rec := range sess.persister.owedVoiceRelays() {
+			id, _ := rec["delivery_id"].(string)
+			if r, ok := a.receipts[id]; ok && r.Action == "steer" && canceled[r.ID] {
+				sess.persister.forgetVoiceRelay(id)
+				dropped = true
+			}
+		}
+		for steerID, w := range a.wakeSteers {
+			if !canceled[steerID] {
+				continue
+			}
+			delete(a.wakeSteers, steerID)
+			if err := m.stoppedVoiceWake(sess, w); err != nil {
+				slog.Warn("stopped voice wake not recorded", "session", sess.ID, "error", err)
+			}
+		}
+		if !dropped {
+			return
+		}
+		if err := sess.runtime.Flush(); err != nil {
+			slog.Warn("canceled voice relay withdrawal not saved", "session", sess.ID, "error", err)
+		}
+	})
+}
+
+// stoppedVoiceWake saves, under the wake's own delivery ID, the display-only
+// record that says its wake was dropped on purpose. The save that holds it
+// counts the wake as consumed (voiceSaved) and so clears the voice marker:
+// the next boot does not wake the session, and the minutes record, saved
+// apart, stays in the conversation. The record has no content, so no reader
+// shows it. Called with the admission lock held.
+func (m *Manager) stoppedVoiceWake(sess *ManagedSession, w voiceWakeSteer) error {
+	record := core.AgentMessage{
+		Message: core.Message{Role: "session_event", Timestamp: time.Now().Unix()},
+		Custom:  map[string]any{"source": "voice_call", "kind": "minutes_wake_stopped", "call_id": w.callID},
+	}
+	record.EnsureMsgID()
+	return m.recordVoiceLocked(sess, w.deliveryID, record)
+}
+
+// admitOwedVoiceRelays admits, once each, the relays the session header
+// still owes. It reports how many it admitted.
+func (m *Manager) admitOwedVoiceRelays(sess *ManagedSession) int {
+	if sess.persister == nil {
+		return 0
+	}
+	owed := sess.persister.owedVoiceRelays()
+	if len(owed) == 0 {
+		return 0
+	}
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	m.watchCanceledVoiceRelays(sess)
+	admitted := 0
+	for _, rec := range owed {
+		id, _ := rec["delivery_id"].(string)
+		summary, _ := rec["summary"].(string)
+		custom := map[string]any{"source": "voice_call", "kind": "relay", "call_id": rec["call_id"], "provider": rec["provider"], "model_summary": summary}
+		_, dup, err := m.admitVoiceLocked(sess, id, voiceRelayPrompt(summary), nil, custom)
+		if err != nil {
+			slog.Warn("voice relay not recovered", "session", sess.ID, "delivery", id, "error", err)
+			continue
+		}
+		if !dup {
+			admitted++
+		}
+	}
+	return admitted
+}
+
+// voiceWakeID is the delivery of the wake owed by the minutes record with
+// delivery minutesID: derived from it, so the record alone says whether its
+// wake was ever delivered.
+func voiceWakeID(minutesID string) string { return minutesID + "/wake" }
+
+// wakeVoiceMinutes admits the wake of every saved minutes record that asks
+// for one (wake=true) and whose wake this session has not taken: at hangup,
+// and after a restart that lost it before it was admitted or while it
+// waited in the steer queue. The save that holds the last owed wake clears
+// the session's voice marker (servePersister.settleVoiceOwed). It reports
+// how many wakes it admitted.
+func (m *Manager) wakeVoiceMinutes(sess *ManagedSession) int {
+	tree := sess.runtime.Context().Tree
+	if tree == nil {
+		return 0
+	}
+	var owed []core.AgentMessage
+	saved := map[string]bool{}
+	tree.VisitDisplayMessages(func(msg *core.AgentMessage) {
+		id := voiceDeliveryID(msg.Custom)
+		if id == "" {
+			return
+		}
+		saved[id] = true
+		if msg.Custom["kind"] == "minutes" && msg.Custom["wake"] == true {
+			owed = append(owed, *msg)
+		}
+	})
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	m.watchCanceledVoiceRelays(sess)
+	admitted := 0
+	for _, rec := range owed {
+		wakeID := voiceWakeID(voiceDeliveryID(rec.Custom))
+		if saved[wakeID] {
+			continue
+		}
+		custom := map[string]any{"source": "voice_call", "kind": "minutes_wake", "call_id": rec.Custom["call_id"], "provider": rec.Custom["provider"], "minutes_msg_id": rec.MsgID}
+		r, dup, err := m.admitVoiceLocked(sess, wakeID, m.voiceWakeText(sess, rec), nil, custom)
+		if err != nil {
+			slog.Warn("voice call minutes did not wake the session", "session", sess.ID, "delivery", wakeID, "error", err)
+			continue
+		}
+		if !dup {
+			admitted++
+			if r.Action == "steer" {
+				if a.wakeSteers == nil {
+					a.wakeSteers = map[string]voiceWakeSteer{}
+				}
+				callID, _ := rec.Custom["call_id"].(string)
+				a.wakeSteers[r.ID] = voiceWakeSteer{deliveryID: wakeID, callID: callID}
+			}
+		}
+	}
+	return admitted
+}
+
+// voiceWakeText is what the woken model reads: the minutes record's text
+// and where the call's literal transcript is, a path in the session's
+// attachment views its own tools can read. The transcript is referenced,
+// not inlined: a long call would otherwise fill the context, and the
+// session decides whether it needs the literal words.
+func (m *Manager) voiceWakeText(sess *ManagedSession, rec core.AgentMessage) string {
+	var b strings.Builder
+	transcript := ""
+	for _, c := range rec.Content {
+		switch {
+		case c.Type == "text":
+			b.WriteString(c.Text)
+		case c.Type == "document" && c.AttachmentID != "":
+			transcript = c.AttachmentID
+		}
+	}
+	b.WriteString("\n" + voiceCheckDecisions)
+	path := ""
+	if transcript != "" && m.attachStore != nil {
+		p, err := m.attachStore.EnsureView(sess.ID, transcript)
+		if err != nil {
+			slog.Warn("voice call transcript view unavailable", "session", sess.ID, "error", err)
+		}
+		path = p
+	}
+	if path == "" {
+		b.WriteString("\nThe literal transcript of this call is not available to you.")
+		return b.String()
+	}
+	b.WriteString("\nThe literal transcript of this call (both sides, as observed) is saved at:\n" + path +
+		"\nRead it with your tools if you need what was literally said; the minutes above are the voice model's summary.")
+	return b.String()
+}
+
+// recoverOwedVoice runs once at startup. Sessions load lazily, so a relay
+// or wake lost in a crash would otherwise wait until someone opens its
+// session; only sessions whose saved header carries the voice marker are
+// loaded (relays first, in the order they were given, then wakes), and
+// closed again when they owed nothing.
+func (m *Manager) recoverOwedVoice(summaries []session.Summary) {
+	for _, sum := range summaries {
+		if sum.Metadata[session.MetaVoiceWake] != true {
+			continue
+		}
+		sess, err := m.ResumeSession(sum.ID)
+		if err != nil {
+			slog.Warn("voice recovery: session not resumed", "session", sum.ID, "error", err)
+			continue
+		}
+		if m.admitOwedVoiceRelays(sess)+m.wakeVoiceMinutes(sess) > 0 {
+			continue
+		}
+		if err := m.CloseSession(sum.ID); err != nil {
+			slog.Warn("voice recovery: session not closed", "session", sum.ID, "error", err)
+		}
+	}
+}
+
+// recordVoice appends a display-only voice record (session_event) once per
+// delivery_id and saves the session to disk before returning, also while a
+// run is in flight. Its receipt exists only once the record is saved, so a
+// failed save can be retried without appending the record twice.
+func (m *Manager) recordVoice(sessionID, deliveryID string, msg core.AgentMessage) error {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return ErrNotFound
+	}
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	if _, ok := a.receipts[deliveryID]; ok {
+		return nil
+	}
+	return m.recordVoiceLocked(sess, deliveryID, msg)
+}
+
+// recordVoiceLocked is recordVoice for a caller that holds the admission
+// lock and has decided the record is due.
+func (m *Manager) recordVoiceLocked(sess *ManagedSession, deliveryID string, msg core.AgentMessage) error {
+	a := &sess.voiceAdmission
+	msgID := ""
+	for _, prev := range sess.runtime.Context().Agent.Messages() {
+		if voiceDeliveryID(prev.Custom) == deliveryID {
+			msgID = prev.MsgID
+		}
+	}
+	if msgID == "" {
+		msg.Custom["delivery_id"] = deliveryID
+		msg.EnsureMsgID()
+		if err := sess.runtime.Bus.Execute(bus.AppendRecord{SessionID: sess.ID, Message: msg}); err != nil {
+			return err
+		}
+		msgID = msg.MsgID
+	}
+	if err := sess.runtime.Flush(); err != nil {
+		return err
+	}
+	// The saved snapshot is the tree's: a record missing from it after the
+	// Flush was never saved, whatever replaced the agent's history meanwhile.
+	if tree := sess.runtime.Context().Tree; tree != nil && !tree.HasMsgID(msgID) {
+		return fmt.Errorf("voice record %s was not saved", deliveryID)
+	}
+	a.receipts[deliveryID] = voiceReceipt{Action: "record", ID: msgID}
+	return nil
+}

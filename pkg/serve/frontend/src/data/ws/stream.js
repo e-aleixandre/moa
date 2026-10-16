@@ -255,6 +255,8 @@ export function handleWsUserMessage(id, data) {
   // Notes of an API-key dispatch stay in the record but not in the conversation:
   // the status line says when the key is in use.
   if (data.custom?.type === 'provider_source_note') return;
+  // The record of a minutes wake a Stop dropped: content-less, never drawn.
+  if (data.custom?.source === 'voice_call' && data.custom.kind === 'minutes_wake_stopped') return;
   if (data.custom?.source === 'provider_wait') {
     updateSession(id, { messages: [...messages, { _type: 'system', _msg_id: data.msg_id,
       timestamp: data.timestamp, text: (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('') || data.text || '' }] });
@@ -394,6 +396,22 @@ function chronologicalSubagentOutcomes(outcomes) {
     if (!at) return bt ? 1 : 0;
     if (!bt) return -1;
     return at - bt;
+  });
+}
+
+// handleWsSteerQueued puts a message another party queued behind the running
+// turn (a voice call's relay or question) in this client's queue, so it shows
+// before the agent reads it. The steer event that delivers it carries the same
+// ID and retires the line; it can overtake this frame, so a message already
+// delivered under that ID is not queued again.
+export function handleWsSteerQueued(id, data) {
+  const sess = store.get().sessions[id];
+  if (!sess || !data?.id) return;
+  if ((sess.messages || []).some(m => m._steer_id === data.id)) return;
+  const steers = sess.pendingSteers || [];
+  if (steers.some(s => s.id === data.id)) return;
+  updateSession(id, {
+    pendingSteers: [...steers, { id: data.id, text: data.text || '', confirmed: true, non_recallable: !!data.non_recallable }],
   });
 }
 

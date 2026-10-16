@@ -321,7 +321,7 @@
    The clouds are radial gradients, not a blur filter, and they drift on
    keyframes the compositor runs; script only scales and fades their parent.
    Colours are the page aurora's (tokens/shell.css), no peach. */
-.zl-composer.is-voice > :is(.zl-ta, .zl-controls, .voice-live, .attach-preview-strip, .cache-warn, .steer-hint) {
+.zl-composer.is-voice > :is(.zl-ta, .zl-controls, .attach-preview-strip, .cache-warn, .steer-hint) {
   position: relative;
 }
 .zl-aurora-wash {

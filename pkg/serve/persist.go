@@ -70,6 +70,7 @@ func (sp *servePersister) snapshot(messages []core.AgentMessage, epoch int, meta
 	snapshot.Messages = make([]core.AgentMessage, len(messages))
 	copy(snapshot.Messages, messages)
 	snapshot.CompactionEpoch = epoch
+	sp.settleVoiceOwed(&snapshot)
 	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
 
 	store := sp.store
@@ -117,6 +118,7 @@ func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, m
 	snapshot.Entries = make([]session.Entry, len(entries))
 	copy(snapshot.Entries, entries)
 	snapshot.LeafID = leafID
+	sp.settleVoiceOwed(&snapshot)
 	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
 	// Clear v1 fields
 	snapshot.Messages = nil
@@ -243,6 +245,136 @@ func (sp *servePersister) recordOwnerDetached(detached bool) error {
 		return err
 	}
 	return nil
+}
+
+// oweVoiceRelay records a voice relay as owed until a save holds it as a
+// message; the caller saves before the relay counts as delivered.
+func (sp *servePersister) oweVoiceRelay(deliveryID string, fields map[string]any) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.preserved == nil {
+		sp.preserved = make(map[string]any, 2)
+	}
+	rec := map[string]any{"delivery_id": deliveryID}
+	for k, v := range fields {
+		rec[k] = v
+	}
+	sp.preserved[session.MetaVoiceRelays] = append(voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]), rec)
+}
+
+// forgetVoiceRelay withdraws a relay that was never admitted.
+func (sp *servePersister) forgetVoiceRelay(deliveryID string) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	var keep []any
+	for _, r := range voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]) {
+		if r.(map[string]any)["delivery_id"] != deliveryID {
+			keep = append(keep, r)
+		}
+	}
+	sp.setVoiceRelays(keep)
+}
+
+// owedVoiceRelays is the relays still owed, in the order they were given.
+func (sp *servePersister) owedVoiceRelays() []map[string]any {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	var out []map[string]any
+	for _, r := range voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]) {
+		out = append(out, r.(map[string]any))
+	}
+	return out
+}
+
+func (sp *servePersister) setVoiceRelays(relays []any) {
+	if len(relays) == 0 {
+		delete(sp.preserved, session.MetaVoiceRelays)
+		return
+	}
+	sp.preserved[session.MetaVoiceRelays] = relays
+}
+
+// voiceRelayRecords reads MetaVoiceRelays, as set at runtime or as decoded
+// from a saved header: a list of objects, anything else dropped.
+func voiceRelayRecords(v any) []any {
+	list, _ := v.([]any)
+	out := make([]any, 0, len(list))
+	for _, r := range list {
+		if m, ok := r.(map[string]any); ok {
+			if id, _ := m["delivery_id"].(string); id != "" {
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
+// settleVoiceOwed derives, on every save, what the snapshot owes: the relays
+// not yet saved as messages, and the voice marker. The marker is true exactly
+// when a saved minutes record has wake=true and the snapshot lacks its wake,
+// or a relay is still owed; nothing sets it independently of the content
+// being saved, so it can never disagree with the saved messages (a marker
+// set before its record entered the snapshot was once dropped by an
+// interleaved save and lost the wake after a crash).
+//
+// The marker stays in the header, as an index, because startup reads only
+// headers: scanning every message of every session file at boot was
+// rejected. Called under sp.mu.
+func (sp *servePersister) settleVoiceOwed(s *session.Session) {
+	saved, wakeOwed := voiceSaved(s)
+	var relays []any
+	for _, r := range voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]) {
+		if !saved[r.(map[string]any)["delivery_id"].(string)] {
+			relays = append(relays, r)
+		}
+	}
+	sp.setVoiceRelays(relays)
+	if wakeOwed || len(relays) > 0 {
+		if sp.preserved == nil {
+			sp.preserved = make(map[string]any, 1)
+		}
+		sp.preserved[session.MetaVoiceWake] = true
+	} else {
+		delete(sp.preserved, session.MetaVoiceWake)
+	}
+}
+
+// voiceSaved is the voice delivery IDs the session's messages hold, and
+// whether they hold a minutes record whose wake they do not. One linear pass
+// per save, over messages the save serializes anyway; sessions without voice
+// records allocate nothing.
+func voiceSaved(s *session.Session) (saved map[string]bool, wakeOwed bool) {
+	var wakes []string
+	visit := func(m *core.AgentMessage) {
+		id := voiceDeliveryID(m.Custom)
+		if id == "" {
+			return
+		}
+		if saved == nil {
+			saved = map[string]bool{}
+		}
+		saved[id] = true
+		if m.Custom["kind"] == "minutes" && m.Custom["wake"] == true {
+			wakes = append(wakes, voiceWakeID(id))
+		}
+	}
+	if len(s.Entries) == 0 {
+		for i := range s.Messages {
+			visit(&s.Messages[i])
+		}
+	} else {
+		for i := range s.Entries {
+			if s.Entries[i].Type == session.EntryMessage {
+				visit(&s.Entries[i].Message)
+			}
+		}
+	}
+	for _, w := range wakes {
+		if !saved[w] {
+			wakeOwed = true
+		}
+	}
+	return saved, wakeOwed
 }
 
 // markDeleted prevents future Snapshot calls from writing to disk.

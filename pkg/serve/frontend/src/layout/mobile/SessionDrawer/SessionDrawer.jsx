@@ -68,6 +68,7 @@ export function SessionDrawer({
   owners = [],
   activeOwnerId = null,
   onOpenOwner,
+  onCallOwner,
   onCloseOwner,
   onNewOwner,
   panelRef: externalPanelRef,
@@ -222,6 +223,7 @@ export function SessionDrawer({
             owners={owners}
             activeOwnerId={activeOwnerId}
             onOpenOwner={onOpenOwner}
+            onCallOwner={onCallOwner}
             onCloseOwner={onCloseOwner}
             onNewOwner={onNewOwner}
             collapsedProjects={drawerCollapsed}

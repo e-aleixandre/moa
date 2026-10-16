@@ -5,6 +5,7 @@ package askuser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -46,7 +47,10 @@ const MultiSeparator = "; "
 // Prompt is the full batch sent from the agent to the UI.
 type Prompt struct {
 	Questions []Question
-	Response  chan<- Reply // exactly once
+	// RequiresTap is a property of the whole request: only a tap or typed
+	// answer may resolve it, never the voice relay.
+	RequiresTap bool
+	Response    chan<- Reply // exactly once
 }
 
 // Reply answers a Prompt: one answer per question, and who gave them.
@@ -61,7 +65,12 @@ const (
 	ResponderUser       = "user"       // the user, from the web UI or a paired app
 	ResponderOwner      = "owner"      // a project owner agent, on the user's behalf
 	ResponderAutomation = "automation" // a caller of the Automation API
+	ResponderVoice      = "voice"      // the voice relay, set only by the server's call bridge
 )
+
+// ErrRequiresTap is returned when a voice responder tries to resolve a
+// request that must be answered by a tap or typed confirmation.
+var ErrRequiresTap = errors.New("this question requires a tap or typed confirmation; voice cannot answer it")
 
 // CustomKey is the tool_result Custom key that records the Responder. Custom
 // never reaches the provider, so the record costs the model nothing.
@@ -77,6 +86,10 @@ type Responder struct {
 	// Via is the authenticated channel of a user answer (device:<id>,
 	// network or token), as the server audits it.
 	Via string `json:"via,omitempty"`
+	// CallID and Quote are the evidence of a voice answer: the local call and
+	// the owner's words as heard.
+	CallID string `json:"call_id,omitempty"`
+	Quote  string `json:"quote,omitempty"`
 }
 
 // ResponderFromCustom reads the recorded Responder back from a tool_result's
@@ -87,7 +100,7 @@ func ResponderFromCustom(v any) (Responder, bool) {
 		return r, r.Kind != ""
 	case map[string]any:
 		get := func(k string) string { s, _ := r[k].(string); return s }
-		out := Responder{Kind: get("kind"), ID: get("id"), Name: get("name"), Via: get("via")}
+		out := Responder{Kind: get("kind"), ID: get("id"), Name: get("name"), Via: get("via"), CallID: get("call_id"), Quote: get("quote")}
 		return out, out.Kind != ""
 	}
 	return Responder{}, false
@@ -113,6 +126,8 @@ func (r Responder) Attribution() string {
 		return "[Answered by the owner agent \"" + name + "\" on the user's behalf, not by the user]"
 	case ResponderAutomation:
 		return "[Answered by an automation on the user's behalf, not by the user]"
+	case ResponderVoice:
+		return "[Answered by voice relay on the owner's behalf; not a tap or typed confirmation]"
 	}
 	return ""
 }
@@ -136,10 +151,14 @@ func (b *Bridge) Prompts() <-chan Prompt {
 func NewTool(b *Bridge) core.Tool {
 	return core.Tool{
 		Name:        "ask_user",
-		Description: `Ask the user one or more questions and wait for their responses. Use this when you need clarification, a decision, or information you cannot determine on your own. You can provide predefined options for each question — the user can pick one or write a custom answer. Do not use this for rhetorical questions or confirmations of actions you can take directly.`,
+		Description: `Ask the user one or more questions and wait for their responses. Use this when you need clarification, a decision, or information you cannot determine on your own. You can provide predefined options for each question — the user can pick one or write a custom answer. Do not use this for rhetorical questions or confirmations of actions you can take directly. Set requires_tap to true when the question authorizes a deploy, merge, release or permission-like action: only a tap or typed answer may resolve it, never a spoken relay.`,
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
+				"requires_tap": {
+					"type": "boolean",
+					"description": "Optional, default false. Set true for deploy/merge/release/permission-like confirmations: the answer must come from a tap or typed confirmation, never from the voice relay."
+				},
 				"questions": {
 					"type": "array",
 					"description": "One or more questions to ask the user (max 32)",
@@ -173,10 +192,11 @@ func NewTool(b *Bridge) core.Tool {
 				return core.ErrorResult(err.Error()), nil
 			}
 
+			requiresTap, _ := params["requires_tap"].(bool)
 			respCh := make(chan Reply, 1)
 
 			select {
-			case b.ch <- Prompt{Questions: questions, Response: respCh}:
+			case b.ch <- Prompt{Questions: questions, RequiresTap: requiresTap, Response: respCh}:
 			case <-ctx.Done():
 				return core.ErrorResult("cancelled"), nil
 			}

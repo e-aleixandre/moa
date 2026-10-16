@@ -29,7 +29,15 @@
 //       compaction card's, so the collapsed body survives loading older
 //       history.
 //
-//   { kind:'voice_call', id, callId, time, exchanges:[{ id, question, answer, time, streaming? }] }
+//   { kind:'voice_minutes', id, callId, time, text, minutes, attachments }
+//       The record a call left at hangup (custom.kind 'minutes'): Decided,
+//       Passed and Still open, with transcript.md attached. Its wake
+//       (kind 'minutes_wake') is the model's input and draws nothing.
+//
+//   { kind:'voice_call', id, callId, time, exchanges:[{ id, voiceKind?, question, answer, time, streaming? }] }
+//       voiceKind 'relay' is a request the call passed on (question holds the
+//       voice model's summary; the session's work after it is not absorbed),
+//       'brief' the call asking for a brief; absent, a question.
 //       One voice call, with every question the delegate asked this session and
 //       the answer this session gave. The question arrives as a user-role
 //       message carrying `custom.source === 'voice_call'` (the only role the
@@ -474,7 +482,7 @@ export function projectStream(session) {
         // What this session said back to the delegate belongs INSIDE the call,
         // next to the question it answers: two machines talking is one
         // exchange, not a turn of the conversation the owner is having.
-        const pending = currentVoiceCall?.exchanges[currentVoiceCall.exchanges.length - 1];
+        const pending = answerableExchange(currentVoiceCall);
         if (pending) {
           pending.answer = pending.answer ? `${pending.answer}\n\n${text}` : text;
           continue;
@@ -511,11 +519,33 @@ export function projectStream(session) {
       // block its call already opened.
       if (msg.custom?.source === 'voice_call') {
         const callId = String(msg.custom.call_id || '');
+        const voiceKind = msg.custom.kind || 'question';
+        // The wake that hands the minutes to the model is the model's input,
+        // shown as the minutes block it carries, never as a message.
+        if (voiceKind === 'minutes_wake' || voiceKind === 'minutes_wake_stopped') continue;
+        // The record a call leaves at hangup: its own block, with the
+        // transcript to download. Not a waypoint and never a draft.
+        if (voiceKind === 'minutes') {
+          blocks.push({
+            kind: 'voice_minutes',
+            id: blockID('voiceminutes', msg, i),
+            callId,
+            time: msg.timestamp * 1000,
+            text: joinText(msg.content),
+            minutes: msg.custom.minutes || null,
+            attachments: (msg.content || []).filter((c) => c && (c.type === 'document' || c.type === 'image') && c.attachment_id),
+          });
+          continue;
+        }
         // The raw question, when the server recorded it: the body of the
         // message is the prompt scaffolding wrapped around it.
-        const question = typeof msg.custom.question === 'string' && msg.custom.question
-          ? msg.custom.question
-          : joinText(msg.content);
+        const question = voiceKind === 'relay'
+          ? String(msg.custom.model_summary || '')
+          : voiceKind === 'brief'
+            ? ''
+            : typeof msg.custom.question === 'string' && msg.custom.question
+              ? msg.custom.question
+              : joinText(msg.content);
         // A call with no id cannot claim to be the same call as anything, so
         // it never merges: better two blocks than one that fuses two calls.
         currentVoiceCall = callId && openVoiceCall?.callId === callId
@@ -536,6 +566,7 @@ export function projectStream(session) {
         }
         currentVoiceCall.exchanges.push({
           id: blockID('voiceask', msg, i),
+          ...(voiceKind === 'relay' || voiceKind === 'brief' ? { voiceKind } : {}),
           question,
           answer: '',
           time: msg.timestamp * 1000,
@@ -680,7 +711,7 @@ export function projectStream(session) {
   // message settled — the live and the cold transcript disagreeing about
   // whose words those are, which is the whole point of the block.
   const liveVoiceAnswer = currentVoiceCall && (hasStreamingText || hasThinking)
-    ? currentVoiceCall.exchanges[currentVoiceCall.exchanges.length - 1]
+    ? answerableExchange(currentVoiceCall)
     : null;
 
   if (live) {
@@ -968,6 +999,14 @@ export function liveTrayAgents(session, sessions = {}, owners = []) {
 // bashAction is the tray's short description of a live bash job: the command.
 function bashAction(job) {
   return toolPath('bash', { command: job.task || '' }) || firstLine(job.task) || 'running';
+}
+
+// answerableExchange is the exchange the session's next prose answers. A
+// request the call passed on is work for the session, not a question: what
+// the session then writes is ordinary conversation, outside the call block.
+function answerableExchange(call) {
+  const last = call?.exchanges[call.exchanges.length - 1];
+  return last && last.voiceKind !== 'relay' ? last : null;
 }
 
 function joinText(content) {

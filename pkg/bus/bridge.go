@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"math"
 	"sync"
@@ -79,7 +80,12 @@ type AgentController interface {
 	// appended user message (core.AgentEventUserMessage) from the append point,
 	// so the announcement can never race a concurrent history snapshot.
 	SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error)
+	// SendWithContentCustomAnnounced also keeps a producer's provenance
+	// (custom) on the appended message.
+	SendWithContentCustomAnnounced(ctx context.Context, content []core.Content, msgID string, custom map[string]any) ([]core.AgentMessage, error)
 	AppendMessage(msg core.AgentMessage) error
+	// AppendRecord appends a session_event record, also while running.
+	AppendRecord(msg core.AgentMessage) error
 	SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error
 	LoadState(msgs []core.AgentMessage, compactionEpoch int) error
 
@@ -1784,9 +1790,19 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 	// prompt wrapper as an ordinary message until a reload brings the record
 	// back; serve's projection narrows the same keys further.
 	if source == "voice_call" {
-		for _, key := range []string{"call_id", "question"} {
+		for _, key := range []string{"call_id", "question", "kind", "delivery_id", "model_summary", "provider"} {
 			if value, ok := custom[key].(string); ok {
 				projected[key] = value
+			}
+		}
+		// The structured minutes lists are copied through JSON so the event
+		// owns its own data and the record can't be mutated through it.
+		if minutes, ok := custom["minutes"]; ok && minutes != nil {
+			if data, err := json.Marshal(minutes); err == nil {
+				var copied any
+				if json.Unmarshal(data, &copied) == nil {
+					projected["minutes"] = copied
+				}
 			}
 		}
 	}

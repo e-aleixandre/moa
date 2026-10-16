@@ -583,3 +583,26 @@ test('desktop: a pending secret request scrolls with the transcript, like ask_us
     expect(JSON.stringify(screen, (k, v) => (typeof v === 'function' ? undefined : v))).not.toContain('conversation-blocking');
   });
 });
+
+test('calling an owner from the drawer closes the drawer under the call screen', async () => {
+  const { __setVoiceCallDepsForTests } = await import('../../../data/voice-call-session.js');
+  // The start request never answers: the call stays "starting" with its screen up.
+  __setVoiceCallDepsForTests({ supported: true, fetch: () => new Promise(() => {}), WebSocket: class {}, createAudio: () => ({ prepare() {}, stop() {} }) });
+  try {
+    setState({ isMobile: true, drawerOpen: true, voiceCall: null });
+    const drawer = componentNode(MobileConversationScreen({}), 'SessionDrawer');
+    drawer.props.onCallOwner({ id: 'o1', name: 'Alpha', session_id: 's1' });
+    expect(store.get().voiceCall.screen).toBe(true);
+    expect(store.get().drawerOpen).toBe(false);
+
+    // Another call is running: nothing started, so the drawer is left alone.
+    setState({ drawerOpen: true });
+    const again = componentNode(MobileConversationScreen({}), 'SessionDrawer');
+    again.props.onCallOwner({ id: 'o2', name: 'Beta', session_id: 's2' });
+    expect(store.get().voiceCall.sessionId).toBe('s1');
+    expect(store.get().drawerOpen).toBe(true);
+  } finally {
+    __setVoiceCallDepsForTests(null);
+    setState({ isMobile: false, drawerOpen: false });
+  }
+});

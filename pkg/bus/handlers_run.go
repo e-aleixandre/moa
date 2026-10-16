@@ -324,7 +324,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			// Carry the plain text alongside the content blocks: the Steered
 			// event (and every client rendering it) shows Text, so a queued
 			// send with attachments would otherwise surface as an empty chip.
-			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content}); err != nil {
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content, Custom: cmd.Custom}); err != nil {
 				return err
 			}
 			if cmd.AcceptedSteerID != nil {
@@ -362,7 +362,10 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		if cmd.AcceptedMsgID != nil {
 			*cmd.AcceptedMsgID = msgID
 		}
-		if err := startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
+		if err := startRunWithOrigin(sctx, label, originFromCustom(cmd.Custom), func(ctx context.Context) ([]core.AgentMessage, error) {
+			if cmd.Custom != nil {
+				return sctx.Agent.SendWithContentCustomAnnounced(ctx, cmd.Content, msgID, cmd.Custom)
+			}
 			return sctx.Agent.SendWithContentAnnounced(ctx, cmd.Content, msgID)
 		}); err != nil {
 			sctx.Agent.ReleaseNativeDocBytes(nativeBytes)
@@ -378,6 +381,9 @@ func registerAppendHandler(sctx *SessionContext) {
 	b := sctx.Bus
 	b.OnCommand(func(cmd AppendToConversation) error {
 		return sctx.Agent.AppendMessage(cmd.Message)
+	})
+	b.OnCommand(func(cmd AppendRecord) error {
+		return sctx.Agent.AppendRecord(cmd.Message)
 	})
 
 }
@@ -524,11 +530,7 @@ func steerAttachmentIDs(items []core.SteerItem) []string {
 // goalIterationMarkerText formats an iteration verdict for the persistent goal
 // marker, matching the wording the frontends use for the live event so the
 
-func startRun(sctx *SessionContext, label string, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {
-	return startRunWithOrigin(sctx, label, RunOrigin{Explicit: true}, runFn)
-}
-
-// startRunWithOrigin is startRun carrying the run's provenance. The origin is
+// startRunWithOrigin starts a run carrying its provenance. The origin is
 // recorded between claiming the slot and launching — both under abortMu — so a
 // failed reservation cannot leave it behind for an unrelated run to pick up.
 func startRunWithOrigin(sctx *SessionContext, label string, origin RunOrigin, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {

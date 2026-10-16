@@ -34,6 +34,7 @@ const (
 	labelKID      = "moa-push-kid-v1"
 	aadEnvelope   = "moa-push-v1"
 	macSend       = "moa-send-v1"
+	labelVoice    = "moa-voice-auth-v1"
 	macCollapse   = "collapse-v1"
 	collapseLen   = 22
 )
@@ -71,6 +72,16 @@ func DeriveDeviceKeys(secret []byte) (DeviceKeys, error) {
 	}, nil
 }
 
+// VoiceAuthKey is the narrow credential a VoIP destination's secret yields:
+// it lets the app answer, decline and join the calls it is rung for while
+// the iPhone is locked, and nothing else (Authorization: Moa-Voice).
+func VoiceAuthKey(secret []byte) ([]byte, error) {
+	if len(secret) != 32 {
+		return nil, errors.New("push secret must be 32 bytes")
+	}
+	return hkdf.Key(sha256.New, secret, nil, labelVoice, 32)
+}
+
 // EnvelopeContent is what the NSE reads once the envelope authenticates.
 // Field order is the marshalling order; the NSE does not depend on it.
 type EnvelopeContent struct {
@@ -84,6 +95,8 @@ type EnvelopeContent struct {
 	Thread string `json:"th"`
 	Title  string `json:"t"`
 	Body   string `json:"b"`
+	// Invite is the call invitation (and CallKit UUID) of a "call" envelope.
+	Invite string `json:"inv,omitempty"`
 }
 
 // Envelope is the encrypted payload as it travels inside the relay request
@@ -144,6 +157,9 @@ func EnvelopeContenttext(keys DeviceKeys, n Notification, now time.Time, id stri
 	}
 	if p.Level == "" {
 		p.Level = LevelActive
+	}
+	if n.Call != nil {
+		p.Kind, p.Invite, p.Exp = KindCall, n.Call.ID, n.Call.Expires.Unix()
 	}
 	p.Thread = collapseID(keys, n.Tag)
 	p.Title = cutUTF8(p.Title, 256)

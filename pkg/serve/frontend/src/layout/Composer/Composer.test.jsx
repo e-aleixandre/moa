@@ -24,11 +24,10 @@ let stateCalls = 0;
 const stateOverrides = new Map();
 
 let voiceOptions;
-// What the voice hooks report, so a test can put the composer in the
-// dictating or on-a-call state without a microphone.
+// What the dictation hook reports, so a test can put the composer in the
+// dictating state without a microphone.
 let voiceRecording = false;
 const recordingStream = () => "recording-stream";
-let callOverride = null;
 
 // Spread the real hooks first. bun's mock.module replaces the module for the
 // whole process and never restores it, so a factory listing only some hooks
@@ -66,19 +65,6 @@ mock.module("../../hooks/useVoiceGesture.js", () => ({
     supported: false, toggleFromShortcut() {}, cancel() {},
     getStream: recordingStream,
     });
-  },
-}));
-
-// Delegates to the real hook unless a test pins a call state, so any other
-// file loaded after this one still gets the real useVoiceLive.
-const realVoiceLive = await import("../../hooks/useVoiceLive.js");
-// Held apart: bun rewrites the imported namespace in place once mocked.
-const realUseVoiceLive = realVoiceLive.useVoiceLive;
-mock.module("../../hooks/useVoiceLive.js", () => ({
-  ...realVoiceLive,
-  useVoiceLive: (...args) => {
-    const real = realUseVoiceLive(...args);
-    return callOverride ? { ...real, ...callOverride } : real;
   },
 }));
 
@@ -699,7 +685,6 @@ test("the voice wash is drawn only while dictating or during a live call", () =>
       firstChild: [].concat(tree.props.children).find(Boolean),
     };
   };
-  const callStream = () => "call-stream";
   try {
     let w = wash();
     expect(w.aurora).toBeUndefined();
@@ -713,20 +698,21 @@ test("the voice wash is drawn only while dictating or during a live call", () =>
     expect(w.aurora.props.getStream()).toBe("recording-stream");
     voiceRecording = false;
 
-    for (const phase of ["connecting", "closing"]) {
-      callOverride = { phase, active: true, getStream: callStream };
+    for (const phase of ["starting", "connecting", "ending"]) {
+      setState({ voiceCall: { sessionId: "s1", phase, active: true, passed: [], asks: 0, maxAsks: 5 } });
       expect(wash().aurora).toBeUndefined();
     }
-    callOverride = { phase: "live", active: true, getStream: callStream };
+    setState({ voiceCall: { sessionId: "s1", phase: "listening", active: true, passed: [], asks: 0, maxAsks: 5 } });
     w = wash();
     expect(w.aurora).toBeDefined();
-    expect(w.aurora.props.getStream()).toBe("call-stream");
+    // The wash reads the call's own microphone (none in this test).
+    expect(w.aurora.props.getStream()).toBe(null);
     // The wash is the slab's first child: the positioned content after it
     // paints above it (Composer.css).
     expect(w.firstChild.type).toBe(ComposerAurora);
   } finally {
     voiceRecording = false;
-    callOverride = null;
+    setState({ voiceCall: null });
   }
 });
 
@@ -765,4 +751,97 @@ test("picking a file from the @ menu still returns focus to the textarea", () =>
   const r = mentionPick(false);
   expect(r.textarea.value).toBe("a.go ");
   expect(r.focused).toBe(1);
+});
+
+// The minutes of a call are a record the server saves in the conversation;
+// they never reach this box. Driven through the REAL composer, its call
+// button, the real call store and controller: only the network, socket and
+// audio are doubles. Both an owner's conversation and an ordinary one, empty
+// or with text typed before AND during the call.
+test("a call's minutes never touch the composer: owner and ordinary sessions keep their text", async () => {
+  const { __setVoiceCallDepsForTests } = await import("../../data/voice-call-session.js");
+  const { loadDraft, saveDraft } = await import("../../data/composer-draft.js");
+  const saved = new Map();
+  const storage = {
+    getItem: (k) => (saved.has(k) ? saved.get(k) : null),
+    setItem: (k, v) => saved.set(k, String(v)),
+    removeItem: (k) => saved.delete(k),
+  };
+  const hadStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const hadLocation = Object.getOwnPropertyDescriptor(globalThis, "location");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, writable: true, value: storage });
+  Object.defineProperty(globalThis, "location", { configurable: true, writable: true, value: { protocol: "https:", host: "moa.test" } });
+  const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+  const callButton = (tree) => descendants(tree).find((n) => n.type === "button" && String(n.props?.class || "").includes("zl-call"));
+  try {
+    for (const [sessionId, owned] of [["owner-session", true], ["ordinary-session", false]]) {
+      for (const before of ["", "My unsent draft\n  keep the spacing 👋  "]) {
+        const sockets = [];
+        const requests = [];
+        class FakeWS {
+          constructor(url) { this.url = url; this.readyState = 0; this.sent = []; sockets.push(this); }
+          send(d) { this.sent.push(d); }
+          close() { this.readyState = 3; this.onclose?.(); }
+        }
+        const audio = { start: async () => {}, play() {}, interrupt() {}, stop() {}, setMuted() {} };
+        __setVoiceCallDepsForTests({
+          supported: true,
+          WebSocket: FakeWS,
+          createAudio: () => audio,
+          fetch: async (url, init) => {
+            requests.push(url);
+            if (url.endsWith("/hangup")) return new Response(null, { status: 204 });
+            return new Response(JSON.stringify({ call_id: "c1", provider: "chatgpt-plan", billing: { kind: "plan_unverified" }, ws_url: "/api/voice/calls/c1/ws" }), { status: 201 });
+          },
+        });
+        setState({ owners: { ...store.get().owners, list: owned ? [{ id: "o1", name: "Infra", session_id: sessionId }] : [] } });
+        if (before) saveDraft(sessionId, before, storage);
+        const inputs = [];
+        const textarea = {
+          value: before, selectionStart: before.length, selectionEnd: before.length,
+          style: {}, scrollHeight: 24, focus() {}, dispatchEvent(e) { inputs.push(e.type); },
+        };
+        refs.length = 0;
+        let tree = Composer({ sessionId, session: { state: "idle" } });
+        refs[0].current = textarea;
+        expect(callButton(tree).props["aria-label"]).toBe("Call");
+        callButton(tree).props.onClick();
+        await flush();
+        sockets[0].readyState = 1;
+        sockets[0].onopen();
+        await flush();
+        sockets[0].onmessage({ data: JSON.stringify({ type: "state", state: "listening" }) });
+        expect(store.get().voiceCall).toMatchObject({ sessionId, phase: "listening" });
+
+        // The user types while on the call.
+        textarea.value += " and more";
+        refs.length = 0;
+        tree = Composer({ sessionId, session: { state: "idle" } });
+        refs[0].current = textarea;
+        expect(callButton(tree).props["aria-label"]).toBe("End call");
+        const ending = callButton(tree).props.onClick();
+        sockets[0].onmessage?.({ data: JSON.stringify({
+          type: "ended", reason: "hangup", minutes_saved: true,
+          minutes: "Decided: keep the record in the conversation.", transcript_url: "/api/voice/calls/c1/transcript.md",
+        }) });
+        await ending;
+        await flush();
+        refs.length = 0;
+        tree = Composer({ sessionId, session: { state: "idle" } });
+        refs[0].current = textarea;
+
+        expect(store.get().voiceCall.phase).toBe("ended");
+        expect(textarea.value).toBe(`${before} and more`);
+        expect(inputs).toEqual([]);
+        expect(loadDraft(sessionId, storage)).toBe(before);
+        expect(requests).toEqual(["/api/voice/calls", "/api/voice/calls/c1/hangup"]);
+        expect(callButton(tree).props["aria-label"]).toBe("Call");
+      }
+    }
+  } finally {
+    __setVoiceCallDepsForTests(null);
+    setState({ owners: { ...store.get().owners, list: [] } });
+    if (hadStorage) Object.defineProperty(globalThis, "localStorage", hadStorage); else delete globalThis.localStorage;
+    if (hadLocation) Object.defineProperty(globalThis, "location", hadLocation); else delete globalThis.location;
+  }
 });

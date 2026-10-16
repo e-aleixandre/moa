@@ -2,3 +2,21 @@
 "PUSH_FALLBACK_TITLE" = "moa";
 "PUSH_FALLBACK_BODY" = "You have updates in moa";
 "PUSH_CHALLENGE_BODY" = "Open moa to finish turning on notifications";
+
+/* CarPlay. The car never asks to pick up the iPhone. */
+"CARPLAY_TITLE" = "moa";
+"CARPLAY_OWNER_CLOSED" = "Closed";
+"CARPLAY_NOT_SET_UP" = "moa isn't set up for calls yet";
+"CARPLAY_ERROR_NO_PLAN" = "No voice plan available";
+"CARPLAY_ERROR_CALL_ACTIVE" = "A call is already in progress";
+"CARPLAY_ERROR_CALL_FAILED" = "Call failed, try again";
+"CARPLAY_ERROR_UNREACHABLE" = "Can't reach your moa server";
+"CARPLAY_ERROR_MIC_OFF" = "Microphone access is off for moa";
+"CARPLAY_OK" = "OK";
+"CARPLAY_CONNECTING" = "Connecting…";
+"CARPLAY_LISTENING" = "Listening";
+"CARPLAY_SPEAKING" = "%@ is speaking";
+"CARPLAY_MUTED" = "Muted";
+"CARPLAY_END" = "End";
+"CARPLAY_MUTE" = "Mute";
+"CARPLAY_UNMUTE" = "Unmute";

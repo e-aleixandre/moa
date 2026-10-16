@@ -25,6 +25,10 @@ const FCM_TOKEN_MARGIN = 300;
 const CHALLENGE_TTL_FCM = `${CHALLENGE_TTL}s`;
 const SEND_TTL_FCM = `${SEND_EXPIRATION}s`;
 const PROVIDERS = new Set(['apns', 'fcm']);
+// Delivery types. `voip` (APNs only) rings an incoming call through PushKit;
+// it is sealed into the handle, so a handle issued for alerts can never send
+// VoIP and the reverse.
+const TYPES = new Set(['alert', 'voip']);
 
 const TOKEN_RE = /^[0-9a-f]{64,200}$/;
 // FCM registration tokens are opaque (real ones are ~150-200 chars). The upper
@@ -184,10 +188,13 @@ function aad(kind) {
 }
 
 // Exported (with an injectable nonce) so tests can reproduce the Go vectors.
-export async function sealBlob(env, kind, { t, e, k, x, p }, nonce = crypto.getRandomValues(new Uint8Array(12))) {
+export async function sealBlob(env, kind, { t, e, k, x, p, y }, nonce = crypto.getRandomValues(new Uint8Array(12))) {
   // Field order t, e, k, x is part of the byte vectors; p is appended only for
-  // non-APNs providers so blobs sealed before FCM existed open identically.
-  const json = JSON.stringify(p === undefined || p === 'apns' ? { t, e, k, x } : { t, e, k, x, p });
+  // non-APNs providers and y only for VoIP, so blobs sealed before either
+  // existed open identically.
+  const fields = p === undefined || p === 'apns' ? { t, e, k, x } : { t, e, k, x, p };
+  if (y === 'voip') fields.y = 'voip';
+  const json = JSON.stringify(fields);
   const ct = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: nonce, additionalData: aad(kind) },
     await blobKey(env, kind),
@@ -224,6 +231,8 @@ export async function openBlob(env, kind, sealed) {
     if (!matches(TOKEN_RE, p.t) || !ENVS.has(p.e)) throw unauthorized();
   } else if (keys === 5 && p.p === 'fcm') {
     if (!matches(FCM_TOKEN_RE, p.t) || p.e !== 'production') throw unauthorized();
+  } else if (keys === 5 && p.y === 'voip') {
+    if (!matches(TOKEN_RE, p.t) || !ENVS.has(p.e)) throw unauthorized();
   } else {
     throw unauthorized();
   }
@@ -238,8 +247,8 @@ async function hmacVerify(keyBytes, label, data, mac) {
 
 // Rate-limit key: the destination, hashed so the binding never sees a token.
 async function destinationKey(token, env, provider) {
-  // APNs keeps its original input; other providers get their own namespace.
-  const prefix = provider === 'fcm' ? 'moa-rl-v1\0fcm\0' : 'moa-rl-v1\0';
+  // APNs alerts keep their original input; others get their own namespace.
+  const prefix = provider === 'apns' ? 'moa-rl-v1\0' : `moa-rl-v1\0${provider}\0`;
   const digest = await crypto.subtle.digest('SHA-256', enc.encode(prefix + env + '\0' + token));
   return b64u(new Uint8Array(digest));
 }
@@ -300,7 +309,9 @@ async function apnsReason(response) {
   return 'unknown';
 }
 
-async function pushAPNs(env, deps, now, dest, payload, expiration, collapse) {
+// A VoIP push goes to the app's .voip topic, at once or never: expiration 0
+// asks APNs not to store it (a call that rings late is worse than none).
+async function pushAPNs(env, deps, now, dest, payload, expiration, collapse, voip = false) {
   if (!env.APNS_TOPIC) throw unavailable();
   let jwt;
   try {
@@ -310,13 +321,13 @@ async function pushAPNs(env, deps, now, dest, payload, expiration, collapse) {
   }
   const headers = {
     'content-type': 'application/json',
-    'apns-push-type': 'alert',
+    'apns-push-type': voip ? 'voip' : 'alert',
     'apns-priority': '10',
-    'apns-topic': env.APNS_TOPIC,
-    'apns-expiration': String(now + expiration),
+    'apns-topic': voip ? env.APNS_TOPIC + '.voip' : env.APNS_TOPIC,
+    'apns-expiration': voip ? '0' : String(now + expiration),
     authorization: 'bearer ' + jwt,
   };
-  if (collapse !== undefined) headers['apns-collapse-id'] = collapse;
+  if (collapse !== undefined && !voip) headers['apns-collapse-id'] = collapse;
   let response;
   try {
     response = await deps.fetch(`https://${APNS_HOSTS[dest.e]}/3/device/${dest.t}`, {
@@ -482,17 +493,26 @@ async function pushFCM(env, deps, now, dest, data, ttl, collapse) {
 // ---------- routes ----------
 
 async function register(request, env, deps) {
-  const body = parseObject(await readBody(request, SMALL_MAX), ['token', 'env', 'send_key'], ['provider']);
+  const body = parseObject(await readBody(request, SMALL_MAX), ['token', 'env', 'send_key'], ['provider', 'type']);
   const provider = Object.hasOwn(body, 'provider') ? body.provider : 'apns';
   if (typeof provider !== 'string' || !PROVIDERS.has(provider)) throw badRequest();
+  const type = Object.hasOwn(body, 'type') ? body.type : 'alert';
+  if (typeof type !== 'string' || !TYPES.has(type) || (type === 'voip' && provider !== 'apns')) throw badRequest();
+  const voip = type === 'voip';
   const fcm = provider === 'fcm';
   if (!matches(fcm ? FCM_TOKEN_RE : TOKEN_RE, body.token) || !(fcm ? body.env === 'production' : ENVS.has(body.env))
     || !key32(body.send_key)) throw badRequest();
-  await rateLimit(env.REGISTER_LIMITER, body.token, body.env, provider);
+  await rateLimit(env.REGISTER_LIMITER, body.token, body.env, voip ? 'voip' : provider);
   const now = deps.now();
-  const c = await sealBlob(env, 'challenge', { t: body.token, e: body.env, k: body.send_key, x: now + CHALLENGE_TTL, p: provider });
+  const c = await sealBlob(env, 'challenge', { t: body.token, e: body.env, k: body.send_key, x: now + CHALLENGE_TTL, p: provider, y: type });
   if (fcm) {
     await pushFCM(env, deps, now, { t: body.token }, { r: c }, CHALLENGE_TTL_FCM);
+    return reply({ status: 'sent' }, 202);
+  }
+  if (voip) {
+    // The only proof that the caller holds this VoIP token is a VoIP push
+    // reaching it; the app answers it only for a registration it started.
+    await pushAPNs(env, deps, now, { t: body.token, e: body.env }, { r: c }, 0, undefined, true);
     return reply({ status: 'sent' }, 202);
   }
   const payload = { aps: { alert: { 'loc-key': 'PUSH_CHALLENGE_BODY' }, 'interruption-level': 'passive' }, r: c };
@@ -509,10 +529,10 @@ async function confirm(request, env, deps) {
   if (now >= blob.x) throw unauthorized();
   if (!(await hmacVerify(key32(blob.k), 'moa-confirm-v1', enc.encode(body.c), p))) throw unauthorized();
   const expiresAt = now + HANDLE_TTL;
-  const handle = await sealBlob(env, 'handle', { t: blob.t, e: blob.e, k: blob.k, x: expiresAt, p: blob.p });
+  const handle = await sealBlob(env, 'handle', { t: blob.t, e: blob.e, k: blob.k, x: expiresAt, p: blob.p, y: blob.y });
   // The destination the challenge was issued for, so the app can check it is
   // the registration it is waiting on and not an older one still in flight.
-  return reply({ handle, expires_at: expiresAt, token: blob.t, env: blob.e, provider: blob.p ?? 'apns' });
+  return reply({ handle, expires_at: expiresAt, token: blob.t, env: blob.e, provider: blob.p ?? 'apns', type: blob.y ?? 'alert' });
 }
 
 async function send(request, env, deps) {
@@ -533,7 +553,13 @@ async function send(request, env, deps) {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', raw));
   if (!(await hmacVerify(key32(dest.k), 'moa-send-v1', digest, sig))) throw unauthorized();
 
-  await rateLimit(env.SEND_LIMITER, dest.t, dest.e, dest.p);
+  await rateLimit(env.SEND_LIMITER, dest.t, dest.e, dest.y === 'voip' ? 'voip' : (dest.p ?? 'apns'));
+  if (dest.y === 'voip') {
+    // No aps: PushKit hands the envelope to the app, which decrypts it and
+    // reports the call to CallKit itself.
+    await pushAPNs(env, deps, now, dest, { e: { v: 1, k: e.k, c: e.c } }, 0, undefined, true);
+    return reply({ ok: true });
+  }
   if (dest.p === 'fcm') {
     const data = { v: '1', k: e.k, c: e.c };
     if (body.c !== undefined) data.col = body.c;

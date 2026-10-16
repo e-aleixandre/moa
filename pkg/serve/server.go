@@ -51,6 +51,7 @@ type serverOptions struct {
 	preview         *PreviewController
 	providerStore   *auth.Store
 	providerLogins  *auth.ProviderLoginManager
+	voice           VoiceCallOptions
 }
 
 // RealtimeAPIKeyFunc returns only a normal OpenAI API key. ok must be false
@@ -216,27 +217,35 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/tasks/occurrences/{oid}/confirm", handleConfirmOccurrence(manager))
 	mux.HandleFunc("POST /api/tasks/occurrences/{oid}/reroute", handleRerouteOccurrence(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())
-	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager, o.realtimeKey))
+	mux.HandleFunc("GET /api/capabilities", handleCapabilities(manager))
 	mux.HandleFunc("GET /api/preview/target", handlePreviewTarget(o.preview))
 	mux.HandleFunc("PUT /api/preview/target", handlePreviewTarget(o.preview))
 	mux.HandleFunc("GET /api/usage", handleUsage(manager))
 	mux.HandleFunc("POST /api/transcribe", handleTranscribe(manager))
-	// One registry per server: it is what lets the server close a Live session
-	// the browser never closed, so it must be shared by the route that creates
-	// sessions and the routes that keep or end them.
-	voiceCalls := newVoiceLiveRegistry(o.realtimeKey, o.realtimeHTTP)
-	mux.HandleFunc("POST /api/voice/live/session", handleVoiceLiveSession(manager, o.realtimeKey, o.realtimeHTTP, voiceCalls))
-	mux.HandleFunc("POST /api/voice/live/close", handleVoiceLiveClose(voiceCalls))
-	mux.HandleFunc("POST /api/voice/live/heartbeat", handleVoiceLiveHeartbeat(voiceCalls))
-	voiceAskPost, voiceAskGet := voiceLiveAskHandlers(manager)
-	mux.HandleFunc("POST /api/voice/live/ask", voiceAskPost)
-	mux.HandleFunc("GET /api/voice/live/ask", voiceAskGet)
+	// Voice calls: one registry per server, owned by the Manager lifecycle.
+	voiceRegistry := newVoiceCallRegistry(manager, o.providerStore, o.voice)
+	manager.attachVoiceCalls(voiceRegistry)
+	mux.HandleFunc("POST /api/voice/calls", voiceRegistry.handleCreate)
+	mux.HandleFunc("GET /api/voice/calls/{id}/ws", voiceRegistry.handleWS)
+	mux.HandleFunc("POST /api/voice/calls/{id}/hangup", voiceRegistry.handleHangup)
+	mux.HandleFunc("GET /api/voice/status", voiceRegistry.handleStatus)
+	mux.HandleFunc("GET /api/voice/directory", voiceRegistry.handleDirectory)
+	mux.HandleFunc("POST /api/voice/owners/{id}/call", voiceRegistry.handleOwnerCall)
+	mux.HandleFunc("POST /api/voice/invites", voiceRegistry.handleInviteCreate)
+	mux.HandleFunc("GET /api/voice/invites/{id}", voiceRegistry.handleInviteStatus)
+	mux.HandleFunc("POST /api/voice/invites/{id}/answer", voiceRegistry.handleInviteAnswer)
+	mux.HandleFunc("POST /api/voice/invites/{id}/decline", voiceRegistry.handleInviteDecline)
+	mux.HandleFunc("GET /api/activity", handleActivity(manager))
+	mux.HandleFunc("PATCH /api/voice/settings", voiceRegistry.handleSettings)
 	mux.HandleFunc("GET /api/push/vapid-public-key", handlePushVAPIDKey(manager))
 	mux.HandleFunc("POST /api/push/subscribe", handlePushSubscribe(manager))
 	mux.HandleFunc("POST /api/push/unsubscribe", handlePushUnsubscribe(manager))
-	mux.HandleFunc("POST /api/push/native", handlePushNativeRegister(manager))
-	mux.HandleFunc("DELETE /api/push/native", handlePushNativeDelete(manager))
-	mux.HandleFunc("GET /api/push/native/status", handlePushNativeStatus(manager))
+	mux.HandleFunc("POST /api/push/native", handlePushNativeRegister(manager, alertDestination))
+	mux.HandleFunc("DELETE /api/push/native", handlePushNativeDelete(manager, alertDestination))
+	mux.HandleFunc("GET /api/push/native/status", handlePushNativeStatus(manager, alertDestination))
+	mux.HandleFunc("POST /api/push/voip", handlePushNativeRegister(manager, voipDestination))
+	mux.HandleFunc("DELETE /api/push/voip", handlePushNativeDelete(manager, voipDestination))
+	mux.HandleFunc("GET /api/push/voip/status", handlePushNativeStatus(manager, voipDestination))
 	// wake-on-event: the owner's inbox. Deciding where an event goes is the
 	// owner's call, so these sit on the normal browser auth, not the automation
 	// token — that token may write events and nothing else.
@@ -318,7 +327,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 func pulseNoStoreMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session", "/api/voice/live/session", "/api/voice/live/ask", "/api/voice/live/close", "/api/voice/live/heartbeat", "/api/push/native", "/api/push/native/status":
+		case "/api/pulse/realtime/client-secret", "/api/pulse/pairings", "/api/pulse/pairings/claim", "/api/pulse/device-session", "/api/push/native", "/api/push/native/status", "/api/push/voip", "/api/push/voip/status":
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)
@@ -1233,7 +1242,8 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 			for _, steer := range discarded {
 				// A task notice is not the owner's text: it is kept in the
 				// transcript instead, so it must not come back to the composer.
-				if isTaskNotice(steer.Custom) {
+				// Neither is a voice call's record.
+				if _, voice := voiceQueuedText(steer.Custom); isTaskNotice(steer.Custom) || voice {
 					continue
 				}
 				ids = append(ids, steer.ID)
@@ -1313,7 +1323,7 @@ func readSteerOperation(w http.ResponseWriter, r *http.Request) (steerOperation,
 func recallableSteers(discarded []core.SteerItem) []PendingSteerData {
 	steers := make([]PendingSteerData, 0, len(discarded))
 	for _, steer := range discarded {
-		if steer.Internal || isTaskNotice(steer.Custom) {
+		if _, voice := voiceQueuedText(steer.Custom); steer.Internal || isTaskNotice(steer.Custom) || voice {
 			continue
 		}
 		steers = append(steers, PendingSteerData{
@@ -1420,7 +1430,7 @@ func handleSteerSubagent(mgr *Manager) http.HandlerFunc {
 	}
 }
 
-func handleCapabilities(mgr *Manager, realtimeKey RealtimeAPIKeyFunc) http.HandlerFunc {
+func handleCapabilities(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		goalFlags := make([]map[string]string, 0, len(goal.Flags()))
 		for _, f := range goal.Flags() {
@@ -1430,17 +1440,13 @@ func handleCapabilities(mgr *Manager, realtimeKey RealtimeAPIKeyFunc) http.Handl
 				"desc":        f.Desc,
 			})
 		}
-		// voice_live is reported separately from transcribe even though both end up
-		// on the same OpenAI key slot today: a call that cannot start must be an
-		// absent button, not a button that fails after asking for the microphone.
-		voiceLive := false
-		if realtimeKey != nil {
-			key, ok := realtimeKey()
-			voiceLive = ok && strings.TrimSpace(key) != ""
-		}
+		// voice_live stays in the payload, always false: the browser Live
+		// call it advertised was retired for /api/voice/calls, and an
+		// installed client that still reads it must hide that button rather
+		// than offer a call whose route is gone.
 		caps := map[string]any{
 			"transcribe":    mgr.transcriber != nil,
-			"voice_live":    voiceLive,
+			"voice_live":    false,
 			"workspaceRoot": mgr.workspaceRoot,
 			"homeDir":       userHomeDir(),
 			"defaultModel":  bootstrap.FullModelSpec(mgr.defaultModel),
