@@ -103,12 +103,26 @@ func TestVoiceWakeCrashChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	pollUntil(t, vpDeadline, "held run", func() bool { return sessState(f.sess) == StateRunning })
-	if phase == "busy_relay" {
+	if phase == "busy_relay" || phase == "canceled_relay" {
 		p.tool(t, "relay", "pass_to_session", map[string]any{"summary": "RECOVER-THIS-RELAY"})
 		result := p.result(t, "relay")
 		delivery, _ := result["delivery_id"].(string)
 		if result["status"] != "delivered" || result["queued"] != true || delivery == "" {
 			t.Fatalf("relay was not accepted as queued: %v", result)
+		}
+		if phase == "canceled_relay" {
+			// Stop drops the queued relay with the run: it is no longer owed.
+			if err := f.mgr.Cancel(f.sess.ID); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(vpDeadline)
+			for time.Now().Before(deadline) {
+				saved, _, err := session.FindSessionReadOnly(f.mgr.sessionBaseDir, f.sess.ID)
+				if err == nil && saved.Metadata[session.MetaVoiceWake] != true && saved.Metadata[session.MetaVoiceRelays] == nil {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
 		// Crash right after the reply: no Flush, no shutdown. Whatever makes
 		// the relay survive was saved before the spokesperson heard
@@ -389,5 +403,23 @@ func TestVoiceQueuedRelayAdmissionSurvivesCrash(t *testing.T) {
 	}
 	if !dup {
 		t.Fatalf("LOST_ADMISSION: acknowledged busy relay %s was forgotten after crash: receipt=%+v calls=%d", s.WakeID, r, p.calls.Load())
+	}
+}
+
+// A queued relay the owner stopped with the run is not owed: a restart
+// does not deliver it.
+func TestVoiceCanceledRelayIsNotOwed(t *testing.T) {
+	s := vwRunChild(t, "canceled_relay")
+	if s.MarkedLast {
+		t.Fatalf("the stopped relay is still owed on disk: %+v", s)
+	}
+	m, p, stop := vwRestart(t, s)
+	vpStable(t, func() bool { return p.calls.Load() == 0 }, "a restart delivered a stopped relay")
+	if _, loaded := m.Get(s.SessionID); loaded {
+		t.Fatal("a restart loaded a session that owed nothing")
+	}
+	stop()
+	if n, _ := vwSaved(t, s, "relay"); n != 0 {
+		t.Fatalf("saved relays=%d after a restart, want 0", n)
 	}
 }

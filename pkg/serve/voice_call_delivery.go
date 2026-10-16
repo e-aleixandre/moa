@@ -20,6 +20,9 @@ type voiceAdmission struct {
 	mu       sync.Mutex
 	loaded   bool
 	receipts map[string]voiceReceipt
+	// watching is set once the session's canceled steers are watched for
+	// owed relays (watchCanceledVoiceRelays).
+	watching bool
 }
 
 // voiceReceipt is how a delivery was admitted. A rehydrated receipt only
@@ -121,6 +124,7 @@ func (m *Manager) admitVoiceRelay(sessionID, deliveryID string, custom map[strin
 	summary, _ := custom["model_summary"].(string)
 	sp := sess.persister
 	if sp != nil {
+		m.watchCanceledVoiceRelays(sess)
 		sp.oweVoiceRelay(deliveryID, map[string]any{"call_id": custom["call_id"], "provider": custom["provider"], "summary": summary})
 		if err := sess.runtime.Flush(); err != nil {
 			sp.forgetVoiceRelay(deliveryID)
@@ -137,6 +141,39 @@ func (m *Manager) admitVoiceRelay(sessionID, deliveryID string, custom map[strin
 	return r, dup, err
 }
 
+// watchCanceledVoiceRelays makes a queued relay that is canceled with its
+// steer (Stop, queue recall) no longer owed: it was dropped on purpose and
+// a restart must not deliver it. Called with the admission lock held.
+func (m *Manager) watchCanceledVoiceRelays(sess *ManagedSession) {
+	a := &sess.voiceAdmission
+	if a.watching {
+		return
+	}
+	a.watching = true
+	sess.runtime.Bus.Subscribe(func(e bus.SteersCanceled) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		canceled := map[string]bool{}
+		for _, id := range e.SteerIDs {
+			canceled[id] = true
+		}
+		dropped := false
+		for _, rec := range sess.persister.owedVoiceRelays() {
+			id, _ := rec["delivery_id"].(string)
+			if r, ok := a.receipts[id]; ok && r.Action == "steer" && canceled[r.ID] {
+				sess.persister.forgetVoiceRelay(id)
+				dropped = true
+			}
+		}
+		if !dropped {
+			return
+		}
+		if err := sess.runtime.Flush(); err != nil {
+			slog.Warn("canceled voice relay withdrawal not saved", "session", sess.ID, "error", err)
+		}
+	})
+}
+
 // admitOwedVoiceRelays admits, once each, the relays the session header
 // still owes. It reports how many it admitted.
 func (m *Manager) admitOwedVoiceRelays(sess *ManagedSession) int {
@@ -151,6 +188,7 @@ func (m *Manager) admitOwedVoiceRelays(sess *ManagedSession) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.load(sess)
+	m.watchCanceledVoiceRelays(sess)
 	admitted := 0
 	for _, rec := range owed {
 		id, _ := rec["delivery_id"].(string)
@@ -200,6 +238,7 @@ func (m *Manager) wakeVoiceMinutes(sess *ManagedSession) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.load(sess)
+	m.watchCanceledVoiceRelays(sess)
 	admitted := 0
 	for _, rec := range owed {
 		wakeID := voiceWakeID(voiceDeliveryID(rec.Custom))
