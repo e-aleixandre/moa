@@ -121,6 +121,9 @@ type deviceLease struct {
 	timerMu   sync.Mutex
 	timer     *time.Timer
 	once      sync.Once
+	// fence orders within against shutdown: a revocation waits for an
+	// effect already under way and, once it has won, no effect starts.
+	fence sync.Mutex
 }
 
 type durableDeviceState struct {
@@ -853,7 +856,26 @@ func (s *deviceStore) detachAllLeasesLocked() []*deviceLease {
 
 func (l *deviceLease) Done() <-chan struct{} { return l.done }
 
+// within runs fn unless the lease has ended, holding off its shutdown
+// until fn returns: what fn publishes either precedes the revocation's
+// answer or never happens. A nil lease (not a device credential) runs fn.
+func (l *deviceLease) within(fn func()) bool {
+	if l == nil {
+		fn()
+		return true
+	}
+	l.fence.Lock()
+	defer l.fence.Unlock()
+	if deviceLeaseClosed(l) {
+		return false
+	}
+	fn()
+	return true
+}
+
 func (l *deviceLease) shutdown(reason string) {
+	l.fence.Lock()
+	defer l.fence.Unlock()
 	l.once.Do(func() {
 		l.timerMu.Lock()
 		if l.timer != nil {

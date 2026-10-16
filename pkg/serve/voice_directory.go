@@ -22,7 +22,15 @@ type voiceDirectoryEntry struct {
 	State string `json:"state"`
 }
 
-func (r *voiceCallRegistry) handleDirectory(w http.ResponseWriter, _ *http.Request) {
+func (r *voiceCallRegistry) handleDirectory(w http.ResponseWriter, req *http.Request) {
+	// The answer goes out inside the device's lease: a list read while the
+	// credential is being revoked is not sent after the revocation.
+	lease, err := deviceLeaseForWebSocket(req, nil)
+	if err != nil {
+		voiceError(w, http.StatusUnauthorized, map[string]any{"error": "unauthenticated"})
+		return
+	}
+	defer lease.release()
 	owners, err := r.mgr.ListOwners()
 	if err != nil {
 		voiceError(w, http.StatusInternalServerError, map[string]any{"error": "owners_unavailable"})
@@ -39,7 +47,9 @@ func (r *voiceCallRegistry) handleDirectory(w http.ResponseWriter, _ *http.Reque
 		}
 		out = append(out, voiceDirectoryEntry{ID: own.ID, Name: own.Name, Avatar: own.Avatar, State: state})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"owners": out})
+	if !lease.within(func() { writeJSON(w, http.StatusOK, map[string]any{"owners": out}) }) {
+		voiceError(w, http.StatusUnauthorized, map[string]any{"error": "unauthenticated"})
+	}
 }
 
 // handleOwnerCall calls an owner by its id, reopening its conversation when
@@ -84,7 +94,13 @@ func (r *voiceCallRegistry) handleOwnerCall(w http.ResponseWriter, req *http.Req
 		if sess, live := r.mgr.Get(sessionID); live {
 			return sess, 0, nil
 		}
-		_, err := r.mgr.ResumeSession(sessionID)
+		// Reopening publishes the owner and delivers its held notices: it
+		// runs inside the lease, so a revocation either waits for it or has
+		// already stopped it from starting.
+		var err error
+		if !lease.within(func() { _, err = r.mgr.ResumeSession(sessionID) }) {
+			return nil, http.StatusUnauthorized, map[string]any{"error": "unauthenticated"}
+		}
 		switch {
 		case errors.Is(err, session.ErrNotFound):
 			return nil, http.StatusConflict, map[string]any{"error": "owner_has_no_conversation"}
