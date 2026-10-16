@@ -227,6 +227,7 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
         let name = content.title.isEmpty ? "moa" : String(content.title.prefix(80))
         let call = Ringing(uuid: uuid, invite: invite, name: name, sessionId: sessionId, stored: stored,
                            expires: content.expires ?? Date().addingTimeInterval(45))
+        let generation = generation
         NativeVoiceCallManager.shared.reportIncoming(uuid: uuid, name: name) { [weak self] error in
             defer { completion() }
             guard let self else { return }
@@ -234,6 +235,13 @@ final class NativeIncomingCalls: NSObject, PKPushRegistryDelegate {
                 // Focus, another call, or a duplicate: the system declined to
                 // ring. Nothing to follow.
                 incomingLog.error("incoming call not shown: \(NativeVoiceCallManager.code(error), privacy: .public)")
+                return
+            }
+            guard self.generation == generation else {
+                // Forgotten (unpaired, re-paired, revoked) while CallKit was
+                // reporting it: the system is ringing an invitation whose
+                // secret is gone, so it ends there and is never installed.
+                NativeVoiceCallManager.shared.provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
                 return
             }
             self.ringing = call
