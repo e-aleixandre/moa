@@ -485,6 +485,7 @@ func (p *vpPeer) audio(t *testing.T, pcm []byte) {
 
 type vpFixture struct {
 	t                *testing.T
+	readMarker       string
 	mgr              *Manager
 	srv              *httptest.Server
 	handler          http.Handler
@@ -650,8 +651,39 @@ func (f *vpFixture) createFor(sid, provider string, headers http.Header) vpCreat
 	f.t.Log("RED_STAGE=create_reached; subsequent stimuli/assertions eligible")
 	return c
 }
+
+// vpReadMarker is the ordinary user prompt create() seeds so the read_session
+// positive control has something real to find, independent of what the
+// asynchronous brief has or has not written yet.
+const vpReadMarker = "READ-CONTROL-PRIVATE"
+
+// seedReadControl fixes the positive control before the call exists, so the
+// brief (which it requests asynchronously) cannot change it. A test that
+// already has a run in flight (blocked in ask_user, say) cannot append; the
+// prompt that test itself sent is then its control.
+func (f *vpFixture) seedReadControl() {
+	f.t.Helper()
+	if f.readMarker != "" {
+		return
+	}
+	if !f.sess.runtime.Context().Agent.IsRunning() {
+		f.appendUser(vpReadMarker)
+		f.readMarker = vpReadMarker
+		return
+	}
+	for _, m := range f.sess.History() {
+		if m.Role == "user" && len(m.Custom) == 0 && len(m.Content) > 0 {
+			f.readMarker = m.Content[0].Text
+		}
+	}
+	if f.readMarker == "" {
+		f.t.Fatal("read control: session is running but holds no ordinary prompt")
+	}
+}
+
 func (f *vpFixture) create() vpCreated {
 	f.t.Helper()
+	f.seedReadControl()
 	return f.createFor(f.sess.ID, f.provider, f.owner())
 }
 

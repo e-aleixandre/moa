@@ -18,22 +18,11 @@ import (
 
 func vpReadControl(t *testing.T, f *vpFixture, p *vpPeer) {
 	t.Helper()
-	marker := "READ-CONTROL-PRIVATE"
-	if f.sess.runtime.Context().Agent.IsRunning() {
-		// AppendToConversation is refused while a run is in flight (a session
-		// blocked in ask_user is one), long before voice existed. The positive
-		// control then reads the latest prompt the test itself sent instead.
-		marker = ""
-		for _, m := range f.sess.History() {
-			if m.Role == "user" && len(m.Custom) == 0 && len(m.Content) > 0 {
-				marker = m.Content[0].Text
-			}
-		}
-		if marker == "" {
-			t.Fatal("read control has no prompt to look for")
-		}
-	} else {
-		f.appendUser(marker)
+	// The control is an ordinary user prompt seeded before the call (see
+	// vpFixture.create), so it never depends on the brief's timing.
+	marker := f.readMarker
+	if marker == "" {
+		t.Fatal("read control was not seeded: the call was not created through the fixture")
 	}
 	p.tool(t, "read-control", "read_session", map[string]any{"session_id": f.sess.ID})
 	v := p.result(t, "read-control")
