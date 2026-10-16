@@ -82,7 +82,9 @@ type voiceCall struct {
 	passed      []voicePassed // the server's ledger of accepted relays
 	asks        int           // ask_session requests accepted (budget)
 	askPending  bool
-	unsubs      []func() // bus subscriptions binding asks/brief to their run
+	askLatency  []time.Duration // ask_session asked → answered, per answered ask
+	costStart   float64         // the session's text spend when the call opened
+	unsubs      []func()        // bus subscriptions binding asks/brief to their run
 
 	// Controller-owned.
 	transcript voice.Transcript

@@ -74,10 +74,6 @@ func WithVoiceCalls(o VoiceCallOptions) ServerOption {
 	return func(so *serverOptions) { so.voice = o }
 }
 
-// voiceBackendModel is the ChatGPT-plan handoff and Live delegation backend
-// until voice.backend_model is configurable.
-const voiceBackendModel = "gpt-6-sol"
-
 var voiceProviders = map[voice.ProviderID]struct {
 	store   string
 	voice   string
@@ -192,11 +188,22 @@ func (r *voiceCallRegistry) selectable(p voice.ProviderID) bool {
 	return snap.Kind == "oauth"
 }
 
-// defaultPlan picks a plan provider when the caller named none: ChatGPT
-// first (full duplex), then Grok. It never picks a paid provider: omitting
-// provider is not consent to pay.
+// voiceSettings is the saved voice configuration, read per use so a change
+// in Settings applies to the next call without a restart.
+func voiceSettings() core.VoiceConfig {
+	return core.GetVoiceConfig(core.LoadGlobalConfig())
+}
+
+// defaultPlan picks a plan provider when the caller named none: the plan
+// chosen in voice.provider when it is signed in, else ChatGPT first (full
+// duplex), then Grok. It never picks a paid provider, even when
+// voice.provider names one: omitting provider is not consent to pay.
 func (r *voiceCallRegistry) defaultPlan() (voice.ProviderID, bool) {
-	for _, p := range []voice.ProviderID{voice.ChatGPTPlan, voice.GrokPlan} {
+	order := []voice.ProviderID{voice.ChatGPTPlan, voice.GrokPlan}
+	if p := voice.ProviderID(voiceSettings().Provider); p == voice.GrokPlan {
+		order = []voice.ProviderID{voice.GrokPlan, voice.ChatGPTPlan}
+	}
+	for _, p := range order {
 		if r.selectable(p) {
 			return p, true
 		}
@@ -204,9 +211,11 @@ func (r *voiceCallRegistry) defaultPlan() (voice.ProviderID, bool) {
 	return "", false
 }
 
+// voiceModel is the configured backend of handoffs and Live delegation.
 func voiceModel() core.Model {
-	if m, ok := core.ResolveModel(voiceBackendModel); ok {
+	spec := voiceSettings().BackendModel
+	if m, ok := core.ResolveModel(spec); ok {
 		return m
 	}
-	return core.Model{ID: voiceBackendModel, Provider: "openai"}
+	return core.Model{ID: spec, Provider: "openai"}
 }

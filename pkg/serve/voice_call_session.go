@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -166,11 +167,13 @@ func (c *voiceCall) askSession(toolID, question string) voice.ToolResult {
 	c.asks++
 	c.askPending = true
 	c.mu.Unlock()
+	asked := time.Now()
 	custom := c.custom("question")
 	custom["question"] = question
 	err := c.consult(c.toolDelivery(toolID), voiceLiveQuestionPrompt(question), custom, func(ctx context.Context, answer string) {
 		c.mu.Lock()
 		c.askPending = false
+		c.askLatency = append(c.askLatency, time.Since(asked))
 		c.mu.Unlock()
 		if strings.TrimSpace(answer) == "" {
 			answer = "The session could not answer."

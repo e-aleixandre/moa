@@ -358,6 +358,9 @@ func (c *voiceCall) persistMinutes(reason string) {
 	if c.usage != nil && c.usage.Seconds != nil {
 		custom["usage_seconds"] = *c.usage.Seconds
 	}
+	usage := c.usageRecord(sess, seconds, len(passed))
+	custom["usage"] = usage
+	c.reg.recordUsage(usage)
 	content := []core.Content{core.TextContent(text)}
 	if m.attachStore != nil {
 		d, err := m.attachStore.PutRef(sess.ID, []byte(c.transcript.Markdown()), attachment.PutMeta{Name: "transcript.md", Mime: "text/markdown", Kind: "file"})

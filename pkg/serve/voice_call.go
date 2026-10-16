@@ -47,6 +47,7 @@ type voiceCallRegistry struct {
 	plans      map[string]auth.CredentialSnapshot // plan sign-in each ChatGPT-plan call opened with
 	ended      map[string]string                  // tombstone: call ID → principal
 	endedOrder []string
+	recent     []voiceUsage   // usage of the last calls, newest last, bounded
 	wg         sync.WaitGroup // reservations and controllers
 }
 
@@ -285,6 +286,7 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	c := newVoiceCall(r, id, principal, sess.ID, provider, adapter.Billing(), up)
+	c.costStart = sessionCostUSD(sess)
 	c.slot = slot
 	var plan *auth.CredentialSnapshot
 	if provider == voice.ChatGPTPlan {
@@ -312,6 +314,11 @@ func (r *voiceCallRegistry) planUnavailable(plan voice.ProviderID, reason string
 	candidates := []voice.ProviderID{voice.XAIAPI, voice.OpenAILiveAPI}
 	if paid, ok := pairedPaid[plan]; ok {
 		candidates = []voice.ProviderID{paid}
+	}
+	// The paid provider chosen in Settings is offered first; it is still
+	// only an offer for the user's explicit tap.
+	if chosen := voice.ProviderID(voiceSettings().PaidProvider); chosen.Paid() {
+		candidates = append([]voice.ProviderID{chosen}, candidates...)
 	}
 	for _, p := range candidates {
 		if r.selectable(p) {
