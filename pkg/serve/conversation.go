@@ -277,7 +277,8 @@ func (m *Manager) safeConversationMessages(sessionID string, messages []core.Age
 		voiceCall := msg.Custom["source"] == "voice_call"
 		// A voice call's minutes are a session_event record: display-only, but
 		// part of the conversation a reader should see.
-		if (msg.Role != "user" && msg.Role != "assistant" && !(voiceCall && msg.Role == "session_event")) || (isExtensionMessage(msg.Custom) && !voiceCall) {
+		shown := msg.Role == "user" || msg.Role == "assistant" || (voiceCall && msg.Role == "session_event")
+		if !shown || (isExtensionMessage(msg.Custom) && !voiceCall) {
 			continue
 		}
 		id := msg.MsgID
