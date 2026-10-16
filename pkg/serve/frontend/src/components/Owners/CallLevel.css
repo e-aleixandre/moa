@@ -1,0 +1,42 @@
+/* CallLevel — a three-way segmented control with 44px targets, and the cost
+   confirmation that opens under it. Tokens only. */
+.cl-seg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-hi);
+  border: 1px solid var(--zl-line);
+}
+.cl-opt {
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: transparent;
+  color: var(--zl-t2);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.cl-opt:hover:not(:disabled) { color: var(--zl-t1); }
+.cl-opt.is-on { background: var(--zl-accent-dim); color: var(--zl-t1); box-shadow: inset 0 0 0 1px var(--zl-accent-line); }
+.cl-opt.is-asking { box-shadow: inset 0 0 0 1px var(--zl-yellow); }
+.cl-opt:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 1px; }
+.cl-confirm {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px;
+  border-radius: var(--zl-r-md);
+  border: 1px solid var(--zl-yellow);
+  background: var(--zl-hi);
+}
+.cl-confirm-t { margin: 0; color: var(--zl-t1); line-height: 1.45; }
+.cl-confirm-acts { display: flex; gap: 8px; }
+.cl-yes, .cl-no {
+  flex: 1; min-height: 44px; border-radius: var(--zl-r-md);
+  font: inherit; font-weight: 500; cursor: pointer;
+}
+.cl-yes { border: 1px solid var(--zl-accent-line); background: var(--zl-accent-dim); color: var(--zl-t1); }
+.cl-no { border: 1px solid var(--zl-line); background: transparent; color: var(--zl-t2); }
+.cl-link { min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--zl-yellow); font: inherit; font-weight: 500; cursor: pointer; }

@@ -1,6 +1,7 @@
 import { focusedSessionId } from "../../data/selectors.js";
 import { sessionDisplayDotState, sessionTitle, shortPath } from "../../data/util/format.js";
 import { attentionKind, ordinarySessions } from "../../data/util/project-sessions.js";
+import { wantsToTalkIds } from "../../data/call-requests-model.js";
 import { ownerRows } from "../../data/owners-model.js";
 import { ownersHealth, ownersSlice } from "../../data/owners.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
@@ -170,7 +171,7 @@ export function selectDesktopChrome(state) {
   // snapshot holds: one projection, so the dossier, the list and the inbox's
   // "send to the owner" destination can never disagree about which session
   // is waiting.
-  const owners = ownerRows(ownersSlice(state).list, state.sessions);
+  const owners = ownerRows(ownersSlice(state).list, state.sessions, undefined, wantsToTalkIds(state.callRequests?.list));
   const inbox = inboxCards(state.sessions, state.events, owners); // wake-on-event
   const next = {
     active,

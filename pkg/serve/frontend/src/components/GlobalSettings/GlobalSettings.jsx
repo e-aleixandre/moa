@@ -29,6 +29,7 @@ import {
 } from "./settings-rows.js";
 import { savedSecretsBridge, listSaved } from "../../data/saved-secrets.js";
 import { savedLine, savedValue, sortSaved, withoutAlias } from "./saved-secrets-model.js";
+import { OwnerCallsSettings } from "./OwnerCallsSettings.jsx";
 import { ProvidersPage } from "./ProvidersPage.jsx";
 import { voiceValue, planOptions, paidOptions, usageLine, backendModelChoices, backendModelName } from "./voice-settings-model.js";
 import { providersValue } from "./providers-model.js";
@@ -622,6 +623,7 @@ export function VoicePage({ state, onProviders, onModel }) {
           pageLabel="Requests run on"
         />
       )}
+      <OwnerCallsSettings state={state} onProviders={onProviders} />
       <span class="zl-set-k is-page">Recent calls</span>
       {recent.length === 0 ? (
         <p class="zl-set-empty">No calls since this server started.</p>

@@ -15,6 +15,7 @@ import { sessionTitle } from "../../data/util/format.js";
 import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { AskUserPrompt } from "../AskUserCard/AskUserPrompt.jsx";
 import { PermissionPrompt } from "../PermissionCard/PermissionPrompt.jsx";
+import { HeldCallNotice } from "../IncomingCall/IncomingCall.jsx";
 import "./VoiceCall.css";
 
 export function useCallElapsed(call) {
@@ -107,6 +108,7 @@ export function VoiceCallBar({ call, name, onOpenScreen }) {
           </button>
         )}
       </div>
+      {active && <HeldCallNotice compact />}
       {active && call.needsTap && (
         <div class="vcall-bar-tap">Needs your tap — answer the card in this conversation.</div>
       )}
@@ -179,6 +181,7 @@ export function VoiceCallScreen() {
       <div class="vcall-screen-name">{party.name}</div>
       <div class="vcall-screen-meta">{callMeta(call, elapsed)}</div>
       <div class="vcall-screen-state">{callStatus(call, party.name)}</div>
+      {active && <HeldCallNotice />}
       {active && <LiveCards call={call} party={party} />}
       {call.phase === "failed" && (
         <div class="vcall-screen-fail"><FailActions call={call} /></div>

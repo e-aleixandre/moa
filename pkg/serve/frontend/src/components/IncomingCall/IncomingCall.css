@@ -1,0 +1,98 @@
+/* IncomingCall / HeldCallNotice — tokens only. The card is amber-edged for Ask
+   first (a request) and accent for Ring (a call); buttons are 44px+ targets. */
+
+.icall {
+  position: fixed;
+  z-index: 1100;
+  top: calc(var(--space-4) + var(--shell-top, 0px));
+  right: var(--space-4);
+  width: min(360px, calc(100vw - 2 * var(--space-4)));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--zl-r-lg, 14px);
+  border: 1px solid var(--zl-line);
+  background: var(--zl-canvas);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  color: var(--zl-t1);
+  animation: icall-in var(--motion-fast, 160ms) var(--motion-ease, ease-out);
+}
+.icall.is-ask { border-color: var(--zl-yellow); }
+.icall.is-ring { border-color: var(--zl-accent-line); }
+@keyframes icall-in { from { opacity: 0; transform: translateY(-8px) scale(0.97); } }
+@media (prefers-reduced-motion: reduce) { .icall { animation: none; } }
+
+.icall-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.icall-face { flex: none; display: inline-grid; place-items: center; }
+.icall-glyph { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 999px; background: var(--zl-hi); color: var(--zl-t2); }
+.icall-who { display: flex; flex-direction: column; min-width: 0; }
+.icall-name { font-weight: 600; font-size: var(--zl-fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icall-verb { font-size: var(--zl-fs-meta); color: var(--zl-t3); }
+.icall.is-ask .icall-verb { color: var(--zl-yellow); }
+.icall-reason {
+  margin: 0;
+  font-size: var(--zl-fs-body);
+  color: var(--zl-t1);
+  overflow-wrap: anywhere;
+  max-height: 9em;
+  overflow-y: auto;
+}
+.icall-acts { display: flex; flex-direction: column; gap: 8px; }
+.icall-answer,
+.icall-write {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 16px;
+  border-radius: var(--zl-r-md);
+  font: inherit; font-weight: 500; cursor: pointer;
+}
+.icall-answer { border: 1px solid var(--zl-accent-line); background: var(--zl-accent-dim); color: var(--zl-t1); }
+.icall-answer:hover { background: var(--zl-accent-med); }
+.icall-write { border: 1px solid var(--zl-line); background: transparent; color: var(--zl-t2); }
+.icall-write:hover { color: var(--zl-t1); background: var(--zl-hi); }
+
+/* On a phone it is the screen. */
+.icall.is-phone {
+  inset: 0;
+  top: 0; right: 0;
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  justify-content: center;
+  align-items: stretch;
+  gap: 18px;
+  padding: calc(env(safe-area-inset-top, 0px) + 40px) 20px calc(env(safe-area-inset-bottom, 0px) + 28px);
+  background:
+    radial-gradient(70% 40% at 50% 18%, color-mix(in oklch, var(--zl-accent) 30%, transparent), transparent 70%),
+    var(--zl-canvas);
+}
+.icall.is-phone .icall-head { flex-direction: column; text-align: center; gap: 10px; }
+.icall.is-phone .icall-name { font-size: 22px; white-space: normal; }
+.icall.is-phone .icall-glyph { width: 72px; height: 72px; }
+.icall.is-phone .icall-reason { text-align: center; font-size: 17px; max-height: 40vh; }
+.icall.is-phone .icall-acts { margin-top: auto; }
+.icall.is-phone .icall-answer,
+.icall.is-phone .icall-write { min-height: 52px; }
+
+/* ── Held behind the call in progress ─────────────────────────────────── */
+.hcall {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--zl-r-md);
+  border: 1px solid var(--zl-yellow);
+  background: var(--zl-hi);
+  min-width: 0;
+}
+.hcall-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.hcall-title { font-weight: 500; color: var(--zl-t1); }
+.hcall-reason { color: var(--zl-t2); font-size: var(--zl-fs-meta); overflow-wrap: anywhere; }
+.hcall-acts { flex: none; display: flex; gap: 6px; }
+.hcall-call,
+.hcall-cancel {
+  min-height: 44px; min-width: 44px; padding: 0 14px;
+  border-radius: var(--zl-r-md);
+  font: inherit; font-weight: 500; cursor: pointer;
+}
+.hcall-call { border: 1px solid var(--zl-accent-line); background: var(--zl-accent-dim); color: var(--zl-t1); }
+.hcall-cancel { border: 1px solid var(--zl-line); background: transparent; color: var(--zl-t2); }
+.vcall-screen .hcall { width: 100%; max-width: 420px; margin-top: 18px; }

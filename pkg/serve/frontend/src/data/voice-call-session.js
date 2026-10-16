@@ -62,7 +62,7 @@ function publish(sessionId, state) {
 
 // startVoiceCall calls sessionId. Without provider the server uses the plan;
 // a paid provider is passed only from the explicit paid button.
-export function startVoiceCall(sessionId, { provider, screen } = {}) {
+export function startVoiceCall(sessionId, { provider, screen, callRequestId } = {}) {
   const current = store.get().voiceCall;
   if (!sessionId || (current?.active && current.sessionId !== sessionId)) return false;
   if (current?.active) return false;
@@ -81,7 +81,7 @@ export function startVoiceCall(sessionId, { provider, screen } = {}) {
   callSession = sessionId;
   const showScreen = screen ?? !!store.get().isMobile;
   setState({ voiceCall: { ...controller.state(), sessionId, screen: showScreen } });
-  controller.start(provider ? { provider } : {});
+  controller.start({ ...(provider ? { provider } : {}), ...(callRequestId ? { callRequestId } : {}) });
   return true;
 }
 

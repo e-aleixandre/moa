@@ -79,6 +79,8 @@ export function normalizeHistory(raw, liveSubagents = []) {
             askResponder: tr?.custom?.ask_responder || undefined,
             // The diffs an apply_patch actually wrote, as its result recorded them.
             patchFiles: tr?.custom?.patch_files || undefined,
+            // How an owner's request to talk ended (request_call).
+            callRequest: tr?.custom?.call_request || undefined,
             timestamp: tr?.timestamp || msg.timestamp,
           });
         }
@@ -284,6 +286,7 @@ export function appendNormalizedHistoryDelta(prefix, raw, liveSubagents = []) {
     if (subagentJobId) update.subagentJobId = subagentJobId;
     if (msg.custom?.ask_responder) update.askResponder = msg.custom.ask_responder;
     if (msg.custom?.patch_files) update.patchFiles = msg.custom.patch_files;
+    if (msg.custom?.call_request) update.callRequest = msg.custom.call_request;
     toolResults.set(msg.tool_call_id, update);
   }
   for (let i = 0; i < prefix.length; i++) {

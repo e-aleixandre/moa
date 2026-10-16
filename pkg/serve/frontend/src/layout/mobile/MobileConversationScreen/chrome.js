@@ -4,6 +4,7 @@ import { sessionRowReason } from "../../Sidebar/sessions.js";
 import { aggregateAttention, newResultSessions } from "./attention-model.js";
 import { inboxCards, inboxHealth, inboxHealthSig, inboxSig } from "../../../data/events.js"; // wake-on-event
 import { ordinarySessions } from "../../../data/util/project-sessions.js";
+import { wantsToTalkIds } from "../../../data/call-requests-model.js";
 import { ownerRows, ownerState } from "../../../data/owners-model.js";
 import { ownersHealth, ownersSlice } from "../../../data/owners.js";
 import { activeOwnerIdOf } from "../../Sidebar/sessions.js";
@@ -199,7 +200,7 @@ export function selectMobileChrome(state, forceMobile = false) {
   const activeId = forceMobile ? (state.activeSession || null) : focusedSessionId(state);
   const session = activeId ? state.sessions[activeId] : null;
   const lists = drawerSessions(state.sessions, activeId);
-  const owners = ownerRows(ownersSlice(state).list, state.sessions);
+  const owners = ownerRows(ownersSlice(state).list, state.sessions, undefined, wantsToTalkIds(state.callRequests?.list));
   const next = {
     activeId,
     title: session ? sessionTitle(session) : "",

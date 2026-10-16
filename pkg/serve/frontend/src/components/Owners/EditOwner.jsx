@@ -6,6 +6,7 @@ import { useStore } from "../../hooks/useStore.js";
 import { ownersSlice } from "../../data/owners.js";
 import { ownerEditBody, ownerState, sameSendTargets, sendCandidates, sendTargets } from "../../data/owners-model.js";
 import { OwnerAvatarFor, ownerAvatar, storedAvatar } from "./OwnerAvatar.jsx";
+import { OwnerCallLevel } from "./CallLevel.jsx";
 import { OwnerIdentityPicker } from "./OwnerIdentityPicker.jsx";
 
 /* EditOwner — changing an owner's name and face after it exists.
@@ -130,6 +131,7 @@ export function EditOwner({ owner, onSave, onClose, phone }) {
         />
       </label>
       <SendTo owner={owner} owners={owners} ids={sendTo} onChange={setSendTo} phone={phone} />
+      <OwnerCallLevel owner={owner} />
       <div class="ow-form-foot">
         {failure && <p class="ow-fail" role="alert">{failure}</p>}
         <Button
