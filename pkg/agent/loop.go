@@ -384,7 +384,12 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventError, Error: loopErr})
 		}
 		// Always emit agent_end
-		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventEnd, Messages: cfg.state.Messages})
+		// A snapshot taken under the lock, emitted after releasing it:
+		// AppendRecord may write while the run ends.
+		cfg.stateMu.Lock()
+		final := append([]core.AgentMessage(nil), cfg.state.Messages...)
+		cfg.stateMu.Unlock()
+		emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventEnd, Messages: final})
 	}()
 
 	for {
