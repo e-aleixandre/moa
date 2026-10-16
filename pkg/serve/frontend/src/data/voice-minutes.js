@@ -58,7 +58,6 @@ export function minutesTitle(minutes, name) {
   const parts = [minutes.dropped ? `Call with ${name} dropped` : `Call with ${name}`];
   const d = duration(minutes.seconds);
   if (d) parts.push(d);
-  if (minutes.billing === 'plan_unverified') parts.push('plan');
-  else if (minutes.provider) parts.push(PROVIDER_NAMES[minutes.provider] || minutes.provider);
+  if (minutes.provider) parts.push(PROVIDER_NAMES[minutes.provider] || minutes.provider);
   return parts.join(' · ');
 }

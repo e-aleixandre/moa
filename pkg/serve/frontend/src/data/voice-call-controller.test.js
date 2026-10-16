@@ -140,7 +140,9 @@ test('failures read as next steps, never as the server body', () => {
     expect(msg.length).toBeGreaterThan(10);
   }
   expect(startFailureMessage('plan_unavailable', 'no_plan')).toContain('Settings');
-  expect(billingLabel({ kind: 'plan_unverified' })).toBe('plan');
+  expect(billingLabel({ kind: 'plan_unverified' }, 'grok-plan')).toBe('Uses your Grok plan');
+  expect(billingLabel({ kind: 'plan_unverified' }, 'chatgpt-plan')).toBe('Uses your ChatGPT plan');
+  expect(billingLabel({ kind: 'plan_unverified' })).toBe('Uses your plan');
   expect(billingLabel({ kind: 'per_minute', usd_per_minute: 0.08 })).toBe('$0.08/min');
   expect(billingLabel({ kind: 'mystery' })).toBe('');
 });

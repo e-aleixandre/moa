@@ -216,9 +216,10 @@ test('voice-call: plan billing shows plan; only plan_unavailable offers paid, an
       const socket = await listening(fixture);
       expect(creates(fixture).map((request) => request.body)).toEqual([{ session_id: 'sess-1' }]);
       expect(fixture.controller.state()).toMatchObject({
-        provider, billing: PLAN, billingLabel: 'plan', paidOption: null,
+        provider, billing: PLAN, billingLabel: provider === 'grok-plan' ? 'Uses your Grok plan' : 'Uses your ChatGPT plan', paidOption: null,
       });
-      expect(fixture.states.some((state) => state.billingLabel === 'plan')).toBe(true);
+      expect(fixture.states.some((state) => state.billingLabel === `Uses your ${provider === 'grok-plan' ? 'Grok' : 'ChatGPT'} plan`)).toBe(true);
+      expect(fixture.states.every((state) => !/included|free/i.test(state.billingLabel))).toBe(true);
       await endFromServer(fixture, socket);
       expect(fixture.states.every((state) => !state.billingLabel.includes('$'))).toBe(true);
       expect(fixture.states.every((state) => state.paidOption === null)).toBe(true);

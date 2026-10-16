@@ -19,12 +19,13 @@ export const MAX_ASKS = 5;
 
 const ACTIVE = new Set(['starting', 'connecting', 'listening', 'speaking', 'consulting', 'ending']);
 
-export function billingLabel(billing) {
+export function billingLabel(billing, provider = '') {
   if (!billing) return '';
   if (billing.kind === 'per_minute' && typeof billing.usd_per_minute === 'number') {
     return `$${billing.usd_per_minute.toFixed(2)}/min`;
   }
-  if (billing.kind === 'plan_unverified') return 'plan';
+  // Never "included" or "free": whether the plan covers a call is not verified.
+  if (billing.kind === 'plan_unverified') return `Uses your ${PROVIDER_NAMES[provider] || 'plan'}`;
   return '';
 }
 
@@ -175,7 +176,7 @@ export class VoiceCallController {
       callId: data.call_id,
       provider: data.provider || provider || '',
       billing: data.billing || null,
-      billingLabel: billingLabel(data.billing),
+      billingLabel: billingLabel(data.billing, data.provider || provider),
     });
     await this.connect(gen, data);
   }

@@ -43,7 +43,7 @@ test('the server minutes record parses into its three sections', () => {
   expect(m.decided).toEqual(["Deploy 0.47 when Winerim's 2 sessions finish"]);
   expect(m.passed).toEqual([{ deliveryId: 'c1/tool/t1', summary: 'Tell me in writing when you deploy' }]);
   expect(m.open).toHaveLength(2);
-  expect(minutesTitle(m, 'Infra')).toBe('Call with Infra · 3:48 · plan');
+  expect(minutesTitle(m, 'Infra')).toBe('Call with Infra · 3:48 · ChatGPT plan');
   const d = parseVoiceMinutes(DROPPED);
   expect(d).toMatchObject({ dropped: true, decided: [], passed: [], open: [] });
   expect(minutesTitle(d, 'Infra')).toBe('Call with Infra dropped · 0:34 · Grok API');

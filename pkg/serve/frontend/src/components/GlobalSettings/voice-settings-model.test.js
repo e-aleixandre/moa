@@ -24,6 +24,8 @@ test('choices say what to do when unavailable and price only what the server dec
   expect(plans.map((p) => [p.id, p.ready, p.on])).toEqual([['chatgpt-plan', false, false], ['grok-plan', true, false]]);
   expect(plans[0]).toMatchObject({ desc: 'Not signed in.', action: 'Sign in under Providers' });
   expect(plans[1].action).toBe('');
+  expect(plans[1].desc).toBe('Uses your Grok plan.');
+  expect(planOptions({ ...status, providers: status.providers.map((p) => ({ ...p, state: 'ready' })) }).map((p) => p.desc)).toEqual(['Uses your ChatGPT plan.', 'Uses your Grok plan.']);
   const paid = paidOptions(status);
   expect(paid.find((p) => p.id === 'xai-api')).toMatchObject({ on: true, ready: true, desc: '$0.08/min, billed by the provider.' });
   expect(paid.find((p) => p.id === 'openai-live-api').desc).toBe('Add an API key under Providers to offer it.');
