@@ -144,13 +144,14 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
 | `muse` | `muse-spark-1.3` (Meta) |
 | `sol` | `gpt-6.1-sol` |
-| `daybreak` | `gpt-6-sol` with the Daybreak mode on (needs Daybreak provisioning and the ChatGPT plan login). In `subagent_allowed_models` it allows GPT-6 Sol with Daybreak. The retired `gpt-daybreak-blue-latest` means the same |
 | `terra` | `gpt-5.6-terra` |
 | `luna` | `gpt-6-luna` |
 | `gpt-5.6` | `gpt-5.6-sol` |
 | `gpt5` | `gpt-5.5` |
 | `gpt5.5` | `gpt-5.5` |
 | `gpt5-mini` | `gpt-5.4-mini` |
+
+`daybreak` (and the retired `gpt-daybreak-blue-latest`) means `gpt-6-sol` with the Daybreak mode on; it needs Daybreak provisioning and the ChatGPT plan login. In `subagent_allowed_models` it allows GPT-6 Sol with Daybreak.
 
 You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-haiku-5-5`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
