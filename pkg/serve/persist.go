@@ -386,6 +386,16 @@ func (sp *servePersister) markDeleted() {
 
 // subagentStore returns a side store for persisting subagent transcripts next
 // to this session's file, or nil if persistence is unavailable/deleted.
+// storeDir is the directory of the session's file, or "" once deleted.
+func (sp *servePersister) storeDir() string {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.deleted || sp.store == nil {
+		return ""
+	}
+	return sp.store.Dir()
+}
+
 func (sp *servePersister) subagentStore(sessionID string) *session.SubagentStore {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()

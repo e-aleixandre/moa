@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -430,6 +431,7 @@ func (r *voiceCallRegistry) handleWS(w http.ResponseWriter, req *http.Request) {
 	}
 	attached := time.Now()
 	slog.Info("voice call socket attached", "call", callID, "header_auth", identity.Header, "note", note)
+	go cl.keepalive(voicePingInterval, voicePongTimeout, voiceLivenessWindow)
 	readErr := c.readClient(cl)
 	slog.Info("voice call socket detached", "call", callID, "after", time.Since(attached).Round(time.Millisecond),
 		"close_status", websocket.CloseStatus(readErr), "err", readErr)
@@ -463,7 +465,13 @@ type voiceClient struct {
 	done   chan struct{}
 	once   sync.Once
 
-	mu       sync.Mutex
+	// heard is when the last frame or pong came from the client (unix
+	// nanoseconds).
+	heard atomic.Int64
+
+	mu sync.Mutex
+	// playedBy is when the audio sent so far finishes playing in real time.
+	playedBy time.Time
 	queue    []voiceFrame
 	audio    int64
 	controls int
@@ -548,6 +556,10 @@ func (cl *voiceClient) enqueue(f voiceFrame) bool {
 			return false
 		}
 		cl.audio += f.audio
+		if now := time.Now(); cl.playedBy.Before(now) {
+			cl.playedBy = now
+		}
+		cl.playedBy = cl.playedBy.Add(time.Duration(f.audio) * time.Second / voicePCMBytesPerSecond)
 	} else {
 		if cl.controls >= voiceClientControls {
 			cl.mu.Unlock()
@@ -595,6 +607,69 @@ func (cl *voiceClient) close() {
 	})
 }
 
+// A call's socket is pinged so a client that vanished without closing it
+// (lost network, phone off, app killed) is noticed in seconds; it then
+// detaches like any closed socket and Grace runs. A client is alive while
+// something arrives from it: microphone audio (every 20 ms unless muted),
+// a control, or a pong. A pong can wait behind up to a minute of queued
+// provider audio, so a late one is not death by itself; nothing heard for
+// voiceLivenessWindow is. Variables so tests can shrink them.
+var (
+	voicePingInterval   = 5 * time.Second
+	voicePongTimeout    = 5 * time.Second
+	voiceLivenessWindow = 15 * time.Second
+	// voiceBackloggedWindow applies while audio waits for the client: a muted
+	// client's pong can sit behind up to a minute of it.
+	voiceBackloggedWindow = 65 * time.Second
+)
+
+// keepalive pings until the client goes and drops the transport once
+// nothing has been heard from it for window.
+func (cl *voiceClient) keepalive(interval, timeout, window time.Duration) {
+	cl.heardNow()
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-cl.ctx.Done():
+			return
+		case <-t.C:
+			ctx, cancel := context.WithTimeout(cl.ctx, timeout)
+			err := cl.conn.Ping(ctx)
+			cancel()
+			if err == nil {
+				cl.heardNow()
+			}
+			if cl.ctx.Err() != nil {
+				return
+			}
+			limit := window
+			if cl.backlogged() {
+				limit = max(window, voiceBackloggedWindow)
+			}
+			if silent := time.Since(time.Unix(0, cl.heard.Load())); silent > limit {
+				slog.Info("voice call socket silent", "for", silent.Round(time.Millisecond), "error", err)
+				cl.kill()
+				return
+			}
+		}
+	}
+}
+
+// backlogged reports audio sent towards the client that it cannot have
+// played yet: queued here, in socket buffers or in its player. Our own queue
+// alone is not enough, since loopback and mobile buffers hold seconds of it.
+func (cl *voiceClient) backlogged() bool {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	return time.Now().Before(cl.playedBy)
+}
+
+// voicePCMBytesPerSecond is PCM s16le mono at 24 kHz.
+const voicePCMBytesPerSecond = 48000
+
+func (cl *voiceClient) heardNow() { cl.heard.Store(time.Now().UnixNano()) }
+
 // kill drops the transport immediately (replaced or slow).
 func (cl *voiceClient) kill() {
 	cl.cancel()
@@ -612,6 +687,7 @@ func (c *voiceCall) readClient(cl *voiceClient) error {
 		if err != nil {
 			return err
 		}
+		cl.heardNow()
 		if kind == websocket.MessageBinary {
 			if len(data) == 0 || len(data)%2 != 0 || len(data) > voice.MaxPCMFrameBytes {
 				c.requestEnd("protocol_violation")

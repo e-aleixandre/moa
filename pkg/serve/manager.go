@@ -1206,6 +1206,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			}
 		}
 	}
+	// Calls the last process lost become minutes before the owed-voice
+	// pass, which then finds nothing more to wake for them.
+	m.recoverVoiceJournals()
 	if summariesErr == nil {
 		m.recoverOwedVoice(summaries)
 	}

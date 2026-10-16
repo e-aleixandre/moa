@@ -949,9 +949,10 @@ func UnlinkByID(baseDir, id string) (string, error) {
 }
 
 // RemoveSideFiles removes what a deleted session left next to its transcript
-// in dir: subagent transcripts, snapshots and artifacts.
+// in dir: subagent transcripts, voice call journals, snapshots and artifacts.
 func RemoveSideFiles(dir, id string) error {
 	_ = os.RemoveAll(filepath.Join(dir, id+".subagents"))
+	_ = os.RemoveAll(filepath.Join(dir, id+".voice-calls"))
 	_ = RemoveTranscriptSnapshots(dir, id)
 	return RemoveArtifacts(dir, id)
 }

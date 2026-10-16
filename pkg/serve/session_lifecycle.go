@@ -1042,6 +1042,10 @@ func (m *Manager) deleteSession(id string) (err error) {
 			if err := session.RemoveTranscriptSnapshots(store.Dir(), id); err != nil && !os.IsNotExist(err) {
 				deleteErrs = append(deleteErrs, err)
 			}
+			// A deleted session's calls go with it, journals included.
+			if err := os.RemoveAll(voiceJournalDir(store.Dir(), id)); err != nil {
+				deleteErrs = append(deleteErrs, err)
+			}
 		}
 	}
 	m.invalidateSavedCache()
