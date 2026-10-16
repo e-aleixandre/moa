@@ -31,6 +31,15 @@ func (c *voiceCall) nextDelivery() string {
 	return fmt.Sprintf("%s/%d", c.id, c.seq)
 }
 
+// toolDelivery is the delivery identity of a provider ToolCall: a retried
+// call is the same delivery, whether or not its result is still cached.
+func (c *voiceCall) toolDelivery(toolID string) string {
+	if toolID == "" {
+		return c.nextDelivery()
+	}
+	return c.id + "/tool/" + toolID
+}
+
 func (c *voiceCall) custom(kind string) map[string]any {
 	return map[string]any{"source": "voice_call", "kind": kind, "call_id": c.id, "provider": string(c.provider)}
 }
@@ -44,12 +53,15 @@ func (c *voiceCall) passToSession(toolID, summary string) voice.ToolResult {
 	if summary == "" {
 		return voiceErrorResult(toolID, "summary is required")
 	}
-	id := c.nextDelivery()
+	id := c.toolDelivery(toolID)
 	custom := c.custom("relay")
 	custom["model_summary"] = summary
-	r, _, err := c.reg.mgr.admitVoice(c.sessionID, id, voiceRelayPrompt(summary), nil, custom)
+	r, duplicate, err := c.reg.mgr.admitVoice(c.sessionID, id, voiceRelayPrompt(summary), nil, custom)
 	if err != nil {
 		return voiceErrorResult(toolID, "the session could not take the request")
+	}
+	if duplicate {
+		return voiceResult(toolID, map[string]any{"status": "already_delivered", "delivery_id": id})
 	}
 	c.mu.Lock()
 	c.passed = append(c.passed, voicePassed{DeliveryID: id, Summary: summary})
@@ -151,7 +163,7 @@ func (c *voiceCall) askSession(toolID, question string) voice.ToolResult {
 	c.mu.Unlock()
 	custom := c.custom("question")
 	custom["question"] = question
-	err := c.consult(voiceLiveQuestionPrompt(question), custom, func(ctx context.Context, answer string) {
+	err := c.consult(c.toolDelivery(toolID), voiceLiveQuestionPrompt(question), custom, func(ctx context.Context, answer string) {
 		c.mu.Lock()
 		c.askPending = false
 		c.mu.Unlock()
@@ -166,6 +178,9 @@ func (c *voiceCall) askSession(toolID, question string) voice.ToolResult {
 		c.asks--
 		c.askPending = false
 		c.mu.Unlock()
+		if errors.Is(err, errVoiceDuplicate) {
+			return voiceResult(toolID, map[string]any{"status": "already_asked"})
+		}
 		return voiceErrorResult(toolID, "the session could not take the question")
 	}
 	c.note(map[string]any{"type": "state", "state": "consulting"})
@@ -176,7 +191,7 @@ func (c *voiceCall) askSession(toolID, question string) voice.ToolResult {
 // or not. The call already started with the fallback context; the brief is
 // injected live when the run that took it ends, bounded in characters.
 func (c *voiceCall) requestBrief(context.Context) {
-	if err := c.consult(voiceBriefPrompt, c.custom("brief"), func(ctx context.Context, answer string) {
+	if err := c.consult(c.nextDelivery(), voiceBriefPrompt, c.custom("brief"), func(ctx context.Context, answer string) {
 		if strings.TrimSpace(answer) == "" {
 			return
 		}
@@ -210,12 +225,11 @@ func voiceBounded(header, body string, budget int, tail bool) string {
 // final text of the exact run that took it: the run its message or steer
 // was delivered into, not whatever run happens to end next. answer runs on
 // the call's worker, so it never runs after the call ended.
-func (c *voiceCall) consult(prompt string, custom map[string]any, answer func(context.Context, string)) error {
+func (c *voiceCall) consult(id, prompt string, custom map[string]any, answer func(context.Context, string)) error {
 	sess, ok := c.reg.mgr.Get(c.sessionID)
 	if !ok {
 		return ErrNotFound
 	}
-	id := c.nextDelivery()
 	b := &voiceRunBinding{deliveryID: id}
 	var unsubOnce sync.Once
 	var unsub func()
@@ -234,12 +248,19 @@ func (c *voiceCall) consult(prompt string, custom map[string]any, answer func(co
 	c.mu.Lock()
 	c.unsubs = append(c.unsubs, func() { unsubOnce.Do(unsub) })
 	c.mu.Unlock()
-	if _, _, err := c.reg.mgr.admitVoice(c.sessionID, id, prompt, nil, custom); err != nil {
+	_, duplicate, err := c.reg.mgr.admitVoice(c.sessionID, id, prompt, nil, custom)
+	if err == nil && duplicate {
+		err = errVoiceDuplicate
+	}
+	if err != nil {
 		unsubOnce.Do(unsub)
 		return err
 	}
 	return nil
 }
+
+// errVoiceDuplicate is a consult whose delivery was already admitted.
+var errVoiceDuplicate = errors.New("voice delivery already admitted")
 
 // voiceRunBinding follows one voice delivery to the run that consumes it.
 type voiceRunBinding struct {
