@@ -1,0 +1,344 @@
+// voice-call.js — one voice call with a session, through moa only.
+//
+// POST /api/voice/calls opens the call on the server, which talks to the
+// provider; this browser only ever opens moa's own WebSocket for it, sends
+// binary PCM (s16le mono 24 kHz) plus the mute/hangup/ping controls, and
+// plays the PCM moa sends back. The same path serves every provider. Paid
+// providers are only ever named by an explicit user action (start({provider})).
+//
+// Nothing a call produces is written into the composer: the minutes are a
+// record the server saves in the conversation. onMinutes/onResult are not
+// part of this API and are never called.
+
+const REQUEST_HEADERS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
+
+// Captured audio waiting in the socket beyond this is dropped instead of
+// queued: one second, the server's own bound for each direction.
+export const MAX_SOCKET_BUFFERED = 48000;
+export const MAX_ASKS = 5;
+
+const ACTIVE = new Set(['starting', 'connecting', 'listening', 'speaking', 'consulting', 'ending']);
+
+export function billingLabel(billing) {
+  if (!billing) return '';
+  if (billing.kind === 'per_minute' && typeof billing.usd_per_minute === 'number') {
+    return `$${billing.usd_per_minute.toFixed(2)}/min`;
+  }
+  if (billing.kind === 'plan_unverified') return 'plan';
+  return '';
+}
+
+export const PROVIDER_NAMES = {
+  'chatgpt-plan': 'ChatGPT plan',
+  'grok-plan': 'Grok plan',
+  'xai-api': 'Grok API',
+  'openai-live-api': 'OpenAI API',
+};
+
+// What the user reads when a call does not start or stops. Each line says
+// what to do next; none is a server body.
+const START_COPY = {
+  no_plan: 'Connect a ChatGPT or Grok plan in Settings → Providers to call.',
+  credentials: 'Sign in to your plan again in Settings → Providers, then call.',
+  unauthorized: 'Your plan sign-in was rejected. Sign in again in Settings → Providers.',
+  forbidden: 'Your plan does not include voice right now. Try again later.',
+  rate_limited: 'Too many calls just now. Wait a few seconds and call again.',
+  unavailable: 'The voice service did not answer. Call again in a moment.',
+  timeout: 'The voice service took too long to answer. Call again.',
+  closing: 'moa is restarting. Call again in a moment.',
+  call_active: 'You are already on a call. Hang up first.',
+  session_not_found: 'This conversation is no longer open. Reopen it and call again.',
+  shutting_down: 'moa is restarting. Call again in a moment.',
+  unauthenticated: 'Sign in to moa again, then call.',
+  unknown_provider: 'That voice provider is not available. Pick another in Settings → Voice.',
+  microphone: 'Allow the microphone for moa, then call again.',
+  network: 'Could not reach moa. Check the connection and call again.',
+};
+
+export function startFailureMessage(error, reason) {
+  if (error === 'plan_unavailable' || error === 'provider_unavailable') {
+    return START_COPY[reason] || START_COPY.unavailable;
+  }
+  return START_COPY[error] || START_COPY[reason] || 'The call could not start. Try again.';
+}
+
+const ENDED_COPY = {
+  hangup: '',
+  end_call: '',
+  client_lost: 'The call ended: this device lost the connection.',
+  max_duration: 'The call reached its time limit.',
+  upstream_closed: 'The voice service ended the call.',
+  upstream_failed: 'The voice service dropped the call.',
+  slow_client: 'The call ended: the connection was too slow.',
+  audio_backpressure: 'The call ended: the connection was too slow.',
+  device_revoked: 'This device was signed out, so the call ended.',
+  shutdown: 'moa restarted, so the call ended.',
+  protocol_violation: 'The call ended unexpectedly. Call again.',
+  transcript_limit: 'The call reached its length limit.',
+};
+
+export function endedMessage(reason) {
+  if (reason in ENDED_COPY) return ENDED_COPY[reason];
+  return reason ? 'The call ended.' : '';
+}
+
+function initialState(sessionId) {
+  return {
+    phase: 'idle',
+    active: false,
+    sessionId,
+    callId: '',
+    provider: '',
+    billing: null,
+    billingLabel: '',
+    paidOption: null,
+    error: '',
+    reason: '',
+    message: '',
+    muted: false,
+    startedAt: 0,
+    endedReason: '',
+    asks: 0,
+    maxAsks: MAX_ASKS,
+    needsTap: null,
+    passed: [],
+    droppedFrames: 0,
+  };
+}
+
+export class VoiceCallController {
+  // audio is one engine, or createAudio builds a fresh one for every call
+  // (a browser engine releases everything it acquired when it stops).
+  constructor({ sessionId, fetch: fetchImpl, WebSocket: WebSocketImpl, audio, createAudio, onState, now } = {}) {
+    this.sessionId = sessionId;
+    this.fetch = fetchImpl || ((...args) => globalThis.fetch(...args));
+    this.WebSocket = WebSocketImpl || globalThis.WebSocket;
+    this.audio = audio;
+    this.createAudio = createAudio || null;
+    this.onState = onState || (() => {});
+    this.now = now || (() => Date.now());
+    this.s = initialState(sessionId);
+    this.ws = null;
+    // A new generation invalidates every callback of the previous attempt:
+    // late capture frames, late socket messages, a slow hangup.
+    this.gen = 0;
+  }
+
+  state() {
+    return this.s;
+  }
+
+  set(patch) {
+    this.s = { ...this.s, ...patch };
+    this.s.active = ACTIVE.has(this.s.phase);
+    this.onState(this.s);
+  }
+
+  // start opens a call. Without provider the server picks the plan; a paid
+  // provider is only ever passed here by the user's explicit choice.
+  async start({ provider } = {}) {
+    if (this.s.active) return;
+    const gen = ++this.gen;
+    if (this.createAudio) this.audio = this.createAudio();
+    this.audio?.prepare?.();
+    this.set({
+      ...initialState(this.sessionId),
+      phase: 'starting',
+      provider: provider || '',
+    });
+    const body = { session_id: this.sessionId };
+    if (provider) body.provider = provider;
+    let res;
+    let data = null;
+    try {
+      res = await this.fetch('/api/voice/calls', { method: 'POST', headers: REQUEST_HEADERS, body: JSON.stringify(body) });
+      data = await res.json().catch(() => null);
+    } catch {
+      if (gen === this.gen) this.fail('network', '', null);
+      return;
+    }
+    if (gen !== this.gen) return;
+    if (res.status !== 201 || !data?.call_id) {
+      const error = typeof data?.error === 'string' ? data.error : `http_${res.status}`;
+      const reason = typeof data?.reason === 'string' ? data.reason : '';
+      // Only a plan failure may offer the paid alternative, and only one the
+      // server named as usable; it is never taken from here.
+      const offer = error === 'plan_unavailable' && typeof data?.paid_option?.provider === 'string'
+        && data.paid_option.provider.endsWith('-api')
+        ? { provider: data.paid_option.provider, billing: data.paid_option.billing || null }
+        : null;
+      this.fail(error, reason, offer);
+      return;
+    }
+    this.set({
+      phase: 'connecting',
+      callId: data.call_id,
+      provider: data.provider || provider || '',
+      billing: data.billing || null,
+      billingLabel: billingLabel(data.billing),
+    });
+    await this.connect(gen, data);
+  }
+
+  fail(error, reason, paidOption) {
+    this.audio?.stop?.();
+    this.set({ phase: 'failed', error, reason, message: startFailureMessage(error, reason), paidOption });
+  }
+
+  async connect(gen, { call_id: callId, ws_url: wsURL }) {
+    const loc = globalThis.location;
+    const path = typeof wsURL === 'string' && wsURL.startsWith('/') ? wsURL : `/api/voice/calls/${encodeURIComponent(callId)}/ws`;
+    const url = `${loc?.protocol === 'http:' ? 'ws:' : 'wss:'}//${loc?.host}${path}`;
+    const ws = new this.WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    this.ws = ws;
+    const opened = new Promise((resolve) => {
+      ws.onopen = () => resolve(true);
+      ws.onclose = () => {
+        resolve(false);
+        if (gen === this.gen) this.finish(this.s.phase === 'ending' ? 'hangup' : 'client_lost');
+      };
+    });
+    ws.onerror = () => {};
+    ws.onmessage = (event) => {
+      if (gen === this.gen && this.ws === ws) this.receive(event.data);
+    };
+    if (!(await opened) || gen !== this.gen) return;
+    try {
+      await this.audio.start((pcm) => this.capture(gen, ws, pcm), {
+        onPlayback: (e) => { if (gen === this.gen) this.playback(e); },
+      });
+    } catch {
+      if (gen !== this.gen) return;
+      // No microphone: end the call on the server too, so nothing keeps
+      // running for a call that cannot hear.
+      this.sendJSON({ type: 'hangup' });
+      this.finish('microphone');
+      this.set({ message: START_COPY.microphone });
+      return;
+    }
+    if (gen !== this.gen) return;
+    if (this.s.muted) this.audio.setMuted?.(true);
+  }
+
+  capture(gen, ws, pcm) {
+    if (gen !== this.gen || this.ws !== ws || this.s.muted || this.s.phase === 'ending') return;
+    if (ws.readyState !== 1) return;
+    // A stalled socket gets fresh audio, never an ever-growing backlog.
+    if ((ws.bufferedAmount || 0) > MAX_SOCKET_BUFFERED) {
+      this.s.droppedFrames++;
+      return;
+    }
+    ws.send(pcm);
+  }
+
+  playback(event) {
+    const type = event?.type;
+    if (type === 'playing' && this.s.phase === 'listening') this.set({ phase: 'speaking' });
+    else if (type === 'drained' && this.s.phase === 'speaking') this.set({ phase: 'listening' });
+  }
+
+  receive(data) {
+    if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+      if (!ACTIVE.has(this.s.phase) || this.s.phase === 'ending') return;
+      this.audio.play(data);
+      return;
+    }
+    let msg;
+    try {
+      msg = JSON.parse(data);
+    } catch {
+      return;
+    }
+    switch (msg?.type) {
+      case 'state': {
+        if (msg.interrupt) this.audio.interrupt();
+        if (this.s.phase === 'ending') return;
+        const patch = {};
+        if (!this.s.startedAt) patch.startedAt = this.now();
+        if (msg.state === 'consulting') {
+          patch.phase = 'consulting';
+          patch.asks = Math.min(MAX_ASKS, this.s.asks + 1);
+        } else if (msg.state === 'listening' || msg.state === 'speaking') {
+          patch.phase = msg.state;
+        }
+        this.set(patch);
+        return;
+      }
+      case 'speech_started':
+        this.audio.interrupt();
+        if (this.s.phase === 'speaking') this.set({ phase: 'listening' });
+        return;
+      case 'needs_tap':
+        if (typeof msg.item_id === 'string') {
+          this.set({ needsTap: { itemId: msg.item_id, kind: msg.kind === 'permission' ? 'permission' : 'ask' } });
+        }
+        return;
+      case 'passed':
+        if (typeof msg.delivery_id === 'string' && !this.s.passed.some((p) => p.deliveryId === msg.delivery_id)) {
+          this.set({ passed: [...this.s.passed, { deliveryId: msg.delivery_id, summary: String(msg.summary || ''), queued: !!msg.queued }] });
+        }
+        return;
+      case 'ended':
+        this.finish(typeof msg.reason === 'string' ? msg.reason : '');
+        return;
+      default:
+    }
+  }
+
+  sendJSON(v) {
+    const ws = this.ws;
+    if (ws && ws.readyState === 1) {
+      try { ws.send(JSON.stringify(v)); } catch { /* closing */ }
+    }
+  }
+
+  setMuted(muted) {
+    if (!this.s.active) return;
+    this.audio.setMuted?.(muted);
+    this.sendJSON({ type: 'mute', muted: !!muted });
+    this.set({ muted: !!muted });
+  }
+
+  // hangup asks the server to end the call and waits until it has: the
+  // server answers once the record of the call is saved. The microphone and
+  // playback stop at once.
+  async hangup() {
+    if (!this.s.active) return;
+    const { callId } = this.s;
+    this.audio.stop();
+    if (this.s.phase === 'starting' || !callId) {
+      // Nothing exists on the server yet; the pending start is abandoned.
+      this.gen++;
+      this.set({ phase: 'ended', endedReason: 'hangup' });
+      return;
+    }
+    this.set({ phase: 'ending' });
+    try {
+      const res = await this.fetch(`/api/voice/calls/${encodeURIComponent(callId)}/hangup`, { method: 'POST', headers: REQUEST_HEADERS });
+      if (!res.ok && res.status !== 404) throw new Error(`hangup ${res.status}`);
+    } catch {
+      this.sendJSON({ type: 'hangup' });
+    }
+    if (this.s.phase !== 'ended' && this.s.callId === callId) this.finish('hangup');
+  }
+
+  finish(reason) {
+    if (this.s.phase === 'ended' || this.s.phase === 'idle' || this.s.phase === 'failed') return;
+    this.gen++;
+    this.audio?.stop?.();
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      ws.onmessage = null;
+      ws.onclose = null;
+      try { ws.close(); } catch { /* gone */ }
+    }
+    this.set({ phase: 'ended', endedReason: reason, message: endedMessage(reason), needsTap: null });
+  }
+
+  // dispose ends a call whose screen is going away for good.
+  dispose() {
+    if (this.s.active) this.hangup();
+  }
+}
