@@ -70,3 +70,10 @@ test('a label line typed by the user, or in an answer with no record, is not an 
     expect(nodes.some((n) => [n.props?.children].flat(Infinity).some((c) => typeof c === 'string' && c.includes('This is a literal line I want preserved')))).toBe(true);
   }
 });
+
+test('a live request_call tool_end fixes the call block on the row', () => {
+  setState({ sessions: { s2: { messages: [{ _type: 'tool_start', tool_call_id: 'rc-1', tool_name: 'request_call', status: 'running' }] } } });
+  const rec = { id: 'r1', outcome: 'written', reason: 'Deploy?' };
+  handleWsToolEnd('s2', { tool_call_id: 'rc-1', tool_name: 'request_call', result: 'ok', call_request: rec });
+  expect(store.get().sessions.s2.messages[0].callRequest).toEqual(rec);
+});

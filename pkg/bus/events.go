@@ -167,6 +167,9 @@ type ToolExecEnded struct {
 	// PatchFiles is an apply_patch's per-file diff record (display only; the
 	// model never sees it). Opaque here: the tool defines its shape.
 	PatchFiles any
+	// CallRequest is the request_call outcome record (id, outcome, reason), so
+	// the live row can show its block without a reload.
+	CallRequest any
 }
 
 // ---------------------------------------------------------------------------

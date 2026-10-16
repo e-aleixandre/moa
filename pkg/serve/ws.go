@@ -234,7 +234,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "tool_end", Data: ToolEndData{
 			ToolCallID: e.ToolCallID, ToolName: e.ToolName,
 			IsError: e.IsError, Rejected: e.Rejected, Result: e.Result, Images: e.Images,
-			AskResponder: e.AskResponder, PatchFiles: e.PatchFiles,
+			AskResponder: e.AskResponder, PatchFiles: e.PatchFiles, CallRequest: e.CallRequest,
 		}}, true
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
@@ -1076,6 +1076,7 @@ func liveToolInitData(calls []bus.LiveToolCall) []LiveToolInitData {
 			AskResponder: c.AskResponder,
 			Images:       c.Images,
 			PatchFiles:   c.PatchFiles,
+			CallRequest:  c.CallRequest,
 		}
 		if !c.StartedAt.IsZero() {
 			d.StartedAtMs = c.StartedAt.UnixMilli()

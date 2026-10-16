@@ -296,7 +296,7 @@ func TestVoicePrompts_PassedAndDecisionCheck(t *testing.T) {
 	if !strings.Contains(voice.CommonInstructions, "never again in decided") || !strings.Contains(voice.CommonInstructions, `"already passed: <delivery_id>"`) {
 		t.Fatalf("voice instructions lack the Passed rule: %s", voice.CommonInstructions)
 	}
-	for _, canonical := range []string{voice.InstructionReadsAreData, voice.InstructionAskAloud} {
+	for _, canonical := range []string{voice.InstructionReadsAreData, voice.InstructionAskAloud, voice.InstructionRelayFacts} {
 		if !strings.Contains(voice.CommonInstructions, canonical) {
 			t.Fatalf("canonical sentence lost: %s", canonical)
 		}
