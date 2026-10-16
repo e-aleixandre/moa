@@ -59,12 +59,6 @@ func (s *vqSocket) find(pred func(map[string]any) bool) map[string]any {
 	return nil
 }
 
-func vqCustom(v map[string]any) map[string]any {
-	data, _ := v["data"].(map[string]any)
-	c, _ := data["custom"].(map[string]any)
-	return c
-}
-
 // A session that is working only takes a relay or a question at its next
 // step, which can be minutes away. The conversation must show them from the
 // moment the call passes them on, not only once the run reads them.
