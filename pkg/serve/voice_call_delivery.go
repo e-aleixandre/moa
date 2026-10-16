@@ -139,7 +139,7 @@ func (m *Manager) wakeVoiceMinutes(sess *ManagedSession) int {
 		}
 		unsaved = true
 		custom := map[string]any{"source": "voice_call", "kind": "minutes_wake", "call_id": rec.Custom["call_id"], "provider": rec.Custom["provider"], "minutes_msg_id": rec.MsgID}
-		_, dup, err := m.admitVoiceLocked(sess, wakeID, voiceWakeText(rec), nil, custom)
+		_, dup, err := m.admitVoiceLocked(sess, wakeID, m.voiceWakeText(sess, rec), nil, custom)
 		if err != nil {
 			slog.Warn("voice call minutes did not wake the session", "session", sess.ID, "delivery", wakeID, "error", err)
 			continue
@@ -154,15 +154,36 @@ func (m *Manager) wakeVoiceMinutes(sess *ManagedSession) int {
 	return admitted
 }
 
-// voiceWakeText is what the woken model reads: the minutes record's text.
-func voiceWakeText(rec core.AgentMessage) string {
+// voiceWakeText is what the woken model reads: the minutes record's text
+// and where the call's literal transcript is, a path in the session's
+// attachment views its own tools can read. The transcript is referenced,
+// not inlined: a long call would otherwise fill the context, and the
+// session decides whether it needs the literal words.
+func (m *Manager) voiceWakeText(sess *ManagedSession, rec core.AgentMessage) string {
 	var b strings.Builder
+	transcript := ""
 	for _, c := range rec.Content {
-		if c.Type == "text" {
+		switch {
+		case c.Type == "text":
 			b.WriteString(c.Text)
+		case c.Type == "document" && c.AttachmentID != "":
+			transcript = c.AttachmentID
 		}
 	}
-	b.WriteString("\nThe observed transcript is attached to the minutes record of this call.")
+	path := ""
+	if transcript != "" && m.attachStore != nil {
+		p, err := m.attachStore.EnsureView(sess.ID, transcript)
+		if err != nil {
+			slog.Warn("voice call transcript view unavailable", "session", sess.ID, "error", err)
+		}
+		path = p
+	}
+	if path == "" {
+		b.WriteString("\nThe literal transcript of this call is not available to you.")
+		return b.String()
+	}
+	b.WriteString("\nThe literal transcript of this call (both sides, as observed) is saved at:\n" + path +
+		"\nRead it with your tools if you need what was literally said; the minutes above are the voice model's summary.")
 	return b.String()
 }
 

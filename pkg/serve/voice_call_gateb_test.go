@@ -228,3 +228,59 @@ func TestVoiceCall_PendingQuestionDiscoverable(t *testing.T) {
 		})
 	}
 }
+
+// The woken session gets a reference to the literal transcript that its own
+// tools can follow, not the transcript inline nor a claim that it is
+// attached elsewhere.
+func TestVoiceCall_WakeReferencesReadableTranscript(t *testing.T) {
+	wake := make(chan core.Request, 1)
+	h := func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		if strings.Contains(vpLastUser(req), "voice_minutes") {
+			select {
+			case wake <- req:
+			default:
+			}
+		}
+		return simpleResponse("BRIEF-READY"), nil
+	}
+	f := vpNewFixture(t, "grok-plan", h, h, h, h)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.user(t, "omitted-detail", "TRANSCRIPT-ONLY-DETAIL: use blue, not red")
+	c.await("literal before minutes", func(v map[string]any) bool {
+		return v["type"] == "transcript" && strings.Contains(vpJSON(v), "TRANSCRIPT-ONLY-DETAIL")
+	})
+	p.tool(t, "end", "end_call", map[string]any{"decided": []string{"Proceed with the chosen color"}, "passed": []string{}, "open": []string{}})
+	c.hangup()
+	record := f.waitRecords("minutes", 1)[0]
+	want := vpTranscriptAttachment(t, f, record)
+	var req core.Request
+	select {
+	case req = <-wake:
+	case <-time.After(vpDeadline):
+		t.Fatal("session did not wake")
+	}
+	input := vpLastUser(req)
+	if strings.Contains(input, "TRANSCRIPT-ONLY-DETAIL") || strings.Contains(input, "is attached to the minutes record") {
+		t.Fatalf("wake inlines the transcript or claims an attachment it lacks: %s", input)
+	}
+	m := regexp.MustCompile(`(?m)^(/\S+transcript\.md)$`).FindStringSubmatch(input)
+	if m == nil {
+		t.Fatalf("wake carries no readable transcript path: %s", input)
+	}
+	real, err := filepath.EvalSymlinks(m[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.sess.runtime.Context().PathPolicy.IsAllowed(real) {
+		t.Fatalf("the woken session's tools may not read %s", real)
+	}
+	got, err := os.ReadFile(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want || !strings.Contains(string(got), "TRANSCRIPT-ONLY-DETAIL") {
+		t.Fatalf("referenced file is not the call transcript: %q", got)
+	}
+}

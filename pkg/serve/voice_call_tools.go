@@ -324,7 +324,7 @@ func (c *voiceCall) persistMinutes(reason string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<voice_minutes>\nVoice call ended (%s) after %ds with %s, billing %s.\n\n", reason, seconds, c.provider, c.billing.Kind)
 	if minutes == nil {
-		b.WriteString("The call dropped before the voice model wrote its minutes. Only the observed transcript is attached.\n\n")
+		b.WriteString("The call dropped before the voice model wrote its minutes. Only the observed transcript remains.\n\n")
 	}
 	section := func(title string, items []string) {
 		fmt.Fprintf(&b, "%s:\n", title)
