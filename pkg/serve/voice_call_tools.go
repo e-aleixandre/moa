@@ -55,6 +55,11 @@ func (c *voiceCall) executeOnce(_ context.Context, tc voice.ToolCall) voice.Tool
 	if !voice.Allowed(tc.Name) {
 		return voiceErrorResult(tc.ID, "this tool is not available in a voice call")
 	}
+	// Once the call is ending only its minutes and reads may still run: the
+	// owner hung up, so nothing new may act on the session for them.
+	if c.ending.Load() && voiceEffectTools[tc.Name] {
+		return voiceErrorResult(tc.ID, "the call has ended; nothing more can be passed or answered in it")
+	}
 	var args map[string]any
 	if len(tc.Arguments) > 0 && json.Unmarshal(tc.Arguments, &args) != nil {
 		return voiceErrorResult(tc.ID, "arguments must be a JSON object")
@@ -136,6 +141,9 @@ func (c *voiceCall) executeOnce(_ context.Context, tc voice.ToolCall) voice.Tool
 	}
 	return voiceErrorResult(tc.ID, "this tool is not available in a voice call")
 }
+
+// voiceEffectTools act on the called session.
+var voiceEffectTools = map[string]bool{"pass_to_session": true, "answer_question": true, "request_tap": true, "ask_session": true}
 
 func stringList(v any) ([]string, bool) {
 	if v == nil {

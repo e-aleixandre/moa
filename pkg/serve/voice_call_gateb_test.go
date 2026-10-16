@@ -97,3 +97,46 @@ func TestVoiceRecordRetryAfterFailedSave(t *testing.T) {
 		t.Fatalf("retried record after the disk recovered: saved minutes=%d, want 1", n)
 	}
 }
+
+// After hangup only end_call and reads run: a tool with an effect sent in
+// the ending window is refused and delivers nothing.
+func TestVoiceCall_NoEffectAfterHangup(t *testing.T) {
+	limits := vpDefaultLimits()
+	limits.minutes = 2 * time.Second
+	f := vpNewFixtureWithLimits(t, "grok-plan", limits, vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	finished := make(chan int, 1)
+	go func() {
+		status, _, _, _ := f.request("POST", "/api/voice/calls/"+c.c.ID+"/hangup", map[string]any{}, f.owner())
+		finished <- status
+	}()
+	c.await("ended", func(v map[string]any) bool { return v["type"] == "ended" })
+	p.await(t, "minutes request", func(v map[string]any) bool {
+		return v["type"] == "conversation.item.create" && strings.Contains(vpJSON(v), "Call end_call with what was decided")
+	})
+	late := map[string]map[string]any{
+		"late-pass":     {"name": "pass_to_session", "args": map[string]any{"summary": "WORK-AFTER-USER-HUNG-UP"}},
+		"late-answer":   {"name": "answer_question", "args": map[string]any{"ask_id": "x", "answer": "y"}},
+		"late-tap":      {"name": "request_tap", "args": map[string]any{"item_id": "x"}},
+		"late-question": {"name": "ask_session", "args": map[string]any{"question": "LATE-QUESTION"}},
+	}
+	for id, tc := range late {
+		p.tool(t, id, tc["name"].(string), tc["args"].(map[string]any))
+		if r := p.result(t, id); !vpError(r) || !strings.Contains(vpJSON(r), "call has ended") {
+			t.Errorf("%s after hangup: %s", tc["name"], vpJSON(r))
+		}
+	}
+	p.tool(t, "late-read", "read_session", map[string]any{})
+	if r := p.result(t, "late-read"); vpError(r) {
+		t.Errorf("read_session after hangup refused: %s", vpJSON(r))
+	}
+	p.tool(t, "real-end", "end_call", map[string]any{"decided": []string{}, "passed": []string{}, "open": []string{}})
+	if status := <-finished; status != 204 {
+		t.Errorf("hangup status=%d", status)
+	}
+	if n := len(f.records("relay")) + len(f.records("question")); n != 0 {
+		t.Errorf("deliveries after hangup: %d", n)
+	}
+}
