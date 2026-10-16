@@ -287,7 +287,6 @@ func TestDurableReviewAttachmentFailureRetainsJournal(t *testing.T) {
 }
 
 func TestDurableReviewLateFinalHasNoWake(t *testing.T) {
-	t.Skip("I4: whether turns after accepted minutes reopen them is the owner's decision (REVIEW-DURABLE-f72f76a9)")
 	f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)
 	u := vaNewControllerUpstream()
 	u.onMinutes = func(context.Context) error { u.events <- vaEndEvent(nil, nil); return nil }
@@ -309,4 +308,18 @@ func TestDurableReviewLateFinalHasNoWake(t *testing.T) {
 	if mins[0].Custom["wake"] != true {
 		t.Fatal("LATE_TRANSCRIPT_NOT_PROCESSED: transcript survived but existing empty minutes cause no wake")
 	}
+	if !strings.Contains(vpJSON(mins), voiceLateAfterMinutesOpen) {
+		t.Fatalf("late turns must leave a Still open item: %s", vpJSON(mins))
+	}
+	pollUntil(t, vpDeadline, "late-final wake saved", func() bool { return len(vpSavedVoice(vaDisk(t, f), "minutes_wake")) == 1 })
+	ctx, cancel := context.WithTimeout(context.Background(), vpDeadline)
+	defer cancel()
+	if !f.sess.runtime.WaitSettled(ctx) {
+		t.Fatal("late-final wake did not settle")
+	}
+	// Saving the same call again wakes nothing more.
+	if _, err := f.mgr.saveVoiceMinutes(f.sess, voiceCallEnd{callID: c.id}); err != nil {
+		t.Fatal(err)
+	}
+	vpStable(t, func() bool { return len(vpSavedVoice(vaDisk(t, f), "minutes_wake")) == 1 }, "the late-final wake ran twice")
 }

@@ -180,6 +180,11 @@ func (j *voiceJournal) close(remove bool) {
 
 // voiceInterruptedOpen is the Still open item of a call the server lost
 // before it could write the minutes.
+const voiceLateAfterMinutesOpen = "Review the end of the call: it went on after the minutes."
+
+// voiceInterruptedOpen is the Still open item of a call the server lost
+// before its minutes; voiceLateAfterMinutesOpen is that of a call whose
+// owner kept talking after the minutes were accepted.
 const voiceInterruptedOpen = "Review the interrupted call: the server stopped before its minutes were written."
 
 // recoverVoiceJournals runs once at startup, before any call can exist:
@@ -266,6 +271,7 @@ func readVoiceJournal(f *os.File) (voiceCallEnd, string, error) {
 	var end voiceCallEnd
 	var transcript voice.Transcript
 	var started int64
+	late := false
 	sessionID := ""
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), voiceJournalMaxBytes)
@@ -279,6 +285,9 @@ func readVoiceJournal(f *os.File) (voiceCallEnd, string, error) {
 			sessionID, started = line.SessionID, line.Started
 			end.callID, end.provider, end.billing = line.CallID, voice.ProviderID(line.Provider), line.Billing
 		case "transcript":
+			if line.Role == "user" && line.Final && end.minutes != nil {
+				late = true
+			}
 			_ = transcript.Add(voice.Event{Kind: voice.EventTranscript, Role: line.Role, ItemID: line.ItemID, Text: line.Text, Final: line.Final, StartMS: line.StartMS, EndMS: line.EndMS})
 		case "passed":
 			end.passed = append(end.passed, voicePassed{DeliveryID: line.DeliveryID, Summary: line.Summary})
@@ -300,6 +309,8 @@ func readVoiceJournal(f *os.File) (voiceCallEnd, string, error) {
 	}
 	if end.minutes == nil {
 		end.open = []string{voiceInterruptedOpen}
+	} else if late {
+		end.open = []string{voiceLateAfterMinutesOpen}
 	}
 	end.transcript = transcript.Markdown()
 	return end, sessionID, nil

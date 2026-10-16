@@ -419,8 +419,12 @@ func (c *voiceCall) persistMinutes(reason string) bool {
 	end := voiceCallEnd{callID: c.id, provider: c.provider, billing: c.billing.Kind, reason: reason,
 		seconds: int(time.Since(c.started).Seconds()), minutes: c.minutes, passed: append([]voicePassed(nil), c.passed...),
 		transcript: c.transcript.Markdown(), diag: c.endDiagnostic(), custom: map[string]any{}}
+	late := c.lateUser
 	c.mu.Unlock()
 	end.open = voicePendingTaps(sess)
+	if late {
+		end.open = append([]string{voiceLateAfterMinutesOpen}, end.open...)
+	}
 	if c.usage != nil && c.usage.Seconds != nil {
 		end.custom["usage_seconds"] = *c.usage.Seconds
 	}

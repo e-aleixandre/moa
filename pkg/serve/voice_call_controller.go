@@ -152,6 +152,9 @@ type voiceCall struct {
 	// are saved; journalErr is why it could not be opened.
 	journal    *voiceJournal
 	journalErr error
+	// lateUser is set when the owner finished a turn after the minutes
+	// were accepted: the minutes do not cover it.
+	lateUser bool
 
 	// Controller-owned.
 	transcript voice.Transcript
@@ -299,6 +302,9 @@ func (c *voiceCall) addTranscript(ev voice.Event) error {
 	}
 	c.mu.Lock()
 	j, err := c.journal, c.journalErr
+	if ev.Role == "user" && ev.Final && c.minutes != nil {
+		c.lateUser = true
+	}
 	c.mu.Unlock()
 	if err != nil {
 		return err
@@ -583,6 +589,8 @@ func (c *voiceCall) rewriteBackendMinutes(ctx context.Context) {
 	c.mu.Lock()
 	if c.minutes == nil {
 		c.minutes = prev
+	} else {
+		c.lateUser = false // written from the final transcript
 	}
 	c.mu.Unlock()
 }

@@ -91,3 +91,32 @@ func TestVoiceJournalBounded(t *testing.T) {
 		t.Fatalf("journal size %d over its limit %d", st.Size(), voiceJournalMaxBytes)
 	}
 }
+
+// A lost call whose user went on after accepted minutes keeps that open.
+func TestVoiceJournalLateTurnAfterMinutes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		lines string
+		late  bool
+	}{
+		{"before", `{"kind":"transcript","role":"user","text":"EARLY","final":true}
+{"kind":"minutes","decided":["D"]}`, false},
+		{"after", `{"kind":"minutes","decided":["D"]}
+{"kind":"transcript","role":"user","text":"LATE","final":true}`, true},
+		{"assistant_after", `{"kind":"minutes","decided":["D"]}
+{"kind":"transcript","role":"assistant","text":"BYE","final":true}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "call.jsonl")
+			data := `{"kind":"call","call_id":"c1","session_id":"s1","provider":"grok-plan","started":1}` + "\n" + tc.lines + "\n"
+			if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			end, _, ok := readJournalPath(t, path)
+			got := ok && len(end.open) == 1 && end.open[0] == voiceLateAfterMinutesOpen
+			if !ok || got != tc.late || (!tc.late && len(end.open) != 0) {
+				t.Fatalf("ok=%v open=%v, want late=%v", ok, end.open, tc.late)
+			}
+		})
+	}
+}
