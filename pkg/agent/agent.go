@@ -2350,14 +2350,18 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// gets "(interrupted by user)". A provider failure (e.g. a ChatGPT usage
 	// limit / 429) must NOT be mislabeled as a user interruption — that both
 	// confuses the user ("I didn't stop it") and lies to the model on replay.
-	if err != nil && lastLLMRole(a.state.Messages) == "user" {
+	// AppendRecord may write while a stopped run finishes, so the check and
+	// the insert are one section under the mutex.
+	if err != nil {
 		a.mu.Lock()
-		interrupted := core.WrapMessage(core.Message{
-			Role:    "assistant",
-			Content: []core.Content{core.TextContent(interruptedMarkerText(ctx, err))},
-		})
-		interrupted.EnsureMsgID()
-		a.state.Messages = append(a.state.Messages, interrupted)
+		if lastLLMRole(a.state.Messages) == "user" {
+			interrupted := core.WrapMessage(core.Message{
+				Role:    "assistant",
+				Content: []core.Content{core.TextContent(interruptedMarkerText(ctx, err))},
+			})
+			interrupted.EnsureMsgID()
+			a.state.Messages = append(a.state.Messages, interrupted)
+		}
 		a.mu.Unlock()
 	}
 
@@ -2369,8 +2373,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 
 	// Return a copy — the internal slice is reused across turns (Send appends).
 	// Without this, callers could mutate returned messages and corrupt state.
-	msgs := make([]core.AgentMessage, len(a.state.Messages))
-	copy(msgs, a.state.Messages)
+	msgs := a.Messages()
 
 	// Record the run's true accumulated cost — including empty/failed-turn usage
 	// the loop billed internally that never surfaces as an assistant message —
