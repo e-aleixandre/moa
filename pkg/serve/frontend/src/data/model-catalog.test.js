@@ -101,3 +101,49 @@ test('a spec resolves from the raw model a subagent carries, not only the displa
   // The breadcrumb codename is NOT an identity the catalog knows.
   expect(catalogSpec(entries, 'Unknown model')).toBeUndefined();
 });
+
+test('a catalog served before Daybreak was known is asked again on the next open', async () => {
+  let calls = 0;
+  const pending = { id: 'gpt-6-sol', name: 'GPT-6 Sol', provider: 'openai', daybreak_pending: true };
+  const known = { id: 'gpt-6-sol', name: 'GPT-6 Sol', provider: 'openai', daybreak_supported: true };
+  let resolveSecond;
+  globalThis.fetch = () => {
+    calls += 1;
+    if (calls === 1) return Promise.resolve(new Response(JSON.stringify([pending]), { status: 200 }));
+    return new Promise(resolve => { resolveSecond = resolve; });
+  };
+
+  await loadModelCatalog();
+  expect(modelCatalog(store.get()).entries[0]).toMatchObject({ daybreakSupported: false, daybreakPending: true });
+
+  ensureModelCatalog();
+  expect(calls).toBe(2);
+  // The selector keeps the models it has while the new answer is on its way.
+  expect(modelCatalog(store.get())).toMatchObject({ status: 'ready' });
+  expect(modelCatalog(store.get()).entries).toHaveLength(1);
+
+  resolveSecond(new Response(JSON.stringify([known]), { status: 200 }));
+  await loadModelCatalog();
+  await new Promise(r => setTimeout(r, 0));
+  expect(modelCatalog(store.get()).entries[0]).toMatchObject({ daybreakSupported: true, daybreakPending: false });
+
+  // Once known, opening the selector costs nothing again.
+  ensureModelCatalog();
+  expect(calls).toBe(2);
+});
+
+test('a failed refresh keeps the catalog it already had', async () => {
+  let calls = 0;
+  globalThis.fetch = () => {
+    calls += 1;
+    if (calls === 1) return Promise.resolve(new Response(JSON.stringify([{ id: 'gpt-6-sol', name: 'GPT-6 Sol', provider: 'openai', daybreak_pending: true }]), { status: 200 }));
+    return Promise.resolve(new Response('nope', { status: 500 }));
+  };
+  await loadModelCatalog();
+  ensureModelCatalog();
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+  expect(calls).toBe(2);
+  expect(modelCatalog(store.get())).toMatchObject({ status: 'ready' });
+  expect(modelCatalog(store.get()).entries).toHaveLength(1);
+});
