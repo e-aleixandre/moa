@@ -79,8 +79,42 @@ type Owner struct {
 	// CanSendTasksTo lists the owner IDs this owner may send tasks to without
 	// asking the user. One-way: B on A's list says nothing about B sending to
 	// A. Additive: an owner.json without it allows nobody.
-	CanSendTasksTo []string  `json:"can_send_tasks_to,omitempty"`
-	Created        time.Time `json:"created"`
+	CanSendTasksTo []string `json:"can_send_tasks_to,omitempty"`
+	// CallLevel is how this owner may reach the user by voice (request_call):
+	// CallNever, CallAskFirst or CallRing. Additive: empty reads as CallNever,
+	// so every owner starts unable to call until the user turns it on.
+	CallLevel string `json:"call_level,omitempty"`
+	// CallCostAck records that the user accepted the per-minute cost of the
+	// paid provider owner calls would use when no plan is signed in. It is
+	// bound to that provider: a different paid provider needs a new one.
+	CallCostAck *CallCostAck `json:"call_cost_ack,omitempty"`
+	Created     time.Time    `json:"created"`
+}
+
+// Call levels of an owner.
+const (
+	CallNever    = "never"
+	CallAskFirst = "ask_first"
+	CallRing     = "ring"
+)
+
+// CallCostAck is the user's acceptance of a paid provider's cost.
+type CallCostAck struct {
+	Provider string    `json:"provider"`
+	At       time.Time `json:"at"`
+}
+
+// ValidCallLevel reports whether s names a call level.
+func ValidCallLevel(s string) bool {
+	return s == CallNever || s == CallAskFirst || s == CallRing
+}
+
+// Calls is the owner's call level; an unset level is CallNever.
+func (o Owner) Calls() string {
+	if ValidCallLevel(o.CallLevel) {
+		return o.CallLevel
+	}
+	return CallNever
 }
 
 // MaySendTasksTo reports whether o may send tasks to the owner id without

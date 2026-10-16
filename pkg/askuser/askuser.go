@@ -193,25 +193,39 @@ func NewTool(b *Bridge) core.Tool {
 			}
 
 			requiresTap, _ := params["requires_tap"].(bool)
-			respCh := make(chan Reply, 1)
-
-			select {
-			case b.ch <- Prompt{Questions: questions, RequiresTap: requiresTap, Response: respCh}:
-			case <-ctx.Done():
-				return core.ErrorResult("cancelled"), nil
-			}
-
-			select {
-			case reply := <-respCh:
-				return formatAnswers(questions, reply), nil
-			case <-ctx.Done():
-				if ctx.Err() == context.Canceled {
-					return core.ErrorResult("Question not answered: the user stopped this run. The answer will arrive in the next user message."), nil
-				}
-				return core.ErrorResult("cancelled"), nil
-			}
+			return Ask(ctx, b, questions, requiresTap), nil
 		},
 	}
+}
+
+// Ask puts questions to the user through b and blocks until they are
+// answered or ctx ends. It is ask_user's body, shared with tools that end in
+// a written question (request_call when no call happens).
+func Ask(ctx context.Context, b *Bridge, questions []Question, requiresTap bool) core.Result {
+	respCh := make(chan Reply, 1)
+	select {
+	case b.ch <- Prompt{Questions: questions, RequiresTap: requiresTap, Response: respCh}:
+	case <-ctx.Done():
+		return core.ErrorResult("cancelled")
+	}
+	select {
+	case reply := <-respCh:
+		return formatAnswers(questions, reply)
+	case <-ctx.Done():
+		if ctx.Err() == context.Canceled {
+			return core.ErrorResult("Question not answered: the user stopped this run. The answer will arrive in the next user message.")
+		}
+		return core.ErrorResult("cancelled")
+	}
+}
+
+// ParseQuestion validates one question as ask_user does.
+func ParseQuestion(m map[string]any) (Question, error) {
+	qs, err := parseQuestions(map[string]any{"questions": []any{m}})
+	if err != nil {
+		return Question{}, err
+	}
+	return qs[0], nil
 }
 
 func parseQuestions(params map[string]any) ([]Question, error) {

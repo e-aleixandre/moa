@@ -15,14 +15,15 @@ import (
 type Kind string
 
 const (
-	KindAsk        Kind = "ask"        // ask_user: the agent is waiting for an answer
-	KindPermission Kind = "permission" // a tool waits for approval
-	KindSecret     Kind = "secret"     // a tool waits for a password for one action
-	KindDone       Kind = "done"       // a run the user started finished
-	KindFailed     Kind = "failed"     // a run errored
-	KindDigest     Kind = "digest"     // an owner finished digesting a report
-	KindEvent      Kind = "event"      // a wake-on-event source delivered something
-	KindCall       Kind = "call"       // an incoming voice call invitation (VoIP destinations only)
+	KindAsk         Kind = "ask"          // ask_user: the agent is waiting for an answer
+	KindPermission  Kind = "permission"   // a tool waits for approval
+	KindSecret      Kind = "secret"       // a tool waits for a password for one action
+	KindDone        Kind = "done"         // a run the user started finished
+	KindFailed      Kind = "failed"       // a run errored
+	KindDigest      Kind = "digest"       // an owner finished digesting a report
+	KindEvent       Kind = "event"        // a wake-on-event source delivered something
+	KindCall        Kind = "call"         // an incoming voice call invitation (VoIP destinations only)
+	KindCallRequest Kind = "call_request" // an owner asks to talk (request_call); an ordinary urgent notification, never VoIP
 )
 
 // Level is how hard a notification should interrupt.

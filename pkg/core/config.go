@@ -123,10 +123,30 @@ type MoaConfig struct {
 // additive: an absent value keeps the default. None of them is consent to
 // pay: a paid provider is only used when the user picks it for a call.
 type VoiceConfig struct {
-	Provider     string `json:"provider,omitempty"`      // plan used by default: "chatgpt-plan" or "grok-plan". Empty = ChatGPT, then Grok.
-	PaidProvider string `json:"paid_provider,omitempty"` // paid alternative offered when the plan fails: "xai-api" or "openai-live-api". Empty = the plan's own provider.
-	BackendModel string `json:"backend_model,omitempty"` // model behind ChatGPT-plan handoffs and Live delegation. Empty = DefaultVoiceBackendModel.
+	Provider     string           `json:"provider,omitempty"`      // plan used by default: "chatgpt-plan" or "grok-plan". Empty = ChatGPT, then Grok.
+	PaidProvider string           `json:"paid_provider,omitempty"` // paid alternative offered when the plan fails: "xai-api" or "openai-live-api". Empty = the plan's own provider.
+	BackendModel string           `json:"backend_model,omitempty"` // model behind ChatGPT-plan handoffs and Live delegation. Empty = DefaultVoiceBackendModel.
+	Calls        VoiceCallsConfig `json:"calls,omitzero"`          // calls owners start (request_call): ring time, pause and allowed hours.
 }
+
+// VoiceCallsConfig bounds the calls owners start. Additive: absent fields keep
+// the defaults (45 s of ringing, no pause, any hour).
+type VoiceCallsConfig struct {
+	RingSeconds int             `json:"ring_seconds,omitempty"` // how long one request rings before it is missed. 0 = DefaultCallRingSeconds.
+	PausedUntil string          `json:"paused_until,omitempty"` // RFC 3339; no owner call is announced before it.
+	Hours       *VoiceCallHours `json:"hours,omitempty"`        // when owners may call; nil = any time.
+}
+
+// VoiceCallHours is a daily window [From, Until) in TZ; Until before From
+// crosses midnight.
+type VoiceCallHours struct {
+	From  string `json:"from"`  // "HH:MM"
+	Until string `json:"until"` // "HH:MM"
+	TZ    string `json:"tz"`    // IANA zone of the device that set it
+}
+
+// DefaultCallRingSeconds is how long an owner's call request rings (D6).
+const DefaultCallRingSeconds = 45
 
 // DefaultVoiceBackendModel serves the tools of a voice call when no model is
 // configured.
