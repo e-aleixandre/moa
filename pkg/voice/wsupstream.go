@@ -135,9 +135,9 @@ func (u *wsUpstream) read() {
 			continue
 		}
 		events := u.parse(env.Type, data)
-		for _, ev := range events {
+		for i, ev := range events {
 			if ev.Usage != nil {
-				u.setUsage(ev.Usage)
+				events[i].Usage = u.setUsage(ev.Usage)
 			}
 		}
 		// The dialect's closed event ends the session even if the transport
@@ -162,10 +162,32 @@ func (u *wsUpstream) read() {
 	}
 }
 
-func (u *wsUpstream) setUsage(usage *Usage) {
+// setUsage merges a report into the retained snapshot: a field the report
+// leaves nil keeps its previous value (seconds and delegated tokens arrive in
+// separate events) and Final is sticky. It returns the merged snapshot.
+func (u *wsUpstream) setUsage(in *Usage) *Usage {
 	u.usageMu.Lock()
-	u.usage = usage
-	u.usageMu.Unlock()
+	defer u.usageMu.Unlock()
+	m := Usage{}
+	if u.usage != nil {
+		m = *u.usage
+	}
+	if in.InputTokens != nil {
+		m.InputTokens = in.InputTokens
+	}
+	if in.OutputTokens != nil {
+		m.OutputTokens = in.OutputTokens
+	}
+	if in.TotalTokens != nil {
+		m.TotalTokens = in.TotalTokens
+	}
+	if in.Seconds != nil {
+		m.Seconds = in.Seconds
+	}
+	m.Final = m.Final || in.Final
+	u.usage = &m
+	out := m
+	return &out
 }
 
 // Usage returns the latest usage the provider reported (Final only if it

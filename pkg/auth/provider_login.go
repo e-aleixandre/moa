@@ -307,7 +307,10 @@ func (m *ProviderLoginManager) Close() {
 // SaveAPIKey stores a write-only API key as a new generation, provided the
 // stored generation is still expectedGeneration. The key is never echoed.
 func (m *ProviderLoginManager) SaveAPIKey(provider, expectedGeneration, key string) (string, error) {
-	return m.saveAPIKey(provider, expectedGeneration, nil, key)
+	// A caller that cannot name the key beside the plan expects none, so an
+	// older page cannot replace a key saved after it loaded.
+	none := ""
+	return m.saveAPIKey(provider, expectedGeneration, &none, key)
 }
 
 // SaveAPIKeyExpecting is SaveAPIKey that also requires the OpenAI/xAI key

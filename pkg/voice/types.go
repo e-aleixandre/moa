@@ -51,8 +51,11 @@ const (
 type Usage struct {
 	InputTokens  *int64
 	OutputTokens *int64
-	Seconds      *float64
-	Final        bool
+	// TotalTokens is the provider-reported total of delegated Responses
+	// usage, kept apart from session Seconds (the voice leg's own meter).
+	TotalTokens *int64
+	Seconds     *float64
+	Final       bool
 }
 
 // Billing is the declared price of the voice leg only.

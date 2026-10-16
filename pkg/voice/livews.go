@@ -83,6 +83,8 @@ func (a *liveWS) Open(ctx context.Context, spec CallSpec) (Upstream, error) {
 type liveUpstream struct {
 	*wsUpstream
 	pending map[string][]ToolCall // by delegation, reader-owned
+	// Cumulative delegated Responses token usage, reader-owned.
+	tokIn, tokOut, tokTotal int64
 }
 
 func (u *liveUpstream) parse(typ string, raw []byte) []Event {
@@ -129,7 +131,14 @@ func (u *liveUpstream) parse(typ string, raw []byte) []Event {
 // releases them as one batch when that backend response completes.
 func (u *liveUpstream) parseResponse(delegation string, raw json.RawMessage) []Event {
 	var ev struct {
-		Type string `json:"type"`
+		Type     string `json:"type"`
+		Response struct {
+			Usage *struct {
+				InputTokens  *int64 `json:"input_tokens"`
+				OutputTokens *int64 `json:"output_tokens"`
+				TotalTokens  *int64 `json:"total_tokens"`
+			} `json:"usage"`
+		} `json:"response"`
 		Item struct {
 			Type      string `json:"type"`
 			CallID    string `json:"call_id"`
@@ -148,9 +157,26 @@ func (u *liveUpstream) parseResponse(delegation string, raw json.RawMessage) []E
 	case "response.completed", "response.failed", "response.incomplete", "response.cancelled":
 		batch := u.pending[delegation]
 		delete(u.pending, delegation)
-		if len(batch) > 0 {
-			return []Event{{Kind: EventToolBatch, Tools: batch}}
+		var out []Event
+		// Delegated tokens are billed apart from session seconds: accumulate
+		// them and report the running totals.
+		if r := ev.Response.Usage; r != nil && (r.InputTokens != nil || r.OutputTokens != nil || r.TotalTokens != nil) {
+			if r.InputTokens != nil {
+				u.tokIn += *r.InputTokens
+			}
+			if r.OutputTokens != nil {
+				u.tokOut += *r.OutputTokens
+			}
+			if r.TotalTokens != nil {
+				u.tokTotal += *r.TotalTokens
+			}
+			in, o, t := u.tokIn, u.tokOut, u.tokTotal
+			out = append(out, Event{Kind: EventUsage, Usage: &Usage{InputTokens: &in, OutputTokens: &o, TotalTokens: &t}})
 		}
+		if len(batch) > 0 {
+			out = append(out, Event{Kind: EventToolBatch, Tools: batch})
+		}
+		return out
 	}
 	return nil
 }

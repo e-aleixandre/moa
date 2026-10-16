@@ -73,7 +73,7 @@ func TestVoiceCredentials_SaveAPIKeyKeepsOAuthPlan(t *testing.T) {
 			plan.Generation = gen
 			assertVoicePhase1TextSelection(t, NewStore(f.path), provider, plan)
 			key := voicePhase1Key(provider)
-			keyGen, err := f.m.SaveAPIKey(provider, gen, " \t"+key+"\n")
+			keyGen, err := f.m.SaveAPIKeyExpecting(provider, gen, besideKeyGen(t, f.path, provider), " \t"+key+"\n")
 			if err != nil || keyGen == "" {
 				t.Fatalf("real SaveAPIKey rejected a syntactically valid fake key: generation_present=%v error=%v", keyGen != "", err)
 			}

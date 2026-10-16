@@ -101,7 +101,7 @@ func TestVoiceKey_StaleGenerationNeverRemovesNewerKeyAcrossStores(t *testing.T) 
 			otherManager := NewProviderLoginManager(context.Background(), other)
 			t.Cleanup(otherManager.Close)
 			const newer = "offline-newer-voice-api-key-0123456789"
-			newGen, err := otherManager.SaveAPIKey(provider, f.plan.Generation, newer)
+			newGen, err := otherManager.SaveAPIKeyExpecting(provider, f.plan.Generation, oldGen, newer)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -412,7 +412,7 @@ func TestVoiceSelection_AdmitRevalidatesKeySelection(t *testing.T) {
 	}
 	other := NewProviderLoginManager(context.Background(), NewStore(f.path))
 	t.Cleanup(other.Close)
-	if _, err := other.SaveAPIKey("xai", f.plan.Generation, "offline-replaced-voice-key-0123456789"); err != nil {
+	if _, err := other.SaveAPIKeyExpecting("xai", f.plan.Generation, besideKeyGen(t, f.path, "xai"), "offline-replaced-voice-key-0123456789"); err != nil {
 		t.Fatal(err)
 	}
 	err = f.store.AdmitSnapshot(context.Background(), snap, admit)
@@ -429,7 +429,7 @@ func TestVoiceKey_PersistenceFailureLeavesFileIntact(t *testing.T) {
 			keyGen := f.saveKey(t, provider, voicePhase1Key(provider))
 			before := fileBytes(t, f.path)
 			restore := makeReadOnlyDir(t, filepath.Dir(f.path))
-			if _, err := f.m.SaveAPIKey(provider, f.plan.Generation, "offline-unsaved-voice-key-0123456789"); err == nil {
+			if _, err := f.m.SaveAPIKeyExpecting(provider, f.plan.Generation, keyGen, "offline-unsaved-voice-key-0123456789"); err == nil {
 				t.Error("save into a read-only directory reported success")
 			} else {
 				wantCredClass(t, err, core.CredentialPersistenceFailed)
@@ -449,4 +449,13 @@ func TestVoiceKey_PersistenceFailureLeavesFileIntact(t *testing.T) {
 			}
 		})
 	}
+}
+
+// besideKeyGen is the generation of the key stored beside a plan sign-in, for
+// callers that must name it now that a save always carries that CAS.
+func besideKeyGen(t *testing.T, path, provider string) string {
+	t.Helper()
+	slot, _ := voiceKeySlot(provider)
+	c, _ := NewStore(path).Get(slot)
+	return c.Generation
 }
