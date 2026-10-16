@@ -104,6 +104,21 @@ final class CarPlayOwnersTests: XCTestCase {
         XCTAssertNil(CarPlayClient(origin: "http://moa.example", authorization: "x").makeRequest("POST", "/a", body: nil))
     }
 
+    func testACallCreatedAfterEndIsDiscardedButOneCreatedAfterDisconnectIsKept() {
+        let started = CarPlayCallStart.started(wsPath: "/api/voice/calls/c1/ws", sessionId: "s1")
+        XCTAssertEqual(CarPlayCallStartModel.discarded(started, userEnded: true), "c1")
+        XCTAssertNil(CarPlayCallStartModel.discarded(started, userEnded: false), "a disconnected car keeps the call (P5)")
+        XCTAssertNil(CarPlayCallStartModel.discarded(.alert(.noPlan), userEnded: true))
+        XCTAssertNil(CarPlayCallStartModel.discarded(.started(wsPath: "/api/voice/calls//ws", sessionId: ""), userEnded: true))
+    }
+
+    func testTheServerHangupCarriesTheCSRFMarker() throws {
+        let client = CarPlayClient(origin: "https://moa.example", authorization: "Moa-Voice d.k")
+        let post = try XCTUnwrap(client.makeRequest("POST", "/api/voice/calls/c1/hangup", body: Data("{}".utf8)))
+        XCTAssertEqual(post.value(forHTTPHeaderField: "X-Moa-Request"), "1")
+        XCTAssertEqual(post.value(forHTTPHeaderField: "Authorization"), "Moa-Voice d.k")
+    }
+
     // MARK: Call events → voice state
 
     func testEventsDriveTheVoiceStates() {

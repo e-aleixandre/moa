@@ -225,6 +225,7 @@ final class CarPlayFakeServer: CarPlayServer {
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { done(503, data) }
     }
 
+    func hangUp(call id: String) {}
     func socketURL(_ wsPath: String) -> URL? { nil }
     func invalidate() {}
 }

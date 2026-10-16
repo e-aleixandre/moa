@@ -81,9 +81,15 @@ final class CarPlayCall: NSObject, NativeCallObserver {
     }
 
     // Runs even when the screen is gone: a call the server created is
-    // opened (P5: it goes on on the iPhone) or, after End, hung up.
+    // opened (P5: it goes on on the iPhone) or, after End, hung up on the
+    // server before anything here (session, microphone) is touched.
     private func created(status: Int?, data: Data?) {
-        switch CarPlayCallStartModel.outcome(status: status, data: data) {
+        let outcome = CarPlayCallStartModel.outcome(status: status, data: data)
+        if let discarded = CarPlayCallStartModel.discarded(outcome, userEnded: userEnded) {
+            client.hangUp(call: discarded)
+            return
+        }
+        switch outcome {
         case .alert(let alert):
             finish(.alert(alert))
         case .reload:
@@ -99,8 +105,6 @@ final class CarPlayCall: NSObject, NativeCallObserver {
                 return
             }
             callId = id
-            // End tapped while the call was being created: hang it up now.
-            if userEnded { NativeVoiceCallManager.shared.hangUpNative(id: id) }
         }
     }
 
@@ -111,7 +115,8 @@ final class CarPlayCall: NSObject, NativeCallObserver {
         if let callId {
             NativeVoiceCallManager.shared.hangUpNative(id: callId)
         }
-        // Still being created: created() hangs it up. The screen goes now.
+        // Still being created: created() hangs it up on the server. The
+        // screen goes now.
         if callId == nil { finish(.alert(nil)) }
     }
 

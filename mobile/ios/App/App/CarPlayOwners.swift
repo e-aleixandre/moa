@@ -151,6 +151,19 @@ enum CarPlayCallStartModel {
     }
 }
 
+extension CarPlayCallStartModel {
+    // discarded answers which call to hang up on the server, without ever
+    // opening it here, when the user tapped End before it was created. A
+    // screen that went away without End (CarPlay disconnected) keeps its
+    // call (P5): nil.
+    static func discarded(_ outcome: CarPlayCallStart, userEnded: Bool) -> String? {
+        guard userEnded, case .started(let wsPath, _) = outcome else { return nil }
+        let parts = wsPath.split(separator: "/")
+        guard parts.count == 5, parts[3] != "", parts[4] == "ws" else { return nil }
+        return String(parts[3])
+    }
+}
+
 // MARK: Call events → voice state
 
 enum CarPlayCallPhase: String, CaseIterable {
@@ -211,6 +224,8 @@ protocol CarPlayServer: AnyObject {
     var origin: String { get }
     func directory(_ done: @escaping (Int?, Data?) -> Void)
     func call(owner id: String, _ done: @escaping (Int?, Data?) -> Void)
+    // hangUp ends a created call on the server, with no socket or audio.
+    func hangUp(call id: String)
     func socketURL(_ wsPath: String) -> URL?
     func invalidate()
 }
@@ -220,13 +235,7 @@ protocol CarPlayServer: AnyObject {
 final class CarPlayClient: NSObject, URLSessionTaskDelegate, CarPlayServer {
     let origin: String
     private let authorization: String
-    private lazy var session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieAcceptPolicy = .never
-        configuration.httpShouldSetCookies = false
-        configuration.timeoutIntervalForRequest = 15
-        return URLSession(configuration: configuration, delegate: self, delegateQueue: .main)
-    }()
+    private var session: URLSession?
 
     init(origin: String, authorization: String) {
         self.origin = origin
@@ -242,6 +251,11 @@ final class CarPlayClient: NSObject, URLSessionTaskDelegate, CarPlayServer {
         request("POST", "/api/voice/owners/\(escaped)/call", body: Data("{}".utf8), done)
     }
 
+    func hangUp(call id: String) {
+        let escaped = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? ""
+        request("POST", "/api/voice/calls/\(escaped)/hangup", body: Data("{}".utf8)) { _, _ in }
+    }
+
     // The call's socket on the same server.
     func socketURL(_ wsPath: String) -> URL? {
         guard origin.hasPrefix("https://") else { return nil }
@@ -251,7 +265,21 @@ final class CarPlayClient: NSObject, URLSessionTaskDelegate, CarPlayServer {
     // A request in flight still completes: a call it creates must be
     // opened or hung up.
     func invalidate() {
-        session.finishTasksAndInvalidate()
+        session?.finishTasksAndInvalidate()
+        session = nil
+    }
+
+    // A request after invalidate() (a call hung up once the car has gone)
+    // gets a fresh session: an invalidated one cannot start tasks.
+    private func currentSession() -> URLSession {
+        if let session { return session }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = 15
+        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: .main)
+        self.session = session
+        return session
     }
 
     private func request(_ method: String, _ path: String, body: Data?, _ done: @escaping (Int?, Data?) -> Void) {
@@ -259,7 +287,7 @@ final class CarPlayClient: NSObject, URLSessionTaskDelegate, CarPlayServer {
             done(nil, nil)
             return
         }
-        session.dataTask(with: request) { data, response, _ in
+        currentSession().dataTask(with: request) { data, response, _ in
             done((response as? HTTPURLResponse)?.statusCode, data)
         }.resume()
     }
