@@ -6,6 +6,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -114,6 +115,15 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		req.Options.Temperature = nil
 	}
 
+	// Daybreak travels only on the plan transport, the one the official
+	// client sends it on. It gets its own cache routing there: the body key
+	// and the session-id header below both derive from it.
+	if o.oauth && req.Options.AccessProgram != "" {
+		req.Options.PromptCacheKey = core.DaybreakPromptCacheKey(req.Options.PromptCacheKey, req.Options.AccessProgram)
+	} else {
+		req.Options.AccessProgram = ""
+	}
+
 	apiKey := o.apiKey
 	if req.Options.APIKey != "" {
 		apiKey = req.Options.APIKey
@@ -138,6 +148,7 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		// The Codex transport rejects service_tier outright; only the public
 		// API prices a priority tier.
 		SupportsServiceTier:     o.endpoint == apiEndpoint,
+		SupportsAccessPrograms:  o.oauth,
 		AllowedReasoningEfforts: core.ReasoningEffortsForModel(req.Model),
 	}
 	body, err := responses.BuildRequestBody(req, dialect)
@@ -222,6 +233,16 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		defer resp.Body.Close() //nolint:errcheck
 		// A rejected credential is reported by status only: the body of an
 		// auth failure can echo what was sent.
+		if resp.StatusCode == http.StatusForbidden && req.Options.AccessProgram != "" {
+			// A model that does not take Daybreak is refused with a 403 whose
+			// detail is the useful part. Only that fixed message is surfaced:
+			// any other 403 stays a credential error, reported by status.
+			body, _ := retry.ErrorBody(resp.Body)
+			if detail := daybreakRefusal(body); detail != "" {
+				return nil, fmt.Errorf("openai: %s", detail)
+			}
+			return nil, &core.ProviderAuthError{Provider: "openai", Status: resp.StatusCode}
+		}
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return nil, &core.ProviderAuthError{Provider: "openai", Status: resp.StatusCode}
 		}
@@ -261,4 +282,17 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	}()
 
 	return ch, nil
+}
+
+// daybreakRefusal returns the plan backend's explanation for refusing a
+// Daybreak request ({"detail":"Daybreak isn't available for this model…"}),
+// or "" when body is anything else.
+func daybreakRefusal(body []byte) string {
+	var payload struct {
+		Detail string `json:"detail"`
+	}
+	if json.Unmarshal(body, &payload) != nil || !strings.Contains(payload.Detail, "Daybreak") {
+		return ""
+	}
+	return payload.Detail
 }

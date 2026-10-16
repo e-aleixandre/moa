@@ -34,6 +34,13 @@ type responsesRequest struct {
 	// both transports: "fast" is the name the UIs give it, and the API
 	// rejects it as an unknown tier.
 	ServiceTier string `json:"service_tier,omitempty"`
+	// AccessPrograms asks for an access program (Daybreak). Omitted for a
+	// standard request and on transports that do not support it.
+	AccessPrograms *accessPrograms `json:"access_programs,omitempty"`
+}
+
+type accessPrograms struct {
+	Cyber string `json:"cyber"`
 }
 
 type promptCacheOptions struct {
@@ -74,7 +81,15 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 		ParallelToolCalls: dialect.SupportsParallelToolCalls,
 	}
 
-	r.Input = convertMessages(req.Messages, dialect)
+	program := ""
+	if dialect.SupportsAccessPrograms {
+		program = req.Options.AccessProgram
+	}
+	if program != "" {
+		r.AccessPrograms = &accessPrograms{Cyber: program}
+	}
+
+	r.Input = convertMessagesForProgram(req.Messages, dialect, program)
 
 	if dialect.SupportsExplicitCacheBreakpoints {
 		// GPT-5.6+ places a single implicit breakpoint at the latest user/tool
@@ -180,6 +195,13 @@ func MapReasoningEffort(level string, allowed []string) string {
 // items produced by a different model omit their provider-assigned output-item
 // ids to avoid pairing validation errors (see convertAssistantMessage).
 func convertMessages(msgs []core.Message, dialect Dialect) []map[string]any {
+	return convertMessagesForProgram(msgs, dialect, "")
+}
+
+// convertMessagesForProgram is convertMessages for a request sent with the
+// given access program ("" = standard). Assistant state recorded under another
+// program is replayed as another model's would be.
+func convertMessagesForProgram(msgs []core.Message, dialect Dialect, program string) []map[string]any {
 	var result []map[string]any
 
 	// A function_call with no output right after it is rejected on every
@@ -187,7 +209,7 @@ func convertMessages(msgs []core.Message, dialect Dialect) []map[string]any {
 	msgs = core.DropUnansweredToolCalls(msgs)
 
 	for i, msg := range msgs {
-		items := convertMessageForDialect(msg, dialect, i)
+		items := convertMessageForProgram(msg, dialect, program, i)
 		result = append(result, items...)
 	}
 
@@ -195,6 +217,10 @@ func convertMessages(msgs []core.Message, dialect Dialect) []map[string]any {
 }
 
 func convertMessageForDialect(msg core.Message, dialect Dialect, msgIndex int) []map[string]any {
+	return convertMessageForProgram(msg, dialect, msg.AccessProgram, msgIndex)
+}
+
+func convertMessageForProgram(msg core.Message, dialect Dialect, program string, msgIndex int) []map[string]any {
 	switch msg.Role {
 	case "user":
 		content := convertUserContent(msg.Content, dialect.SupportsDocuments)
@@ -209,7 +235,7 @@ func convertMessageForDialect(msg core.Message, dialect Dialect, msgIndex int) [
 		}
 
 	case "assistant":
-		return convertAssistantMessageForDialect(msg, dialect.Provider, dialect.Model, msgIndex)
+		return convertAssistantMessageForProgram(msg, dialect.Provider, dialect.Model, program, msgIndex)
 
 	case "tool_result":
 		item := map[string]any{
@@ -302,6 +328,14 @@ func hasImage(blocks []core.Content) bool {
 // message is cross-model — a message id is not pairing-validated, and always
 // sending one reduces early stopping (matches pi).
 func convertAssistantMessageForDialect(msg core.Message, provider, modelID string, msgIndex int) []map[string]any {
+	return convertAssistantMessageForProgram(msg, provider, modelID, msg.AccessProgram, msgIndex)
+}
+
+// convertAssistantMessageForProgram is convertAssistantMessageForDialect for a
+// request sent with program. Encrypted reasoning produced under one access
+// program is not known to be valid under another, so a program change is
+// treated like a model change.
+func convertAssistantMessageForProgram(msg core.Message, provider, modelID, program string, msgIndex int) []map[string]any {
 	// Responses messages written before model provenance was added still carry
 	// their provider. Preserve that known-provider legacy metadata, while
 	// continuing to reject unknown-provider and explicitly cross-model state.
@@ -309,7 +343,7 @@ func convertAssistantMessageForDialect(msg core.Message, provider, modelID strin
 	// recorded as the target's; SameResponseOrigin accepts those instead of
 	// discarding the session's whole reasoning history on every replay.
 	sameOrigin := msg.Provider != "" && modelID != "" && msg.Provider == provider && (msg.Model == "" || core.SameResponseOrigin(modelID, msg.Model))
-	foreignModel := !sameOrigin
+	foreignModel := !sameOrigin || msg.AccessProgram != program
 
 	var items []map[string]any
 	textBlockIndex := 0
