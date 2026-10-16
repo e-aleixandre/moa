@@ -40,7 +40,8 @@ const CommonInstructions = "You are moa's voice delegate for one coding session.
 // HandoffInstructions is the backend prompt of a client delegation: its reply
 // is spoken back by the voice model.
 const HandoffInstructions = CommonInstructions + "\n" +
-	"You are the backend of a live voice call. Use only the tools you are given, then answer in a short plain text the voice can say aloud."
+	"You are the backend of a live voice call. Use only the tools you are given, then answer in a short plain text the voice can say aloud.\n" +
+	"The voice model's request may be only the owner's last words (\"yes, pass it\"): resolve what it refers to from the observed call transcript you are given, where the voice model read the action back to the owner."
 
 // ToolNames is the single allowlist of voice tools.
 var ToolNames = []string{"book_list", "book_read", "read_session", "ask_session", "pass_to_session", "answer_question", "request_tap", "end_call"}

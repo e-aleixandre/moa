@@ -29,39 +29,87 @@ const vpRTCFrameBytes = 960 // PCM16 mono, 24 kHz, 20 ms.
 // double emits a scripted tool call through core.Provider and echoes only the
 // real tool result supplied by the SUT. It never executes or authorizes tools.
 // Source: openai/codex f0c5077c, protocol_frameless_bidi.rs:74-99 and
-// methods_frameless_bidi.rs:13-32. Actual provider handoffs remain unverified.
+// methods_frameless_bidi.rs:13-32. Real ChatGPT (I9, 2026-10-16) delegates
+// only the owner's last utterance ("Yes, pass it") and never delegates
+// end_call when the call is hanging up, so a script fires on whatever its
+// marker is found in the whole backend input, the latest marker winning, and
+// the minutes are answered only to a backend request offering end_call alone.
 type vpVoiceText struct {
 	fallback core.Provider
 	mu       sync.Mutex
 	scripts  map[string]vpVoiceTool
 	tools    []core.ToolSpec
 	system   string
+	inputs   []string       // last user message of every backend request
+	minutes  map[string]any // end_call arguments for a backend minutes request
 }
 type vpVoiceTool struct {
-	id, name string
-	args     map[string]any
+	id, name, marker string
+	args             map[string]any
 }
 
+const vpMinutesCallID = "vp-backend-minutes"
+
 func (p *vpVoiceText) script(id, name string, args any) string {
+	marker := "VP-BACKEND-CALL:" + id + ":END"
+	p.scriptOn(marker, id, name, args)
+	return marker
+}
+
+// scriptOn makes the backend call name when marker appears anywhere in its
+// input, as a model would act on context it was given.
+func (p *vpVoiceText) scriptOn(marker, id, name string, args any) {
 	data, _ := json.Marshal(args)
 	var object map[string]any
 	_ = json.Unmarshal(data, &object)
 	p.mu.Lock()
-	p.scripts[id] = vpVoiceTool{id: id, name: name, args: object}
+	p.scripts[id] = vpVoiceTool{id: id, name: name, marker: marker, args: object}
 	p.mu.Unlock()
-	return "VP-BACKEND-CALL:" + id + ":END"
 }
-func (p *vpVoiceText) Stream(ctx context.Context, r core.Request) (<-chan core.AssistantEvent, error) {
-	last := vpLastUser(r)
+
+func (p *vpVoiceText) scriptMinutes(args map[string]any) {
 	p.mu.Lock()
-	var script vpVoiceTool
-	for id, candidate := range p.scripts {
-		if strings.Contains(last, "VP-BACKEND-CALL:"+id+":END") {
-			script = candidate
-			break
+	p.minutes = args
+	p.mu.Unlock()
+}
+
+func (p *vpVoiceText) backendInputs() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.inputs...)
+}
+
+func vpBackendRequest(r core.Request) (backend, minutesOnly bool) {
+	for _, t := range r.Tools {
+		if t.Name == "end_call" || t.Name == "pass_to_session" {
+			backend = true
 		}
 	}
-	if script.id != "" {
+	return backend, backend && len(r.Tools) == 1 && r.Tools[0].Name == "end_call"
+}
+
+func (p *vpVoiceText) Stream(ctx context.Context, r core.Request) (<-chan core.AssistantEvent, error) {
+	backend, minutesOnly := vpBackendRequest(r)
+	if !backend {
+		return p.fallback.Stream(ctx, r)
+	}
+	last := vpLastUser(r)
+	p.mu.Lock()
+	p.inputs = append(p.inputs, last)
+	var script vpVoiceTool
+	if minutesOnly {
+		if p.minutes != nil {
+			script = vpVoiceTool{id: vpMinutesCallID, name: "end_call", args: p.minutes}
+		}
+	} else {
+		at := -1
+		for _, candidate := range p.scripts {
+			if i := strings.LastIndex(last, candidate.marker); i > at {
+				at, script = i, candidate
+			}
+		}
+	}
+	if script.id != "" && !minutesOnly {
 		p.tools = append([]core.ToolSpec(nil), r.Tools...)
 		p.system = r.System
 	}

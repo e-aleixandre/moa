@@ -34,6 +34,9 @@ const voiceWorkQueue = 8
 type voiceJob struct {
 	tools   []voice.ToolCall
 	handoff *voice.Event
+	// transcript is the observed call so far, taken when the handoff arrived:
+	// a client delegation carries only the owner's last words.
+	transcript string
 	// do is session-side work of the call (the brief request, an answer to
 	// inject): it runs on the worker, so it stops with the call.
 	do func(context.Context)
@@ -210,7 +213,7 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 		c.submit(voiceJob{tools: ev.Tools})
 	case voice.EventHandoff:
 		h := ev
-		c.submit(voiceJob{handoff: &h})
+		c.submit(voiceJob{handoff: &h, transcript: c.transcript.Tail(voiceHandoffTranscriptChars)})
 	case voice.EventUsage:
 		c.usage = ev.Usage
 	case voice.EventClosed:
@@ -267,7 +270,7 @@ func (c *voiceCall) runJob(job voiceJob) {
 		return
 	}
 	if job.handoff != nil {
-		text := c.runHandoff(ctx, job.handoff.Text)
+		text := c.runHandoff(ctx, job.transcript, job.handoff.Text)
 		if r, ok := c.up.(voice.HandoffResponder); ok {
 			_ = r.SendHandoffResult(ctx, job.handoff.ItemID, text)
 		}
@@ -300,11 +303,24 @@ func (c *voiceCall) finishCall(client *voiceClient, events <-chan voice.Event) {
 	}
 	if events != nil && !c.hasMinutes() && reason != "upstream_closed" && reason != "upstream_failed" {
 		ctx, cancel := context.WithTimeout(context.Background(), c.limits.Minutes)
-		if c.up.RequestMinutes(ctx) == nil {
+		var asked error
+		var backend chan struct{}
+		if _, delegates := c.up.(voice.HandoffResponder); delegates {
+			// The ChatGPT voice model never delegates end_call at hangup
+			// (I9): the backend writes the minutes from the observed call.
+			input := c.minutesInput()
+			backend = make(chan struct{})
+			go func() { defer close(backend); c.backendMinutes(ctx, input) }()
+		} else {
+			asked = c.up.RequestMinutes(ctx)
+		}
+		if asked == nil {
 		wait:
 			for {
 				select {
 				case <-c.minutesCh:
+					break wait
+				case <-backend:
 					break wait
 				case <-ctx.Done():
 					break wait
@@ -318,6 +334,9 @@ func (c *voiceCall) finishCall(client *voiceClient, events <-chan voice.Event) {
 			}
 		}
 		cancel()
+		if backend != nil {
+			<-backend
+		}
 	}
 	tctx, cancel := context.WithTimeout(context.Background(), c.limits.Teardown)
 	closed := make(chan struct{})

@@ -88,6 +88,41 @@ func (t *Transcript) Entries() []TranscriptEntry {
 	return append([]TranscriptEntry(nil), t.entries...)
 }
 
+// Tail renders the newest part of the record as plain "User:"/"Voice:" lines,
+// oldest first, within maxChars characters. What does not fit is the oldest
+// part, replaced by one omission line.
+func (t *Transcript) Tail(maxChars int) string {
+	var lines []string
+	used, omitted := 0, false
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		e := t.entries[i]
+		if e.Text == "" {
+			continue
+		}
+		who := "User"
+		if e.Role == "assistant" {
+			who = "Voice"
+		}
+		line := []rune(who + ": " + e.Text)
+		if used+len(line)+1 > maxChars {
+			omitted = true
+			if len(lines) == 0 && maxChars > 0 {
+				lines = append(lines, string(line[len(line)-min(len(line), maxChars):]))
+			}
+			break
+		}
+		lines = append(lines, string(line))
+		used += len(line) + 1
+	}
+	if omitted {
+		lines = append(lines, "[earlier transcript omitted]")
+	}
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
 // Markdown renders the record literally, in arrival order, with Live
 // intervals when the provider gave them.
 func (t *Transcript) Markdown() string {

@@ -363,10 +363,11 @@ func (p *vpPeer) tool(t *testing.T, id, name string, args any) {
 		if p.backend == nil {
 			t.Fatal("v3 tool scenario requires the separate text-provider double")
 		}
+		// Real v3 delegates only the owner's last utterance: the scripted
+		// request is said by the owner, then delegated as that utterance.
 		text := p.backend.script(id, name, args)
-		p.emit(t, map[string]any{"type": "delegation.created", "item": map[string]any{
-			"id": id, "type": "delegation", "target": "client", "content": []any{map[string]any{"type": "input_text", "text": text}},
-		}})
+		p.user(t, "utterance-"+id, text)
+		p.delegate(t, id, text)
 	case "openai-live-api":
 		// Live delegates Responses events; response.completed is backend state,
 		// never a speech/transcript final boundary. See live-delegation §Handle.
@@ -377,6 +378,15 @@ func (p *vpPeer) tool(t *testing.T, id, name string, args any) {
 		p.emit(t, map[string]any{"type": "response.function_call_arguments.done", "call_id": id, "name": name, "arguments": string(b)})
 		p.emit(t, map[string]any{"type": "response.done", "response": map[string]any{"status": "completed"}})
 	}
+}
+
+// delegate emits a v3 client delegation whose content is only text, as real
+// ChatGPT sends the owner's last utterance and nothing else.
+func (p *vpPeer) delegate(t *testing.T, id, text string) {
+	t.Helper()
+	p.emit(t, map[string]any{"type": "delegation.created", "item": map[string]any{
+		"id": id, "type": "delegation", "target": "client", "content": []any{map[string]any{"type": "input_text", "text": text}},
+	}})
 }
 func (p *vpPeer) result(t *testing.T, id string) map[string]any {
 	t.Helper()
