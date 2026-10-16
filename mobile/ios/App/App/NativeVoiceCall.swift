@@ -1,0 +1,619 @@
+import AVFoundation
+import CallKit
+import WebKit
+import os
+
+private let callLog = Logger(subsystem: "com.ealeixandre.moa.app", category: "voice-call")
+
+// `window.MoaNativeCall` for the paired frontend's voice calls. The call's
+// WebSocket, microphone and speaker run here, in the app process, as a
+// CallKit call: it goes on with the screen locked, routes to headphones and
+// the car, and can be muted or hung up from the lock screen, a headset or
+// CarPlay, whether or not the page is running. The page only mirrors the
+// JSON control frames. Only the main frame of the paired origin may call it,
+// and it may only open that origin's /api/voice/calls/{id}/ws.
+final class NativeCallMessageHandler: NSObject, WKScriptMessageHandler {
+    static let name = "moaNativeCall"
+    static let javaScript = #"""
+    (() => {
+      if (window.MoaNativeCall) return;
+      const post = (m) => window.webkit.messageHandlers.moaNativeCall.postMessage(m);
+      const audio = new Map();
+      window.MoaNativeCall = {
+        version: 1,
+        onevent: null,
+        open(url, opts) {
+          const id = "n" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+          post({ op: "open", id, url: String(url), name: String((opts && opts.name) || "moa") });
+          return id;
+        },
+        send(id, text) { post({ op: "send", id, text: String(text) }); },
+        close(id) { post({ op: "close", id }); },
+        startAudio(id) {
+          return new Promise((resolve, reject) => {
+            audio.set(id, { resolve, reject });
+            post({ op: "startAudio", id });
+          });
+        },
+        stopAudio(id) { post({ op: "stopAudio", id }); },
+        interrupt(id) { post({ op: "interrupt", id }); },
+        setMuted(id, muted) { post({ op: "setMuted", id, muted: !!muted }); },
+        __event(ev) {
+          if (ev.type === "audio") {
+            const p = audio.get(ev.id);
+            if (!p) return;
+            audio.delete(ev.id);
+            if (ev.data === "ok") p.resolve(); else p.reject(new Error(ev.data || "microphone"));
+            return;
+          }
+          if (typeof this.onevent === "function") this.onevent(ev);
+        }
+      };
+    })();
+    """#
+
+    weak var webView: WKWebView? {
+        didSet { NativeVoiceCallManager.shared.webView = webView }
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard
+            message.frameInfo.isMainFrame,
+            NativeServerBinding.matches(message.frameInfo.securityOrigin),
+            let body = message.body as? [String: Any],
+            let op = body["op"] as? String,
+            let id = body["id"] as? String
+        else { return }
+        let manager = NativeVoiceCallManager.shared
+        switch op {
+        case "open":
+            manager.open(id: id, url: body["url"] as? String ?? "", name: body["name"] as? String ?? "moa")
+        case "send":
+            if let text = body["text"] as? String { manager.send(id: id, text: text) }
+        case "close":
+            manager.closeFromPage(id: id)
+        case "startAudio":
+            manager.startAudio(id: id)
+        case "stopAudio":
+            manager.stopAudio(id: id)
+        case "interrupt":
+            manager.interrupt(id: id)
+        case "setMuted":
+            manager.setMutedFromPage(id: id, muted: body["muted"] as? Bool ?? false)
+        default:
+            break
+        }
+    }
+}
+
+// One voice call at a time, as the server allows. Everything here runs on
+// the main queue (CallKit and URLSession delegates are bound to it) except
+// the microphone tap, which only sends frames.
+final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebSocketDelegate {
+    static let shared = NativeVoiceCallManager()
+
+    weak var webView: WKWebView?
+
+    private final class Call {
+        let id: String
+        let uuid = UUID()
+        let name: String
+        let task: URLSessionWebSocketTask
+        var audio: NativeCallAudio?
+        var audioWanted = false
+        var sessionActive = false
+        var muted = false
+        var pending: [Data] = []
+        var pendingBytes = 0
+        var open = false
+        var pageClosed = false
+        var serverEnded = false
+        var hangingUp = false
+        var finished = false
+        init(id: String, name: String, task: URLSessionWebSocketTask) {
+            self.id = id
+            self.name = name
+            self.task = task
+        }
+    }
+
+    // Audio that arrives before the speaker is ready is kept, bounded, as
+    // the page's engine does (PENDING_MAX_SECONDS of 24 kHz s16le).
+    private static let pendingMaxBytes = 24000 * 2 * 4
+
+    private let provider: CXProvider
+    private let callController = CXCallController()
+    private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+    private var call: Call?
+
+    private override init() {
+        let config = CXProviderConfiguration()
+        config.supportsVideo = false
+        config.maximumCallGroups = 1
+        config.maximumCallsPerCallGroup = 1
+        config.supportedHandleTypes = [.generic]
+        config.includesCallsInRecents = false
+        provider = CXProvider(configuration: config)
+        super.init()
+        provider.setDelegate(self, queue: nil)
+    }
+
+    // MARK: Page operations
+
+    func open(id: String, url raw: String, name: String) {
+        if let existing = call { finish(existing, remote: false) }
+        guard let url = Self.callURL(raw), let credential = Self.credential() else {
+            callLog.error("voice call refused: bad url or no paired credential")
+            emit(id, "close")
+            return
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Moa-Device \(credential)", forHTTPHeaderField: "Authorization")
+        let task = session.webSocketTask(with: request)
+        let call = Call(id: id, name: String(name.prefix(80)), task: task)
+        self.call = call
+        task.resume()
+        receive(call)
+        let handle = CXHandle(type: .generic, value: call.name)
+        let start = CXStartCallAction(call: call.uuid, handle: handle)
+        callController.request(CXTransaction(action: start)) { [weak self] error in
+            guard let error else { return }
+            // Without a system call (another call is on, or CallKit is not
+            // available) the call still runs, but only while the app is open.
+            callLog.error("CallKit start failed: \(error.localizedDescription, privacy: .public)")
+            DispatchQueue.main.async { self?.activateWithoutCallKit(call) }
+        }
+        callLog.info("voice call opening")
+    }
+
+    func send(id: String, text: String) {
+        guard let call, call.id == id, call.open else { return }
+        call.task.send(.string(text)) { _ in }
+    }
+
+    func closeFromPage(id: String) {
+        guard let call, call.id == id else { return }
+        call.pageClosed = true
+        finish(call, remote: false)
+    }
+
+    func startAudio(id: String) {
+        guard let call, call.id == id else {
+            emit(id, "audio", "microphone")
+            return
+        }
+        call.audioWanted = true
+        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+            DispatchQueue.main.async {
+                guard let self, let current = self.call, current === call else { return }
+                guard granted else {
+                    self.emit(id, "audio", "microphone")
+                    return
+                }
+                if call.sessionActive { self.startEngine(call) }
+            }
+        }
+    }
+
+    func stopAudio(id: String) {
+        guard let call, call.id == id else { return }
+        call.audioWanted = false
+        call.audio?.stop()
+        call.audio = nil
+    }
+
+    func interrupt(id: String) {
+        guard let call, call.id == id else { return }
+        call.pending = []
+        call.pendingBytes = 0
+        call.audio?.interrupt()
+    }
+
+    func setMutedFromPage(id: String, muted: Bool) {
+        guard let call, call.id == id, call.muted != muted else { return }
+        let action = CXSetMutedCallAction(call: call.uuid, muted: muted)
+        callController.request(CXTransaction(action: action)) { [weak self] error in
+            guard error != nil else { return }
+            DispatchQueue.main.async { self?.applyMute(call, muted: muted, fromSystem: false) }
+        }
+    }
+
+    // MARK: Call lifecycle
+
+    private func receive(_ call: Call) {
+        call.task.receive { [weak self] result in
+            guard let self, self.call === call else { return }
+            switch result {
+            case .failure:
+                self.finish(call, remote: true)
+            case .success(.data(let data)):
+                self.play(call, data)
+                self.receive(call)
+            case .success(.string(let text)):
+                self.control(call, text)
+                self.emit(call.id, "message", text)
+                self.receive(call)
+            @unknown default:
+                self.receive(call)
+            }
+        }
+    }
+
+    private func control(_ call: Call, _ text: String) {
+        guard
+            let data = text.data(using: .utf8),
+            let msg = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = msg["type"] as? String
+        else { return }
+        switch type {
+        case "speech_started":
+            interrupt(id: call.id)
+        case "state":
+            if msg["interrupt"] as? Bool == true { interrupt(id: call.id) }
+        case "ended":
+            call.serverEnded = true
+        default:
+            break
+        }
+    }
+
+    private func play(_ call: Call, _ data: Data) {
+        if let audio = call.audio {
+            audio.play(data)
+            return
+        }
+        call.pending.append(data)
+        call.pendingBytes += data.count
+        while call.pendingBytes > Self.pendingMaxBytes, !call.pending.isEmpty {
+            call.pendingBytes -= call.pending.removeFirst().count
+        }
+    }
+
+    private func startEngine(_ call: Call) {
+        guard call.audioWanted, call.audio == nil, !call.finished else { return }
+        let audio = NativeCallAudio()
+        audio.muted = call.muted
+        let task = call.task
+        audio.onFrame = { frame in task.send(.data(frame)) { _ in } }
+        audio.onPlayback = { [weak self] event in self?.emit(call.id, "playback", event) }
+        do {
+            try audio.start()
+        } catch {
+            callLog.error("voice audio start: \(error.localizedDescription, privacy: .public)")
+            emit(call.id, "audio", "microphone")
+            return
+        }
+        call.audio = audio
+        for chunk in call.pending { audio.play(chunk) }
+        call.pending = []
+        call.pendingBytes = 0
+        emit(call.id, "audio", "ok")
+        callLog.info("voice audio on: \(AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","), privacy: .public)")
+    }
+
+    private func applyMute(_ call: Call, muted: Bool, fromSystem: Bool) {
+        call.muted = muted
+        call.audio?.muted = muted
+        if call.open {
+            let text = "{\"type\":\"mute\",\"muted\":\(muted)}"
+            call.task.send(.string(text)) { _ in }
+        }
+        if fromSystem { emit(call.id, "mute", muted) }
+    }
+
+    // finish ends the call once: audio off, socket closed, system call ended
+    // and, unless the page closed it itself, the page told.
+    private func finish(_ call: Call, remote: Bool) {
+        guard !call.finished else { return }
+        call.finished = true
+        call.audio?.stop()
+        call.audio = nil
+        call.task.cancel(with: .normalClosure, reason: nil)
+        if remote {
+            provider.reportCall(with: call.uuid, endedAt: Date(), reason: call.serverEnded || call.hangingUp ? .remoteEnded : .failed)
+        } else {
+            callController.request(CXTransaction(action: CXEndCallAction(call: call.uuid))) { _ in }
+        }
+        if !call.pageClosed { emit(call.id, "close") }
+        if self.call === call { self.call = nil }
+        callLog.info("voice call finished remote=\(remote, privacy: .public) server_ended=\(call.serverEnded, privacy: .public)")
+    }
+
+    private func activateWithoutCallKit(_ call: Call) {
+        guard self.call === call, !call.sessionActive else { return }
+        do {
+            try Self.configureSession()
+            try AVAudioSession.sharedInstance().setActive(true)
+            call.sessionActive = true
+            if call.audioWanted { startEngine(call) }
+        } catch {
+            callLog.error("voice session without CallKit: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static func configureSession() throws {
+        // allowBluetoothHFP is hands-free, the only Bluetooth route with a
+        // microphone (headsets, the car); defaultToSpeaker keeps a call
+        // without headphones on the loudspeaker, as on the web.
+        try AVAudioSession.sharedInstance().setCategory(
+            .playAndRecord, mode: .voiceChat,
+            options: [.allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker]
+        )
+    }
+
+    // MARK: CXProviderDelegate
+
+    func providerDidReset(_ provider: CXProvider) {
+        if let call { finish(call, remote: false) }
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        guard let call, call.uuid == action.callUUID else {
+            action.fail()
+            return
+        }
+        do {
+            try Self.configureSession()
+        } catch {
+            callLog.error("voice session category: \(error.localizedDescription, privacy: .public)")
+        }
+        provider.reportOutgoingCall(with: call.uuid, startedConnectingAt: Date())
+        let update = CXCallUpdate()
+        update.localizedCallerName = call.name
+        update.remoteHandle = CXHandle(type: .generic, value: call.name)
+        update.hasVideo = false
+        update.supportsHolding = false
+        update.supportsGrouping = false
+        update.supportsUngrouping = false
+        update.supportsDTMF = false
+        provider.reportCall(with: call.uuid, updated: update)
+        if call.open { provider.reportOutgoingCall(with: call.uuid, connectedAt: Date()) }
+        action.fulfill()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+        action.fulfill()
+        guard let call, call.uuid == action.callUUID, !call.finished else { return }
+        // Hung up from the lock screen, a headset or the car: silence now,
+        // and let the server end the call so its record is saved; the page
+        // learns it from the server's "ended".
+        call.audioWanted = false
+        call.audio?.stop()
+        call.audio = nil
+        call.hangingUp = true
+        if call.open {
+            call.task.send(.string("{\"type\":\"hangup\"}")) { _ in }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self, self.call === call else { return }
+                self.finish(call, remote: true)
+            }
+        } else {
+            finish(call, remote: true)
+        }
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
+        action.fulfill()
+        guard let call, call.uuid == action.callUUID else { return }
+        applyMute(call, muted: action.isMuted, fromSystem: true)
+    }
+
+    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        guard let call else { return }
+        call.sessionActive = true
+        if call.audioWanted { startEngine(call) }
+    }
+
+    func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        guard let call else { return }
+        call.sessionActive = false
+        call.audio?.stop()
+        call.audio = nil
+    }
+
+    // MARK: URLSessionWebSocketDelegate
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        guard let call, call.task === webSocketTask else { return }
+        call.open = true
+        provider.reportOutgoingCall(with: call.uuid, connectedAt: Date())
+        emit(call.id, "open")
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        guard let call, call.task === webSocketTask else { return }
+        finish(call, remote: true)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let call, call.task === task else { return }
+        if let error { callLog.error("voice socket: \(error.localizedDescription, privacy: .public)") }
+        finish(call, remote: true)
+    }
+
+    // MARK: Helpers
+
+    private func emit(_ id: String, _ type: String, _ data: Any? = nil) {
+        var event: [String: Any] = ["id": id, "type": type]
+        if let data { event["data"] = data }
+        guard
+            let json = try? JSONSerialization.data(withJSONObject: event),
+            let text = String(data: json, encoding: .utf8)
+        else { return }
+        webView?.evaluateJavaScript("window.MoaNativeCall && window.MoaNativeCall.__event(\(text));")
+    }
+
+    // callURL accepts only the paired server's own voice call socket.
+    static func callURL(_ raw: String) -> URL? {
+        guard
+            var components = URLComponents(string: raw),
+            components.scheme?.lowercased() == "wss",
+            components.user == nil, components.password == nil,
+            components.query == nil, components.fragment == nil
+        else { return nil }
+        let parts = components.path.split(separator: "/", omittingEmptySubsequences: false)
+        guard
+            parts.count == 6, parts[0].isEmpty, parts[1] == "api", parts[2] == "voice",
+            parts[3] == "calls", !parts[4].isEmpty, parts[5] == "ws"
+        else { return nil }
+        components.scheme = "https"
+        guard let https = components.url, NativeServerBinding.matches(https) else { return nil }
+        components.scheme = "wss"
+        return components.url
+    }
+
+    private static func credential() -> String? {
+        guard
+            let stored = try? DeviceCredentialStore().load(),
+            let origin = URL(string: stored.origin),
+            NativeServerBinding.matches(origin),
+            stored.expiresAt > Date()
+        else { return nil }
+        return stored.credential
+    }
+}
+
+// The call's microphone and speaker: voice processing (echo cancellation)
+// on, s16le mono 24 kHz in 20 ms frames out, the provider's 24 kHz played
+// back. A route change (AirPods, the car) rebuilds the graph.
+final class NativeCallAudio {
+    private static let frameBytes = 480 * 2
+
+    var onFrame: ((Data) -> Void)?
+    var onPlayback: ((String) -> Void)?
+    var muted: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return mutedValue }
+        set { lock.lock(); mutedValue = newValue; lock.unlock() }
+    }
+
+    private let engine = AVAudioEngine()
+    private let player = AVAudioPlayerNode()
+    private let wireFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
+    private let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
+    private let lock = NSLock()
+    private var mutedValue = false
+    private var converter: AVAudioConverter?
+    private var frame = Data()
+    private var queued = 0
+    private var generation = 0
+    private var running = false
+    private var configObserver: NSObjectProtocol?
+
+    func start() throws {
+        try engine.inputNode.setVoiceProcessingEnabled(true)
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: playFormat)
+        try startGraph()
+        running = true
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in self?.restart() }
+    }
+
+    private func startGraph() throws {
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw NSError(domain: "moa.voice", code: 1, userInfo: [NSLocalizedDescriptionKey: "no microphone input"])
+        }
+        let converter = AVAudioConverter(from: format, to: wireFormat)
+        self.converter = converter
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            self?.capture(buffer, converter)
+        }
+        engine.prepare()
+        try engine.start()
+        player.play()
+    }
+
+    private func restart() {
+        guard running else { return }
+        callLog.info("voice audio route changed: \(AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","), privacy: .public)")
+        engine.stop()
+        let was = queued > 0
+        generation += 1
+        queued = 0
+        do {
+            try startGraph()
+        } catch {
+            callLog.error("voice audio restart: \(error.localizedDescription, privacy: .public)")
+        }
+        if was { onPlayback?("drained") }
+    }
+
+    // Runs on the audio thread.
+    private func capture(_ buffer: AVAudioPCMBuffer, _ converter: AVAudioConverter?) {
+        guard let converter else { return }
+        let ratio = wireFormat.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
+        guard let out = AVAudioPCMBuffer(pcmFormat: wireFormat, frameCapacity: capacity) else { return }
+        var fed = false
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            if fed {
+                status.pointee = .noDataNow
+                return nil
+            }
+            fed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        guard error == nil, out.frameLength > 0, let samples = out.int16ChannelData else { return }
+        frame.append(Data(bytes: samples[0], count: Int(out.frameLength) * 2))
+        let silent = muted
+        while frame.count >= Self.frameBytes {
+            let chunk = frame.prefix(Self.frameBytes)
+            frame.removeFirst(Self.frameBytes)
+            if !silent { onFrame?(Data(chunk)) }
+        }
+    }
+
+    func play(_ data: Data) {
+        let count = data.count / 2
+        guard running, count > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: AVAudioFrameCount(count)),
+              let out = buffer.floatChannelData?[0]
+        else { return }
+        buffer.frameLength = AVAudioFrameCount(count)
+        data.withUnsafeBytes { raw in
+            for i in 0..<count {
+                out[i] = Float(Int16(littleEndian: raw.loadUnaligned(fromByteOffset: i * 2, as: Int16.self))) / 32768
+            }
+        }
+        let gen = generation
+        if queued == 0 { onPlayback?("playing") }
+        queued += 1
+        player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+            DispatchQueue.main.async { self?.played(gen) }
+        }
+    }
+
+    private func played(_ gen: Int) {
+        guard gen == generation, queued > 0 else { return }
+        queued -= 1
+        if queued == 0 { onPlayback?("drained") }
+    }
+
+    func interrupt() {
+        guard running else { return }
+        generation += 1
+        let was = queued > 0
+        queued = 0
+        player.stop()
+        player.play()
+        if was { onPlayback?("drained") }
+    }
+
+    func stop() {
+        guard running else { return }
+        running = false
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = nil
+        engine.inputNode.removeTap(onBus: 0)
+        player.stop()
+        engine.stop()
+        onFrame = nil
+        onPlayback = nil
+    }
+}

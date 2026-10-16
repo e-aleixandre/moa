@@ -10,11 +10,27 @@ import { store, setState } from './store.js';
 import { VoiceCallController } from './voice-call.js';
 import { createCallAudio } from './voice-call-audio.js';
 import { claimWakeLock } from './wake-lock.js';
+import { nativeCallBridge, createNativeCallDeps } from './voice-call-native.js';
+import { sessionTitle } from './util/format.js';
 
 let controller = null;
+let callName = '';
 
-// Injectable for tests: the controller's I/O boundary.
-const browserDeps = { fetch: undefined, WebSocket: undefined, createAudio: () => createCallAudio({ claimWakeLock }) };
+// The name the phone shows for the call: the owner, or the conversation.
+function partyName(sessionId) {
+  const s = store.get();
+  const owner = (s.owners?.list || []).find((o) => o.session_id === sessionId);
+  const session = s.sessions?.[sessionId];
+  return owner?.name || (session ? sessionTitle(session) : '');
+}
+
+// Injectable for tests: the controller's I/O boundary. Inside the iOS app
+// the socket and audio are the app's own (a system call that survives the
+// lock screen); elsewhere they are the page's.
+const nativeBridge = nativeCallBridge();
+const browserDeps = nativeBridge
+  ? { fetch: undefined, ...createNativeCallDeps(nativeBridge, { name: () => callName }) }
+  : { fetch: undefined, WebSocket: undefined, createAudio: () => createCallAudio({ claimWakeLock }) };
 let deps = browserDeps;
 export function __setVoiceCallDepsForTests(next) {
   controller = null;
@@ -50,6 +66,7 @@ export function startVoiceCall(sessionId, { provider, screen } = {}) {
       onState: (state) => publish(sessionId, state),
     });
   }
+  callName = partyName(sessionId);
   const showScreen = screen ?? !!store.get().isMobile;
   setState({ voiceCall: { ...controller.state(), sessionId, screen: showScreen } });
   controller.start(provider ? { provider } : {});

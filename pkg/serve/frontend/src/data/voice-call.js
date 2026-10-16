@@ -288,6 +288,10 @@ export class VoiceCallController {
           this.set({ passed: [...this.s.passed, { deliveryId: msg.delivery_id, summary: String(msg.summary || ''), queued: !!msg.queued }] });
         }
         return;
+      case 'native_mute':
+        // The app's own call was muted from the system call screen.
+        if (this.s.active) this.set({ muted: !!msg.muted });
+        return;
       case 'ended':
         this.finish(typeof msg.reason === 'string' ? msg.reason : '');
         return;

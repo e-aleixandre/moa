@@ -9,7 +9,7 @@ final class MoaBridgeViewController: CAPBridgeViewController {
     private let deviceAuthHandler = DeviceAuthMessageHandler()
     private let nativePushHandler = NativePushMessageHandler()
     private let savedSecretsHandler = SavedSecretsMessageHandler()
-    private let voiceAudioSession = VoiceAudioSessionController()
+    private let nativeCallHandler = NativeCallMessageHandler()
     private var serverRecovery: PairedServerRecoveryController?
 
     override func webView(with frame: CGRect, configuration: WKWebViewConfiguration) -> WKWebView {
@@ -36,7 +36,13 @@ final class MoaBridgeViewController: CAPBridgeViewController {
         configuration.userContentController.add(shareInboxHandler, name: ShareInboxMessageHandler.name)
         configuration.userContentController.add(deviceAuthHandler, name: DeviceAuthMessageHandler.name)
         configuration.userContentController.add(nativePushHandler, name: NativePushMessageHandler.name)
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: NativeCallMessageHandler.javaScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         configuration.userContentController.add(savedSecretsHandler, name: SavedSecretsMessageHandler.name)
+        configuration.userContentController.add(nativeCallHandler, name: NativeCallMessageHandler.name)
         return super.webView(with: frame, configuration: configuration)
     }
 
@@ -48,7 +54,7 @@ final class MoaBridgeViewController: CAPBridgeViewController {
         nativePushHandler.webView = webView
         savedSecretsHandler.webView = webView
         PushNavigator.shared.webView = webView
-        if let webView { voiceAudioSession.attach(to: webView) }
+        nativeCallHandler.webView = webView
         if let webView, let capacitorDelegate = webView.navigationDelegate {
             let recovery = PairedServerRecoveryController(webView: webView, forwardingTo: capacitorDelegate)
             serverRecovery = recovery
