@@ -40,8 +40,10 @@
 @media (prefers-reduced-motion: reduce) { .vcall-dot { animation: none !important; } }
 
 .vcall-bar-phase {
-  /* Text shrinks with an ellipsis so the 44px icons always stay on screen. */
-  flex: 0 1 auto;
+  /* The state keeps its words (capped); the meta beside it is what gives way
+     to the icons on a narrow bar. */
+  flex: 0 0 auto;
+  max-width: 55%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
