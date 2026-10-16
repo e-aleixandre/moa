@@ -8,6 +8,7 @@ import { focusedSessionId } from "../../../data/selectors.js";
 import { openSession, setActiveSession } from "../../../data/tile-actions.js";
 import { openDrawer, closeDrawer, setDrawerProjectCollapsed, setSectionCollapsed, setSidebarMode } from "../../../data/drawer.js";
 import { closeOwner, createOwner, openOwnerConversation } from "../../../data/owners.js";
+import { callOwner } from "../../../data/voice-call-session.js";
 import { openPalette } from "../../../data/palette.js";
 import { openPersistedSubagent, openBashJob, closeSession, deleteSession, resumeSession, rewindToMessage, stopRun } from "../../../data/session-actions.js";
 import { addToast } from "../../../data/notifications.js";
@@ -608,6 +609,9 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         /* Choosing an owner closes the drawer onto its conversation, exactly
            as choosing a session does. */
         onOpenOwner={(own) => { if (openOwnerConversation(own)) closeDrawer(); }}
+        /* A tap calls without opening the conversation: the call screen
+           comes up over the drawer. */
+        onCallOwner={(own) => { callOwner(own); }}
         onCloseOwner={(own) => { closeOwner(own); }}
         onNewOwner={onNewOwnerFromDrawer}
         drawerCollapsed={chrome.drawerCollapsed}

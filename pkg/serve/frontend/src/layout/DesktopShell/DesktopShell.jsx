@@ -8,6 +8,7 @@ import { openSession } from "../../data/tile-actions.js";
 import { openPalette } from "../../data/palette.js";
 import { setDrawerProjectCollapsed, setSectionCollapsed, setSidebarMode } from "../../data/drawer.js";
 import { closeOwner, createOwner, openOwnerConversation } from "../../data/owners.js";
+import { callOwner } from "../../data/voice-call-session.js";
 import { closeSession, deleteSession, resumeSession } from "../../data/session-actions.js";
 import { dismissEvent, dismissSource, retryEvents, routeEvent, routeEventToNewSession, routeEventToOwner, toggleInbox } from "../../data/events.js"; // wake-on-event
 import { selectDesktopChrome } from "../Sidebar/sessions.js";
@@ -77,6 +78,9 @@ export function DesktopShell({ version, children }) {
         owners={chrome.owners}
         activeOwnerId={chrome.activeOwnerId}
         onOpenOwner={(own) => openOwnerConversation(own)}
+        /* The desktop has no call screen: the call shows in the owner's
+           conversation, so the ☎ opens it too. */
+        onCallOwner={(own) => { if (callOwner(own)) openOwnerConversation(own); }}
         onCloseOwner={(own) => { closeOwner(own); }}
         onNewOwner={() => setNewOwnerOpen(true)}
         collapsedProjects={chrome.drawerCollapsed}

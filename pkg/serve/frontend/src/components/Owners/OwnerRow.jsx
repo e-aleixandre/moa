@@ -2,6 +2,7 @@ import { Dot } from "../SessionRow/SessionRow.jsx";
 import { projectName } from "../../data/util/format.js";
 import { ownerDotState, ownerLine, ownerState } from "../../data/owners-model.js";
 import { OwnerAvatarFor } from "./OwnerAvatar.jsx";
+import { PhoneCall } from "lucide-preact";
 import "./OwnerAvatar.css";
 import "./OwnerRow.css";
 
@@ -41,7 +42,11 @@ function ChevronIcon() {
    height rhythm and the same two-line grammar, so the column keeps its beat,
    but the avatar and the missing age say "this is not one of the sessions
    below" before you have read a word. */
-export function OwnerRow({ owner, project = false, active = false, onOpen }) {
+// `onCall` adds the row's call button (☎): a tap calls this owner without
+// opening its conversation. `call` is "here" while the call is with this
+// owner (the button then returns to it) and "elsewhere" while another call
+// runs (the button rests).
+export function OwnerRow({ owner, project = false, active = false, onOpen, onCall, call = "" }) {
   const { lead, tail, stated } = ownerLine(owner);
   const state = ownerState(owner);
   const place = projectName(owner.root);
@@ -106,6 +111,18 @@ export function OwnerRow({ owner, project = false, active = false, onOpen }) {
           )}
         </span>
       </button>
+      {onCall && owner.session_id && (
+        <button
+          type="button"
+          class={`ow-orow-call${call === "here" ? " is-here" : ""}`}
+          aria-label={call === "here" ? `Back to the call with ${owner.name}` : `Call ${owner.name}`}
+          title={call === "elsewhere" ? "Hang up your other call first" : call === "here" ? "Back to the call" : `Call ${owner.name}`}
+          disabled={call === "elsewhere"}
+          onClick={() => onCall(owner)}
+        >
+          <PhoneCall size={15} aria-hidden="true" />
+        </button>
+      )}
     </span>
   );
 }

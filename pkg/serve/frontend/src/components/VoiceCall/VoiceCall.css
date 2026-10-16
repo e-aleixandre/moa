@@ -1,0 +1,212 @@
+/* VoiceCall — the composer's call row and the phone's call screen. Tokens
+   only (`--zl-*`). The row is flat, like the slab's other rows; the screen is
+   the one full-bleed surface, as a phone call is. */
+
+.vcall-bar {
+  flex: 1 0 100%;
+  order: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--zl-fs-body);
+  color: var(--zl-t2);
+}
+.vcall-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 6px;
+}
+.vcall-spring { flex: 1 1 auto; min-width: 0; }
+.vcall-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--zl-t4);
+  flex: none;
+}
+.vcall-dot.is-listening,
+.vcall-dot.is-speaking,
+.vcall-dot.is-consulting { background: var(--zl-green); animation: vcall-breathe var(--breath-running) ease-in-out infinite; }
+.vcall-dot.is-starting,
+.vcall-dot.is-connecting,
+.vcall-dot.is-ending { background: var(--zl-yellow); }
+.vcall-dot.is-failed { background: var(--zl-red); }
+@keyframes vcall-breathe { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .vcall-dot { animation: none !important; } }
+
+.vcall-bar-phase {
+  flex: none;
+  color: var(--zl-t1);
+  font-weight: 500;
+  font-size: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+}
+.is-failed .vcall-bar-phase,
+.is-ended .vcall-bar-phase { white-space: normal; flex: 1 1 auto; font-weight: 400; color: var(--zl-t2); }
+.vcall-bar-phase.is-link { cursor: pointer; }
+.vcall-bar-meta {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+}
+.vcall-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--zl-r-sm);
+  border: 0;
+  background: none;
+  color: var(--zl-t3);
+  cursor: pointer;
+}
+.vcall-icon:hover { color: var(--zl-t1); background: var(--zl-hi); }
+.vcall-icon.is-on { color: var(--zl-red); }
+.vcall-bar-tap {
+  padding: 4px 6px;
+  color: var(--zl-yellow);
+  font-size: var(--zl-fs-meta);
+}
+.vcall-paid {
+  align-self: flex-start;
+  margin: 2px 6px 4px;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: var(--zl-r-md);
+  border: 1px solid var(--zl-accent-line);
+  background: var(--zl-accent-dim);
+  color: var(--zl-t1);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.vcall-paid:hover { background: var(--zl-accent-med); }
+
+/* ── The phone's call screen ───────────────────────────────────────────── */
+.vcall-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: calc(env(safe-area-inset-top, 0px) + 56px) 20px calc(env(safe-area-inset-bottom, 0px) + 28px);
+  background:
+    radial-gradient(70% 40% at 50% 18%, color-mix(in oklch, var(--zl-accent) 30%, transparent), transparent 70%),
+    var(--zl-canvas);
+  color: var(--zl-t1);
+  overflow-y: auto;
+}
+.vcall-screen-back {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 12px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--zl-t2);
+  cursor: pointer;
+}
+.vcall-screen-face { margin-top: 8px; }
+.vcall-screen-glyph {
+  width: 96px;
+  height: 96px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--zl-raised);
+  color: var(--zl-t2);
+}
+.vcall-screen-name {
+  margin-top: 14px;
+  font-size: 22px;
+  font-weight: 600;
+  text-align: center;
+}
+.vcall-screen-meta {
+  margin-top: 4px;
+  min-height: 18px;
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+}
+.vcall-screen-state {
+  margin-top: 10px;
+  max-width: 320px;
+  text-align: center;
+  color: var(--zl-t2);
+  font-size: var(--zl-fs-body);
+}
+.is-failed .vcall-screen-state { color: var(--zl-t1); }
+.vcall-screen-fail { margin-top: 18px; }
+.vcall-screen-fail .vcall-paid { margin: 0; min-height: 48px; padding: 0 20px; }
+
+.vcall-live {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.vcall-card {
+  border: 1px solid var(--zl-line-2);
+  border-radius: var(--zl-r-lg);
+  background: var(--zl-raised);
+  padding: 10px 12px;
+  font-size: var(--zl-fs-body);
+}
+.vcall-card-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--zl-fs-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--zl-t3);
+}
+.vcall-card-h.is-tap { color: var(--zl-yellow); margin-bottom: 6px; }
+.vcall-card.is-tap { border-color: color-mix(in oklch, var(--zl-yellow) 45%, transparent); }
+.vcall-card.is-asked { box-shadow: 0 0 0 2px color-mix(in oklch, var(--zl-yellow) 35%, transparent); }
+.vcall-card.is-secret { display: flex; align-items: center; gap: 8px; color: var(--zl-t2); }
+.vcall-card-note { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--zl-t4); }
+.vcall-card-body { margin: 6px 0 0; color: var(--zl-t1); white-space: pre-wrap; }
+
+.vcall-spring-v { flex: 1 1 auto; min-height: 24px; }
+.vcall-screen-buttons { display: flex; gap: 40px; justify-content: center; }
+.vcall-round {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: none;
+  color: var(--zl-t2);
+  font: inherit;
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+.vcall-round-disc {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--zl-raised);
+  color: var(--zl-t1);
+}
+.vcall-round.is-on .vcall-round-disc { background: var(--zl-t1); color: var(--zl-canvas); }
+.vcall-round.is-end .vcall-round-disc { background: var(--zl-red); color: var(--zl-canvas); }
+.vcall-round:disabled { opacity: 0.5; cursor: default; }

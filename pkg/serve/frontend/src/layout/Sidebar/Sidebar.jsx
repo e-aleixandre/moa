@@ -1,5 +1,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { useFlip } from "../../hooks/useFlip.js";
+import { useStore } from "../../hooks/useStore.js";
+import { voiceCallSupported } from "../../data/voice-call-session.js";
 import { InboxView } from "../../components/InboxView/InboxView.jsx";
 import { SessionCardMenu } from "../../components/SessionCardMenu/SessionCardMenu.jsx";
 import { SessionRow, Dot } from "../../components/SessionRow/SessionRow.jsx";
@@ -328,6 +330,8 @@ export function Sidebar({
   owners = [],
   activeOwnerId = null,
   onOpenOwner,
+  // The owner row's ☎: calls that owner (data/voice-call-session.js).
+  onCallOwner,
   // Close on an owner's ⋯ (the session menu, same gesture). Reopening is
   // opening it.
   onCloseOwner,
@@ -341,6 +345,10 @@ export function Sidebar({
   const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [showAllSaved, setShowAllSaved] = useState(false);
   const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
+  const voiceCall = useStore((s) => s.voiceCall);
+  const ownerCall = (owner) => (!voiceCall?.active ? ""
+    : voiceCall.sessionId === owner.session_id ? "here" : "elsewhere");
+  const callable = !!onCallOwner && voiceCallSupported();
 
   // Nothing filters this list any more -- the palette is where you look for a
   // session -- so what is left is the roster as it stands.
@@ -569,6 +577,8 @@ export function Sidebar({
                         project
                         active={sectionOwner.id === activeOwnerId}
                         onOpen={onOpenOwner}
+                        onCall={callable ? onCallOwner : undefined}
+                        call={ownerCall(sectionOwner)}
                       />
                     )}
                     {shownSessions.map((s) => row(s, true))}
@@ -612,6 +622,8 @@ export function Sidebar({
                             owner={owner}
                             active={owner.id === activeOwnerId}
                             onOpen={onOpenOwner}
+                            onCall={callable ? onCallOwner : undefined}
+                            call={ownerCall(owner)}
                           />
                           {onCloseOwner && <OwnerMenu owner={owner} onClose={onCloseOwner} onReopen={onOpenOwner} />}
                         </div>

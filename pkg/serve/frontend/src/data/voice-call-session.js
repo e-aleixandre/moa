@@ -1,0 +1,99 @@
+// voice-call-session.js — the one voice call of this client, in the app store.
+//
+// A call belongs to the app, not to a composer: the owner row can start it
+// without opening the conversation, the phone's call screen and the
+// conversation's composer both show it, and switching conversations does not
+// hang up. The store slice `voiceCall` mirrors the controller's state plus
+// which session it is with and whether the phone's call screen is open.
+
+import { store, setState } from './store.js';
+import { VoiceCallController } from './voice-call.js';
+import { createCallAudio } from './voice-call-audio.js';
+import { claimWakeLock } from './wake-lock.js';
+
+let controller = null;
+
+// Injectable for tests: the controller's I/O boundary.
+const browserDeps = { fetch: undefined, WebSocket: undefined, createAudio: () => createCallAudio({ claimWakeLock }) };
+let deps = browserDeps;
+export function __setVoiceCallDepsForTests(next) {
+  controller = null;
+  deps = next ? { ...browserDeps, ...next } : browserDeps;
+  setState({ voiceCall: null });
+}
+
+export function voiceCallSupported() {
+  if (typeof deps.supported === 'boolean') return deps.supported;
+  return typeof globalThis.WebSocket === 'function'
+    && typeof (globalThis.AudioContext || globalThis.webkitAudioContext) === 'function'
+    && typeof globalThis.AudioWorkletNode === 'function'
+    && !!globalThis.navigator?.mediaDevices?.getUserMedia;
+}
+
+function publish(sessionId, state) {
+  const prev = store.get().voiceCall;
+  setState({ voiceCall: { ...state, sessionId, screen: prev?.sessionId === sessionId ? !!prev.screen : false } });
+}
+
+// startVoiceCall calls sessionId. Without provider the server uses the plan;
+// a paid provider is passed only from the explicit paid button.
+export function startVoiceCall(sessionId, { provider, screen } = {}) {
+  const current = store.get().voiceCall;
+  if (!sessionId || (current?.active && current.sessionId !== sessionId)) return false;
+  if (current?.active) return false;
+  if (!controller || controller.sessionId !== sessionId) {
+    controller = new VoiceCallController({
+      sessionId,
+      fetch: deps.fetch,
+      WebSocket: deps.WebSocket,
+      createAudio: deps.createAudio,
+      onState: (state) => publish(sessionId, state),
+    });
+  }
+  const showScreen = screen ?? !!store.get().isMobile;
+  setState({ voiceCall: { ...controller.state(), sessionId, screen: showScreen } });
+  controller.start(provider ? { provider } : {});
+  return true;
+}
+
+// voiceCallStream is the call's microphone, for the composer's level wash.
+export function voiceCallStream() {
+  return controller?.audio?.stream || null;
+}
+
+export function hangupVoiceCall() {
+  return controller?.hangup();
+}
+
+export function setVoiceCallMuted(muted) {
+  controller?.setMuted(muted);
+}
+
+// showVoiceCallScreen opens or leaves the phone's call screen; the call goes
+// on either way.
+export function showVoiceCallScreen(open) {
+  const call = store.get().voiceCall;
+  if (call) setState({ voiceCall: { ...call, screen: !!open } });
+}
+
+// dismissVoiceCall clears a finished or failed call from view.
+export function dismissVoiceCall() {
+  const call = store.get().voiceCall;
+  if (!call || call.active) return;
+  setState({ voiceCall: null });
+}
+
+// callOwner is the owner row's ☎: it calls the owner's conversation, or
+// returns to the call already running with it. It reports whether a call is
+// now with this owner, so the desktop can open the conversation that shows it.
+export function callOwner(owner) {
+  const sessionId = owner?.session_id;
+  if (!sessionId) return false;
+  const current = store.get().voiceCall;
+  if (current?.active) {
+    if (current.sessionId !== sessionId) return false;
+    showVoiceCallScreen(!!store.get().isMobile);
+    return true;
+  }
+  return startVoiceCall(sessionId);
+}
