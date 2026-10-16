@@ -208,8 +208,16 @@ func (r *voiceCallRegistry) handleSettings(w http.ResponseWriter, req *http.Requ
 		return
 	}
 	if model != nil && *model != "" {
-		if _, ok := core.ResolveModel(*model); !ok {
+		m, ok := core.ResolveModel(*model)
+		if !ok {
 			voiceError(w, http.StatusBadRequest, map[string]any{"error": "unknown_model"})
+			return
+		}
+		// The handoff is bound to the ChatGPT plan's OAuth sign-in
+		// (newVoiceBackendFactory refuses any other provider), so a model of
+		// another provider would fail every call after being saved.
+		if m.Provider != "openai" {
+			voiceError(w, http.StatusBadRequest, map[string]any{"error": "unsupported_model"})
 			return
 		}
 	}

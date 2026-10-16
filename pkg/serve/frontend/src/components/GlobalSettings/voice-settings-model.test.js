@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { voiceValue, planOptions, paidOptions, usageLine } from './voice-settings-model.js';
 
 const status = {
-  provider: '', paid_provider: 'xai-api', backend_model: 'gpt-6-sol', default: 'grok-plan', active_calls: 0,
+  provider: '', paid_provider: 'xai-api', backend_model: 'gpt-6.1-sol', default: 'grok-plan', active_calls: 0,
   providers: [
     { id: 'chatgpt-plan', paid: false, state: 'not_connected', billing: { kind: 'plan_unverified' } },
     { id: 'grok-plan', paid: false, state: 'ready', billing: { kind: 'plan_unverified' } },

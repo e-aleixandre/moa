@@ -34,13 +34,16 @@ func vsProvider(s voiceStatus, id string) voiceProviderStatus {
 	return voiceProviderStatus{}
 }
 
-// Defaults are N2 (ChatGPT, then Grok; gpt-6-sol behind the tools), the
+// Defaults are N2 (ChatGPT, then Grok; gpt-6.1-sol behind the tools), the
 // status says only ready/not connected, and choosing a paid provider in
 // Settings never makes a call paid by itself.
 func TestVoiceSettings_DefaultsSafeStatusAndPaidOnlyOffered(t *testing.T) {
 	f := vpNewFixture(t, "grok-plan")
 	f.harnessOnly = true
 	s := vsStatus(t, f)
+	if core.DefaultVoiceBackendModel != "gpt-6.1-sol" {
+		t.Fatalf("default backend model = %q", core.DefaultVoiceBackendModel)
+	}
 	if s.BackendModel != core.DefaultVoiceBackendModel || s.Provider != "" || s.PaidProvider != "" || s.Default != "grok-plan" || s.ActiveCalls != 0 {
 		t.Fatalf("defaults = %+v", s)
 	}
@@ -61,10 +64,20 @@ func TestVoiceSettings_DefaultsSafeStatusAndPaidOnlyOffered(t *testing.T) {
 		{"provider": "xai-api"},        // a paid provider is never the default
 		{"paid_provider": "grok-plan"}, // a plan is not a paid alternative
 		{"backend_model": "no-such-model"},
+		{"backend_model": "claude-sonnet-5-5"}, // the handoff only runs on the ChatGPT plan's provider
 	} {
 		if st, body, _, _ := f.request("PATCH", "/api/voice/settings", bad, f.owner()); st != 400 {
 			t.Fatalf("PATCH %v = %d %s, want 400", bad, st, body)
 		}
+	}
+	// A model of the plan's provider is saved and reported; clearing restores the default.
+	f.mustRequest("PATCH", "/api/voice/settings", map[string]any{"backend_model": "gpt-6-luna"}, f.owner(), 200)
+	if s := vsStatus(t, f); s.BackendModel != "gpt-6-luna" {
+		t.Fatalf("backend model after PATCH = %q", s.BackendModel)
+	}
+	f.mustRequest("PATCH", "/api/voice/settings", map[string]any{"backend_model": ""}, f.owner(), 200)
+	if s := vsStatus(t, f); s.BackendModel != core.DefaultVoiceBackendModel {
+		t.Fatalf("backend model after clearing = %q", s.BackendModel)
 	}
 	f.mustRequest("PATCH", "/api/voice/settings", map[string]any{"provider": "chatgpt-plan", "paid_provider": "xai-api"}, f.owner(), 200)
 	cfg := core.LoadGlobalConfig()

@@ -30,7 +30,7 @@ import {
 import { savedSecretsBridge, listSaved } from "../../data/saved-secrets.js";
 import { savedLine, savedValue, sortSaved, withoutAlias } from "./saved-secrets-model.js";
 import { ProvidersPage } from "./ProvidersPage.jsx";
-import { voiceValue, planOptions, paidOptions, usageLine } from "./voice-settings-model.js";
+import { voiceValue, planOptions, paidOptions, usageLine, backendModelChoices, backendModelName } from "./voice-settings-model.js";
 import { providersValue } from "./providers-model.js";
 import { useProviderStatus } from "../../data/providers.js";
 import "./GlobalSettings.css";
@@ -511,15 +511,50 @@ function CompactModelPage({ state, onDone }) {
   );
 }
 
+// The model behind a call's tools. Saved now, used by the NEXT call: one that
+// is running keeps the model it started with.
+export function VoiceModelPage({ state, onDone }) {
+  const { status, loaded, save, models = [] } = state;
+  const choices = backendModelChoices(models);
+  const current = status?.backend_model || "";
+  return (
+    <>
+      <p class="zl-set-sum">
+        The model that works for you during a call. It runs on your ChatGPT
+        plan, so only OpenAI models are offered. The next call uses it; a call
+        in progress keeps its own.
+      </p>
+      <div role="radiogroup" aria-label="Requests run on">
+        {choices.map((m) => (
+          <Option
+            key={m.catalogId}
+            label={m.name}
+            desc={m.catalogId}
+            on={current === m.catalogId}
+            disabled={!loaded}
+            onPick={() => { save({ backend_model: m.catalogId }); onDone?.(); }}
+          />
+        ))}
+      </div>
+      {loaded && choices.length === 0 && <p class="zl-set-empty">No OpenAI model is available.</p>}
+    </>
+  );
+}
+
 function useVoiceSettings(active) {
   const [status, setStatus] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [models, setModels] = useState([]);
   useEffect(() => {
     if (!active) return undefined;
     let live = true;
-    api("GET", "/api/voice/status").catch(() => null).then((next) => {
+    Promise.all([
+      api("GET", "/api/voice/status").catch(() => null),
+      api("GET", "/api/models").catch(() => []),
+    ]).then(([next, list]) => {
       if (!live) return;
       setStatus(next);
+      setModels(deriveModelSpecs(list || []));
       setLoaded(true);
     });
     return () => { live = false; };
@@ -527,13 +562,13 @@ function useVoiceSettings(active) {
   const save = (patch) => api("PATCH", "/api/voice/settings", patch)
     .then((next) => setStatus(next))
     .catch(() => addToast({ title: "Could not save the voice setting", detail: "Try again.", type: "error" }));
-  return { status, loaded, save };
+  return { status, loaded, save, models };
 }
 
 // Calls: which plan a call uses, which paid provider is offered when
 // the plan fails (only ever on a tap), and what recent calls measured.
-export function VoicePage({ state, onProviders }) {
-  const { status, loaded, save } = state;
+export function VoicePage({ state, onProviders, onModel }) {
+  const { status, loaded, save, models = [] } = state;
   if (loaded && !status) return <p class="zl-set-empty">Voice settings are unavailable on this server.</p>;
   const plans = planOptions(status);
   const paid = paidOptions(status);
@@ -579,10 +614,13 @@ export function VoicePage({ state, onProviders }) {
         <button type="button" class="zl-set-link zl-set-inline" onClick={onProviders}>Open Providers</button>
       )}
       {status?.backend_model && (
-        <div class="zl-set-row is-static">
-          <span class="zl-set-l">Requests run on<em>The model that works for the call.</em></span>
-          <span class="zl-set-v zl-data">{status.backend_model}</span>
-        </div>
+        <Row
+          label="Requests run on"
+          hint="The model that works for the call."
+          value={backendModelName(models, status.backend_model)}
+          onOpen={onModel}
+          pageLabel="Requests run on"
+        />
       )}
       <span class="zl-set-k is-page">Recent calls</span>
       {recent.length === 0 ? (
@@ -1118,7 +1156,8 @@ export function GlobalSettings({
             {page === "subagent-models" && <SubagentModelsPage state={subagents} />}
             {page === "devices" && <DevicesPage state={devices} onClose={onClose} />}
             {page === "saved-secrets" && <SavedSecretsPage state={saved} />}
-            {page === "voice" && <VoicePage state={voiceSettings} onProviders={() => setPage("providers")} />}
+            {page === "voice" && <VoicePage state={voiceSettings} onProviders={() => setPage("providers")} onModel={() => setPage("voice-model")} />}
+            {page === "voice-model" && <VoiceModelPage state={voiceSettings} onDone={() => setPage("voice")} />}
             {page === "providers" && (
               <ProvidersPage
                 focusProvider={providerFocus?.provider || ""}

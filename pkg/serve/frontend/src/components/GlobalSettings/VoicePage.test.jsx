@@ -9,7 +9,7 @@ mock.module('preact/hooks', () => ({
 }));
 mock.module('../../util/sanitize.js', () => ({ sanitizeHtml(html) { return html; } }));
 
-const { VoicePage } = await import('./GlobalSettings.jsx');
+const { VoicePage, VoiceModelPage } = await import('./GlobalSettings.jsx');
 
 function walk(node, visit) {
   if (Array.isArray(node)) return node.forEach((n) => walk(n, visit));
@@ -54,4 +54,37 @@ test('the page and its Settings row are both called Calls', async () => {
   expect(SETTINGS_PAGES.voice).toBe('Calls');
   const source = (await import('node:fs')).readFileSync(new URL('./GlobalSettings.jsx', import.meta.url), 'utf8');
   expect(source).toContain('label="Calls"');
+});
+
+const models = [
+  { catalogId: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', provider: 'openai' },
+  { catalogId: 'gpt-6-luna', name: 'GPT-6 Luna', provider: 'openai' },
+  { catalogId: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', provider: 'anthropic' },
+];
+
+test('Requests run on is a row that opens the model page and reads the model by name', () => {
+  let opened = 0;
+  const tree = VoicePage({
+    state: { status: { ...status, backend_model: 'gpt-6.1-sol' }, loaded: true, save() {}, models },
+    onModel: () => { opened += 1; },
+  });
+  const row = find(tree, (n) => n.props?.label === 'Requests run on')[0];
+  expect(row.props.value).toBe('GPT-6.1 Sol');
+  row.props.onOpen();
+  expect(opened).toBe(1);
+});
+
+test('the model page offers only OpenAI models, marks the current one and saves the pick', () => {
+  const saved = [];
+  let done = 0;
+  const tree = VoiceModelPage({
+    state: { status: { ...status, backend_model: 'gpt-6.1-sol' }, loaded: true, save: (p) => saved.push(p), models },
+    onDone: () => { done += 1; },
+  });
+  const options = find(tree, (n) => n.props?.label && n.props?.onPick);
+  expect(options.map((o) => o.props.label)).toEqual(['GPT-6.1 Sol', 'GPT-6 Luna']);
+  expect(options.map((o) => o.props.on)).toEqual([true, false]);
+  options[1].props.onPick();
+  expect(saved).toEqual([{ backend_model: 'gpt-6-luna' }]);
+  expect(done).toBe(1);
 });

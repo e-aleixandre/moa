@@ -83,3 +83,18 @@ export function usageLine(u) {
     delta: `Session spend while on the call: $${delta.toFixed(2)} (includes anything else it ran)`,
   };
 }
+
+// backendModelChoices are the models that can serve a call's tools: the
+// handoff is bound to the ChatGPT plan's sign-in, so only OpenAI's. `models`
+// are the derived catalog specs (deriveModelSpecs).
+export function backendModelChoices(models) {
+  return (models || []).filter((m) => m.provider === 'openai');
+}
+
+// backendModelName is the row's reading: the catalog's name, or the raw id
+// when the catalog does not know it (never a guess).
+export function backendModelName(models, id) {
+  if (!id) return '';
+  const hit = (models || []).find((m) => m.catalogId === id);
+  return hit?.name || id;
+}

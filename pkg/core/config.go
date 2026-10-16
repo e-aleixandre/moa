@@ -130,7 +130,7 @@ type VoiceConfig struct {
 
 // DefaultVoiceBackendModel serves the tools of a voice call when no model is
 // configured.
-const DefaultVoiceBackendModel = "gpt-6-sol"
+const DefaultVoiceBackendModel = "gpt-6.1-sol"
 
 // GetVoiceConfig returns the voice settings with defaults filled in.
 func GetVoiceConfig(cfg MoaConfig) VoiceConfig {
