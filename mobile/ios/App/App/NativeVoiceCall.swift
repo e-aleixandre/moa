@@ -411,7 +411,8 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             try audio.start()
         } catch {
             callLog.error("voice audio start: \(error.localizedDescription, privacy: .public)")
-            emit(call, "audio", "microphone")
+            // Not the user's permission: the page may take the call over.
+            emit(call, "audio", "audio_failed")
             finish(call, remote: false, why: "engine \(Self.code(error)) category \(call.categoryError.isEmpty ? "ok" : call.categoryError) route \(AVAudioSession.sharedInstance().currentRoute.inputs.first?.portType.rawValue ?? "none")")
             return
         }
@@ -443,7 +444,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         call.finished = true
         call.audio?.stop()
         call.audio = nil
-        let reason = String("native:\(why.isEmpty ? "unspecified" : why) mic=\(Self.micPermission())".prefix(120))
+        let reason = Self.closeReason("native:\(why.isEmpty ? "unspecified" : why) mic=\(Self.micPermission())")
         callLog.error("voice call ending: \(reason, privacy: .public)")
         call.task.cancel(with: .normalClosure, reason: reason.data(using: .utf8))
         if call.manualSession {
@@ -469,7 +470,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             if call.audioWanted { startEngine(call) }
         } catch {
             callLog.error("voice session without CallKit: \(error.localizedDescription, privacy: .public)")
-            emit(call, "audio", "microphone")
+            emit(call, "audio", "audio_failed")
             finish(call, remote: false, why: "callkit \(callKitError) session \(Self.code(error))")
         }
     }
@@ -611,6 +612,20 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             let text = String(data: json, encoding: .utf8)
         else { return }
         webView?.evaluateJavaScript("window.MoaNativeCall && window.MoaNativeCall.__event(\(text));")
+    }
+
+    // closeReason fits a WebSocket close reason: at most 123 bytes of UTF-8,
+    // never cut inside a character.
+    static func closeReason(_ text: String) -> String {
+        var out = ""
+        var bytes = 0
+        for ch in text {
+            let n = String(ch).utf8.count
+            if bytes + n > 123 { break }
+            out.append(ch)
+            bytes += n
+        }
+        return out
     }
 
     static func code(_ error: Error) -> String {

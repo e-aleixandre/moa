@@ -236,3 +236,53 @@ test('native call: the app dropping the call before audio hands the same call to
   expect(c.state().endedReason).toBe('client_lost');
   await started;
 });
+
+test('native call: the app audio failing before its close still hands the call to the page', async () => {
+  const { b } = await injectedBridge();
+  const deps = createNativeCallDeps(b, { name: () => 'X' });
+  const opened = [];
+  class PageSocket {
+    constructor(url) { this.url = url; this.readyState = 0; opened.push(this); }
+    send() {}
+    close() { this.readyState = 3; }
+  }
+  const pageAudio = { prepare() {}, async start() {}, stop() {}, play() {}, interrupt() {}, setMuted() {} };
+  const fetch = async () => ({ status: 201, ok: true, json: async () => ({ call_id: 'k1', ws_url: '/api/voice/calls/k1/ws' }) });
+  const c = new VoiceCallController({
+    sessionId: 's1', fetch, WebSocket: deps.WebSocket, createAudio: deps.createAudio,
+    fallback: { WebSocket: PageSocket, createAudio: () => pageAudio },
+  });
+  c.start();
+  await flush();
+  const id = c.ws.id;
+  b.__event({ id, type: 'open' });
+  await flush();
+  // Two separate evaluations from the app: the audio error, then its close.
+  b.__event({ id, type: 'audio', data: 'audio_failed' });
+  await flush();
+  b.__event({ id, type: 'close', data: 'native:engine x mic=granted' });
+  await flush();
+  expect(c.state().endedReason).not.toBe('microphone');
+  expect(opened).toHaveLength(1);
+  expect(opened[0].url).toContain('client_note=native%3Aaudio_failed');
+  expect(c.state().phase).toBe('connecting');
+});
+
+test('native call: a microphone the user denied ends the call as microphone, no takeover', async () => {
+  const { b } = await injectedBridge();
+  const deps = createNativeCallDeps(b, { name: () => 'X' });
+  const opened = [];
+  const fetch = async () => ({ status: 201, ok: true, json: async () => ({ call_id: 'k1', ws_url: '/api/voice/calls/k1/ws' }) });
+  const c = new VoiceCallController({
+    sessionId: 's1', fetch, WebSocket: deps.WebSocket, createAudio: deps.createAudio,
+    fallback: { WebSocket: class { constructor() { opened.push(this); } }, createAudio: () => ({ prepare() {}, async start() {}, stop() {} }) },
+  });
+  c.start();
+  await flush();
+  b.__event({ id: c.ws.id, type: 'open' });
+  await flush();
+  b.__event({ id: c.ws.id, type: 'audio', data: 'microphone' });
+  await flush();
+  expect(c.state().endedReason).toBe('microphone');
+  expect(opened).toHaveLength(0);
+});
