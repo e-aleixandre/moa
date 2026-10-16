@@ -28,10 +28,7 @@ function partyName(sessionId) {
 // Injectable for tests: the controller's I/O boundary. Inside the iOS app
 // the socket and audio are the app's own (a system call that survives the
 // lock screen); elsewhere they are the page's.
-// Off until the iOS app's native call is proven on a device: build 7 closes
-// its socket right after it opens, so every call goes through the page.
-const NATIVE_CALLS = false;
-const nativeBridge = NATIVE_CALLS ? nativeCallBridge() : null;
+const nativeBridge = nativeCallBridge();
 const webDeps = { fetch: undefined, WebSocket: undefined, createAudio: () => createCallAudio({ claimWakeLock }) };
 const webFallback = { WebSocket: globalThis.WebSocket, createAudio: webDeps.createAudio };
 const browserDeps = nativeBridge

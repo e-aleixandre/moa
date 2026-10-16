@@ -128,6 +128,8 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         var sessionActive = false
         var muted = false
         var manualSession = false
+        var started = false
+        var categoryError = ""
         var pending: [Data] = []
         var pendingBytes = 0
         var open = false
@@ -169,7 +171,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     // MARK: Page operations
 
     func open(id: String, url raw: String, name: String, sessionId: String) {
-        if let existing = call { finish(existing, remote: false) }
+        if let existing = call { finish(existing, remote: false, why: "replaced") }
         guard let url = Self.callURL(raw), let origin = NativeServerBinding.origin, let credential = Self.credential() else {
             callLog.error("voice call refused: bad url or no paired credential")
             emitAny(id, "close")
@@ -190,7 +192,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             // Without a system call (another call is on, or CallKit is not
             // available) the call still runs, but only while the app is open.
             callLog.error("CallKit start failed: \(error.localizedDescription, privacy: .public)")
-            DispatchQueue.main.async { self?.activateWithoutCallKit(call) }
+            DispatchQueue.main.async { self?.activateWithoutCallKit(call, callKitError: Self.code(error)) }
         }
         callLog.info("voice call opening")
     }
@@ -216,7 +218,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     func bindingChanged() {
         guard let call, call.origin != NativeServerBinding.origin else { return }
         call.pageClosed = true
-        finish(call, remote: false)
+        finish(call, remote: false, why: "unpaired")
     }
 
     func send(id: String, text: String) {
@@ -227,7 +229,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     func closeFromPage(id: String) {
         guard let call = current(id) else { return }
         call.pageClosed = true
-        finish(call, remote: false)
+        finish(call, remote: false, why: "page_closed")
     }
 
     func startAudio(id: String) {
@@ -246,6 +248,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
                 guard let self, let current = self.call, current === call else { return }
                 guard granted else {
                     self.emit(call, "audio", "microphone")
+                    self.finish(call, remote: false, why: "mic_denied")
                     return
                 }
                 if call.sessionActive { self.startEngine(call) }
@@ -283,8 +286,8 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         call.task.receive { [weak self] result in
             guard let self, self.call === call else { return }
             switch result {
-            case .failure:
-                self.finish(call, remote: true)
+            case .failure(let error):
+                self.finish(call, remote: true, why: "receive \(Self.code(error))")
             case .success(.data(let data)):
                 self.play(call, data)
                 self.receive(call)
@@ -337,13 +340,14 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         audio.onFailure = { [weak self] in
             guard let self, self.call === call else { return }
             callLog.error("voice audio lost after a route change")
-            self.finish(call, remote: false)
+            self.finish(call, remote: false, why: "route_rebuild")
         }
         do {
             try audio.start()
         } catch {
             callLog.error("voice audio start: \(error.localizedDescription, privacy: .public)")
             emit(call, "audio", "microphone")
+            finish(call, remote: false, why: "engine \(Self.code(error)) category \(call.categoryError.isEmpty ? "ok" : call.categoryError) route \(AVAudioSession.sharedInstance().currentRoute.inputs.first?.portType.rawValue ?? "none")")
             return
         }
         call.audio = audio
@@ -367,12 +371,16 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
 
     // finish ends the call once: audio off, socket closed, system call ended
     // and, unless the page closed it itself, the page told.
-    private func finish(_ call: Call, remote: Bool) {
+    // why travels as the WebSocket close reason, which the server logs: the
+    // only way to learn on a device with no cable why the app ended a call.
+    private func finish(_ call: Call, remote: Bool, why: String = "") {
         guard !call.finished else { return }
         call.finished = true
         call.audio?.stop()
         call.audio = nil
-        call.task.cancel(with: .normalClosure, reason: nil)
+        let reason = String("native:\(why.isEmpty ? "unspecified" : why) mic=\(Self.micPermission())".prefix(120))
+        callLog.error("voice call ending: \(reason, privacy: .public)")
+        call.task.cancel(with: .normalClosure, reason: reason.data(using: .utf8))
         if call.manualSession {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
@@ -381,12 +389,12 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         } else {
             callController.request(CXTransaction(action: CXEndCallAction(call: call.uuid))) { _ in }
         }
-        if !call.pageClosed { emit(call, "close") }
+        if !call.pageClosed { emit(call, "close", reason) }
         if self.call === call { self.call = nil }
         callLog.info("voice call finished remote=\(remote, privacy: .public) server_ended=\(call.serverEnded, privacy: .public)")
     }
 
-    private func activateWithoutCallKit(_ call: Call) {
+    private func activateWithoutCallKit(_ call: Call, callKitError: String) {
         guard self.call === call, !call.sessionActive else { return }
         do {
             try Self.configureSession()
@@ -397,7 +405,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         } catch {
             callLog.error("voice session without CallKit: \(error.localizedDescription, privacy: .public)")
             emit(call, "audio", "microphone")
-            finish(call, remote: false)
+            finish(call, remote: false, why: "callkit \(callKitError) session \(Self.code(error))")
         }
     }
 
@@ -414,7 +422,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     // MARK: CXProviderDelegate
 
     func providerDidReset(_ provider: CXProvider) {
-        if let call { finish(call, remote: false) }
+        if let call { finish(call, remote: false, why: "provider_reset") }
     }
 
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
@@ -425,12 +433,12 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         do {
             try Self.configureSession()
         } catch {
+            // Not fatal: CallKit still activates a session; if the engine
+            // cannot run on it, that failure ends the call with its own reason.
             callLog.error("voice session category: \(error.localizedDescription, privacy: .public)")
-            action.fail()
-            emit(call, "audio", "microphone")
-            finish(call, remote: true)
-            return
+            call.categoryError = Self.code(error)
         }
+        call.started = true
         provider.reportOutgoingCall(with: call.uuid, startedConnectingAt: Date())
         let update = CXCallUpdate()
         update.localizedCallerName = call.name
@@ -459,10 +467,10 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             call.task.send(.string("{\"type\":\"hangup\"}")) { _ in }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                 guard let self, self.call === call else { return }
-                self.finish(call, remote: true)
+                self.finish(call, remote: true, why: "system_hangup_timeout")
             }
         } else {
-            finish(call, remote: true)
+            finish(call, remote: true, why: "system_hangup_before_open")
         }
     }
 
@@ -490,13 +498,14 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         guard let call, call.task === webSocketTask else { return }
         call.open = true
-        provider.reportOutgoingCall(with: call.uuid, connectedAt: Date())
+        // Connected is reported only for a call CallKit has started.
+        if call.started { provider.reportOutgoingCall(with: call.uuid, connectedAt: Date()) }
         emit(call, "open")
     }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         guard let call, call.task === webSocketTask else { return }
-        finish(call, remote: true)
+        finish(call, remote: true, why: "server_closed \(closeCode.rawValue)")
     }
 
     // Only the validated call URL: no redirect to another path or origin.
@@ -508,7 +517,7 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let call, call.task === task else { return }
         if let error { callLog.error("voice socket: \(error.localizedDescription, privacy: .public)") }
-        finish(call, remote: true)
+        finish(call, remote: true, why: "socket \(error.map(Self.code) ?? "done")")
     }
 
     // MARK: Helpers
@@ -531,6 +540,19 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             let text = String(data: json, encoding: .utf8)
         else { return }
         webView?.evaluateJavaScript("window.MoaNativeCall && window.MoaNativeCall.__event(\(text));")
+    }
+
+    static func code(_ error: Error) -> String {
+        let e = error as NSError
+        return "\(e.domain.replacingOccurrences(of: "com.apple.", with: "")):\(e.code)"
+    }
+
+    static func micPermission() -> String {
+        switch AVAudioSession.sharedInstance().recordPermission {
+        case .granted: return "granted"
+        case .denied: return "denied"
+        default: return "undetermined"
+        }
     }
 
     // callURL accepts only the paired server's own voice call socket.
