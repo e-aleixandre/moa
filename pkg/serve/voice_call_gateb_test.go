@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -176,5 +177,54 @@ func TestVoiceCall_MinutesRecordInReadSession(t *testing.T) {
 		if !strings.Contains(text, "voice call minutes") || !strings.Contains(text, "READ-MINUTES-OPEN-ITEM") {
 			t.Errorf("%s: read_session drops the minutes record shown in /messages:\n%s", phase, text)
 		}
+	}
+}
+
+// The voice delegate discovers a pending question, its ask_id and options
+// from what the call gives it, and acts on it with that ID alone.
+func TestVoiceCall_PendingQuestionDiscoverable(t *testing.T) {
+	for _, tap := range []bool{false, true} {
+		t.Run(fmt.Sprintf("requires_tap=%t", tap), func(t *testing.T) {
+			question := "PENDING-QUESTION-DISCOVERY-SENTINEL"
+			f := vpNewFixture(t, "grok-plan", toolCallHandlerFor("tool-question", "ask_user", map[string]any{
+				"requires_tap": tap, "questions": []any{map[string]any{"question": question, "options": []any{"DISCOVERY-OPTION-A", "DISCOVERY-OPTION-B"}}},
+			}), simpleResponseHandler("resolved"), simpleResponseHandler("BRIEF-READY"))
+			if _, _, _, err := f.mgr.Send(f.sess.ID, "Ask the user the next question", nil, "", ""); err != nil {
+				t.Fatal(err)
+			}
+			waitPendingAsk(t, f.sess) // a barrier only: its ID is not used
+			c := f.call()
+			p := f.up.peer(t, f.provider)
+			initial := vpJSON(p.await(t, "initial configuration", func(v map[string]any) bool { return v["type"] == "session.update" }))
+			p.tool(t, "read-pending", "read_session", map[string]any{})
+			result := p.result(t, "read-pending")
+			if vpError(result) {
+				t.Fatal(result)
+			}
+			for where, text := range map[string]string{"initial context": initial, "read_session": vpJSON(result)} {
+				for _, want := range []string{question, "DISCOVERY-OPTION-A", "DISCOVERY-OPTION-B", "ask_id="} {
+					if !strings.Contains(text, want) {
+						t.Errorf("%s lacks %q: %s", where, want, text)
+					}
+				}
+			}
+			m := regexp.MustCompile(`ask_id=([A-Za-z0-9_-]+)`).FindStringSubmatch(vpJSON(result))
+			if m == nil {
+				t.Fatal("no ask_id in read_session")
+			}
+			if tap {
+				p.tool(t, "highlight", "request_tap", map[string]any{"item_id": m[1]})
+				if r := p.result(t, "highlight"); vpError(r) {
+					t.Errorf("discovered ID could not be highlighted: %s", vpJSON(r))
+				}
+				f.mustRequest("POST", "/api/sessions/"+f.sess.ID+"/ask", map[string]any{"id": m[1], "answers": []string{"typed"}}, f.owner(), 204)
+			} else {
+				p.tool(t, "answer", "answer_question", map[string]any{"ask_id": m[1], "answer": "DISCOVERY-OPTION-A"})
+				if r := p.result(t, "answer"); vpError(r) {
+					t.Errorf("discovered ID could not be answered: %s", vpJSON(r))
+				}
+			}
+			c.hangup()
+		})
 	}
 }

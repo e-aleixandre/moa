@@ -79,7 +79,13 @@ func (c *voiceCall) executeOnce(_ context.Context, tc voice.ToolCall) voice.Tool
 		if res.IsError {
 			return voiceErrorResult(tc.ID, voiceResultText(res))
 		}
-		return voiceResult(tc.ID, map[string]any{"session_id": target, "content": voiceResultText(res)})
+		out := map[string]any{"session_id": target, "content": voiceResultText(res)}
+		if target == c.sessionID {
+			if pending := m.voicePendingSummary(target); pending != "" {
+				out["pending"] = pending
+			}
+		}
+		return voiceResult(tc.ID, out)
 	case "book_list":
 		ownerID, err := m.voiceBookOwner(c.sessionID)
 		if err != nil {
