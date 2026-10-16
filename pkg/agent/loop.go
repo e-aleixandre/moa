@@ -128,6 +128,12 @@ type loopConfig struct {
 	// fast is read per provider request because a provider can disable the
 	// session setting while this run is still processing tool calls.
 	fast func() bool
+	// daybreak is read per provider request, like fast: the session can turn
+	// it on or off while this run works.
+	daybreak func() bool
+	// requestProgram is the access program of the request last built, which
+	// its response is stamped with.
+	requestProgram string
 
 	// Guardrails
 	maxTurns            int
@@ -289,12 +295,16 @@ func compactionWindow(s requestSettings) int {
 // signatures are model-specific; this model's own are kept. Messages without
 // that provenance (written before it was recorded) are left as they are, as
 // they always were. Copy-on-write: neither msgs nor its content is mutated.
-func withoutForeignThinking(msgs []core.Message, model core.Model) []core.Message {
+//
+// program is the access program of the request: reasoning recorded under
+// another one is not known to be valid under it, so it is dropped the same way.
+func withoutForeignThinking(msgs []core.Message, model core.Model, program string) []core.Message {
 	var out []core.Message
 	for i := range msgs {
 		m := msgs[i]
 		foreign := m.RequestedModel != "" &&
-			(m.RequestedModel != model.ID || (m.Provider != "" && model.Provider != "" && m.Provider != model.Provider))
+			(m.RequestedModel != model.ID || (m.Provider != "" && model.Provider != "" && m.Provider != model.Provider) ||
+				m.AccessProgram != program)
 		if m.Role != "assistant" || !foreign || !hasThinking(m.Content) {
 			continue
 		}
@@ -315,7 +325,17 @@ func (cfg *loopConfig) requestOptions() core.StreamOptions {
 	if cfg.fast != nil {
 		opts.Fast = cfg.fast()
 	}
+	opts.AccessProgram = cfg.accessProgram()
 	return opts
+}
+
+// accessProgram is the program the next request asks for. Daybreak is an
+// OpenAI program; any other provider's request goes out standard.
+func (cfg *loopConfig) accessProgram() string {
+	if cfg.daybreak != nil && cfg.model.Provider == "openai" && cfg.daybreak() {
+		return core.DaybreakAccessProgram
+	}
+	return ""
 }
 
 // emitLifecycle emits a lifecycle event to both the emitter (subscribers)
@@ -527,6 +547,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					// compaction forces it off downstream regardless.
 					if sumModel.ID != cfg.model.ID {
 						compactOpts.ThinkingLevel = ""
+						// The program was chosen for the session's model, not this one.
+						compactOpts.AccessProgram = ""
 					}
 				}
 
@@ -717,7 +739,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// History can carry thinking another model signed: a switch since
 			// these messages were prepared, or a restored session whose append-
 			// only tree keeps it. Only the request drops it; history keeps it.
-			reqMessages = withoutForeignThinking(reqMessages, cfg.model)
+			cfg.requestProgram = cfg.accessProgram()
+			reqMessages = withoutForeignThinking(reqMessages, cfg.model, cfg.requestProgram)
 			// Whatever got this request here (an unstable-source fallback, a
 			// compaction that found no cut, a transport repair appending the
 			// partial and a hint), it never leaves over the model window minus
@@ -746,6 +769,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				Tools:    toolSpecs,
 				Options:  cfg.requestOptions(),
 			}
+			req.Options.AccessProgram = cfg.requestProgram
 			bound := justPaused || repairPartial != nil
 			if !bound && retrySource == nil && apiWorkOrigin != nil && apiWorkOrigin.Model == cfg.model.ID && apiWorkOrigin.OAuthNotBefore != nil && time.Now().Before(*apiWorkOrigin.OAuthNotBefore) {
 				req.Options.ProviderBinding = apiWorkOrigin
@@ -896,6 +920,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			}
 			if hasPartial {
 				assistantMsg.RequestedModel = cfg.model.ID
+				assistantMsg.AccessProgram = cfg.requestProgram
 				toolResultErr := "Tool result unavailable: the run was cancelled before a result was recorded."
 				if ctx.Err() == nil {
 					assistantMsg.Content = append(assistantMsg.Content, core.TextContent(interruptedMarkerText(ctx, streamErr)))
@@ -925,6 +950,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Keep the requested identity on this response. A provider can return a
 		// safety fallback without changing the session's selected model.
 		assistantMsg.RequestedModel = cfg.model.ID
+		assistantMsg.AccessProgram = cfg.requestProgram
 		if assistantMsg.ProviderSource != nil && assistantMsg.ProviderSource.Kind == "api_backup" {
 			apiWorkOrigin = assistantMsg.ProviderSource
 		} else {

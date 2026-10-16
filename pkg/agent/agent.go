@@ -2141,6 +2141,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		streamOpts:          streamOpts,
 		streamRepairBackoff: a.config.StreamRepairBackoff,
 		fast:                a.Fast,
+		daybreak:            a.Daybreak,
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
 		convertToLLM:        a.config.ConvertToLLM,
@@ -2423,7 +2424,16 @@ func (a *Agent) SetCompactStrategy(strategy string) {
 }
 
 // Daybreak reports whether this session asks for the Daybreak program.
-func (a *Agent) Daybreak() bool { return false }
+func (a *Agent) Daybreak() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config.Daybreak
+}
 
-// SetDaybreak turns the Daybreak program on or off for the next request.
-func (a *Agent) SetDaybreak(on bool) {}
+// SetDaybreak turns the Daybreak program on or off. Like SetFast it is allowed
+// while running: the next request reads it, the one in flight keeps its own.
+func (a *Agent) SetDaybreak(on bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.config.Daybreak = on
+}

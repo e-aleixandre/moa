@@ -260,6 +260,8 @@ func (a *Agent) startBackgroundCompaction(ctx context.Context, cfg *loopConfig, 
 		}
 		if sumModel.ID != cfg.model.ID {
 			compactOpts.ThinkingLevel = ""
+			// The program was chosen for the session's model, not this one.
+			compactOpts.AccessProgram = ""
 		}
 	}
 	// The checkpoint is frozen now (text and generation); it is appended to
