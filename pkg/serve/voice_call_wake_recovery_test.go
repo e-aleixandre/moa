@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/voice"
@@ -80,6 +81,10 @@ func TestVoiceWakeCrashChild(t *testing.T) {
 	f := vpNewFixture(t, "grok-plan", h, h, h, h, h, h)
 	if phase == "wake_saved_idle" || phase == "wake_saved_busy" {
 		vwWakeSaved(t, f, phase, release)
+		return
+	}
+	if strings.HasPrefix(phase, "race_") {
+		vwRaceChild(t, f, phase)
 		return
 	}
 	if phase == "between_record_and_wake" {
@@ -262,6 +267,48 @@ func vwSaved(t *testing.T, s vwCrashState, kind string) (n int, marked bool) {
 	return n, saved.Metadata[session.MetaVoiceWake] == true
 }
 
+// vwAssertRecoveredOnce boots a new Manager on the crashed state: the first
+// boot runs the wake once without anyone opening the session, the next two
+// find nothing owed.
+func vwAssertRecoveredOnce(t *testing.T, s vwCrashState) {
+	t.Helper()
+	first := make(chan string, 1)
+	woken := func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		first <- vpLastUser(req)
+		return simpleResponse("WOKEN"), nil
+	}
+	m, p, stop := vwRestart(t, s, woken, simpleResponseHandler("EXTRA-RUN"))
+	pollUntil(t, vpDeadline, "the wake ran after the restart", func() bool { return p.calls.Load() >= 1 })
+	sess, ok := m.Get(s.SessionID)
+	if !ok {
+		t.Fatal("the session owing a wake was not loaded at startup")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), vpDeadline)
+	defer cancel()
+	if !sess.runtime.WaitSettled(ctx) {
+		t.Fatal("wake run did not settle")
+	}
+	if got := <-first; !strings.Contains(got, "RECOVER-THIS-DECISION") {
+		t.Fatalf("first run after restart was not the minutes wake: %q", got)
+	}
+	stop()
+	if n, _ := vwSavedWakes(t, s); n != 1 || p.calls.Load() != 1 {
+		t.Fatalf("after the first restart: saved wakes=%d provider calls=%d, want 1 and 1", n, p.calls.Load())
+	}
+
+	for restart := 2; restart <= 3; restart++ {
+		m, p, stop := vwRestart(t, s)
+		vpStable(t, func() bool { return p.calls.Load() == 0 }, "a later restart woke the session again")
+		if _, loaded := m.Get(s.SessionID); loaded {
+			t.Fatalf("restart %d left a session that owed nothing loaded", restart)
+		}
+		stop()
+		if n, marked := vwSavedWakes(t, s); n != 1 || marked {
+			t.Fatalf("restart %d: saved wakes=%d marker=%v, want 1 and cleared", restart, n, marked)
+		}
+	}
+}
+
 // Minutes that must wake their session wake it exactly once, even when the
 // process dies after saving them and before the wake is saved, and across
 // further restarts. The session is never opened by anyone after the crash.
@@ -272,42 +319,7 @@ func TestVoiceWakeSurvivesCrash(t *testing.T) {
 			if s.DiskMinutes != 1 || s.DiskWake != 0 || (phase == "busy_minutes" && s.Queued != 1) {
 				t.Fatalf("invalid checkpoint: %+v", s)
 			}
-
-			first := make(chan string, 1)
-			woken := func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
-				first <- vpLastUser(req)
-				return simpleResponse("WOKEN"), nil
-			}
-			m, p, stop := vwRestart(t, s, woken, simpleResponseHandler("EXTRA-RUN"))
-			pollUntil(t, vpDeadline, "the wake ran after the restart", func() bool { return p.calls.Load() >= 1 })
-			sess, ok := m.Get(s.SessionID)
-			if !ok {
-				t.Fatal("the session owing a wake was not loaded at startup")
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), vpDeadline)
-			defer cancel()
-			if !sess.runtime.WaitSettled(ctx) {
-				t.Fatal("wake run did not settle")
-			}
-			if got := <-first; !strings.Contains(got, "RECOVER-THIS-DECISION") {
-				t.Fatalf("first run after restart was not the minutes wake: %q", got)
-			}
-			stop()
-			if n, _ := vwSavedWakes(t, s); n != 1 || p.calls.Load() != 1 {
-				t.Fatalf("after the first restart: saved wakes=%d provider calls=%d, want 1 and 1", n, p.calls.Load())
-			}
-
-			for restart := 2; restart <= 3; restart++ {
-				m, p, stop := vwRestart(t, s)
-				vpStable(t, func() bool { return p.calls.Load() == 0 }, "a later restart woke the session again")
-				if _, loaded := m.Get(s.SessionID); loaded {
-					t.Fatalf("restart %d left a session that owed nothing loaded", restart)
-				}
-				stop()
-				if n, marked := vwSavedWakes(t, s); n != 1 || marked {
-					t.Fatalf("restart %d: saved wakes=%d marker=%v, want 1 and cleared", restart, n, marked)
-				}
-			}
+			vwAssertRecoveredOnce(t, s)
 		})
 	}
 }
@@ -421,5 +433,89 @@ func TestVoiceCanceledRelayIsNotOwed(t *testing.T) {
 	stop()
 	if n, _ := vwSaved(t, s, "relay"); n != 0 {
 		t.Fatalf("saved relays=%d after a restart, want 0", n)
+	}
+}
+
+// vwAppendGate is the real agent except that its first AppendRecord waits
+// before reaching the real one: it only orders events, so a snapshot may land
+// between the start of the minutes save and the record entering the tree.
+type vwAppendGate struct {
+	*agent.Agent
+	reached, resume chan struct{}
+	armed           bool
+}
+
+func (g *vwAppendGate) AppendRecord(m core.AgentMessage) error {
+	if g.armed {
+		g.armed = false
+		close(g.reached)
+		<-g.resume
+	}
+	return g.Agent.AppendRecord(m)
+}
+
+// vwRaceChild saves a minutes record (wake=true) and crashes right after the
+// save that holds it, before its wake is admitted. race_flush takes a real
+// runtime snapshot while the record is not in the tree yet; race_gate holds
+// the append without a snapshot and race_control does not hold it: the two
+// orders that never lost the wake.
+func vwRaceChild(t *testing.T, f *vpFixture, phase string) {
+	f.sess.runtime.Bus.Drain(2 * time.Second)
+	if err := f.sess.runtime.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	f.sess.runtime.Bus.Drain(2 * time.Second)
+	callID := "vw-" + phase
+	var gate *vwAppendGate
+	if phase != "race_control" {
+		real, ok := f.sess.runtime.Context().Agent.(*agent.Agent)
+		if !ok {
+			t.Fatalf("runtime agent is %T, not *agent.Agent", f.sess.runtime.Context().Agent)
+		}
+		gate = &vwAppendGate{Agent: real, reached: make(chan struct{}), resume: make(chan struct{}), armed: true}
+		f.sess.runtime.Context().Agent = gate
+	}
+	f.sess.persister.onSaved = func() {
+		saved, _, err := session.FindSessionReadOnly(f.mgr.sessionBaseDir, f.sess.ID)
+		if err != nil || len(vpSavedVoice(saved, "minutes")) != 1 {
+			return // an earlier save that does not hold the record yet
+		}
+		vwCrash(t, f, voiceWakeID(callID+"/minutes"))
+	}
+	c := &voiceCall{reg: &voiceCallRegistry{mgr: f.mgr}, id: callID, sessionID: f.sess.ID,
+		provider: voice.GrokPlan, started: time.Now(), minutes: &voiceMinutes{decided: []string{"RECOVER-THIS-DECISION"}}}
+	go c.persistMinutes("hangup")
+	if gate != nil {
+		select {
+		case <-gate.reached:
+		case <-time.After(10 * time.Second):
+			t.Fatal("persistMinutes never reached AppendRecord")
+		}
+		if phase == "race_flush" {
+			if err := f.sess.runtime.Flush(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		close(gate.resume)
+	}
+	time.Sleep(10 * time.Second)
+	t.Fatal("the save holding the minutes never happened")
+}
+
+// A snapshot between the start of the minutes save and the record entering
+// the tree must not lose the wake: the header marker is derived from the
+// saved content, so the record saved afterwards still carries it.
+func TestVoiceWakeSurvivesSnapshotBeforeRecord(t *testing.T) {
+	for _, phase := range []string{"race_control", "race_gate", "race_flush"} {
+		t.Run(phase, func(t *testing.T) {
+			s := vwRunChild(t, phase)
+			if s.DiskMinutes != 1 || s.DiskWake != 0 {
+				t.Fatalf("invalid checkpoint: %+v", s)
+			}
+			if !s.MarkedLast {
+				t.Fatal("the file holds minutes (wake=true) without its wake and the header marker is not set")
+			}
+			vwAssertRecoveredOnce(t, s)
+		})
 	}
 }

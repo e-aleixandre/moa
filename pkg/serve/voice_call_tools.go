@@ -377,11 +377,9 @@ func (c *voiceCall) persistMinutes(reason string) {
 	// wait in the queue.
 	record := core.AgentMessage{Message: core.Message{Role: "session_event", Content: content, Timestamp: time.Now().Unix()}, Custom: custom}
 	record.EnsureMsgID()
-	// The marker is saved with the record, so a restart that loses the
-	// wake finds it from the session header alone.
-	if wake && sess.persister != nil {
-		sess.persister.markVoiceOwed()
-	}
+	// The save that holds this record derives the header marker from it
+	// (servePersister.settleVoiceOwed), so a restart that loses the wake
+	// finds it from the session header alone.
 	if err := m.recordVoice(sess.ID, c.id+"/minutes", record); err != nil {
 		slog.Warn("voice call minutes not saved", "call", c.id, "error", err)
 		return

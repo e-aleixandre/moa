@@ -247,18 +247,6 @@ func (sp *servePersister) recordOwnerDetached(detached bool) error {
 	return nil
 }
 
-// markVoiceOwed sets the voice marker for the next save. It lives in the
-// preserved set, which every snapshot carries forward until settleVoiceOwed
-// finds nothing owed in what it saves.
-func (sp *servePersister) markVoiceOwed() {
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	if sp.preserved == nil {
-		sp.preserved = make(map[string]any, 1)
-	}
-	sp.preserved[session.MetaVoiceWake] = true
-}
-
 // oweVoiceRelay records a voice relay as owed until a save holds it as a
 // message; the caller saves before the relay counts as delivered.
 func (sp *servePersister) oweVoiceRelay(deliveryID string, fields map[string]any) {
@@ -272,7 +260,6 @@ func (sp *servePersister) oweVoiceRelay(deliveryID string, fields map[string]any
 		rec[k] = v
 	}
 	sp.preserved[session.MetaVoiceRelays] = append(voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]), rec)
-	sp.preserved[session.MetaVoiceWake] = true
 }
 
 // forgetVoiceRelay withdraws a relay that was never admitted.
@@ -322,16 +309,19 @@ func voiceRelayRecords(v any) []any {
 	return out
 }
 
-// settleVoiceOwed drops from the snapshot about to be saved what it already
-// holds: relays saved as messages, and the voice marker once nothing is
-// owed — no minutes record lacks its wake and no relay is left. The save
-// that persists the last owed delivery is the one that clears the marker, so
-// no later boot loads the session for nothing. Called under sp.mu.
+// settleVoiceOwed derives, on every save, what the snapshot owes: the relays
+// not yet saved as messages, and the voice marker. The marker is true exactly
+// when a saved minutes record has wake=true and the snapshot lacks its wake,
+// or a relay is still owed; nothing sets it independently of the content
+// being saved, so it can never disagree with the saved messages (a marker
+// set before its record entered the snapshot was once dropped by an
+// interleaved save and lost the wake after a crash).
+//
+// The marker stays in the header, as an index, because startup reads only
+// headers: scanning every message of every session file at boot was
+// rejected. Called under sp.mu.
 func (sp *servePersister) settleVoiceOwed(s *session.Session) {
-	if sp.preserved[session.MetaVoiceWake] != true && sp.preserved[session.MetaVoiceRelays] == nil {
-		return
-	}
-	saved, wakeOwed := voiceSaved(savedMessages(s))
+	saved, wakeOwed := voiceSaved(s)
 	var relays []any
 	for _, r := range voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]) {
 		if !saved[r.(map[string]any)["delivery_id"].(string)] {
@@ -340,25 +330,43 @@ func (sp *servePersister) settleVoiceOwed(s *session.Session) {
 	}
 	sp.setVoiceRelays(relays)
 	if wakeOwed || len(relays) > 0 {
+		if sp.preserved == nil {
+			sp.preserved = make(map[string]any, 1)
+		}
 		sp.preserved[session.MetaVoiceWake] = true
 	} else {
 		delete(sp.preserved, session.MetaVoiceWake)
 	}
 }
 
-// voiceSaved is the voice delivery IDs msgs hold, and whether they hold a
-// minutes record whose wake they do not.
-func voiceSaved(msgs []core.AgentMessage) (saved map[string]bool, wakeOwed bool) {
-	saved = map[string]bool{}
+// voiceSaved is the voice delivery IDs the session's messages hold, and
+// whether they hold a minutes record whose wake they do not. One linear pass
+// per save, over messages the save serializes anyway; sessions without voice
+// records allocate nothing.
+func voiceSaved(s *session.Session) (saved map[string]bool, wakeOwed bool) {
 	var wakes []string
-	for _, m := range msgs {
+	visit := func(m *core.AgentMessage) {
 		id := voiceDeliveryID(m.Custom)
 		if id == "" {
-			continue
+			return
+		}
+		if saved == nil {
+			saved = map[string]bool{}
 		}
 		saved[id] = true
 		if m.Custom["kind"] == "minutes" && m.Custom["wake"] == true {
 			wakes = append(wakes, voiceWakeID(id))
+		}
+	}
+	if len(s.Entries) == 0 {
+		for i := range s.Messages {
+			visit(&s.Messages[i])
+		}
+	} else {
+		for i := range s.Entries {
+			if s.Entries[i].Type == session.EntryMessage {
+				visit(&s.Entries[i].Message)
+			}
 		}
 	}
 	for _, w := range wakes {
@@ -367,20 +375,6 @@ func voiceSaved(msgs []core.AgentMessage) (saved map[string]bool, wakeOwed bool)
 		}
 	}
 	return saved, wakeOwed
-}
-
-// savedMessages is every message of a session file, whatever its format.
-func savedMessages(s *session.Session) []core.AgentMessage {
-	if len(s.Entries) == 0 {
-		return s.Messages
-	}
-	out := make([]core.AgentMessage, 0, len(s.Entries))
-	for _, e := range s.Entries {
-		if e.Type == session.EntryMessage {
-			out = append(out, e.Message)
-		}
-	}
-	return out
 }
 
 // markDeleted prevents future Snapshot calls from writing to disk.
