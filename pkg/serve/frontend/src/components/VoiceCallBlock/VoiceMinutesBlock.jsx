@@ -6,6 +6,8 @@
 import { useState } from "preact/hooks";
 import { ChevronRight, AudioLines, FileText } from "lucide-preact";
 import { eventAge } from "../EventBlock/EventBlock.jsx";
+import { useStore } from "../../hooks/useStore.js";
+import { callParty } from "../VoiceCall/VoiceCall.jsx";
 import { parseVoiceMinutes, minutesTitle } from "../../data/voice-minutes.js";
 import "./VoiceCallBlock.css";
 
@@ -26,9 +28,9 @@ function Section({ title, tone, items, render = (x) => x }) {
   );
 }
 
-export function VoiceMinutesBlock({ text, attachments = [], time, sessionId, name = "this session" }) {
+export function VoiceMinutesBlock({ text, minutes: structured = null, attachments = [], time, sessionId, name = "this session" }) {
   const [open, setOpen] = useState(true);
-  const minutes = parseVoiceMinutes(text);
+  const minutes = parseVoiceMinutes(text, structured);
   const age = eventAge(time);
   const empty = !minutes.decided.length && !minutes.passed.length && !minutes.open.length;
   return (
@@ -66,4 +68,12 @@ export function VoiceMinutesBlock({ text, attachments = [], time, sessionId, nam
       )}
     </section>
   );
+}
+
+// The record names who took the call the way the call screen did: the owner,
+// else the session's title.
+export function VoiceMinutesForSession(props) {
+  const owners = useStore((s) => s.owners.list);
+  const sessions = useStore((s) => s.sessions);
+  return <VoiceMinutesBlock {...props} name={callParty(owners, sessions, props.sessionId).name} />;
 }

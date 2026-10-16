@@ -29,7 +29,7 @@
 //       compaction card's, so the collapsed body survives loading older
 //       history.
 //
-//   { kind:'voice_minutes', id, callId, time, text, attachments }
+//   { kind:'voice_minutes', id, callId, time, text, minutes, attachments }
 //       The record a call left at hangup (custom.kind 'minutes'): Decided,
 //       Passed and Still open, with transcript.md attached. Its wake
 //       (kind 'minutes_wake') is the model's input and draws nothing.
@@ -523,6 +523,7 @@ export function projectStream(session) {
             callId,
             time: msg.timestamp * 1000,
             text: joinText(msg.content),
+            minutes: msg.custom.minutes || null,
             attachments: (msg.content || []).filter((c) => c && (c.type === 'document' || c.type === 'image') && c.attachment_id),
           });
           continue;

@@ -155,7 +155,7 @@
 }
 .vmb-sec.is-decided .vmb-h { color: var(--zl-green); }
 .vmb-sec.is-open .vmb-h { color: var(--zl-yellow); }
-.vmb-list { margin: 0; padding-left: 18px; color: var(--zl-t1); font-size: var(--zl-fs-body); line-height: 1.5; }
+.vmb-list { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding-left: 18px; color: var(--zl-t1); font-size: var(--zl-fs-body); line-height: 1.5; }
 .vmb-note { margin: 0; color: var(--zl-t3); font-size: var(--zl-fs-meta); }
 .vmb-files { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .vmb-file {

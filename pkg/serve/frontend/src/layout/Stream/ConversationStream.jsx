@@ -17,7 +17,7 @@ import {
 } from "../../components/index.js";
 import { Prose } from "../../components/AssistantDocument/AssistantDocument.jsx";
 import { TurnFoot } from "../../components/AssistantDocument/TurnFoot.jsx";
-import { VoiceMinutesBlock } from "../../components/VoiceCallBlock/VoiceMinutesBlock.jsx";
+import { VoiceMinutesForSession } from "../../components/VoiceCallBlock/VoiceMinutesBlock.jsx";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { ProviderErrorAction } from "../../components/ProviderErrorAction/ProviderErrorAction.jsx";
 import { turnFinalResponse } from "../../data/stream-model.js";
@@ -166,7 +166,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       return <VoiceCallBlock exchanges={block.exchanges} time={block.time} />;
     // The record a call left at hangup, with its transcript to download.
     case "voice_minutes":
-      return <VoiceMinutesBlock text={block.text} attachments={block.attachments} time={block.time} sessionId={sessionId} />;
+      return <VoiceMinutesForSession text={block.text} minutes={block.minutes} attachments={block.attachments} time={block.time} sessionId={sessionId} />;
     case "waypoint": {
       // A message sent from the Live Preview carries the feedback block the
       // agent needs verbatim; the transcript paints it as a reference tied to

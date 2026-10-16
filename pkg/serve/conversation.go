@@ -36,18 +36,21 @@ type ConversationMessage struct {
 	Source string `json:"source,omitempty"`
 	// CallID and Kind place a voice call record (source voice_call) in its
 	// call: brief, question, relay or minutes. Never a typed message.
-	CallID        string          `json:"call_id,omitempty"`
-	Kind          string          `json:"kind,omitempty"`
-	Timestamp     time.Time       `json:"timestamp,omitempty"`
-	Text          string          `json:"text,omitempty"`
-	Truncated     bool            `json:"truncated,omitempty"`
-	Omitted       bool            `json:"omitted,omitempty"`
-	OmittedBlocks int             `json:"omitted_blocks,omitempty"`
-	Tool          string          `json:"tool,omitempty"`
-	Action        string          `json:"action,omitempty"`
-	Target        string          `json:"target,omitempty"`
-	Status        string          `json:"status,omitempty"`
-	Attachments   []AttachmentDTO `json:"attachments,omitempty"`
+	CallID string `json:"call_id,omitempty"`
+	Kind   string `json:"kind,omitempty"`
+	// Minutes is a minutes record's structured lists, so a reader never has
+	// to parse Text. Absent on records from before they were stored.
+	Minutes       *voiceMinutesItems `json:"minutes,omitempty"`
+	Timestamp     time.Time          `json:"timestamp,omitempty"`
+	Text          string             `json:"text,omitempty"`
+	Truncated     bool               `json:"truncated,omitempty"`
+	Omitted       bool               `json:"omitted,omitempty"`
+	OmittedBlocks int                `json:"omitted_blocks,omitempty"`
+	Tool          string             `json:"tool,omitempty"`
+	Action        string             `json:"action,omitempty"`
+	Target        string             `json:"target,omitempty"`
+	Status        string             `json:"status,omitempty"`
+	Attachments   []AttachmentDTO    `json:"attachments,omitempty"`
 	// PatchFiles is an apply_patch item's files and counts, without diffs: the
 	// closed card's content (see tool.SummarizePatchFiles).
 	PatchFiles []tool.PatchFileDisplay `json:"patch_files,omitempty"`
@@ -301,6 +304,9 @@ func (m *Manager) safeConversationMessages(sessionID string, messages []core.Age
 				item.Source = "voice_call"
 				item.CallID, _ = msg.Custom["call_id"].(string)
 				item.Kind, _ = msg.Custom["kind"].(string)
+				if item.Kind == "minutes" {
+					item.Minutes = voiceMinutesFromCustom(msg.Custom)
+				}
 			}
 			if truncated {
 				item.full = fullDisplayText(msg.Content)

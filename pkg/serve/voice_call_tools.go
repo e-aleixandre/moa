@@ -342,9 +342,11 @@ func (c *voiceCall) persistMinutes(reason string) {
 		b.WriteString("- (none)\n")
 	}
 	ledger := make([]map[string]any, 0, len(passed))
+	items := voiceMinutesItems{Decided: append([]string{}, decided...), Passed: []voiceMinutesPassed{}, Open: append([]string{}, open...)}
 	for _, p := range passed {
 		fmt.Fprintf(&b, "- [%s] already_delivered: %s\n", p.DeliveryID, voiceEscape(p.Summary, "voice_minutes"))
 		ledger = append(ledger, map[string]any{"delivery_id": p.DeliveryID, "already_delivered": true})
+		items.Passed = append(items.Passed, voiceMinutesPassed{DeliveryID: p.DeliveryID, Summary: p.Summary})
 	}
 	b.WriteString("\n")
 	section("Still open", open)
@@ -352,7 +354,7 @@ func (c *voiceCall) persistMinutes(reason string) {
 	text := b.String()
 
 	custom := c.custom("minutes")
-	for k, v := range map[string]any{"billing": c.billing.Kind, "reason": reason, "seconds": seconds, "dropped": minutes == nil, "passed": ledger, "wake": wake} {
+	for k, v := range map[string]any{"billing": c.billing.Kind, "reason": reason, "seconds": seconds, "dropped": minutes == nil, "passed": ledger, "wake": wake, "minutes": items} {
 		custom[k] = v
 	}
 	if c.usage != nil && c.usage.Seconds != nil {
@@ -409,4 +411,46 @@ func voicePendingTaps(sess *ManagedSession) []string {
 		out = append(out, "A secret is waiting — answer it later on the secure sheet.")
 	}
 	return out
+}
+
+// voiceMinutesItems is what the minutes block draws: the same items the text
+// lists, whole, so the UI never re-parses text meant for the model.
+type voiceMinutesItems struct {
+	Decided []string             `json:"decided"`
+	Passed  []voiceMinutesPassed `json:"passed"`
+	Open    []string             `json:"open"`
+}
+
+type voiceMinutesPassed struct {
+	DeliveryID string `json:"delivery_id"`
+	Summary    string `json:"summary"`
+}
+
+// voiceMinutesFromCustom reads the structured items back from a record's
+// Custom, live (typed) or reloaded from disk (generic JSON). A record
+// without them (older calls) yields nil.
+func voiceMinutesFromCustom(custom map[string]any) *voiceMinutesItems {
+	raw, ok := custom["minutes"]
+	if !ok || raw == nil {
+		return nil
+	}
+	var items voiceMinutesItems
+	if typed, ok := raw.(voiceMinutesItems); ok {
+		items = typed
+	} else {
+		data, err := json.Marshal(raw)
+		if err != nil || json.Unmarshal(data, &items) != nil {
+			return nil
+		}
+	}
+	if items.Decided == nil {
+		items.Decided = []string{}
+	}
+	if items.Passed == nil {
+		items.Passed = []voiceMinutesPassed{}
+	}
+	if items.Open == nil {
+		items.Open = []string{}
+	}
+	return &items
 }

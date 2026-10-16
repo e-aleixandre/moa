@@ -12,16 +12,39 @@ const SECTIONS = [
   ['open', /^Still open:$/],
 ];
 
-export function parseVoiceMinutes(text) {
+// fromStructured reads the server's structured lists (custom.minutes). They
+// are the items themselves, whole; the text is only for the model.
+function fromStructured(s) {
+  if (!s || !Array.isArray(s.decided) || !Array.isArray(s.passed) || !Array.isArray(s.open)) return null;
+  const strings = (list) => list.filter((x) => typeof x === 'string');
+  return {
+    decided: strings(s.decided),
+    passed: s.passed
+      .filter((p) => p && typeof p.summary === 'string')
+      .map((p) => ({ deliveryId: String(p.delivery_id || ''), summary: p.summary })),
+    open: strings(s.open),
+  };
+}
+
+export function parseVoiceMinutes(text, structured = null) {
   const out = {
     reason: '', seconds: null, provider: '', billing: '', dropped: false,
     decided: [], passed: [], open: [], transcriptMissing: false,
   };
   const body = String(text || '');
   let section = null;
+  // Records from before the structured lists: a line that is not an item and
+  // follows one without a blank line is that item's continuation.
+  let last = null;
+  const known = fromStructured(structured);
   for (const raw of body.split('\n')) {
     const line = raw.trim();
-    if (!line || line === '<voice_minutes>' || line === '</voice_minutes>') continue;
+    if (!line) { last = null; continue; }
+    if (last && !SECTIONS.some(([, re]) => re.test(line)) && !line.startsWith('- ') && line !== '</voice_minutes>') {
+      last.append(raw.replace(/\s+$/, ''));
+      continue;
+    }
+    if (line === '<voice_minutes>' || line === '</voice_minutes>') continue;
     const head = HEADER.exec(line);
     if (head) {
       out.reason = head[1];
@@ -39,12 +62,17 @@ export function parseVoiceMinutes(text) {
       if (item === '(none)') continue;
       if (section === 'passed') {
         const m = /^\[([^\]]+)\] already_delivered: (.*)$/.exec(item);
-        out.passed.push(m ? { deliveryId: m[1], summary: m[2] } : { deliveryId: '', summary: item });
+        const entry = m ? { deliveryId: m[1], summary: m[2] } : { deliveryId: '', summary: item };
+        out.passed.push(entry);
+        last = { append: (more) => { entry.summary += `\n${more}`; } };
       } else {
-        out[section].push(item);
+        const list = out[section];
+        list.push(item);
+        last = { append: (more) => { list[list.length - 1] += `\n${more}`; } };
       }
     }
   }
+  if (known) Object.assign(out, known);
   return out;
 }
 

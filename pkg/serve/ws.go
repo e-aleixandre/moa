@@ -610,6 +610,11 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 				projected[key] = value
 			}
 		}
+		if custom["kind"] == "minutes" {
+			if items := voiceMinutesFromCustom(custom); items != nil {
+				projected["minutes"] = items
+			}
+		}
 		if summary, ok := custom["model_summary"].(string); ok && summary != "" {
 			projected["model_summary"] = truncateHistoryString(summary)
 		}

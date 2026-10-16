@@ -1,4 +1,5 @@
 import { test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { parseVoiceMinutes, minutesTitle } from './voice-minutes.js';
 import { projectStream } from './stream-model.js';
 import { normalizeHistory } from './ws/history.js';
@@ -80,4 +81,43 @@ test('the minutes wake draws nothing; a relay joins the call block and the sessi
     ['relay', 'Tell me in writing', ''],
   ]);
   expect(blocks.some((b) => b.kind === 'waypoint')).toBe(false);
+});
+
+// The reviewer's real HTTP record: one passed request of two lines.
+const MULTILINE = JSON.parse(readFileSync(new URL('./testdata/voice-minutes-multiline.json', import.meta.url), 'utf8'));
+const SECOND = 'MULTILINE-SECOND: NO DESPLEGAR NUNCA EN ESTA PRUEBA';
+
+test('old records without structured items keep continuation lines inside the previous item', () => {
+  const m = parseVoiceMinutes(MULTILINE.text);
+  expect(m.passed).toEqual([{
+    deliveryId: 'yq2NZ3o_pLMXbGdAuT1sO3x2/tool/pass-6',
+    summary: `MULTILINE-FIRST: preparar revisión\n${SECOND}`,
+  }]);
+  expect(m.decided).toEqual(['MULTILINE-DECIDED: guardar registro, no repetir lo pasado']);
+  expect(m.open).toEqual([]);
+  const open = parseVoiceMinutes('<voice_minutes>\nVoice call ended (hangup) after 5s with grok-plan, billing plan_unverified.\n\nDecided:\n- (none)\nPassed to this session (already_delivered — do not execute again):\n- (none)\n\nStill open:\n- first\nsecond line\n- third\n\n</voice_minutes>\n');
+  expect(open.open).toEqual(['first\nsecond line', 'third']);
+});
+
+test('structured items win over the text and survive lines that look like formatting', () => {
+  const structured = {
+    decided: ['D1\nD1-more'],
+    passed: [{ delivery_id: 'c1/tool/p', summary: 'P1\n- not an item\nStill open:' }],
+    open: ['O1\nO1-more'],
+  };
+  const m = parseVoiceMinutes(MULTILINE.text, structured);
+  expect(m).toMatchObject({ reason: 'end_call', seconds: 66, provider: 'chatgpt-plan', billing: 'plan_unverified' });
+  expect(m.decided).toEqual(['D1\nD1-more']);
+  expect(m.passed).toEqual([{ deliveryId: 'c1/tool/p', summary: 'P1\n- not an item\nStill open:' }]);
+  expect(m.open).toEqual(['O1\nO1-more']);
+});
+
+test('the block carries the structured items from live and reloaded records', () => {
+  const minutes = { decided: ['D\nmore'], passed: [], open: [] };
+  const custom = { ...CUSTOM, minutes };
+  const live = reduceUserMessage({ messages: [] }, { msg_id: 'm1', timestamp: 100, text: '', content: [{ type: 'text', text: RECORD }], custom });
+  const cold = normalizeHistory([{ role: 'session_event', msg_id: 'm1', timestamp: 100, content: [{ type: 'text', text: RECORD }], custom }]);
+  for (const messages of [live.messages, cold]) {
+    expect(blocksOf(messages)[0].minutes).toEqual(minutes);
+  }
 });
