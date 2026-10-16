@@ -1,6 +1,9 @@
 package serve
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -58,5 +61,49 @@ func TestVoiceJournalStalledSyncKeepsAudioFlowing(t *testing.T) {
 	vaWaitDone(t, c)
 	if text := drLiteral(t, f.mgr, vaDisk(t, f)); !strings.Contains(text, "FINAL-WHILE-DISK-STALLS") {
 		t.Fatalf("the stalled final was not saved: %q", text)
+	}
+}
+
+// With audio still owed to the client the silence allowed is the longer
+// window, and a dead client still goes once it passes.
+func TestVoiceLivenessBackloggedWindow(t *testing.T) {
+	accepted := make(chan *voiceClient, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		cl := newVoiceClient(conn, voice.MaxPendingOutputAudio)
+		defer cl.close()
+		accepted <- cl
+		<-cl.ctx.Done()
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, srv.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow() //nolint:errcheck
+	cl := <-accepted
+	orig := voiceBackloggedWindow
+	voiceBackloggedWindow = time.Second
+	defer func() { voiceBackloggedWindow = orig }()
+	// Two seconds of audio owed; the peer never reads nor answers pings.
+	if !cl.sendAudio(make([]byte, 2*voicePCMBytesPerSecond)) {
+		t.Fatal("control: audio refused")
+	}
+	start := time.Now()
+	go cl.keepalive(50*time.Millisecond, 20*time.Millisecond, 200*time.Millisecond)
+	select {
+	case <-cl.ctx.Done():
+		t.Fatalf("killed after %s, within the backlogged window", time.Since(start))
+	case <-time.After(600 * time.Millisecond):
+	}
+	select {
+	case <-cl.ctx.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("a dead client with audio owed was never dropped")
 	}
 }

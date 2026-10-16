@@ -469,7 +469,9 @@ type voiceClient struct {
 	// nanoseconds).
 	heard atomic.Int64
 
-	mu       sync.Mutex
+	mu sync.Mutex
+	// playedBy is when the audio sent so far finishes playing in real time.
+	playedBy time.Time
 	queue    []voiceFrame
 	audio    int64
 	controls int
@@ -554,6 +556,10 @@ func (cl *voiceClient) enqueue(f voiceFrame) bool {
 			return false
 		}
 		cl.audio += f.audio
+		if now := time.Now(); cl.playedBy.Before(now) {
+			cl.playedBy = now
+		}
+		cl.playedBy = cl.playedBy.Add(time.Duration(f.audio) * time.Second / voicePCMBytesPerSecond)
 	} else {
 		if cl.controls >= voiceClientControls {
 			cl.mu.Unlock()
@@ -612,6 +618,9 @@ var (
 	voicePingInterval   = 5 * time.Second
 	voicePongTimeout    = 5 * time.Second
 	voiceLivenessWindow = 15 * time.Second
+	// voiceBackloggedWindow applies while audio waits for the client: a muted
+	// client's pong can sit behind up to a minute of it.
+	voiceBackloggedWindow = 65 * time.Second
 )
 
 // keepalive pings until the client goes and drops the transport once
@@ -634,7 +643,11 @@ func (cl *voiceClient) keepalive(interval, timeout, window time.Duration) {
 			if cl.ctx.Err() != nil {
 				return
 			}
-			if silent := time.Since(time.Unix(0, cl.heard.Load())); silent > window {
+			limit := window
+			if cl.backlogged() {
+				limit = max(window, voiceBackloggedWindow)
+			}
+			if silent := time.Since(time.Unix(0, cl.heard.Load())); silent > limit {
 				slog.Info("voice call socket silent", "for", silent.Round(time.Millisecond), "error", err)
 				cl.kill()
 				return
@@ -642,6 +655,18 @@ func (cl *voiceClient) keepalive(interval, timeout, window time.Duration) {
 		}
 	}
 }
+
+// backlogged reports audio sent towards the client that it cannot have
+// played yet: queued here, in socket buffers or in its player. Our own queue
+// alone is not enough, since loopback and mobile buffers hold seconds of it.
+func (cl *voiceClient) backlogged() bool {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	return time.Now().Before(cl.playedBy)
+}
+
+// voicePCMBytesPerSecond is PCM s16le mono at 24 kHz.
+const voicePCMBytesPerSecond = 48000
 
 func (cl *voiceClient) heardNow() { cl.heard.Store(time.Now().UnixNano()) }
 

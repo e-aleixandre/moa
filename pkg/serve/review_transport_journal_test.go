@@ -85,22 +85,8 @@ func TestReviewHeartbeatActivePacedReader(t *testing.T) {
 			t.Fatal("audio burst rejected before probe")
 		}
 	}
-	// The live client's microphone: 20 ms PCM frames, as the app sends
-	// unless muted.
-	go func() {
-		tick := time.NewTicker(20 * time.Millisecond)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-				if conn.Write(ctx, websocket.MessageBinary, make([]byte, 960)) != nil {
-					return
-				}
-			}
-		}
-	}()
+	// Muted: nothing comes from the client but its pongs, which wait behind
+	// the burst.
 	var frames atomic.Int64
 	go func() {
 		for {

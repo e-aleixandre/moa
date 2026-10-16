@@ -284,6 +284,20 @@ func TestDurableReviewAttachmentFailureRetainsJournal(t *testing.T) {
 	if !transcriptAttached && len(journals) == 0 {
 		t.Fatal("LAST_DURABLE_COPY_DELETED: PutRef failed, minutes saved without transcript, journal removed")
 	}
+	if !strings.Contains(f.log.String(), "voice call transcript only in its journal") {
+		t.Fatalf("no log names the kept journal: %s", f.log.String())
+	}
+	// Accepted debt (R-B2): recovery parks the journal once; later boots do
+	// not load the session for it again.
+	f.mgr.recoverVoiceJournals()
+	kept, _ := filepath.Glob(filepath.Join(f.mgr.sessionBaseDir, "*", "*"+voiceJournalDirSuffix, "*.jsonl.kept"))
+	if len(kept) != 1 || len(drJournals(t, f.mgr.sessionBaseDir)) != 0 {
+		t.Fatalf("journal not parked: kept=%v active=%d", kept, len(drJournals(t, f.mgr.sessionBaseDir)))
+	}
+	f.mgr.recoverVoiceJournals()
+	if n := len(vpSavedVoice(vaDisk(t, f), "minutes")); n != 1 {
+		t.Fatalf("parked journal produced minutes=%d, want 1", n)
+	}
 }
 
 func TestDurableReviewLateFinalHasNoWake(t *testing.T) {

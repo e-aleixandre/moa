@@ -345,7 +345,13 @@ func (m *Manager) recoverVoiceJournal(path string) {
 		return
 	}
 	if !complete {
-		slog.Warn("voice call journal: transcript not saved, journal kept", "path", path)
+		// Accepted debt: the transcript stays only here. Parked under a name
+		// recovery does not match, so no later boot loads the session again.
+		kept := path + ".kept"
+		if err := os.Rename(path, kept); err != nil {
+			kept = path
+		}
+		slog.Warn("voice call transcript only in its journal", "path", kept)
 		return
 	}
 	j.close(true)

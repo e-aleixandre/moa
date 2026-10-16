@@ -13,7 +13,7 @@ import (
 )
 
 func TestRecheck924AttachmentRetryAfterStorageRecovers(t *testing.T) {
-	t.Skip("R-B2: repairing a saved record needs a record-update path or a companion record; owner's call before adding it")
+	t.Skip("R-B2 accepted as debt by the owner: the record is not repaired; TestVoiceJournalKeptWhenTranscriptUnsaved covers what is kept")
 	f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)
 	u := vaNewControllerUpstream()
 	u.onMinutes = func(context.Context) error { u.events <- vaEndEvent([]string{"RECHECK-DECISION"}, nil); return nil }

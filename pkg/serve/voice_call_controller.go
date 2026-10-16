@@ -579,7 +579,12 @@ drain:
 		c.rewriteBackendMinutes(ctx)
 		cancel()
 	}
-	c.journalLine().close(c.persistMinutes(reason))
+	saved := c.persistMinutes(reason)
+	j := c.journalLine()
+	j.close(saved)
+	if !saved && j != nil {
+		slog.Warn("voice call transcript only in its journal", "call", c.id, "path", j.path)
+	}
 	c.reg.finish(c)
 	close(c.done)
 }
