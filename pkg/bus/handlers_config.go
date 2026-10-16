@@ -35,11 +35,19 @@ func registerConfigHandlers(sctx *SessionContext) {
 		if sctx.ProviderFactory == nil {
 			return fmt.Errorf("model switching unavailable: provider factory not configured")
 		}
-		newModel, ok := core.ResolveModel(cmd.ModelSpec)
+		// "daybreak" (or the retired alias) is GPT-6 Sol with the program on.
+		newModel, daybreakSpec, ok := core.ResolveModelDaybreak(cmd.ModelSpec)
 		if !ok {
 			if err := core.ValidateModelSpec(cmd.ModelSpec); err != nil {
 				return err
 			}
+		}
+		// With Daybreak on, a model the catalog rules out is refused rather
+		// than switching Daybreak off behind the user's back.
+		daybreak := daybreakSpec || sctx.Agent.Daybreak()
+		availability := DaybreakAvailability(sctx)
+		if daybreak && availability.Rejects(newModel) {
+			return fmt.Errorf("%s doesn't support Daybreak. Turn off Daybreak or choose GPT-6 Sol", modelLabel(newModel))
 		}
 		newProvider, err := sctx.ProviderFactory(newModel)
 		if err != nil {
@@ -76,10 +84,10 @@ func registerConfigHandlers(sctx *SessionContext) {
 		if cmd.Application != nil {
 			*cmd.Application = application
 		}
-		modelName := newModel.Name
-		if modelName == "" {
-			modelName = newModel.ID
+		if daybreakSpec && !sctx.Agent.Daybreak() {
+			sctx.Agent.SetDaybreak(true)
 		}
+		modelName := modelLabel(newModel)
 		// A model that can't serve fast mode silently drops the flag, so a
 		// session left marked fast would claim a speed it isn't getting.
 		// Turning it off here also means coming back to a capable model
@@ -90,15 +98,19 @@ func registerConfigHandlers(sctx *SessionContext) {
 		fast := sctx.Agent.Fast()
 		fastSupported := core.SupportsFast(newModel.ID)
 		fastNote := core.FastNote(newModel.ID)
+		daybreakOn := sctx.Agent.Daybreak()
+		daybreakSupported := availability.Sendable(newModel)
 		changed := ConfigChanged{
-			SessionID:     sctx.SessionID,
-			Model:         modelName,
-			Provider:      newModel.Provider,
-			Thinking:      thinking,
-			ContextWindow: newModel.MaxInput,
-			Fast:          &fast,
-			FastSupported: &fastSupported,
-			FastNote:      &fastNote,
+			Daybreak:          &daybreakOn,
+			DaybreakSupported: &daybreakSupported,
+			SessionID:         sctx.SessionID,
+			Model:             modelName,
+			Provider:          newModel.Provider,
+			Thinking:          thinking,
+			ContextWindow:     newModel.MaxInput,
+			Fast:              &fast,
+			FastSupported:     &fastSupported,
+			FastNote:          &fastNote,
 		}
 		if rescale {
 			changed.CompactAt = &rescaled
@@ -229,4 +241,20 @@ func rescaleCompactAt(current, floor, oldWindow, newWindow int) (int, bool) {
 		return 0, false
 	}
 	return rescaled, true
+}
+
+// DaybreakAvailability is the session's view of the account catalog; a
+// session without one behaves as if the catalog was never loaded.
+func DaybreakAvailability(sctx *SessionContext) core.DaybreakAvailability {
+	if sctx == nil || sctx.DaybreakCatalog == nil {
+		return core.DaybreakAvailability{}
+	}
+	return sctx.DaybreakCatalog()
+}
+
+func modelLabel(m core.Model) string {
+	if m.Name != "" {
+		return m.Name
+	}
+	return m.ID
 }
