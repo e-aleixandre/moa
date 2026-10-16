@@ -265,3 +265,55 @@ func TestVoiceCall_ChatGPTNoTurnEndNoLatency(t *testing.T) {
 		t.Fatalf("usage = %+v / %s, want no turn-end latency", u, minutes)
 	}
 }
+
+// ChatGPT's stream carries silence between replies: a silent frame after the
+// user's turn.done is not the reply starting.
+func TestVoiceCall_ChatGPTTurnEndLatencySkipsSilence(t *testing.T) {
+	f := vpNewFixture(t, "chatgpt-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.user(t, "u1", "hello")
+	p.audio(t, make([]byte, 960))
+	time.Sleep(120 * time.Millisecond)
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "two audio frames", func() bool {
+		n := 0
+		for _, fr := range c.snapshot() {
+			if fr.kind == websocket.MessageBinary {
+				n++
+			}
+		}
+		return n >= 2
+	})
+	u, _ := vsEndAndUsage(t, f, c, p)
+	if u.TurnEndLatencyCount != 1 || u.TurnEndLatencyMsP50 < 110 {
+		t.Fatalf("turn-end latency = %+v, want one sample of about 120ms (silence does not end the wait)", u)
+	}
+}
+
+// The user's turn.done can arrive after ChatGPT's reply began: there was no
+// wait, so no sample.
+func TestVoiceCall_ChatGPTLateTurnDoneNotMeasured(t *testing.T) {
+	f := vpNewFixture(t, "chatgpt-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.assistant(t, "a1", "Two plus", false)
+	p.user(t, "u1", "how much is two plus two")
+	time.Sleep(50 * time.Millisecond)
+	p.audio(t, vpPCM())
+	pollUntil(t, vpDeadline, "audio frame", func() bool {
+		for _, fr := range c.snapshot() {
+			if fr.kind == websocket.MessageBinary {
+				return true
+			}
+		}
+		return false
+	})
+	p.assistant(t, "a1", "Two plus two is four.", true)
+	u, _ := vsEndAndUsage(t, f, c, p)
+	if u.TurnEndLatencyCount != 0 {
+		t.Fatalf("turn-end latency = %+v, want no sample for a turn.done after the reply began", u)
+	}
+}
