@@ -229,6 +229,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/voice/calls/{id}/ws", voiceRegistry.handleWS)
 	mux.HandleFunc("POST /api/voice/calls/{id}/hangup", voiceRegistry.handleHangup)
 	mux.HandleFunc("GET /api/voice/status", voiceRegistry.handleStatus)
+	mux.HandleFunc("GET /api/voice/directory", voiceRegistry.handleDirectory)
+	mux.HandleFunc("POST /api/voice/owners/{id}/call", voiceRegistry.handleOwnerCall)
 	mux.HandleFunc("POST /api/voice/invites", voiceRegistry.handleInviteCreate)
 	mux.HandleFunc("GET /api/voice/invites/{id}", voiceRegistry.handleInviteStatus)
 	mux.HandleFunc("POST /api/voice/invites/{id}/answer", voiceRegistry.handleInviteAnswer)

@@ -111,8 +111,12 @@ func isPulseDeviceRevokeRoute(path string) bool {
 }
 
 // voiceOnlyRoute lists what a Moa-Voice credential may do: follow, answer
-// and decline an invitation, and join and hang up its call.
+// and decline an invitation, join and hang up its call, and, for the car,
+// list the owners and call one of them.
 func voiceOnlyRoute(r *http.Request) bool {
+	if r.URL.Path == "/api/voice/directory" {
+		return r.Method == http.MethodGet
+	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/voice/"), "/")
 	if !strings.HasPrefix(r.URL.Path, "/api/voice/") || len(parts) < 2 || parts[1] == "" {
 		return false
@@ -122,6 +126,8 @@ func voiceOnlyRoute(r *http.Request) bool {
 		return r.Method == http.MethodGet
 	case parts[0] == "invites" && len(parts) == 3:
 		return r.Method == http.MethodPost && (parts[2] == "answer" || parts[2] == "decline")
+	case parts[0] == "owners" && len(parts) == 3:
+		return r.Method == http.MethodPost && parts[2] == "call"
 	case parts[0] == "calls" && len(parts) == 3:
 		return (r.Method == http.MethodGet && parts[2] == "ws") || (r.Method == http.MethodPost && parts[2] == "hangup")
 	}
