@@ -74,6 +74,13 @@ func WithVoiceCalls(o VoiceCallOptions) ServerOption {
 	return func(so *serverOptions) { so.voice = o }
 }
 
+// Per-minute prices shown on the explicit paid action, as published (checked
+// 2026-10-16):
+//   - xAI Speech to Speech (grok-voice-latest): $0.08 / min,
+//     https://docs.x.ai/developers/models/grok-voice-latest
+//   - OpenAI GPT-Live (gpt-live-1): $0.05 / min, billed per second,
+//     https://platform.openai.com/docs/pricing ("GPT-Live sessions").
+//     Backend model and tool usage are billed separately.
 var voiceProviders = map[voice.ProviderID]struct {
 	store   string
 	voice   string

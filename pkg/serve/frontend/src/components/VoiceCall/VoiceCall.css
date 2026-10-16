@@ -78,20 +78,35 @@
   color: var(--zl-yellow);
   font-size: var(--zl-fs-meta);
 }
-.vcall-paid {
-  align-self: flex-start;
+.vcall-fail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin: 2px 6px 4px;
-  min-height: 40px;
-  padding: 0 14px;
+}
+.vcall-retry,
+.vcall-paid {
+  min-height: 44px;
+  padding: 0 16px;
   border-radius: var(--zl-r-md);
-  border: 1px solid var(--zl-accent-line);
-  background: var(--zl-accent-dim);
-  color: var(--zl-t1);
   font: inherit;
   font-weight: 500;
   cursor: pointer;
 }
-.vcall-paid:hover { background: var(--zl-accent-med); }
+/* Primary: the accent. Secondary: a plain outline, so the paid choice never
+   reads as the default. */
+.vcall-retry {
+  border: 1px solid var(--zl-accent-line);
+  background: var(--zl-accent-dim);
+  color: var(--zl-t1);
+}
+.vcall-retry:hover { background: var(--zl-accent-med); }
+.vcall-paid {
+  border: 1px solid var(--zl-line);
+  background: transparent;
+  color: var(--zl-t2);
+}
+.vcall-paid:hover { color: var(--zl-t1); background: var(--zl-hi); }
 
 /* ── The phone's call screen ───────────────────────────────────────────── */
 .vcall-screen {
@@ -154,7 +169,9 @@
 }
 .is-failed .vcall-screen-state { color: var(--zl-t1); }
 .vcall-screen-fail { margin-top: 18px; }
-.vcall-screen-fail .vcall-paid { margin: 0; min-height: 48px; padding: 0 20px; }
+.vcall-screen-fail .vcall-fail-actions { margin: 0; flex-direction: column; align-items: stretch; }
+.vcall-screen-fail .vcall-retry,
+.vcall-screen-fail .vcall-paid { min-height: 48px; padding: 0 20px; }
 
 .vcall-live {
   width: 100%;

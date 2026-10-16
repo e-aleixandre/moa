@@ -9,7 +9,7 @@ import { useStore } from "../../hooks/useStore.js";
 import {
   startVoiceCall, hangupVoiceCall, setVoiceCallMuted, showVoiceCallScreen, dismissVoiceCall,
 } from "../../data/voice-call-session.js";
-import { callStatus, callMeta, paidAction, inCall } from "../../data/voice-call-view.js";
+import { callStatus, callMeta, paidAction, retryAction, inCall } from "../../data/voice-call-view.js";
 import { pendingSecrets } from "../../data/secret-action.js";
 import { sessionTitle } from "../../data/util/format.js";
 import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
@@ -37,17 +37,30 @@ export function callParty(owners, sessions, sessionId) {
   return { owner, name: owner?.name || (session ? sessionTitle(session) : "this session"), session };
 }
 
-function PaidButton({ call }) {
+// FailActions — what a failed call offers: Call again is the one primary
+// action; the paid provider is a secondary choice that names itself and its
+// price, and only the plan failure offers it.
+function FailActions({ call }) {
+  const retry = retryAction(call);
   const paid = paidAction(call);
-  if (!paid) return null;
+  if (!retry && !paid) return null;
   return (
-    <button
-      type="button"
-      class="vcall-paid"
-      onClick={() => startVoiceCall(call.sessionId, { provider: paid.provider })}
-    >
-      {paid.label}
-    </button>
+    <div class="vcall-fail-actions">
+      {retry && (
+        <button type="button" class="vcall-retry" onClick={() => startVoiceCall(call.sessionId)}>
+          {retry.label}
+        </button>
+      )}
+      {paid && (
+        <button
+          type="button"
+          class="vcall-paid"
+          onClick={() => startVoiceCall(call.sessionId, { provider: paid.provider })}
+        >
+          {paid.label}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -97,7 +110,7 @@ export function VoiceCallBar({ call, name, onOpenScreen }) {
       {active && call.needsTap && (
         <div class="vcall-bar-tap">Needs your tap — answer the card in this conversation.</div>
       )}
-      {failed && <PaidButton call={call} />}
+      {failed && <FailActions call={call} />}
     </div>
   );
 }
@@ -168,7 +181,7 @@ export function VoiceCallScreen() {
       <div class="vcall-screen-state">{callStatus(call, party.name)}</div>
       {active && <LiveCards call={call} party={party} />}
       {call.phase === "failed" && (
-        <div class="vcall-screen-fail"><PaidButton call={call} /></div>
+        <div class="vcall-screen-fail"><FailActions call={call} /></div>
       )}
       <div class="vcall-spring-v" />
       {active ? (

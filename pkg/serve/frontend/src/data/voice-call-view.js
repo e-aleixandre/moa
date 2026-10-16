@@ -27,14 +27,27 @@ export function inCall(call) {
   return !!call?.active;
 }
 
-// paidAction is the explicit paid button, offered only after the plan could
-// not start the call and only for the provider the server named.
+// Reasons a plan failure that calling again cannot fix: the user has to sign
+// in again first (the message says where), so no retry is offered for them.
+const NOT_RETRYABLE = new Set(['no_plan', 'credentials', 'unauthorized', 'forbidden']);
+
+// retryAction is the one primary action of a plan failure: call again on the
+// plan, which costs nothing extra.
+export function retryAction(call) {
+  if (call?.phase !== 'failed' || call.error !== 'plan_unavailable' || NOT_RETRYABLE.has(call.reason)) return null;
+  return { label: 'Call again' };
+}
+
+// paidAction is the explicit, secondary paid button, offered only after the
+// plan could not start the call and only for the provider the server named.
+// It names the provider and the price the server declares; without a
+// per-minute price it says the call is billed per use and never estimates.
 export function paidAction(call) {
   if (call?.phase !== 'failed' || call.error !== 'plan_unavailable' || !call.paidOption) return null;
   const { provider, billing } = call.paidOption;
   const price = billingLabel(billing);
   const name = PROVIDER_NAMES[provider] || 'the paid API';
-  return { provider, label: price ? `Call with ${name} · ${price}` : `Call with ${name}`, price };
+  return { provider, label: `Use ${name} · ${price || 'billed per use'}`, price };
 }
 
 // meta is "1:12 · plan" under the name; the price only when billed per minute.
