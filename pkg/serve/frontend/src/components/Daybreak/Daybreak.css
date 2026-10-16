@@ -1,5 +1,5 @@
 .db-sunrise { flex: none; width: 14px; height: 14px; color: var(--zl-warm, #e8a25a); }
-.zl-pick-cur-name .db-sunrise { margin-left: 6px; vertical-align: -1px; }
+.zl-pick-cur-name:has(.db-sunrise) { display: inline-flex; align-items: center; gap: 6px; }
 .zl-st-model .db-sunrise { margin-left: 2px; }
 
 .zl-mchip.is-blocked { opacity: 0.45; cursor: not-allowed; }

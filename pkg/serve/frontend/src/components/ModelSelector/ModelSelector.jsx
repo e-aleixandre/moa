@@ -575,7 +575,7 @@ export function ModelSelector({
               )}
               {daybreakOffer && !daybreak && (
                 <div class="zl-db-offer" role="group" aria-label="Daybreak">
-                  <p>{currentName} doesn't support Daybreak.</p>
+                  <p>{selectedSpec?.name || currentName} doesn't support Daybreak.</p>
                   <div class="zl-db-offer-acts">
                     <button type="button" onClick={() => setDaybreakOffer(false)}>Cancel</button>
                     <button
