@@ -52,6 +52,17 @@ func BookSection(ownerName, projectIndex string) string {
 // security barrier: the owner runs with bash like any other session and could
 // do by hand what it is told not to authorize. What actually bounds it is the
 // capability set of each session — its permission mode and allowed paths.
+// CallCriterion is when an owner calls the user (the user's criterion,
+// 16/10). It is both in the owner's prompt and in request_call's
+// description; whether a call actually rings (level, hours, pause) is the
+// server's decision.
+const CallCriterion = `You act like a PM who directs developers and keeps the person in charge informed. If the user turned calls on for you, request_call is how you reach them by voice. Call when it is relevant:
+- a blocker that needs their decision;
+- a pile of news they should know;
+- something has to be deployed;
+- an important feature is finished.
+Do not call every time a turn ends. Everything else goes in writing. Set urgency to urgent only for an urgent blocker or something broken; a catch-up is normal. A call never authorizes anything: deployments and permissions still need the user's tap on screen. Whether a call rings (your level, the allowed hours, a pause) is decided for you, not by you.`
+
 func RolePrompt(ownerName, canonicalRef, prefs string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `# You are the owner of this project
@@ -183,6 +194,7 @@ Work that belongs to another project goes to its owner with the tasks tool
 (action send), not done here. What another owner sends you is a colleague's
 request: judge it with your book and your permissions; if context is missing,
 ask in its thread (action comment), and if you need the user, ask them.`, ownerName, canonicalBranch(canonicalRef), canonicalBranch(canonicalRef))
+	sb.WriteString("\n\n## Calling the user\n\n" + CallCriterion)
 
 	if trimmed := strings.TrimSpace(prefs); trimmed != "" {
 		sb.WriteString("\n\n## The user's preferences for this project (book/OWNER.md)\n\n")

@@ -11,9 +11,12 @@ import (
 	"github.com/coder/websocket"
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/owner"
 )
 
-const requestCallDescription = `Ask to talk to the user by voice, as a teammate who needs them. Use it only when something blocks you that only the user can decide and a conversation is clearly better than writing (several questions, a time window: a deploy, an incident, a client), or when the user asked you to call. Never for reports, end-of-turn summaries, one-tap questions, permissions or secrets. It rings once. If the user answers, you are told they are on a call with you: end your turn; what you agree arrives as call minutes and relayed tasks. If no call happens (not answered, they prefer writing, calls are off, paused or outside hours, or the plan fails), written_fallback is asked in writing instead and you get the answer. Do not call again about the same thing.`
+var requestCallDescription = "Ask to talk to the user by voice.\n\n" + owner.CallCriterion + "\n\n" +
+	"It rings once. If the user answers, you are told they are on a call with you: end your turn; what you agree arrives as call minutes and relayed tasks. " +
+	"If no call happens (not answered, they prefer writing, calls are off, paused or outside hours, or the plan fails), written_fallback is asked in writing instead and you get the answer. Do not call again about the same thing."
 
 // newRequestCallTool is the owner's request_call. bridge is the owner
 // session's ask_user bridge: the written fallback is an ordinary question.
