@@ -245,6 +245,21 @@ func (sp *servePersister) recordOwnerDetached(detached bool) error {
 	return nil
 }
 
+// setVoiceWake sets or clears the voice wake marker for the next save. It
+// lives in the preserved set, which every snapshot carries forward.
+func (sp *servePersister) setVoiceWake(on bool) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if !on {
+		delete(sp.preserved, session.MetaVoiceWake)
+		return
+	}
+	if sp.preserved == nil {
+		sp.preserved = make(map[string]any, 1)
+	}
+	sp.preserved[session.MetaVoiceWake] = true
+}
+
 // markDeleted prevents future Snapshot calls from writing to disk.
 func (sp *servePersister) markDeleted() {
 	sp.mu.Lock()

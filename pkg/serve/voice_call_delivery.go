@@ -2,10 +2,13 @@ package serve
 
 import (
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 // voiceAdmission is the voice-only idempotent admission of one session
@@ -78,17 +81,112 @@ func (m *Manager) admitVoice(sessionID, deliveryID, text string, atts []Attachme
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.load(sess)
+	return m.admitVoiceLocked(sess, deliveryID, text, atts, custom)
+}
+
+func (m *Manager) admitVoiceLocked(sess *ManagedSession, deliveryID, text string, atts []Attachment, custom map[string]any) (voiceReceipt, bool, error) {
+	a := &sess.voiceAdmission
 	if prev, ok := a.receipts[deliveryID]; ok {
 		return prev, true, nil
 	}
 	custom["delivery_id"] = deliveryID
-	action, id, _, err := m.send(sessionID, text, atts, core.NewSteerID(), core.NewMsgID(), custom)
+	action, id, _, err := m.send(sess.ID, text, atts, core.NewSteerID(), core.NewMsgID(), custom)
 	if err != nil {
 		return voiceReceipt{}, false, err
 	}
-	r = voiceReceipt{Action: action, ID: id}
+	r := voiceReceipt{Action: action, ID: id}
 	a.receipts[deliveryID] = r
 	return r, false, nil
+}
+
+// voiceWakeID is the delivery of the wake owed by the minutes record with
+// delivery minutesID: derived from it, so the record alone says whether its
+// wake was ever delivered.
+func voiceWakeID(minutesID string) string { return minutesID + "/wake" }
+
+// wakeVoiceMinutes admits the wake of every saved minutes record that asks
+// for one (wake=true) and whose wake this session has not taken: at hangup,
+// and after a restart that lost it before it was admitted or while it
+// waited in the steer queue. Once every such wake is saved in the
+// transcript the session's voice wake marker is cleared. It reports how
+// many wakes it admitted.
+func (m *Manager) wakeVoiceMinutes(sess *ManagedSession) int {
+	tree := sess.runtime.Context().Tree
+	if tree == nil {
+		return 0
+	}
+	var owed []core.AgentMessage
+	saved := map[string]bool{}
+	tree.VisitDisplayMessages(func(msg *core.AgentMessage) {
+		id := voiceDeliveryID(msg.Custom)
+		if id == "" {
+			return
+		}
+		saved[id] = true
+		if msg.Custom["kind"] == "minutes" && msg.Custom["wake"] == true {
+			owed = append(owed, *msg)
+		}
+	})
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	admitted, unsaved := 0, false
+	for _, rec := range owed {
+		wakeID := voiceWakeID(voiceDeliveryID(rec.Custom))
+		if saved[wakeID] {
+			continue
+		}
+		unsaved = true
+		custom := map[string]any{"source": "voice_call", "kind": "minutes_wake", "call_id": rec.Custom["call_id"], "provider": rec.Custom["provider"], "minutes_msg_id": rec.MsgID}
+		_, dup, err := m.admitVoiceLocked(sess, wakeID, voiceWakeText(rec), nil, custom)
+		if err != nil {
+			slog.Warn("voice call minutes did not wake the session", "session", sess.ID, "delivery", wakeID, "error", err)
+			continue
+		}
+		if !dup {
+			admitted++
+		}
+	}
+	if !unsaved && sess.persister != nil {
+		sess.persister.setVoiceWake(false)
+	}
+	return admitted
+}
+
+// voiceWakeText is what the woken model reads: the minutes record's text.
+func voiceWakeText(rec core.AgentMessage) string {
+	var b strings.Builder
+	for _, c := range rec.Content {
+		if c.Type == "text" {
+			b.WriteString(c.Text)
+		}
+	}
+	b.WriteString("\nThe observed transcript is attached to the minutes record of this call.")
+	return b.String()
+}
+
+// recoverVoiceWakes runs once at startup. Sessions load lazily, so a wake
+// lost in a crash would otherwise wait until someone opens its session;
+// only sessions whose saved header carries the voice wake marker are
+// loaded, and closed again when they owed nothing.
+func (m *Manager) recoverVoiceWakes(summaries []session.Summary) {
+	for _, sum := range summaries {
+		if sum.Metadata[session.MetaVoiceWake] != true {
+			continue
+		}
+		sess, err := m.ResumeSession(sum.ID)
+		if err != nil {
+			slog.Warn("voice wake recovery: session not resumed", "session", sum.ID, "error", err)
+			continue
+		}
+		if m.wakeVoiceMinutes(sess) > 0 {
+			continue
+		}
+		if err := m.CloseSession(sum.ID); err != nil {
+			slog.Warn("voice wake recovery: session not closed", "session", sum.ID, "error", err)
+		}
+	}
 }
 
 // recordVoice appends a display-only voice record (session_event) once per
