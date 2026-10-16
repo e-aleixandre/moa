@@ -63,18 +63,32 @@ func (r *voiceCallRegistry) handleOwnerCall(w http.ResponseWriter, req *http.Req
 		voiceError(w, http.StatusConflict, map[string]any{"error": "owner_has_no_conversation"})
 		return
 	}
-	if _, live := r.mgr.Get(own.SessionID); !live {
-		// ErrBusy: another request is reopening it right now.
-		if _, err := r.mgr.ResumeSession(own.SessionID); err != nil && !errors.Is(err, ErrBusy) {
-			if errors.Is(err, session.ErrNotFound) {
-				voiceError(w, http.StatusConflict, map[string]any{"error": "owner_has_no_conversation"})
-				return
-			}
-			voiceError(w, http.StatusInternalServerError, map[string]any{"error": "owner_reopen_failed"})
-			return
+	sessionID := own.SessionID
+	// The owner is reopened only for a call already admitted: a refused one
+	// (no plan, rate limited, a call already on) leaves it closed.
+	status, out, retry := r.openCallWith(r.ctx, identity.auditID(), "", func() (*ManagedSession, int, map[string]any) {
+		if sess, live := r.mgr.Get(sessionID); live {
+			return sess, 0, nil
 		}
-	}
-	status, out, retry := r.openCall(identity.auditID(), own.SessionID, "")
+		_, err := r.mgr.ResumeSession(sessionID)
+		switch {
+		case errors.Is(err, session.ErrNotFound):
+			return nil, http.StatusConflict, map[string]any{"error": "owner_has_no_conversation"}
+		case errors.Is(err, ErrBusy):
+			// Being reopened or closed by someone else right now: no runtime
+			// to call yet, and not missing either.
+			if sess, live := r.mgr.Get(sessionID); live {
+				return sess, 0, nil
+			}
+			return nil, http.StatusConflict, map[string]any{"error": "owner_busy", "retryable": true}
+		case err != nil:
+			return nil, http.StatusInternalServerError, map[string]any{"error": "owner_reopen_failed"}
+		}
+		if sess, live := r.mgr.Get(sessionID); live {
+			return sess, 0, nil
+		}
+		return nil, http.StatusConflict, map[string]any{"error": "owner_busy", "retryable": true}
+	})
 	if retry > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 	}

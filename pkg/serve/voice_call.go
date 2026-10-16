@@ -257,10 +257,22 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 // answers the HTTP status and body to send, and a Retry-After when limited.
 // Ending scope (r.ctx or narrower) aborts an opening that has not answered.
 func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID, providerName string) (int, map[string]any, int) {
-	sess, ok := r.mgr.Get(sessionID)
-	if !ok {
+	if _, ok := r.mgr.Get(sessionID); !ok {
 		return http.StatusNotFound, map[string]any{"error": "session_not_found"}, 0
 	}
+	return r.openCallWith(scope, principal, providerName, func() (*ManagedSession, int, map[string]any) {
+		if sess, ok := r.mgr.Get(sessionID); ok {
+			return sess, 0, nil
+		}
+		return nil, http.StatusNotFound, map[string]any{"error": "session_not_found"}
+	})
+}
+
+// openCallWith is openCall with the session resolved only once the plan,
+// the admission budget and the principal's slot have all said yes: a
+// resolver with side effects (reopening an owner) runs for admitted calls
+// and never for refused ones.
+func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, providerName string, resolve func() (*ManagedSession, int, map[string]any)) (int, map[string]any, int) {
 	provider := voice.ProviderID(providerName)
 	if provider == "" {
 		p, found := r.defaultPlan()
@@ -284,6 +296,11 @@ func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID
 	}
 	if slot == nil {
 		return http.StatusConflict, map[string]any{"error": "call_active"}, 0
+	}
+	sess, status, out := resolve()
+	if sess == nil {
+		r.release(principal, slot)
+		return status, out, 0
 	}
 	id := newVoiceCallID()
 	// Read once: the call keeps this model to its end, whatever Settings says later.
