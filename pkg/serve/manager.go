@@ -1186,7 +1186,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		}
 	}
 	if summariesErr == nil {
-		m.recoverVoiceWakes(summaries)
+		m.recoverOwedVoice(summaries)
 	}
 	return m
 }

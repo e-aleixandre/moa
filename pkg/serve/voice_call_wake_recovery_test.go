@@ -326,3 +326,68 @@ func TestVoiceWakeMarkerClearedWhenWakeSaved(t *testing.T) {
 		})
 	}
 }
+
+// A relay the spokesperson was told is delivered while the session was busy
+// (queued) reaches the session exactly once after a crash, across restarts.
+func TestVoiceQueuedRelaySurvivesCrash(t *testing.T) {
+	s := vwRunChild(t, "busy_relay")
+	if s.DiskRelay != 0 {
+		t.Fatalf("invalid checkpoint, the relay was already a saved message: %+v", s)
+	}
+	first := make(chan string, 1)
+	relayed := func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		first <- vpLastUser(req)
+		return simpleResponse("RELAYED"), nil
+	}
+	m, p, stop := vwRestart(t, s, relayed, simpleResponseHandler("EXTRA-RUN"))
+	pollUntil(t, vpDeadline, "the relay ran after the restart", func() bool { return p.calls.Load() >= 1 })
+	sess, ok := m.Get(s.SessionID)
+	if !ok {
+		t.Fatal("the session owing a relay was not loaded at startup")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), vpDeadline)
+	defer cancel()
+	if !sess.runtime.WaitSettled(ctx) {
+		t.Fatal("relay run did not settle")
+	}
+	if got := <-first; !strings.Contains(got, "RECOVER-THIS-RELAY") {
+		t.Fatalf("first run after restart was not the relay: %q", got)
+	}
+	stop()
+	if n, marked := vwSaved(t, s, "relay"); n != 1 || marked || p.calls.Load() != 1 {
+		t.Fatalf("after the first restart: saved relays=%d marker=%v provider calls=%d, want 1, cleared, 1", n, marked, p.calls.Load())
+	}
+	for restart := 2; restart <= 3; restart++ {
+		m, p, stop := vwRestart(t, s)
+		vpStable(t, func() bool { return p.calls.Load() == 0 }, "a later restart relayed again")
+		if _, loaded := m.Get(s.SessionID); loaded {
+			t.Fatalf("restart %d left a session that owed nothing loaded", restart)
+		}
+		stop()
+		if n, marked := vwSaved(t, s, "relay"); n != 1 || marked {
+			t.Fatalf("restart %d: saved relays=%d marker=%v, want 1 and cleared", restart, n, marked)
+		}
+	}
+}
+
+// Ported from the Gate B review probe
+// TestGateBReviewAcceptedBusyVoiceDeliverySurvivesCrash/busy_relay: after the
+// crash, retrying the acknowledged delivery ID must find its admission.
+func TestVoiceQueuedRelayAdmissionSurvivesCrash(t *testing.T) {
+	s := vwRunChild(t, "busy_relay")
+	m, p, _ := vwRestart(t, s, simpleResponseHandler("RESTORED-RUN"), simpleResponseHandler("RESTORED-RUN"))
+	sess, ok := m.Get(s.SessionID)
+	if !ok {
+		var err error
+		if sess, err = m.ResumeSession(s.SessionID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, dup, err := m.admitVoice(sess.ID, s.WakeID, "RETRY-OF-ACKNOWLEDGED-DELIVERY", nil, map[string]any{"source": "voice_call", "kind": "relay", "call_id": "retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dup {
+		t.Fatalf("LOST_ADMISSION: acknowledged busy relay %s was forgotten after crash: receipt=%+v calls=%d", s.WakeID, r, p.calls.Load())
+	}
+}

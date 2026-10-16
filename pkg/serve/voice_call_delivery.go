@@ -99,6 +99,75 @@ func (m *Manager) admitVoiceLocked(sess *ManagedSession, deliveryID, text string
 	return r, false, nil
 }
 
+// admitVoiceRelay admits a pass_to_session relay like admitVoice, but first
+// saves it in the session header as owed: a relay queued behind a busy run
+// lives only in memory until that run takes it, and the spokesperson is
+// told it was delivered. The save that holds the relay as a message drops
+// it from the header (servePersister.settleVoiceOwed); a restart before
+// that admits it again (recoverOwedVoice). custom carries model_summary,
+// from which the relay is rebuilt.
+func (m *Manager) admitVoiceRelay(sessionID, deliveryID string, custom map[string]any) (voiceReceipt, bool, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		return voiceReceipt{}, false, ErrNotFound
+	}
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	if prev, ok := a.receipts[deliveryID]; ok {
+		return prev, true, nil
+	}
+	summary, _ := custom["model_summary"].(string)
+	sp := sess.persister
+	if sp != nil {
+		sp.oweVoiceRelay(deliveryID, map[string]any{"call_id": custom["call_id"], "provider": custom["provider"], "summary": summary})
+		if err := sess.runtime.Flush(); err != nil {
+			sp.forgetVoiceRelay(deliveryID)
+			return voiceReceipt{}, false, err
+		}
+	}
+	r, dup, err := m.admitVoiceLocked(sess, deliveryID, voiceRelayPrompt(summary), nil, custom)
+	if err != nil && sp != nil {
+		sp.forgetVoiceRelay(deliveryID)
+		if ferr := sess.runtime.Flush(); ferr != nil {
+			slog.Warn("voice relay withdrawal not saved", "session", sess.ID, "delivery", deliveryID, "error", ferr)
+		}
+	}
+	return r, dup, err
+}
+
+// admitOwedVoiceRelays admits, once each, the relays the session header
+// still owes. It reports how many it admitted.
+func (m *Manager) admitOwedVoiceRelays(sess *ManagedSession) int {
+	if sess.persister == nil {
+		return 0
+	}
+	owed := sess.persister.owedVoiceRelays()
+	if len(owed) == 0 {
+		return 0
+	}
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	admitted := 0
+	for _, rec := range owed {
+		id, _ := rec["delivery_id"].(string)
+		summary, _ := rec["summary"].(string)
+		custom := map[string]any{"source": "voice_call", "kind": "relay", "call_id": rec["call_id"], "provider": rec["provider"], "model_summary": summary}
+		_, dup, err := m.admitVoiceLocked(sess, id, voiceRelayPrompt(summary), nil, custom)
+		if err != nil {
+			slog.Warn("voice relay not recovered", "session", sess.ID, "delivery", id, "error", err)
+			continue
+		}
+		if !dup {
+			admitted++
+		}
+	}
+	return admitted
+}
+
 // voiceWakeID is the delivery of the wake owed by the minutes record with
 // delivery minutesID: derived from it, so the record alone says whether its
 // wake was ever delivered.
@@ -184,25 +253,26 @@ func (m *Manager) voiceWakeText(sess *ManagedSession, rec core.AgentMessage) str
 	return b.String()
 }
 
-// recoverVoiceWakes runs once at startup. Sessions load lazily, so a wake
-// lost in a crash would otherwise wait until someone opens its session;
-// only sessions whose saved header carries the voice wake marker are
-// loaded, and closed again when they owed nothing.
-func (m *Manager) recoverVoiceWakes(summaries []session.Summary) {
+// recoverOwedVoice runs once at startup. Sessions load lazily, so a relay
+// or wake lost in a crash would otherwise wait until someone opens its
+// session; only sessions whose saved header carries the voice marker are
+// loaded (relays first, in the order they were given, then wakes), and
+// closed again when they owed nothing.
+func (m *Manager) recoverOwedVoice(summaries []session.Summary) {
 	for _, sum := range summaries {
 		if sum.Metadata[session.MetaVoiceWake] != true {
 			continue
 		}
 		sess, err := m.ResumeSession(sum.ID)
 		if err != nil {
-			slog.Warn("voice wake recovery: session not resumed", "session", sum.ID, "error", err)
+			slog.Warn("voice recovery: session not resumed", "session", sum.ID, "error", err)
 			continue
 		}
-		if m.wakeVoiceMinutes(sess) > 0 {
+		if m.admitOwedVoiceRelays(sess)+m.wakeVoiceMinutes(sess) > 0 {
 			continue
 		}
 		if err := m.CloseSession(sum.ID); err != nil {
-			slog.Warn("voice wake recovery: session not closed", "session", sum.ID, "error", err)
+			slog.Warn("voice recovery: session not closed", "session", sum.ID, "error", err)
 		}
 	}
 }

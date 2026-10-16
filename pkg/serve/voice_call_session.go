@@ -56,7 +56,7 @@ func (c *voiceCall) passToSession(toolID, summary string) voice.ToolResult {
 	id := c.toolDelivery(toolID)
 	custom := c.custom("relay")
 	custom["model_summary"] = summary
-	r, duplicate, err := c.reg.mgr.admitVoice(c.sessionID, id, voiceRelayPrompt(summary), nil, custom)
+	r, duplicate, err := c.reg.mgr.admitVoiceRelay(c.sessionID, id, custom)
 	if err != nil {
 		return voiceErrorResult(toolID, "the session could not take the request")
 	}

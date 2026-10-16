@@ -259,24 +259,97 @@ func (sp *servePersister) markVoiceOwed() {
 	sp.preserved[session.MetaVoiceWake] = true
 }
 
-// settleVoiceOwed drops the voice marker from the snapshot about to be saved
-// once that snapshot owes nothing: every minutes record asking for a wake
-// holds its wake. The save that persists the last owed delivery is the one
-// that clears the marker, so no later boot loads the session for nothing.
-// Called under sp.mu.
-func (sp *servePersister) settleVoiceOwed(s *session.Session) {
-	if sp.preserved[session.MetaVoiceWake] != true {
+// oweVoiceRelay records a voice relay as owed until a save holds it as a
+// message; the caller saves before the relay counts as delivered.
+func (sp *servePersister) oweVoiceRelay(deliveryID string, fields map[string]any) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.preserved == nil {
+		sp.preserved = make(map[string]any, 2)
+	}
+	rec := map[string]any{"delivery_id": deliveryID}
+	for k, v := range fields {
+		rec[k] = v
+	}
+	sp.preserved[session.MetaVoiceRelays] = append(voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]), rec)
+	sp.preserved[session.MetaVoiceWake] = true
+}
+
+// forgetVoiceRelay withdraws a relay that was never admitted.
+func (sp *servePersister) forgetVoiceRelay(deliveryID string) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	var keep []any
+	for _, r := range voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]) {
+		if r.(map[string]any)["delivery_id"] != deliveryID {
+			keep = append(keep, r)
+		}
+	}
+	sp.setVoiceRelays(keep)
+}
+
+// owedVoiceRelays is the relays still owed, in the order they were given.
+func (sp *servePersister) owedVoiceRelays() []map[string]any {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	var out []map[string]any
+	for _, r := range voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]) {
+		out = append(out, r.(map[string]any))
+	}
+	return out
+}
+
+func (sp *servePersister) setVoiceRelays(relays []any) {
+	if len(relays) == 0 {
+		delete(sp.preserved, session.MetaVoiceRelays)
 		return
 	}
-	if !voiceOwes(savedMessages(s)) {
+	sp.preserved[session.MetaVoiceRelays] = relays
+}
+
+// voiceRelayRecords reads MetaVoiceRelays, as set at runtime or as decoded
+// from a saved header: a list of objects, anything else dropped.
+func voiceRelayRecords(v any) []any {
+	list, _ := v.([]any)
+	out := make([]any, 0, len(list))
+	for _, r := range list {
+		if m, ok := r.(map[string]any); ok {
+			if id, _ := m["delivery_id"].(string); id != "" {
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
+// settleVoiceOwed drops from the snapshot about to be saved what it already
+// holds: relays saved as messages, and the voice marker once nothing is
+// owed — no minutes record lacks its wake and no relay is left. The save
+// that persists the last owed delivery is the one that clears the marker, so
+// no later boot loads the session for nothing. Called under sp.mu.
+func (sp *servePersister) settleVoiceOwed(s *session.Session) {
+	if sp.preserved[session.MetaVoiceWake] != true && sp.preserved[session.MetaVoiceRelays] == nil {
+		return
+	}
+	saved, wakeOwed := voiceSaved(savedMessages(s))
+	var relays []any
+	for _, r := range voiceRelayRecords(sp.preserved[session.MetaVoiceRelays]) {
+		if !saved[r.(map[string]any)["delivery_id"].(string)] {
+			relays = append(relays, r)
+		}
+	}
+	sp.setVoiceRelays(relays)
+	if wakeOwed || len(relays) > 0 {
+		sp.preserved[session.MetaVoiceWake] = true
+	} else {
 		delete(sp.preserved, session.MetaVoiceWake)
 	}
 }
 
-// voiceOwes reports whether msgs hold a minutes record whose wake they do
-// not hold.
-func voiceOwes(msgs []core.AgentMessage) bool {
-	saved := map[string]bool{}
+// voiceSaved is the voice delivery IDs msgs hold, and whether they hold a
+// minutes record whose wake they do not.
+func voiceSaved(msgs []core.AgentMessage) (saved map[string]bool, wakeOwed bool) {
+	saved = map[string]bool{}
 	var wakes []string
 	for _, m := range msgs {
 		id := voiceDeliveryID(m.Custom)
@@ -290,10 +363,10 @@ func voiceOwes(msgs []core.AgentMessage) bool {
 	}
 	for _, w := range wakes {
 		if !saved[w] {
-			return true
+			wakeOwed = true
 		}
 	}
-	return false
+	return saved, wakeOwed
 }
 
 // savedMessages is every message of a session file, whatever its format.

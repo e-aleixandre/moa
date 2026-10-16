@@ -118,12 +118,17 @@ const (
 	// writing false, and binaries that predate it simply see an attached
 	// session.
 	MetaOwnerDetached = "owner_detached"
-	// MetaVoiceWake marks a session whose transcript holds voice call
-	// minutes that wake it and whose wake is not saved yet; the save that
-	// holds the wake drops it. It is only an index for the startup scan,
+	// MetaVoiceWake marks a session that owes voice deliveries not saved yet:
+	// the wake of voice call minutes, or relays in MetaVoiceRelays; the save
+	// that holds the last of them drops it. It is only an index for the startup scan,
 	// which reads session headers alone; the minutes record itself says
 	// whether, and which, wake is owed.
 	MetaVoiceWake = "voice_wake"
+	// MetaVoiceRelays holds the voice call relays a session was given and has
+	// not saved as messages yet (each delivery_id with what rebuilds it), so
+	// a relay queued behind a busy run survives a restart. MetaVoiceWake is
+	// set while it holds any.
+	MetaVoiceRelays = "voice_relays"
 	// MetaLegacyTasks is where versions before the shared task database kept a
 	// session's checklist. Nothing reads or writes it any more; it is carried
 	// forward untouched so saving a session never deletes what an old JSON
@@ -158,7 +163,7 @@ const OriginUser = "user"
 // does not know about. The persistence reactor rebuilds Metadata from scratch
 // on every snapshot, so persisters must carry these forward or they would be
 // dropped on the first save after creation.
-var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind, MetaOwnerDetached, MetaLegacyTasks, MetaCreatorTZ, MetaVoiceWake}
+var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind, MetaOwnerDetached, MetaLegacyTasks, MetaCreatorTZ, MetaVoiceWake, MetaVoiceRelays}
 
 // SetOrigin records who created the session (e.g. "user", "automation", or a
 // caller-chosen label such as "linear-webhook"). An empty origin is not stored:
