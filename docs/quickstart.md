@@ -197,7 +197,8 @@ loaded at all (see [Configuration](./configuration.md#project-directory-moa)).
 
 **Voice input does nothing** — it needs `moa --login openai-transcribe` (or a
 plain `OPENAI_API_KEY`), and browsers only grant microphone access over HTTPS or
-on localhost. Without that key the composer shows no phone button (**Talk live**).
+on localhost. A call (the composer's phone button) needs a ChatGPT or Grok
+sign-in instead; see [Calls](./serve.md#calls).
 
 ## Next
 

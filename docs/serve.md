@@ -34,7 +34,7 @@ moa serve --host 0.0.0.0 --port 8080   # expose on network
 - [Artifacts](#files-sent-by-the-agent): reopen files delivered by the agent without searching the conversation
 - Multi-pane tiled layouts
 - Keyboard-first navigation
-- [Voice input](#voice-input), and [live calls](#talk-live) with a voice delegate that hands back minutes
+- [Voice input](#voice-input), and [calls](#calls) to a conversation that leave minutes in it
 - Session IDs the agent writes in its replies become chips that open that session
 - Share a file or link from another app into a conversation (installed web app, and the [native iOS and Android apps](./mobile.md))
 - [Rewind](#rewind): go back to any of your messages and edit it, without losing the branch you leave
@@ -481,27 +481,27 @@ If it keeps mangling a name or a piece of jargon, add that word to
 [`stt_vocabulary`](configuration.md#features). The model and the language hint
 are configurable there too.
 
-### Talk live
+### Calls
 
-When Moa has a plain OpenAI API key (the `openai-transcribe` credential, or an
-API-key `OPENAI_API_KEY` / `openai` credential — never OpenAI OAuth), the
-composer shows a phone button, **Talk live**. It hands the conversation in front
-of you to a voice delegate you talk to:
+Call a conversation with the phone button in its composer, or with the ☎ on an
+owner's row in the sidebar. The call runs over your ChatGPT or Grok plan
+(ChatGPT first, then Grok, unless **Settings › Voice › Calls** says otherwise);
+Moa carries the audio, so the browser never talks to the provider.
 
-- The delegate gets this conversation as its brief, can read the project
-  owner's book, and can ask this session up to five questions during the call.
-  It cannot write to other sessions, create sessions or approve permissions.
-- While the call runs, one line shows its state, time, voice cost so far and
-  questions used. If the delegate is waiting on this session, the line says so;
-  answer it in the composer.
-- Hang up with the same phone button in the composer (**End call**). The
-  minutes land in the composer as a draft —
-  nothing is sent until you send it. If the call drops, you still get the
-  minutes, or the raw transcript.
-- The questions and answers stay in the transcript as one call block.
-
-The cost shown counts voice time only; the model behind the delegate is billed
-separately and is not included.
+- During the call you can ask about the session, pass it work, and answer what
+  waits for you. Questions, permissions and secrets still need a tap on their
+  own card; the voice only points at them.
+- If the plan cannot take the call, you get the reason and, when one is set up,
+  a button to call with a paid API instead. Nothing paid starts without that
+  tap.
+- **End call** hangs up. The conversation gets the minutes — Decided, Passed to
+  this session, Still open — with `transcript.md` to download. Your draft is
+  left as it was. If the call drops, the minutes say so and the transcript
+  remains.
+- **Settings › Voice** lists which providers are ready, the paid provider to
+  offer, the model that works for the call, and what recent calls measured.
+  The spend shown there is how much the session's own spend changed while the
+  call was open, which includes anything else it ran.
 
 ## Attachments
 
@@ -1179,7 +1179,9 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `GET /api/tasks/ws` | WebSocket that sends `{"type":"tasks_changed","revision":N}` whenever any process (this server, the CLI) changes a task. It is only an invalidation: read `GET /api/tasks` again, on it and on every reconnect |
 | `POST /api/sessions/{id}/owner` | Detach a session from its project owner (`{"detached": true}`) or reattach it |
 | `/api/owners/...` | [Project owners](./owners.md#api) and their books |
-| `POST /api/voice/live/session` · `.../heartbeat` · `.../close` · `GET`/`POST .../ask` | A [live call](#talk-live): start it, keep it alive, end it, and relay the delegate's questions to the session |
+| `POST /api/voice/calls` · `GET .../{id}/ws` · `POST .../{id}/hangup` | A [call](#calls): open it, carry its audio and state, hang up |
+| `GET /api/voice/status` · `PATCH /api/voice/settings` | Voice providers' availability, settings and recent calls' usage |
+| `GET /api/activity` | What a restart would interrupt: running sessions, jobs and voice calls |
 
 The web transcript initially opens on the recent conversation and automatically
 loads older history as you scroll upwards. Each older page is prepended while

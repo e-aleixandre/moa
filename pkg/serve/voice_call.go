@@ -35,7 +35,7 @@ type voiceCallRegistry struct {
 	// admission is the open-attempt budget shared with Live voice's rules:
 	// in-flight and global attempts count failures, the principal's
 	// allowance only counts calls that opened.
-	admission *voiceLiveAdmission
+	admission *voiceOpenBudget
 
 	ctx    context.Context // cancelled on Close: aborts opens in flight
 	cancel context.CancelFunc
@@ -57,7 +57,7 @@ func newVoiceCallRegistry(mgr *Manager, store *auth.Store, opts VoiceCallOptions
 		opts.HTTPClient = &http.Client{}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &voiceCallRegistry{mgr: mgr, store: store, opts: opts, admission: newVoiceLiveAdmission(), ctx: ctx, cancel: cancel,
+	return &voiceCallRegistry{mgr: mgr, store: store, opts: opts, admission: newVoiceOpenBudget(), ctx: ctx, cancel: cancel,
 		principals: map[string]*voiceSlot{}, calls: map[string]*voiceCall{}, plans: map[string]auth.CredentialSnapshot{}, ended: map[string]string{}}
 }
 

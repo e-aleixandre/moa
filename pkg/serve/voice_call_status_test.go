@@ -135,3 +135,20 @@ func TestVoiceCall_ActivityAndUsage(t *testing.T) {
 		t.Fatalf("minutes usage = %s", got)
 	}
 }
+
+// The browser Live routes are gone; a client that still asks for them gets
+// no call, and one that reads voice_live is told to hide its button.
+func TestVoiceLiveRetired(t *testing.T) {
+	f := vpNewFixture(t, "grok-plan")
+	f.harnessOnly = true
+	for _, path := range []string{"/api/voice/live/session", "/api/voice/live/close", "/api/voice/live/heartbeat", "/api/voice/live/ask"} {
+		if st, _, _, _ := f.request("POST", path, map[string]any{}, f.owner()); st < 400 {
+			t.Fatalf("POST %s = %d, want it gone", path, st)
+		}
+	}
+	var caps map[string]any
+	_ = json.Unmarshal(f.mustRequest("GET", "/api/capabilities", nil, f.owner(), 200), &caps)
+	if v, ok := caps["voice_live"]; !ok || v != false {
+		t.Fatalf("voice_live = %v (present %v), want false", v, ok)
+	}
+}

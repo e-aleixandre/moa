@@ -29,7 +29,7 @@ func TestVoiceCall_DefaultPlanIsChatGPTWhenBothPresent(t *testing.T) {
 }
 
 // The global open-attempt rate counts failed opens too: a client looping on
-// a refused upstream stops reaching the provider after voiceLiveGlobalRate
+// a refused upstream stops reaching the provider after voiceGlobalRate
 // attempts in a minute and is told to retry later.
 func TestVoiceCall_GlobalAttemptRateCountsFailures(t *testing.T) {
 	f := vpNewFixture(t, "grok-plan")
@@ -38,7 +38,7 @@ func TestVoiceCall_GlobalAttemptRateCountsFailures(t *testing.T) {
 	f.up.reject = http.StatusForbidden
 	f.up.mu.Unlock()
 	var statuses []int
-	for range voiceLiveGlobalRate + 2 {
+	for range voiceGlobalRate + 2 {
 		status, _, header, err := f.request("POST", "/api/voice/calls", map[string]any{"session_id": f.sess.ID, "provider": f.provider}, f.owner())
 		if err != nil {
 			t.Fatal(err)
@@ -49,8 +49,8 @@ func TestVoiceCall_GlobalAttemptRateCountsFailures(t *testing.T) {
 		}
 	}
 	requests, _, _ := f.up.snapshot()
-	if len(requests) > voiceLiveGlobalRate {
-		t.Fatalf("upstream opens = %d, want at most %d; statuses %v", len(requests), voiceLiveGlobalRate, statuses)
+	if len(requests) > voiceGlobalRate {
+		t.Fatalf("upstream opens = %d, want at most %d; statuses %v", len(requests), voiceGlobalRate, statuses)
 	}
 	if statuses[len(statuses)-1] != http.StatusTooManyRequests {
 		t.Fatalf("statuses = %v, want the attempts beyond the global rate refused with 429", statuses)
@@ -64,13 +64,13 @@ func TestVoiceCall_PrincipalRateCountsOnlyEstablishedCalls(t *testing.T) {
 	f.up.mu.Lock()
 	f.up.reject = http.StatusForbidden
 	f.up.mu.Unlock()
-	for range voiceLivePrincipalRate {
+	for range voicePrincipalRate {
 		f.mustRequest("POST", "/api/voice/calls", map[string]any{"session_id": f.sess.ID, "provider": f.provider}, f.owner(), http.StatusServiceUnavailable)
 	}
 	f.up.mu.Lock()
 	f.up.reject = 0
 	f.up.mu.Unlock()
-	for range voiceLivePrincipalRate {
+	for range voicePrincipalRate {
 		c := f.call()
 		c.hangup()
 	}
