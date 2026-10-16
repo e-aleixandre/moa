@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -148,8 +149,9 @@ type voiceCall struct {
 	unsubs     []func()        // bus subscriptions binding asks/brief to their run
 
 	// journal keeps what the call has accepted on disk until its minutes
-	// are saved (nil when it could not be opened).
-	journal *voiceJournal
+	// are saved; journalErr is why it could not be opened.
+	journal    *voiceJournal
+	journalErr error
 
 	// Controller-owned.
 	transcript voice.Transcript
@@ -278,22 +280,42 @@ func (c *voiceCall) openJournal() {
 		return
 	}
 	j, err := openVoiceJournal(dir, c)
-	if err != nil {
-		slog.Warn("voice call journal not opened: a server crash would lose this call", "call", c.id, "error", err)
-		return
-	}
 	c.mu.Lock()
-	c.journal = j
+	c.journal, c.journalErr = j, err
 	c.mu.Unlock()
+	if err != nil {
+		// Without its journal a server crash would lose the call: it ends
+		// now and its minutes are saved from memory.
+		slog.Warn("voice call journal not opened", "call", c.id, "error", err)
+		c.requestEnd("journal_failed")
+	}
 }
 
-// addTranscript records a transcript event, journaling finished turns.
+// addTranscript records a transcript event and journals it. An error means
+// the event is not durable: the record limit, or a journal that failed.
 func (c *voiceCall) addTranscript(ev voice.Event) error {
 	if err := c.transcript.Add(ev); err != nil {
 		return err
 	}
-	c.journalLine().transcript(ev)
-	return nil
+	c.mu.Lock()
+	j, err := c.journal, c.journalErr
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return j.transcript(ev)
+}
+
+// journalEnd ends the call whose journal refused an event (or reached its
+// limit): what it holds in memory is saved at its end instead.
+func (c *voiceCall) journalEnd(err error) {
+	switch {
+	case err == nil:
+	case errors.Is(err, voice.ErrTranscriptFull), errors.Is(err, errVoiceJournalFull):
+		c.requestEnd("transcript_limit")
+	default:
+		c.requestEnd("journal_failed")
+	}
 }
 
 func (c *voiceCall) journalLine() *voiceJournal {
@@ -346,8 +368,8 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 		if ev.Role == "user" && !ev.Final {
 			c.turnEnded = time.Time{} // the user is still talking: not a turn end
 		}
-		if c.addTranscript(ev) != nil {
-			c.requestEnd("transcript_limit")
+		if err := c.addTranscript(ev); err != nil {
+			c.journalEnd(err)
 			return
 		}
 		c.toClient(client, map[string]any{"type": "transcript", "role": ev.Role, "text": ev.Text, "final": ev.Final})
@@ -453,7 +475,7 @@ func (c *voiceCall) finishCall(client *voiceClient, events <-chan voice.Event) {
 	if d := c.endDiagnostic(); d != nil {
 		slog.Warn("voice call ended", "call", c.id, "provider", c.provider, "reason", reason, "diagnostic", d)
 	}
-	c.journalLine().append(voiceJournalLine{Kind: "ending", Reason: reason, Diagnostic: c.endDiagnostic()})
+	_ = c.journalLine().append(voiceJournalLine{Kind: "ending", Reason: reason, Diagnostic: c.endDiagnostic()}, true)
 	c.ending.Store(true)
 	if client != nil {
 		client.finish(map[string]any{"type": "ended", "reason": reason})

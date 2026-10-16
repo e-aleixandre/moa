@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -464,6 +465,10 @@ type voiceClient struct {
 	done   chan struct{}
 	once   sync.Once
 
+	// wrote is when the last audio frame reached the transport (unix
+	// nanoseconds): audio is the only backlog a pong can wait behind.
+	wrote atomic.Int64
+
 	mu       sync.Mutex
 	queue    []voiceFrame
 	audio    int64
@@ -501,6 +506,9 @@ func (cl *voiceClient) write() {
 		err := cl.conn.Write(ctx, f.kind, f.data)
 		cancel()
 		cl.release(f)
+		if err == nil && f.kind == websocket.MessageBinary {
+			cl.wrote.Store(time.Now().UnixNano())
+		}
 		if err != nil {
 			cl.cancel()
 			_ = cl.conn.CloseNow()
@@ -598,15 +606,19 @@ func (cl *voiceClient) close() {
 
 // A call's socket is pinged so a client that vanished without closing it
 // (lost network, phone off, app killed) is noticed in seconds; it then
-// detaches like any closed socket and Grace runs. The queue ahead of a ping
-// is bounded by BufferedBytes of audio, so one missed pong is enough.
+// detaches like any closed socket and Grace runs. A pong can wait behind up
+// to a minute of queued provider audio, so a late pong alone is not proof:
+// the client is dead when it does not answer and no audio of ours, still
+// being written, explains the delay. A dead peer stops taking audio once
+// the transport's buffers are full.
 // Variables so tests can shrink them.
 var (
 	voicePingInterval = 5 * time.Second
 	voicePongTimeout  = 5 * time.Second
 )
 
-// keepalive pings until the client goes; a missed pong drops the transport.
+// keepalive pings until the client goes; a missed pong with no frame
+// written meanwhile drops the transport.
 func (cl *voiceClient) keepalive(interval, timeout time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -618,10 +630,15 @@ func (cl *voiceClient) keepalive(interval, timeout time.Duration) {
 			ctx, cancel := context.WithTimeout(cl.ctx, timeout)
 			err := cl.conn.Ping(ctx)
 			cancel()
-			if err != nil {
-				cl.kill()
-				return
+			if err == nil || cl.ctx.Err() != nil {
+				continue
 			}
+			if time.Since(time.Unix(0, cl.wrote.Load())) < interval+timeout {
+				continue // still reading: the pong is behind our frames
+			}
+			slog.Info("voice call socket missed its pong", "timeout", timeout, "error", err)
+			cl.kill()
+			return
 		}
 	}
 }

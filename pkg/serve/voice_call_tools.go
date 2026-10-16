@@ -134,7 +134,7 @@ func (c *voiceCall) executeOnce(_ context.Context, tc voice.ToolCall) voice.Tool
 		j := c.journal
 		c.mu.Unlock()
 		if accepted {
-			j.append(voiceJournalLine{Kind: "minutes", Decided: decided, Open: open})
+			c.journalEnd(j.append(voiceJournalLine{Kind: "minutes", Decided: decided, Open: open}, true))
 		}
 		c.minutesOnce.Do(func() { close(c.minutesCh) })
 		return voiceResult(tc.ID, map[string]any{"status": "ok"})
@@ -407,7 +407,7 @@ type voiceCallEnd struct {
 // saved to disk at hangup even while the session is busy. Without the
 // model's end_call it says the call dropped instead of inventing minutes.
 // Passed comes from the server's ledger, already delivered and never sent
-// again. It reports whether the record is saved.
+// again. It reports whether the record and its transcript are saved.
 func (c *voiceCall) persistMinutes(reason string) bool {
 	m := c.reg.mgr
 	sess, ok := m.Get(c.sessionID)
@@ -428,18 +428,20 @@ func (c *voiceCall) persistMinutes(reason string) bool {
 	usage.Reason, usage.Diagnostic = reason, end.diag
 	end.custom["usage"] = usage
 	c.reg.recordUsage(usage)
-	if err := m.saveVoiceMinutes(sess, end); err != nil {
+	complete, err := m.saveVoiceMinutes(sess, end)
+	if err != nil {
 		slog.Warn("voice call minutes not saved", "call", c.id, "error", err)
-		return false
 	}
-	return true
+	return complete
 }
 
 // saveVoiceMinutes saves the minutes record of an ended call and admits its
 // wake. Only Decided or Still open (which includes anything waiting for a
 // tap) wake the session: one run, or one steer when busy. Saving again the
-// same call is a no-op, so a recovery may repeat it.
-func (m *Manager) saveVoiceMinutes(sess *ManagedSession, e voiceCallEnd) error {
+// same call is a no-op, so a recovery may repeat it. complete reports that
+// the record holds the call's transcript: until it does, the journal is the
+// transcript's only durable copy.
+func (m *Manager) saveVoiceMinutes(sess *ManagedSession, e voiceCallEnd) (complete bool, err error) {
 	var decided, open []string
 	if e.minutes != nil {
 		decided, open = e.minutes.decided, append([]string(nil), e.minutes.open...)
@@ -448,7 +450,7 @@ func (m *Manager) saveVoiceMinutes(sess *ManagedSession, e voiceCallEnd) error {
 	wake := len(decided) > 0 || len(open) > 0
 	if m.voiceRecorded(sess, e.callID+"/minutes") {
 		m.wakeVoiceMinutes(sess)
-		return nil
+		return m.attachStore == nil || voiceRecordHasTranscript(sess, e.callID+"/minutes"), nil
 	}
 
 	var b strings.Builder
@@ -503,11 +505,13 @@ func (m *Manager) saveVoiceMinutes(sess *ManagedSession, e voiceCallEnd) error {
 		custom["ending_reason"] = e.endingReason
 	}
 	content := []core.Content{core.TextContent(text)}
+	complete = true
 	if m.attachStore != nil {
 		d, err := m.attachStore.PutRef(sess.ID, []byte(e.transcript), attachment.PutMeta{Name: "transcript.md", Mime: "text/markdown", Kind: "file"})
 		if err != nil {
 			slog.Warn("voice call transcript not saved", "call", e.callID, "error", err)
 			content[0].Text += "\nThe transcript could not be saved.\n"
+			complete = false
 		} else {
 			content = append([]core.Content{{Type: "document", AttachmentID: d.ID, AttachmentSize: d.Size, MimeType: d.Mime, Filename: d.Name}}, content...)
 		}
@@ -522,12 +526,33 @@ func (m *Manager) saveVoiceMinutes(sess *ManagedSession, e voiceCallEnd) error {
 	// (servePersister.settleVoiceOwed), so a restart that loses the wake
 	// finds it from the session header alone.
 	if err := m.recordVoice(sess.ID, e.callID+"/minutes", record); err != nil {
-		return err
+		return false, err
 	}
 	// The wake is owed by the saved record itself (wake=true), under an ID
 	// derived from it: admitted here, or after a restart that lost it.
 	m.wakeVoiceMinutes(sess)
-	return nil
+	return complete, nil
+}
+
+// voiceRecordHasTranscript reports whether the saved record of deliveryID
+// carries its transcript document.
+func voiceRecordHasTranscript(sess *ManagedSession, deliveryID string) bool {
+	tree := sess.runtime.Context().Tree
+	if tree == nil {
+		return false
+	}
+	found := false
+	tree.VisitDisplayMessages(func(msg *core.AgentMessage) {
+		if voiceDeliveryID(msg.Custom) != deliveryID {
+			return
+		}
+		for _, part := range msg.Content {
+			if part.Type == "document" && part.AttachmentID != "" {
+				found = true
+			}
+		}
+	})
+	return found
 }
 
 // voicePendingTaps names what still waits for the owner's tap when a call

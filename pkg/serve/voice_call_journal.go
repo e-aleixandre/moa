@@ -16,15 +16,26 @@ import (
 )
 
 // voiceJournal is the durable side of a live call: an append-only file next
-// to the called session, one line per finished transcript turn, accepted
-// relay and accepted end_call. The call's minutes are written from memory
-// at its end; the journal exists only for a server that dies first, and is
-// removed once the minutes record is saved.
+// to the called session, one line per transcript event, accepted relay and
+// accepted end_call. The call's minutes are written from memory at its end;
+// the journal exists only for a server that dies first, and is removed once
+// the minutes record and its transcript are saved. The live call holds an
+// exclusive lock on it, so another server sharing the config never takes a
+// live call for a lost one.
 type voiceJournal struct {
 	mu   sync.Mutex
 	f    *os.File
 	path string
+	size int64
 }
+
+// errVoiceJournalFull means the journal reached voiceJournalMaxBytes.
+var errVoiceJournalFull = errors.New("voice call journal limit reached")
+
+// voiceJournalMaxBytes bounds what one call's journal serializes: room for
+// a full transcript sent as partial deltas and again as finals, JSON-escaped
+// at worst. The reader accepts any line a journal within it can hold.
+const voiceJournalMaxBytes = 16 * voice.MaxTranscriptBytes
 
 // voiceJournalLine is one journal entry; Kind says which fields it uses.
 type voiceJournalLine struct {
@@ -61,7 +72,8 @@ func voiceJournalDir(storeDir, sessionID string) string {
 	return filepath.Join(storeDir, sessionID+voiceJournalDirSuffix)
 }
 
-// openVoiceJournal creates the journal of call c with its header line.
+// openVoiceJournal creates the journal of call c with its header line,
+// locked for this process, with the file and its directories synced.
 func openVoiceJournal(storeDir string, c *voiceCall) (*voiceJournal, error) {
 	dir := voiceJournalDir(storeDir, c.sessionID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -72,53 +84,80 @@ func openVoiceJournal(storeDir string, c *voiceCall) (*voiceJournal, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The directory entry must survive too, or a power loss forgets the file.
-	syncVoiceJournalDir(dir)
 	j := &voiceJournal{f: f, path: path}
-	j.append(voiceJournalLine{Kind: "call", CallID: c.id, SessionID: c.sessionID, Provider: string(c.provider), Billing: c.billing.Kind, Started: c.started.Unix()})
+	err = lockVoiceJournal(f)
+	if err == nil {
+		err = j.append(voiceJournalLine{Kind: "call", CallID: c.id, SessionID: c.sessionID, Provider: string(c.provider), Billing: c.billing.Kind, Started: c.started.Unix()}, true)
+	}
+	// Both directory entries must survive a power loss, or it forgets the file.
+	if err == nil {
+		err = syncVoiceJournalDir(dir)
+	}
+	if err == nil {
+		err = syncVoiceJournalDir(storeDir)
+	}
+	if err != nil {
+		j.close(true)
+		return nil, err
+	}
 	return j, nil
 }
 
-func syncVoiceJournalDir(dir string) {
-	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync()
-		_ = d.Close()
+func syncVoiceJournalDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
 	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
-// append writes and syncs one line. A nil journal (none could be opened)
-// records nothing; a failed write is logged and the call goes on.
-func (j *voiceJournal) append(line voiceJournalLine) {
+// append writes one line, syncing it when sync is set; a line written and
+// not yet synced survives the process, not a power loss. A nil journal
+// records nothing.
+func (j *voiceJournal) append(line voiceJournalLine, sync bool) error {
 	if j == nil {
-		return
+		return nil
 	}
 	data, err := json.Marshal(line)
 	if err != nil {
-		return
+		return err
 	}
+	data = append(data, '\n')
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.f == nil {
-		return
+		return errors.New("voice call journal closed")
 	}
-	if _, err := j.f.Write(append(data, '\n')); err == nil {
+	if j.size+int64(len(data)) > voiceJournalMaxBytes {
+		return errVoiceJournalFull
+	}
+	n, err := j.f.Write(data)
+	j.size += int64(n)
+	if err == nil && sync {
 		err = j.f.Sync()
 	}
 	if err != nil {
 		slog.Warn("voice call journal write failed", "path", j.path, "error", err)
 	}
+	return err
 }
 
-// transcript journals a finished turn: a provider final or a timed Live
-// fragment. Partial captions are not journaled; their final replaces them.
-func (j *voiceJournal) transcript(ev voice.Event) {
-	if !ev.Final && ev.StartMS == nil {
-		return
+// transcript journals a transcript event as it was observed, partial
+// captions included: replayed in order they rebuild the same record. A
+// finished turn (a final or a timed Live fragment) is synced.
+func (j *voiceJournal) transcript(ev voice.Event) error {
+	if ev.Text == "" && !ev.Final {
+		return nil
 	}
-	j.append(voiceJournalLine{Kind: "transcript", Role: ev.Role, ItemID: ev.ItemID, Text: ev.Text, Final: ev.Final, StartMS: ev.StartMS, EndMS: ev.EndMS})
+	return j.append(voiceJournalLine{Kind: "transcript", Role: ev.Role, ItemID: ev.ItemID, Text: ev.Text, Final: ev.Final, StartMS: ev.StartMS, EndMS: ev.EndMS}, ev.Final || ev.StartMS != nil)
 }
 
-// close stops writing; remove also deletes the file, once its call is saved.
+// close stops writing (releasing the lock); remove also deletes the file,
+// once its call is saved.
 func (j *voiceJournal) close(remove bool) {
 	if j == nil {
 		return
@@ -126,7 +165,9 @@ func (j *voiceJournal) close(remove bool) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.f != nil {
-		_ = j.f.Close()
+		if err := j.f.Close(); err != nil {
+			slog.Warn("voice call journal close failed", "path", j.path, "error", err)
+		}
 		j.f = nil
 	}
 	if remove {
@@ -165,14 +206,32 @@ func (m *Manager) recoverVoiceJournals() {
 }
 
 func (m *Manager) recoverVoiceJournal(path string) {
-	end, sessionID, ok := readVoiceJournal(path)
+	f, err := os.Open(path)
+	if err != nil {
+		slog.Warn("voice call journal not opened", "path", path, "error", err)
+		return
+	}
+	defer f.Close() //nolint:errcheck // read-only
+	if lockVoiceJournal(f) != nil {
+		// Another server sharing this config owns the call, and it is live.
+		slog.Info("voice call journal in use by another server, skipped", "path", path)
+		return
+	}
 	j := &voiceJournal{path: path}
-	if !ok {
-		slog.Warn("voice call journal unreadable, removed", "path", path)
+	end, sessionID, err := readVoiceJournal(f)
+	if errors.Is(err, errVoiceJournalNoHeader) {
+		slog.Warn("voice call journal without a call, removed", "path", path)
 		j.close(true)
 		return
 	}
-	sess, err := m.ResumeSession(sessionID)
+	if err != nil {
+		slog.Warn("voice call journal unreadable, kept", "path", path, "error", err)
+		return
+	}
+	sess, ok := m.Get(sessionID)
+	if !ok {
+		sess, err = m.ResumeSession(sessionID)
+	}
 	if errors.Is(err, session.ErrNotFound) || errors.Is(err, ErrNotFound) {
 		slog.Warn("voice call journal of a missing session, removed", "path", path, "session", sessionID)
 		j.close(true)
@@ -185,28 +244,31 @@ func (m *Manager) recoverVoiceJournal(path string) {
 	// Relays the call left owed go first, in the order they were given, as
 	// at any other startup; the minutes wake follows them.
 	m.admitOwedVoiceRelays(sess)
-	if err := m.saveVoiceMinutes(sess, end); err != nil {
+	complete, err := m.saveVoiceMinutes(sess, end)
+	if err != nil {
 		slog.Warn("voice call journal: minutes not saved", "path", path, "error", err)
+		return
+	}
+	if !complete {
+		slog.Warn("voice call journal: transcript not saved, journal kept", "path", path)
 		return
 	}
 	j.close(true)
 }
 
+// errVoiceJournalNoHeader means a journal that names no call.
+var errVoiceJournalNoHeader = errors.New("voice call journal has no call header")
+
 // readVoiceJournal rebuilds a lost call's end from its journal. A torn last
-// line (the crash hit mid-write) is skipped.
-func readVoiceJournal(path string) (voiceCallEnd, string, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return voiceCallEnd{}, "", false
-	}
-	defer f.Close()
+// line (the crash hit mid-write) is skipped; a read error is not a torn line
+// and fails the whole read, so the journal is kept.
+func readVoiceJournal(f *os.File) (voiceCallEnd, string, error) {
 	var end voiceCallEnd
 	var transcript voice.Transcript
 	var started int64
 	sessionID := ""
 	sc := bufio.NewScanner(f)
-	// One line holds at most a whole transcript, JSON-escaped.
-	sc.Buffer(make([]byte, 64*1024), 8*voice.MaxTranscriptBytes)
+	sc.Buffer(make([]byte, 64*1024), voiceJournalMaxBytes)
 	for sc.Scan() {
 		var line voiceJournalLine
 		if json.Unmarshal(sc.Bytes(), &line) != nil {
@@ -226,8 +288,11 @@ func readVoiceJournal(path string) (voiceCallEnd, string, bool) {
 			end.endingReason, end.diag = line.Reason, line.Diagnostic
 		}
 	}
+	if err := sc.Err(); err != nil {
+		return voiceCallEnd{}, "", err
+	}
 	if sessionID == "" || end.callID == "" {
-		return voiceCallEnd{}, "", false
+		return voiceCallEnd{}, "", errVoiceJournalNoHeader
 	}
 	end.reason = "server_lost"
 	if st, err := f.Stat(); err == nil && started > 0 {
@@ -237,5 +302,5 @@ func readVoiceJournal(path string) (voiceCallEnd, string, bool) {
 		end.open = []string{voiceInterruptedOpen}
 	}
 	end.transcript = transcript.Markdown()
-	return end, sessionID, true
+	return end, sessionID, nil
 }

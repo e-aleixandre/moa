@@ -1,10 +1,12 @@
 package serve
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A crash can tear the last line; what was synced before it is kept.
@@ -18,7 +20,7 @@ func TestVoiceJournalTornLastLine(t *testing.T) {
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	end, sessionID, ok := readVoiceJournal(path)
+	end, sessionID, ok := readJournalPath(t, path)
 	if !ok || sessionID != "s1" || end.callID != "c1" || end.reason != "server_lost" {
 		t.Fatalf("journal not read: ok=%v session=%q end=%+v", ok, sessionID, end)
 	}
@@ -51,5 +53,41 @@ func TestVoiceJournalOfMissingSessionIsRemoved(t *testing.T) {
 	f.mgr.recoverVoiceJournals()
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("journal of a missing session kept: %v", err)
+	}
+}
+
+// readJournalPath reads a journal file, reporting whether it is complete.
+func readJournalPath(t *testing.T, path string) (voiceCallEnd, string, bool) {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		return voiceCallEnd{}, "", false
+	}
+	defer f.Close() //nolint:errcheck // read-only
+	end, sessionID, err := readVoiceJournal(f)
+	return end, sessionID, err == nil
+}
+
+// The journal is bounded by what it serializes, not by transcript text:
+// empty finals still grow it.
+func TestVoiceJournalBounded(t *testing.T) {
+	c := &voiceCall{id: "bounded", sessionID: "s", provider: "grok-plan", started: time.Now()}
+	j, err := openVoiceJournal(t.TempDir(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.close(true)
+	chunk := strings.Repeat("x", 1<<20)
+	for i := 0; ; i++ {
+		err := j.append(voiceJournalLine{Kind: "transcript", Role: "user", Text: chunk}, false)
+		if errors.Is(err, errVoiceJournalFull) {
+			break
+		}
+		if err != nil || i > voiceJournalMaxBytes>>20 {
+			t.Fatalf("append %d: err=%v, want the journal limit", i, err)
+		}
+	}
+	if st, _ := os.Stat(j.path); st.Size() > voiceJournalMaxBytes {
+		t.Fatalf("journal size %d over its limit %d", st.Size(), voiceJournalMaxBytes)
 	}
 }
