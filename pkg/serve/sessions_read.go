@@ -45,7 +45,9 @@ func (m *Manager) readSession(id string, opts sessionReadOptions) core.Result {
 	}
 	var items []ConversationMessage
 	for _, msg := range snapshot.messages {
-		if msg.Role == "user" || msg.Role == "assistant" || (opts.tools && msg.Role == "tool") {
+		// A voice call's minutes record is part of what the conversation shows.
+		voiceRecord := msg.Role == "session_event" && msg.Source == "voice_call"
+		if msg.Role == "user" || msg.Role == "assistant" || voiceRecord || (opts.tools && msg.Role == "tool") {
 			items = append(items, msg)
 		}
 	}
@@ -69,7 +71,11 @@ func (m *Manager) readSession(id string, opts sessionReadOptions) core.Result {
 			sb.WriteString("\n")
 			continue
 		}
-		fmt.Fprintf(&sb, "[%s] %s: %s\n\n", msg.ID, msg.Role, abridge(msg.fullText(), readMessageHead, readMessageTail, how))
+		role := msg.Role
+		if role == "session_event" {
+			role = "voice call " + msg.Kind
+		}
+		fmt.Fprintf(&sb, "[%s] %s: %s\n\n", msg.ID, role, abridge(msg.fullText(), readMessageHead, readMessageTail, how))
 	}
 	return core.TextResult(sb.String())
 }

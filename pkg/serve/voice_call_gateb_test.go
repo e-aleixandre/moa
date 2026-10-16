@@ -140,3 +140,41 @@ func TestVoiceCall_NoEffectAfterHangup(t *testing.T) {
 		t.Errorf("deliveries after hangup: %d", n)
 	}
 }
+
+// read_session shows the minutes record that /messages shows, live and
+// after the session is closed and resumed.
+func TestVoiceCall_MinutesRecordInReadSession(t *testing.T) {
+	f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.user(t, "literal", "READ-MINUTES-LITERAL")
+	c.await("literal ingested", func(v map[string]any) bool {
+		return v["type"] == "transcript" && strings.Contains(vpJSON(v), "READ-MINUTES-LITERAL")
+	})
+	p.tool(t, "end", "end_call", map[string]any{"decided": []string{}, "passed": []string{}, "open": []string{"READ-MINUTES-OPEN-ITEM"}})
+	c.hangup()
+	f.waitRecords("minutes", 1)
+	raw := f.mustRequest("GET", "/api/sessions/"+f.sess.ID+"/messages", nil, f.owner(), 200)
+	if !strings.Contains(string(raw), "voice_minutes") {
+		t.Fatal("control: record absent in /messages")
+	}
+	for _, phase := range []string{"active", "resumed"} {
+		if phase == "resumed" {
+			ctx, cancel := context.WithTimeout(context.Background(), vpDeadline)
+			f.sess.runtime.WaitSettled(ctx)
+			cancel()
+			if err := f.mgr.CloseSession(f.sess.ID); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if f.sess, err = f.mgr.ResumeSession(f.sess.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		text := voiceResultText(f.mgr.readSession(f.sess.ID, sessionReadOptions{}))
+		if !strings.Contains(text, "voice call minutes") || !strings.Contains(text, "READ-MINUTES-OPEN-ITEM") {
+			t.Errorf("%s: read_session drops the minutes record shown in /messages:\n%s", phase, text)
+		}
+	}
+}
