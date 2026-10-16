@@ -30,6 +30,7 @@ import {
 import { savedSecretsBridge, listSaved } from "../../data/saved-secrets.js";
 import { savedLine, savedValue, sortSaved, withoutAlias } from "./saved-secrets-model.js";
 import { ProvidersPage } from "./ProvidersPage.jsx";
+import { voiceValue, planOptions, paidOptions, usageLine, backendModelChoices, backendModelName } from "./voice-settings-model.js";
 import { providersValue } from "./providers-model.js";
 import { useProviderStatus } from "../../data/providers.js";
 import "./GlobalSettings.css";
@@ -510,6 +511,136 @@ function CompactModelPage({ state, onDone }) {
   );
 }
 
+// The model behind a call's tools. Saved now, used by the NEXT call: one that
+// is running keeps the model it started with.
+export function VoiceModelPage({ state, onDone }) {
+  const { status, loaded, save, models = [] } = state;
+  const choices = backendModelChoices(models);
+  const current = status?.backend_model || "";
+  return (
+    <>
+      <p class="zl-set-sum">
+        The model that works for you during a call. It runs on your ChatGPT
+        plan, so only OpenAI models are offered. The next call uses it; a call
+        in progress keeps its own.
+      </p>
+      <div role="radiogroup" aria-label="Requests run on">
+        {choices.map((m) => (
+          <Option
+            key={m.catalogId}
+            label={m.name}
+            desc={m.catalogId}
+            on={current === m.catalogId}
+            disabled={!loaded}
+            onPick={() => { save({ backend_model: m.catalogId }); onDone?.(); }}
+          />
+        ))}
+      </div>
+      {loaded && choices.length === 0 && <p class="zl-set-empty">No OpenAI model is available.</p>}
+    </>
+  );
+}
+
+function useVoiceSettings(active) {
+  const [status, setStatus] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [models, setModels] = useState([]);
+  useEffect(() => {
+    if (!active) return undefined;
+    let live = true;
+    Promise.all([
+      api("GET", "/api/voice/status").catch(() => null),
+      api("GET", "/api/models").catch(() => []),
+    ]).then(([next, list]) => {
+      if (!live) return;
+      setStatus(next);
+      setModels(deriveModelSpecs(list || []));
+      setLoaded(true);
+    });
+    return () => { live = false; };
+  }, [active]);
+  const save = (patch) => api("PATCH", "/api/voice/settings", patch)
+    .then((next) => setStatus(next))
+    .catch(() => addToast({ title: "Could not save the voice setting", detail: "Try again.", type: "error" }));
+  return { status, loaded, save, models };
+}
+
+// Calls: which plan a call uses, which paid provider is offered when
+// the plan fails (only ever on a tap), and what recent calls measured.
+export function VoicePage({ state, onProviders, onModel }) {
+  const { status, loaded, save, models = [] } = state;
+  if (loaded && !status) return <p class="zl-set-empty">Voice settings are unavailable on this server.</p>;
+  const plans = planOptions(status);
+  const paid = paidOptions(status);
+  const recent = status?.recent || [];
+  return (
+    <>
+      <p class="zl-set-sum">
+        Calls use your plan. A paid provider is only offered when the plan
+        fails, and only starts when you tap it.
+      </p>
+      <span class="zl-set-k is-page">Call with</span>
+      <div role="radiogroup" aria-label="Call with">
+        <Option
+          label="Automatic"
+          desc="ChatGPT plan, then Grok plan."
+          on={!status?.provider}
+          disabled={!loaded}
+          onPick={() => save({ provider: "" })}
+        />
+        {plans.map((o) => (
+          <div key={o.id} class="zl-set-opt-wrap">
+            <Option label={o.label} desc={o.desc} on={o.on} disabled={!loaded || !o.ready} onPick={() => save({ provider: o.id })} />
+            {loaded && o.action && onProviders && (
+              <button type="button" class="zl-set-link zl-set-inline" onClick={onProviders}>{o.action}</button>
+            )}
+          </div>
+        ))}
+      </div>
+      <span class="zl-set-k is-page">If the plan fails, offer</span>
+      <div role="radiogroup" aria-label="If the plan fails, offer">
+        <Option
+          label="The plan's own API"
+          desc="Grok API after Grok, OpenAI API after ChatGPT."
+          on={!status?.paid_provider}
+          disabled={!loaded}
+          onPick={() => save({ paid_provider: "" })}
+        />
+        {paid.map((o) => (
+          <Option key={o.id} label={o.label} desc={o.desc} on={o.on} disabled={!loaded} onPick={() => save({ paid_provider: o.id })} />
+        ))}
+      </div>
+      {paid.some((o) => !o.ready) && onProviders && (
+        <button type="button" class="zl-set-link zl-set-inline" onClick={onProviders}>Open Providers</button>
+      )}
+      {status?.backend_model && (
+        <Row
+          label="Requests run on"
+          hint="The model that works for the call."
+          value={backendModelName(models, status.backend_model)}
+          onOpen={onModel}
+          pageLabel="Requests run on"
+        />
+      )}
+      <span class="zl-set-k is-page">Recent calls</span>
+      {recent.length === 0 ? (
+        <p class="zl-set-empty">No calls since this server started.</p>
+      ) : (
+        <ul class="zl-set-voice-recent">
+          {recent.map((u) => {
+            const line = usageLine(u);
+            return (
+              <li key={u.call_id}>
+                <span class="zl-set-l">{line.facts}<em>{line.delta}</em></span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
+  );
+}
+
 // The allowlist. A page rather than a row's value because fourteen models with
 // a filter and provider folds is a screen's worth on its own — and folding by
 // provider is what keeps it one screen when there are fifty.
@@ -914,6 +1045,7 @@ export function GlobalSettings({
   const subagents = useSubagentModels();
   const devices = useDevices(open);
   const saved = useSavedSecrets(open);
+  const voiceSettings = useVoiceSettings(open);
 
   const [push, setPush] = useState(getPushState());
   useEffect(() => subscribePushState(setPush), []);
@@ -1024,6 +1156,8 @@ export function GlobalSettings({
             {page === "subagent-models" && <SubagentModelsPage state={subagents} />}
             {page === "devices" && <DevicesPage state={devices} onClose={onClose} />}
             {page === "saved-secrets" && <SavedSecretsPage state={saved} />}
+            {page === "voice" && <VoicePage state={voiceSettings} onProviders={() => setPage("providers")} onModel={() => setPage("voice-model")} />}
+            {page === "voice-model" && <VoiceModelPage state={voiceSettings} onDone={() => setPage("voice")} />}
             {page === "providers" && (
               <ProvidersPage
                 focusProvider={providerFocus?.provider || ""}
@@ -1075,6 +1209,18 @@ export function GlobalSettings({
                   label="Push notifications on this device"
                 />
               </Row>
+            </div>
+
+            <div class="zl-set-sec">
+              <span class="zl-set-k">Voice</span>
+              <Row
+                label="Calls"
+                hint="Which plan answers when you call a session."
+                value={voiceValue(voiceSettings.status, voiceSettings.loaded)}
+                loading={!voiceSettings.loaded}
+                onOpen={() => setPage("voice")}
+                pageLabel={SETTINGS_PAGES.voice}
+              />
             </div>
 
             <div class="zl-set-sec">

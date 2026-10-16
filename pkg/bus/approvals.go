@@ -93,7 +93,9 @@ type PermissionDecisionSnapshot struct {
 type PendingAsk struct {
 	ID        string
 	Questions []AskQuestion
-	RunGen    uint64
+	// RequiresTap makes the request unanswerable by the voice relay.
+	RequiresTap bool `json:"requires_tap"`
+	RunGen      uint64
 	// RequestedAt is when the question was asked (see PendingPermission).
 	RequestedAt time.Time
 	response    chan<- askuser.Reply
@@ -385,6 +387,7 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 				am.asks[id] = &PendingAsk{
 					ID:          id,
 					Questions:   questions,
+					RequiresTap: p.RequiresTap,
 					RunGen:      am.currentGen(),
 					RequestedAt: time.Now(),
 					response:    p.Response,
@@ -399,10 +402,11 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 					_ = am.state.Transition(StatePermission)
 				}
 				am.bus.Publish(AskUserRequested{
-					SessionID: am.sid,
-					RunGen:    am.currentGen(),
-					ID:        id,
-					Questions: questions,
+					SessionID:   am.sid,
+					RunGen:      am.currentGen(),
+					ID:          id,
+					Questions:   questions,
+					RequiresTap: p.RequiresTap,
 				})
 			case <-ctx.Done():
 				return
@@ -423,6 +427,12 @@ func (am *ApprovalManager) ResolveAskUser(id string, answers []string, responder
 	if p.resolved {
 		am.mu.Unlock()
 		return nil
+	}
+	// Checked under the same lock that consumes the request, so voice and tap
+	// have a single winner and a rejected voice leaves the request pending.
+	if responder.Kind == askuser.ResponderVoice && p.RequiresTap {
+		am.mu.Unlock()
+		return askuser.ErrRequiresTap
 	}
 	if len(answers) != len(p.Questions) {
 		am.mu.Unlock()
@@ -529,6 +539,7 @@ type PendingPermissionInfo struct {
 type PendingAskInfo struct {
 	ID          string        `json:"id"`
 	Questions   []AskQuestion `json:"questions"`
+	RequiresTap bool          `json:"requires_tap,omitempty"`
 	RequestedAt time.Time     `json:"requested_at,omitzero"`
 }
 
@@ -554,6 +565,7 @@ func (am *ApprovalManager) PendingInfo() PendingApprovalInfo {
 			info.Ask = &PendingAskInfo{
 				ID:          a.ID,
 				Questions:   a.Questions,
+				RequiresTap: a.RequiresTap,
 				RequestedAt: a.RequestedAt,
 			}
 			break

@@ -1,0 +1,22 @@
+{
+  "id": "f37d6a4fd52abc6f",
+  "role": "session_event",
+  "source": "voice_call",
+  "call_id": "yq2NZ3o_pLMXbGdAuT1sO3x2",
+  "kind": "minutes",
+  "timestamp": "2026-10-16T04:27:17Z",
+  "text": "<voice_minutes>\nVoice call ended (end_call) after 66s with chatgpt-plan, billing plan_unverified.\n\nDecided:\n- MULTILINE-DECIDED: guardar registro, no repetir lo pasado\n\nPassed to this session (already_delivered — do not execute again):\n- [yq2NZ3o_pLMXbGdAuT1sO3x2/tool/pass-6] already_delivered: MULTILINE-FIRST: preparar revisión\nMULTILINE-SECOND: NO DESPLEGAR NUNCA EN ESTA PRUEBA\n\nStill open:\n- (none)\n\n</voice_minutes>\n",
+  "omitted": true,
+  "attachments": [
+    {
+      "id": "att_34ade0f30a707d88fdade419",
+      "name": "transcript.md",
+      "mime": "text/markdown",
+      "size": 52,
+      "kind": "file",
+      "width": 0,
+      "height": 0,
+      "url": "/api/sessions/e4036923a1ce5a9d5c23e19b/attachments/att_34ade0f30a707d88fdade419"
+    }
+  ]
+}

@@ -789,17 +789,24 @@ func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]
 // with the message that lands in state — so clients dedup it against their
 // optimistic echo and against reconnect snapshots. Mirrors SendWithMsgID.
 func (a *Agent) SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
-	return a.sendWithContentMsgID(ctx, content, msgID, false)
+	return a.sendWithContentMsgID(ctx, content, msgID, false, nil)
 }
 
 // SendWithContentAnnounced is SendWithContentMsgID that also announces the
 // prompt (AgentEventUserMessage) from the append point. Only the user-initiated
 // ingress paths announce: internal producers render themselves.
 func (a *Agent) SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
-	return a.sendWithContentMsgID(ctx, content, msgID, true)
+	return a.sendWithContentMsgID(ctx, content, msgID, true, nil)
 }
 
-func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content, msgID string, announce bool) ([]core.AgentMessage, error) {
+// SendWithContentCustomAnnounced is SendWithContentAnnounced for a producer
+// whose provenance must stay on the message (custom), as SendWithCustom does
+// for text-only prompts.
+func (a *Agent) SendWithContentCustomAnnounced(ctx context.Context, content []core.Content, msgID string, custom map[string]any) ([]core.AgentMessage, error) {
+	return a.sendWithContentMsgID(ctx, content, msgID, true, custom)
+}
+
+func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content, msgID string, announce bool, custom map[string]any) ([]core.AgentMessage, error) {
 	cc := core.CloneContent(content)
 	// The SendPromptWithContent handler reserved these native bytes in the
 	// inflight ledger before this run's goroutine started (see
@@ -814,6 +821,7 @@ func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content
 			a.state.Model = a.config.Model
 		}
 		msg := core.WrapMessage(core.NewUserMessageWithContent(cc))
+		msg.Custom = custom
 		if msgID != "" {
 			msg.MsgID = msgID
 		} else {
@@ -1053,6 +1061,23 @@ func (a *Agent) AppendMessage(msg core.AgentMessage) error {
 	if a.state.Model.ID == "" {
 		a.state.Model = a.config.Model
 	}
+	return nil
+}
+
+// AppendRecord appends a display-only record (role session_event) and
+// announces it. Unlike AppendMessage it is allowed while a run is in flight:
+// the provider never receives session_event messages, so a record placed
+// between a tool call and its result changes nothing the model sees, the
+// same way the loop's own provider-wait notes do.
+func (a *Agent) AppendRecord(msg core.AgentMessage) error {
+	if msg.Role != "session_event" {
+		return fmt.Errorf("only session_event records can be appended while running")
+	}
+	a.lockCut()
+	msg.EnsureMsgID()
+	a.state.Messages = append(a.state.Messages, msg)
+	a.unlockCut()
+	a.announceUserMessage(msg, "")
 	return nil
 }
 
@@ -1701,7 +1726,7 @@ func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	}
 
 	a.mu.Lock()
-	a.state.Messages = compacted
+	a.state.Messages = keepAppendedRecords(compacted, msgs, a.state.Messages)
 	a.state.CompactionEpoch++
 	slot := a.config.SessionCheckpoint
 	a.mu.Unlock()
@@ -1908,6 +1933,25 @@ func interruptedMarkerText(ctx context.Context, err error) string {
 // Callers must hold a.mu (or otherwise own the slice). Kept as a package helper
 // so every state-mutating entry point can enforce the "no anonymous message in
 // state" invariant that the tree syncer relies on for deduplication.
+// keepAppendedRecords is replacement followed by the records AppendRecord
+// added to cur after captured was read. A compaction or trim computes its
+// replacement from captured with the lock released, and AppendRecord is the
+// only writer allowed meanwhile: adopting the replacement alone would drop a
+// record before it is ever saved. Caller holds the state lock.
+func keepAppendedRecords(replacement, captured, cur []core.AgentMessage) []core.AgentMessage {
+	n := len(captured)
+	if len(cur) <= n || (n > 0 && cur[n-1].MsgID != captured[n-1].MsgID) {
+		return replacement
+	}
+	out := replacement[:len(replacement):len(replacement)]
+	for _, m := range cur[n:] {
+		if m.Role == "session_event" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func ensureMsgIDs(msgs []core.AgentMessage) {
 	for i := range msgs {
 		msgs[i].EnsureMsgID()

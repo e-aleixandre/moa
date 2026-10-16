@@ -54,7 +54,7 @@
 
 | Package | Role |
 |---------|------|
-| `pkg/serve/` | HTTP/WebSocket server + web UI session manager; also hosts the Pulse backend (device pairing, guardian WebSocket, Realtime client-secret broker, session brief) and the web voice delegate (`/api/voice/live/*`) |
+| `pkg/serve/` | HTTP/WebSocket server + web UI session manager; also hosts the Pulse backend (device pairing, guardian WebSocket, Realtime client-secret broker, session brief) and web voice calls (`/api/voice/calls`) |
 
 ### Infrastructure
 

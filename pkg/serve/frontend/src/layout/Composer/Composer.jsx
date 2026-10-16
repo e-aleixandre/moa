@@ -1,11 +1,12 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Paperclip, X, Mic, Loader2, PhoneCall, TriangleAlert } from "lucide-preact";
+import { Paperclip, X, Mic, Loader2, PhoneCall, PhoneOff, TriangleAlert } from "lucide-preact";
 import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
-import { useVoiceLive } from "../../hooks/useVoiceLive.js";
-import { appendCallResult, callSpendNotice } from "../../data/voice-live.js";
-import { VoiceLivePanel } from "../../components/VoiceLivePanel/VoiceLivePanel.jsx";
+import {
+  startVoiceCall, hangupVoiceCall, showVoiceCallScreen, voiceCallSupported, voiceCallStream,
+} from "../../data/voice-call-session.js";
+import { VoiceCallBar } from "../../components/VoiceCall/VoiceCall.jsx";
 import { ComposerAurora, auroraActive } from "./ComposerAurora.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import {
@@ -171,7 +172,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // --- Slash command + @-mention suggestion state ---
   const [goalFlags, setGoalFlags] = useState([]);
   const [canTranscribe, setCanTranscribe] = useState(false);
-  const [canVoiceLive, setCanVoiceLive] = useState(false);
   const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
   const [cmdCursor, setCmdCursor] = useState(0);
   const [fileSuggestions, setFileSuggestions] = useState(null); // [{path, is_dir}] or null
@@ -210,11 +210,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       .then(caps => {
         setGoalFlags(Array.isArray(caps.goal_flags) ? caps.goal_flags : []);
         setCanTranscribe(!!caps.transcribe);
-        // A live call needs the same OpenAI key slot the transcriber uses, so
-        // `transcribe` is the honest fallback until the server publishes a
-        // capability of its own. Being wrong here costs a toast (the session
-        // endpoint answers 503), never a silent failure.
-        setCanVoiceLive(caps.voice_live === undefined ? !!caps.transcribe : !!caps.voice_live);
       })
       .catch(() => {});
   }, [sessionId]);
@@ -826,46 +821,25 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // subagent's steer box cannot spill into the parent's.
   const canVoice = canTranscribe && voiceSupported;
 
-  // --- Voice delegate (live call) ---
-  // The minutes land in the composer as a draft, and they are NEVER sent
-  // automatically: the owner reads, corrects or deletes them and sends them
-  // himself. They are APPENDED as their own block rather than inserted at the
-  // caret — a call runs for minutes, and during it the owner may have typed,
-  // selected or moved the caret, so an insertion would replace his text with
-  // the delegate's. The input event is dispatched the same way insertAtCursor
-  // does it, so the draft, hasText and the auto-resize stay correct.
-  const onVoiceLiveResult = useCallback((text, meta) => {
-    const el = textareaRef.current;
-    if (!el) return;
-    const next = appendCallResult(el.value, text);
-    if (next === el.value) return;
-    writeComposer(el, next);
-    el.selectionStart = el.selectionEnd = next.length;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    // What the call cost, once, when it is over. The panel is gone by now and
-    // the figure must not travel inside the draft: the owner sends that text to
-    // the session, and a price tag has no business in the message he sends.
-    const spend = callSpendNotice(meta);
-    if (spend) addToast({ sessionId, title: 'Call ended', detail: spend });
-  }, [writeComposer, sessionId]);
-
-  const onVoiceLiveError = useCallback((msg) => {
-    addToast({ sessionId, title: 'Voice call', detail: msg, type: 'error' });
-  }, [sessionId]);
-
-  const voiceLive = useVoiceLive(sessionId, {
-    onResult: onVoiceLiveResult,
-    onError: onVoiceLiveError,
-  });
-
+  // --- Voice call ---
+  // The call belongs to the app (data/voice-call-session.js): the owner row
+  // can start it and the phone shows it full screen. Here it is a row and
+  // the call button, which turns into the hang-up while this conversation is
+  // on a call. Nothing the call produces is written into this box: the
+  // minutes are a record in the conversation, and whatever the user typed
+  // during the call stays exactly as typed.
+  const call = useStore((s) => s.voiceCall);
+  const callHere = call && call.sessionId === sessionId ? call : null;
+  const callElsewhere = !!(call?.active && call.sessionId !== sessionId);
+  const phoneLayout = useStore((s) => s.isMobile);
   // Never in steer mode: that box writes to a subagent, and a call is a
   // conversation with THIS session.
-  const canCall = canVoiceLive && voiceLive.supported && !steer && !!sessionId;
+  const canCall = voiceCallSupported() && !steer && !!sessionId;
 
   const handleCallToggle = useCallback(() => {
-    if (voiceLive.active) voiceLive.hangup();
-    else voiceLive.start();
-  }, [voiceLive.active, voiceLive.hangup, voiceLive.start]);
+    if (callHere?.active) hangupVoiceCall();
+    else startVoiceCall(sessionId);
+  }, [callHere?.active, sessionId]);
 
   // ⌘. (Mac) / Alt+. (elsewhere) toggles push-to-talk for the FOCUSED composer.
   // Ctrl is deliberately excluded (project rule: ⌘ on Mac / Alt elsewhere,
@@ -1157,7 +1131,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       decorating an empty box. Attachments count: a photo with no caption is
       as sendable as a sentence. */
   const armed = hasText || attachments.length > 0;
-  const voiceLit = auroraActive({ recording, callPhase: voiceLive.phase });
+  const callLive = callHere?.phase === 'listening' || callHere?.phase === 'speaking' || callHere?.phase === 'consulting';
+  const voiceLit = auroraActive({ recording, callPhase: callLive ? 'live' : '' });
 
   /* The composer draws NO queue: what has been said belongs to the thread,
      and the marker at the end of the transcript is where it is seen and
@@ -1167,7 +1142,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     <div class={`zl-composer${busy ? " is-busy" : ""}${armed ? " is-armed" : ""}${voiceLit ? " is-voice" : ""}`}>
       {/* First child on purpose: the slab's content is positioned after it
           while the voice is live (Composer.css), so it paints above the wash. */}
-      {voiceLit && <ComposerAurora getStream={recording ? getRecordingStream : voiceLive.getStream} />}
+      {voiceLit && <ComposerAurora getStream={recording ? getRecordingStream : voiceCallStream} />}
       {later && !compact && (
         <SendLater sessionId={sessionId} text={later.text} onClose={() => setLater(null)} onScheduled={clearScheduled} />
       )}
@@ -1195,18 +1170,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         </div>
       )}
       {/* The call is a flat row inside this slab, not a card: the input stays
-          reachable during a call on purpose — the delegate can block waiting
-          for an answer from this conversation. */}
-      {voiceLive.active && (
-        <VoiceLivePanel
-          phase={voiceLive.phase}
-          endedReason={voiceLive.endedReason}
-          micState={voiceLive.micState}
-          questionsUsed={voiceLive.questionsUsed}
-          maxQuestions={voiceLive.maxQuestions}
-          pendingAsks={voiceLive.pendingAsks}
-          elapsed={voiceLive.elapsed}
-          cost={voiceLive.cost}
+          reachable during a call on purpose. */}
+      {callHere && !steer && (
+        <VoiceCallBar
+          call={callHere}
+          onOpenScreen={phoneLayout ? () => showVoiceCallScreen(true) : undefined}
         />
       )}
       {attachments.length > 0 && (
@@ -1326,26 +1294,25 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           </button>
         )}
         {canCall && (
-          /* Talk live — turns this conversation into a voice call. It sits
-             next to dictation because both are "speak instead of type", but
-             they are different verbs: the mic writes what YOU said, this one
-             hands the conversation to a delegate that talks back and returns
-             minutes. Hence a phone glyph, never a second microphone. */
+          /* The call button: calls this conversation, and while this
+             conversation is on a call it is the hang-up. It sits next to
+             dictation because both are "speak instead of type", but they are
+             different verbs, hence a phone glyph, never a second mic. */
           <button
             type="button"
-            class={`zl-attach zl-call${voiceLive.active ? " in-call" : ""}`}
-            aria-label={voiceLive.active ? "End call" : "Talk live"}
+            class={`zl-attach zl-call${callHere?.active ? " in-call" : ""}`}
+            aria-label={callHere?.active ? "End call" : "Call"}
             title={
-              voiceLive.active
-                ? "End call — the minutes land here as a draft"
-                : "Talk live — a voice delegate takes this conversation"
+              callHere?.active ? "End call"
+                : callElsewhere ? "Hang up your other call first"
+                  : "Call — talk with this conversation"
             }
-            disabled={contentSendPending || voiceLive.phase === 'closing'}
+            disabled={contentSendPending || callElsewhere || callHere?.phase === 'ending'}
             onClick={handleCallToggle}
           >
-            {voiceLive.phase === 'connecting' || voiceLive.phase === 'closing'
+            {callHere?.phase === 'starting' || callHere?.phase === 'ending'
               ? <Loader2 size={15} class="spin" />
-              : <PhoneCall size={15} />}
+              : callHere?.active ? <PhoneOff size={15} /> : <PhoneCall size={15} />}
           </button>
         )}
         {canLater && (hasText || later) && (

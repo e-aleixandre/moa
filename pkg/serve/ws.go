@@ -321,6 +321,8 @@ func wsEventFromBus(event any) (Event, bool) {
 			data.Content = sanitized.Content
 		}
 		return Event{Type: "user_message", Data: data}, true
+	case bus.SteerQueued:
+		return Event{Type: "steer_queued", Data: SteerQueuedData{ID: e.ID, Text: truncateHistoryString(e.Text), NonRecallable: true}}, true
 	case bus.CommandQueued:
 		return Event{Type: "command_queued", Data: CommandQueuedData{ID: e.ID, Raw: e.Raw}}, true
 	case bus.CommandDequeued:
@@ -354,6 +356,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.AskUserRequested:
 		return Event{Type: "ask_user", Data: map[string]any{
 			"id": e.ID, "run_gen": e.RunGen, "questions": e.Questions,
+			"requires_tap": e.RequiresTap,
 		}}, true
 	case bus.AskUserResolved:
 		return Event{Type: "ask_resolved", Data: PromptResolvedData{ID: e.ID}}, true
@@ -599,6 +602,22 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 		if question, ok := custom["question"].(string); ok && question != "" {
 			projected["question"] = truncateHistoryString(question)
 		}
+		// Which record of the call this is (brief, question, relay, minutes),
+		// its admission identity, and for a relay the voice model's summary,
+		// labeled as such: none of them is a message the user typed.
+		for _, key := range []string{"kind", "delivery_id", "provider"} {
+			if value, ok := custom[key].(string); ok && value != "" {
+				projected[key] = value
+			}
+		}
+		if custom["kind"] == "minutes" {
+			if items := voiceMinutesFromCustom(custom); items != nil {
+				projected["minutes"] = items
+			}
+		}
+		if summary, ok := custom["model_summary"].(string); ok && summary != "" {
+			projected["model_summary"] = truncateHistoryString(summary)
+		}
 	}
 	// A batch of reports carries which sessions it is about: the block opens
 	// each of them. Stored as []map[string]string when delivered live, and as
@@ -806,15 +825,24 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 	}
 
 	if len(pendingSteers) > 0 {
-		data.PendingSteers = make([]PendingSteerData, len(pendingSteers))
-		for i, s := range pendingSteers {
-			data.PendingSteers[i] = PendingSteerData{
+		data.PendingSteers = make([]PendingSteerData, 0, len(pendingSteers))
+		for _, s := range pendingSteers {
+			entry := PendingSteerData{
 				ID:            s.ID,
 				Text:          s.Text,
 				Command:       s.IsBarrier(),
 				Images:        countImageContent(s.Content),
 				NonRecallable: isTaskNotice(s.Custom),
 			}
+			if label, ok := voiceQueuedText(s.Custom); ok {
+				// The call's records read as what they are, never as the
+				// prompt wrapped around them, and are not the owner's text.
+				if label == "" {
+					continue
+				}
+				entry.Text, entry.NonRecallable = truncateHistoryString(label), true
+			}
+			data.PendingSteers = append(data.PendingSteers, entry)
 		}
 	}
 
@@ -922,8 +950,9 @@ func pendingAttentionData(pending bus.PendingApprovalInfo) (*PermissionData, *As
 	var askData *AskData
 	if pending.Ask != nil {
 		askData = &AskData{
-			ID:        pending.Ask.ID,
-			Questions: pending.Ask.Questions,
+			ID:          pending.Ask.ID,
+			Questions:   pending.Ask.Questions,
+			RequiresTap: pending.Ask.RequiresTap,
 		}
 	}
 	return permissionData, askData

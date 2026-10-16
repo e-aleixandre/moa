@@ -50,6 +50,8 @@ const (
 // ManagedSession wraps a bus.SessionRuntime with metadata for the web dashboard.
 type ManagedSession struct {
 	subagentSaveMu sync.Mutex
+	// voiceAdmission admits each voice call delivery once (voice_call_delivery.go).
+	voiceAdmission voiceAdmission
 	// Immutable after construction.
 	ID      string    `json:"id"`
 	CWD     string    `json:"cwd"`
@@ -794,6 +796,11 @@ type Manager struct {
 
 	conversationKey []byte // process-local HMAC key for read cursors
 
+	// voiceCalls are the voice call registries of this Manager's servers;
+	// Shutdown ends their calls before any session is torn down.
+	voiceCallsMu sync.Mutex
+	voiceCalls   []*voiceCallRegistry
+
 	providerFactory   func(model core.Model) (core.Provider, error)
 	compactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)
 	// providerCredentialAvailable reports whether a provider has a usable
@@ -1178,6 +1185,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 			}
 		}
 	}
+	if summariesErr == nil {
+		m.recoverOwedVoice(summaries)
+	}
 	return m
 }
 
@@ -1415,7 +1425,7 @@ retryAfterTerminalRun:
 	}
 	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{
 		Content: content, MsgID: msgID, AcceptedMsgID: &accepted,
-		SteerID: steerID, AcceptedSteerID: &acceptedSteer,
+		SteerID: steerID, AcceptedSteerID: &acceptedSteer, Custom: custom,
 	}); err != nil {
 		// The message never entered the conversation — roll back any files
 		// written for it so they don't orphan and count against the quota.

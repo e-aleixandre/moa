@@ -11,8 +11,9 @@ type anthropicPlanKey struct {
 	State      string `json:"state"`
 }
 
-// removeAPIKey deletes the key stored next to the plan sign-in. A primary API
-// key (no plan sign-in) is not removable here, as before.
+// removeAPIKey deletes the key stored next to the plan sign-in. For Anthropic
+// a primary API key (no plan sign-in) is not removable here, as before; for
+// OpenAI and xAI a primary API key is removed when it is the only key.
 func (pc *providerCredentials) removeAPIKey(w http.ResponseWriter, r *http.Request, provider string) {
 	var body struct {
 		ExpectedGeneration *string `json:"expected_generation"`
@@ -20,11 +21,21 @@ func (pc *providerCredentials) removeAPIKey(w http.ResponseWriter, r *http.Reque
 	if !decodeProviderBody(w, r, provider, &body) {
 		return
 	}
-	if provider != "anthropic" || body.ExpectedGeneration == nil {
+	if body.ExpectedGeneration == nil {
 		writeProviderError(w, http.StatusBadRequest, provider, "invalid_request")
 		return
 	}
-	if err := pc.store.RemoveAnthropicAPIKey(*body.ExpectedGeneration); err != nil {
+	var err error
+	switch provider {
+	case "anthropic":
+		err = pc.store.RemoveAnthropicAPIKey(*body.ExpectedGeneration)
+	case "openai", "xai":
+		err = pc.store.RemoveProviderAPIKey(provider, *body.ExpectedGeneration)
+	default:
+		writeProviderError(w, http.StatusBadRequest, provider, "invalid_request")
+		return
+	}
+	if err != nil {
 		writeProviderFailure(w, provider, "api_key", err)
 		return
 	}

@@ -443,34 +443,75 @@ func (s *Store) CommitLogin(provider, expectedGeneration string, cred Credential
 }
 
 func (s *Store) commit(provider, op string, expected *string, cred Credential) (string, error) {
+	return s.commitKey(provider, op, expected, nil, false, cred)
+}
+
+// commitKey is commit that, with keyBesidePlan, stores an OpenAI/xAI API key
+// beside a plan sign-in instead of replacing it, requiring the key there to
+// still be expectedKey when set. The returned generation is the one of the
+// record written. Either way the provider is left with a single API key.
+func (s *Store) commitKey(provider, op string, expected, expectedKey *string, keyBesidePlan bool, cred Credential) (string, error) {
 	gen, err := newGeneration()
 	if err != nil {
 		return "", persistenceFailed(provider, op)
 	}
 	cred.Generation = gen
 	cred.extra = nil
+	besidePlan := false
+	var fenced []string
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	err = s.transact(provider, op, func(disk map[string]Credential) (bool, *pendingRotation, error) {
 		if expected != nil && disk[provider].Generation != *expected {
 			return false, nil, credentialsChanged(provider, op, disk[provider].Generation)
 		}
-		if err := keepKeyBesidePlan(disk, provider, cred); err != nil {
-			return false, nil, persistenceFailed(provider, op)
+		normalizeVoiceKey(disk, provider)
+		slot, voice := voiceKeySlot(provider)
+		switch {
+		case keyBesidePlan && voice && cred.Type == "api_key" && disk[provider].Type == "oauth":
+			if expectedKey != nil && disk[slot].Generation != *expectedKey {
+				return false, nil, credentialsChanged(provider, op, disk[slot].Generation)
+			}
+			besidePlan = true
+			disk[slot] = cred
+			fenced = []string{slot}
+		default:
+			if err := keepKeyBesidePlan(disk, provider, cred); err != nil {
+				return false, nil, persistenceFailed(provider, op)
+			}
+			moved, err := keepVoiceKey(disk, provider, cred)
+			if err != nil {
+				return false, nil, persistenceFailed(provider, op)
+			}
+			if voice && cred.Type == "api_key" {
+				delete(disk, slot) // the new key replaces the provider's key
+			}
+			disk[provider] = cred
+			fenced = []string{provider}
+			if moved {
+				// The moved key is part of this login: it stays fenced with it.
+				fenced = append(fenced, slot)
+			}
 		}
-		disk[provider] = cred
-		// Fence the provider before the rename can expose the new login:
-		// until the write is confirmed durable no request may use it.
+		// Fence the records before the rename can expose them: until the
+		// write is confirmed durable no request may use them.
 		s.mu.Lock()
-		prev, hadPrev := s.pending[provider]
-		s.pending[provider] = pendingRotation{fence: true}
+		prev := make(map[string]pendingRotation, len(fenced))
+		for _, record := range fenced {
+			if p, ok := s.pending[record]; ok {
+				prev[record] = p
+			}
+			s.pending[record] = pendingRotation{fence: true}
+		}
 		s.mu.Unlock()
 		if err := s.saveLocked(disk); err != nil {
 			if errors.Is(err, errNotWritten) {
 				s.mu.Lock()
-				delete(s.pending, provider)
-				if hadPrev {
-					s.pending[provider] = prev
+				for _, record := range fenced {
+					delete(s.pending, record)
+					if p, ok := prev[record]; ok {
+						s.pending[record] = p
+					}
 				}
 				s.mu.Unlock()
 			}
@@ -481,8 +522,12 @@ func (s *Store) commit(provider, op string, expected *string, cred Credential) (
 	if err != nil {
 		return "", err
 	}
-	s.dropPending(provider)
-	s.observe(useKey{provider, core.CredentialSourceStore, gen}, StatusSaved)
+	for _, record := range fenced {
+		s.dropPending(record)
+	}
+	if !besidePlan {
+		s.observe(useKey{provider, core.CredentialSourceStore, gen}, StatusSaved)
+	}
 	return gen, nil
 }
 
@@ -526,6 +571,15 @@ func (s *Store) Remove(provider string) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	err := s.transact(provider, "remove", func(disk map[string]Credential) (bool, *pendingRotation, error) {
+		normalizeVoiceKey(disk, provider)
+		if slot, ok := voiceKeySlot(provider); ok && disk[provider].Type == "oauth" {
+			if key, ok := disk[slot]; ok {
+				// Removing the plan keeps its key, now the only credential.
+				disk[provider] = key
+				delete(disk, slot)
+				return false, nil, s.saveFencedLocked(provider, provider, "remove", disk)
+			}
+		}
 		delete(disk, provider)
 		return true, nil, nil
 	})

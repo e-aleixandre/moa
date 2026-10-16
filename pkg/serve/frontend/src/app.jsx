@@ -19,6 +19,7 @@ import { loadOwners } from "./data/owners.js";
 import { loadProviderStatus } from "./data/providers.js";
 import { startTasksSync, resumeTasksSync } from "./data/tasks.js";
 import { TasksScreen } from "./components/Tasks/TasksScreen.jsx";
+import { VoiceCallScreen } from "./components/VoiceCall/VoiceCall.jsx";
 import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
 import { afterPendingInits, getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
@@ -373,6 +374,8 @@ function App() {
         <GlobalSharePicker />
         <GlobalPairingPanel />
         <ArtifactsDrawer />
+        {/* The phone's call screen, over everything while a call is shown. */}
+        <VoiceCallScreen />
         <ToastContainer />
       </>
     );

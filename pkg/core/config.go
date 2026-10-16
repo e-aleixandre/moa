@@ -116,6 +116,32 @@ type MoaConfig struct {
 	TrimDisabled           *bool                `json:"trim_disabled,omitempty"`                 // Turn off the tool-result elision that runs before compaction. Absent/false = on. A pointer so an explicit false is distinguishable from "unset" when configs merge.
 	Events                 *EventsConfig        `json:"events,omitempty"`                        // wake-on-event: inbound webhook sources (global-only; see EventsConfig).
 	Preview                *PreviewConfig       `json:"preview,omitempty"`                       // Live Preview proxy address, remembered so the web UI does not ask again (global-only).
+	Voice                  *VoiceConfig         `json:"voice,omitempty"`                         // Voice calls: plan provider, paid alternative and backend model (global-only; see VoiceConfig).
+}
+
+// VoiceConfig chooses how voice calls are made. Every field is optional and
+// additive: an absent value keeps the default. None of them is consent to
+// pay: a paid provider is only used when the user picks it for a call.
+type VoiceConfig struct {
+	Provider     string `json:"provider,omitempty"`      // plan used by default: "chatgpt-plan" or "grok-plan". Empty = ChatGPT, then Grok.
+	PaidProvider string `json:"paid_provider,omitempty"` // paid alternative offered when the plan fails: "xai-api" or "openai-live-api". Empty = the plan's own provider.
+	BackendModel string `json:"backend_model,omitempty"` // model behind ChatGPT-plan handoffs and Live delegation. Empty = DefaultVoiceBackendModel.
+}
+
+// DefaultVoiceBackendModel serves the tools of a voice call when no model is
+// configured.
+const DefaultVoiceBackendModel = "gpt-6.1-sol"
+
+// GetVoiceConfig returns the voice settings with defaults filled in.
+func GetVoiceConfig(cfg MoaConfig) VoiceConfig {
+	var out VoiceConfig
+	if cfg.Voice != nil {
+		out = *cfg.Voice
+	}
+	if out.BackendModel == "" {
+		out.BackendModel = DefaultVoiceBackendModel
+	}
+	return out
 }
 
 // PreviewConfig remembers how the browser reaches the Live Preview proxy. Only
@@ -614,6 +640,9 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		// The preview address is the owner's, not a project's: a repository must
 		// never be able to tell Moa where to publish a proxy.
 		Preview: base.Preview,
+		// Global-only: a repository must not choose how, or at whose cost, the
+		// owner's calls are made.
+		Voice: base.Voice,
 		Permissions: PermissionsConfig{
 			Mode:  mergeScalar(base.Permissions.Mode, override.Permissions.Mode),
 			Model: mergeScalar(base.Permissions.Model, override.Permissions.Model),

@@ -24,6 +24,11 @@ func (m *Manager) ownerReadSession(own owner.Owner, id string, opts sessionReadO
 	if _, err := m.ownerSession(own, id); err != nil {
 		return core.ErrorResult(err.Error())
 	}
+	return m.readSession(id, opts)
+}
+
+// readSession renders a session for a reader whose scope was already checked.
+func (m *Manager) readSession(id string, opts sessionReadOptions) core.Result {
 	snapshot, err := m.conversationSnapshot(id)
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot read session %s: %v", id, err))
@@ -40,7 +45,9 @@ func (m *Manager) ownerReadSession(own owner.Owner, id string, opts sessionReadO
 	}
 	var items []ConversationMessage
 	for _, msg := range snapshot.messages {
-		if msg.Role == "user" || msg.Role == "assistant" || (opts.tools && msg.Role == "tool") {
+		// A voice call's minutes record is part of what the conversation shows.
+		voiceRecord := msg.Role == "session_event" && msg.Source == "voice_call"
+		if msg.Role == "user" || msg.Role == "assistant" || voiceRecord || (opts.tools && msg.Role == "tool") {
 			items = append(items, msg)
 		}
 	}
@@ -64,7 +71,11 @@ func (m *Manager) ownerReadSession(own owner.Owner, id string, opts sessionReadO
 			sb.WriteString("\n")
 			continue
 		}
-		fmt.Fprintf(&sb, "[%s] %s: %s\n\n", msg.ID, msg.Role, abridge(msg.fullText(), readMessageHead, readMessageTail, how))
+		role := msg.Role
+		if role == "session_event" {
+			role = "voice call " + msg.Kind
+		}
+		fmt.Fprintf(&sb, "[%s] %s: %s\n\n", msg.ID, role, abridge(msg.fullText(), readMessageHead, readMessageTail, how))
 	}
 	return core.TextResult(sb.String())
 }

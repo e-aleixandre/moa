@@ -53,6 +53,16 @@ switched off for a project — is kept separately, in
 
 > **Bash deny is not a security boundary.** `Bash(...)` rules match the *literal command string* by prefix/glob. A rule like `Bash(rm -rf:*)` does **not** reliably block recursive deletes — it is trivially evaded by flag reordering (`rm -fr`, `rm -r -f`), absolute paths (`/bin/rm -rf`), a leading space, or shell aliases. Use `deny` to reduce accidents, not to contain an adversarial command. For real containment use `mode: ask`/`auto` (a human or model approves each call) and the path sandbox (`path_scope`).
 
+### Voice calls
+
+Global config only; also set from **Settings › Voice** in `moa serve`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `voice.provider` | string | Plan a call uses: `chatgpt-plan` or `grok-plan` (default: ChatGPT, then Grok). Never a paid provider |
+| `voice.paid_provider` | string | Paid provider offered, on a tap, when the plan fails: `openai-live-api` or `xai-api` (default: the plan's own) |
+| `voice.backend_model` | string | Model that works for the call (default `gpt-6-sol`) |
+
 ### Paths & sandbox
 
 | Field | Type | Description |

@@ -169,6 +169,8 @@ let state = {
   collapsedSections: persisted.collapsedSections || {},
 
   isMobile: false,
+  // The one voice call of this client (data/voice-call-session.js), or null.
+  voiceCall: null,
 
   // view — which screen is showing: null = single conversation (or mobile),
   // 'grid' = pane grid. Seeded from the URL.

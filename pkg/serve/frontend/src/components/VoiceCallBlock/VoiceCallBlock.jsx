@@ -20,7 +20,18 @@ import "./VoiceCallBlock.css";
 
 // What the collapsed block says happened, in one line.
 export function voiceCallSummary(exchanges = []) {
-  const n = Array.isArray(exchanges) ? exchanges.length : 0;
+  const list = Array.isArray(exchanges) ? exchanges : [];
+  // A call made through moa's own call path also passes requests on and asks
+  // for a brief; it is a call with you, not a delegate's interview.
+  if (list.some((x) => x?.voiceKind)) {
+    const asked = list.filter((x) => !x?.voiceKind).length;
+    const passed = list.filter((x) => x?.voiceKind === "relay").length;
+    const parts = [];
+    if (passed) parts.push(`${passed} passed on`);
+    if (asked) parts.push(`${asked} ${asked === 1 ? "question" : "questions"}`);
+    return parts.length ? `Call with you · ${parts.join(" · ")}` : "Call with you";
+  }
+  const n = list.length;
   if (n === 0) return "A voice delegate called this session";
   return `The voice delegate asked this session ${n === 1 ? "1 question" : `${n} questions`}`;
 }
@@ -33,7 +44,7 @@ export const VOICE_ANSWER_PENDING = "No answer recorded in this conversation";
 export const VOICE_ANSWER_WORKING = "Answering…";
 
 export function voiceCallUnanswered(exchanges = []) {
-  return (Array.isArray(exchanges) ? exchanges : []).filter((x) => !x?.answer && !x?.streaming).length;
+  return (Array.isArray(exchanges) ? exchanges : []).filter((x) => x?.voiceKind !== "relay" && !x?.answer && !x?.streaming).length;
 }
 
 export function VoiceCallBlock({ exchanges = [], time }) {
@@ -63,18 +74,27 @@ export function VoiceCallBlock({ exchanges = [], time }) {
       {open && (
         <ol class="vcb-log">
           {exchanges.map((exchange) => (
-            <li class="vcb-x" key={exchange.id}>
-              <div class="vcb-line">
-                <span class="vcb-who">The delegate asked</span>
-                <p class="vcb-said">{exchange.question}</p>
-              </div>
-              <div class="vcb-line is-answer">
-                <span class="vcb-who">This session answered</span>
-                <p class={`vcb-said${exchange.answer ? "" : " is-pending"}`}>
-                  {exchange.answer || (exchange.streaming ? VOICE_ANSWER_WORKING : VOICE_ANSWER_PENDING)}
-                </p>
-              </div>
-            </li>
+            exchange.voiceKind === "relay" ? (
+              <li class="vcb-x" key={exchange.id}>
+                <div class="vcb-line">
+                  <span class="vcb-who is-relay">Passed to this session · the voice's summary</span>
+                  <p class="vcb-said">{exchange.question}</p>
+                </div>
+              </li>
+            ) : (
+              <li class="vcb-x" key={exchange.id}>
+                <div class="vcb-line">
+                  <span class="vcb-who">{exchange.voiceKind === "brief" ? "The call asked for a brief" : "The call asked"}</span>
+                  {exchange.question && <p class="vcb-said">{exchange.question}</p>}
+                </div>
+                <div class="vcb-line is-answer">
+                  <span class="vcb-who">This session answered</span>
+                  <p class={`vcb-said${exchange.answer ? "" : " is-pending"}`}>
+                    {exchange.answer || (exchange.streaming ? VOICE_ANSWER_WORKING : VOICE_ANSWER_PENDING)}
+                  </p>
+                </div>
+              </li>
+            )
           ))}
         </ol>
       )}

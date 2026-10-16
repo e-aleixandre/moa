@@ -251,3 +251,7 @@ button.zl-group.ow-sec .zl-dot { flex: none; }
   background: var(--ow-sw-c);
 }
 
+
+/* A call is running with this owner: a small green phone beside the name. Not a
+   control; the row itself opens the conversation. */
+.ow-orow-live { flex: none; color: var(--zl-green); }

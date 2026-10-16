@@ -31,19 +31,26 @@ const (
 // projected into role=tool items; tool result output remains available only
 // through the explicit detail query.
 type ConversationMessage struct {
-	ID            string          `json:"id"`
-	Role          string          `json:"role"`
-	Source        string          `json:"source,omitempty"`
-	Timestamp     time.Time       `json:"timestamp,omitempty"`
-	Text          string          `json:"text,omitempty"`
-	Truncated     bool            `json:"truncated,omitempty"`
-	Omitted       bool            `json:"omitted,omitempty"`
-	OmittedBlocks int             `json:"omitted_blocks,omitempty"`
-	Tool          string          `json:"tool,omitempty"`
-	Action        string          `json:"action,omitempty"`
-	Target        string          `json:"target,omitempty"`
-	Status        string          `json:"status,omitempty"`
-	Attachments   []AttachmentDTO `json:"attachments,omitempty"`
+	ID     string `json:"id"`
+	Role   string `json:"role"`
+	Source string `json:"source,omitempty"`
+	// CallID and Kind place a voice call record (source voice_call) in its
+	// call: brief, question, relay or minutes. Never a typed message.
+	CallID string `json:"call_id,omitempty"`
+	Kind   string `json:"kind,omitempty"`
+	// Minutes is a minutes record's structured lists, so a reader never has
+	// to parse Text. Absent on records from before they were stored.
+	Minutes       *voiceMinutesItems `json:"minutes,omitempty"`
+	Timestamp     time.Time          `json:"timestamp,omitempty"`
+	Text          string             `json:"text,omitempty"`
+	Truncated     bool               `json:"truncated,omitempty"`
+	Omitted       bool               `json:"omitted,omitempty"`
+	OmittedBlocks int                `json:"omitted_blocks,omitempty"`
+	Tool          string             `json:"tool,omitempty"`
+	Action        string             `json:"action,omitempty"`
+	Target        string             `json:"target,omitempty"`
+	Status        string             `json:"status,omitempty"`
+	Attachments   []AttachmentDTO    `json:"attachments,omitempty"`
 	// PatchFiles is an apply_patch item's files and counts, without diffs: the
 	// closed card's content (see tool.SummarizePatchFiles).
 	PatchFiles []tool.PatchFileDisplay `json:"patch_files,omitempty"`
@@ -270,7 +277,11 @@ func (m *Manager) safeConversationMessages(sessionID string, messages []core.Age
 	for index, msg := range messages {
 		// Custom messages are extensions (shell, subagent and internal injected
 		// notifications), not owner-authored display conversation.
-		if (msg.Role != "user" && msg.Role != "assistant") || isExtensionMessage(msg.Custom) {
+		voiceCall := msg.Custom["source"] == "voice_call"
+		// A voice call's minutes are a session_event record: display-only, but
+		// part of the conversation a reader should see.
+		shown := msg.Role == "user" || msg.Role == "assistant" || (voiceCall && msg.Role == "session_event")
+		if !shown || (isExtensionMessage(msg.Custom) && !voiceCall) {
 			continue
 		}
 		id := msg.MsgID
@@ -289,6 +300,14 @@ func (m *Manager) safeConversationMessages(sessionID string, messages []core.Age
 		text, omitted, truncated := safeDisplayText(msg.Content)
 		if shouldShowConversationMessage(msg.Role, text, omitted, msg.Content) {
 			item := ConversationMessage{ID: id, Role: msg.Role, Text: text, Omitted: omitted, Truncated: truncated}
+			if voiceCall {
+				item.Source = "voice_call"
+				item.CallID, _ = msg.Custom["call_id"].(string)
+				item.Kind, _ = msg.Custom["kind"].(string)
+				if item.Kind == "minutes" {
+					item.Minutes = voiceMinutesFromCustom(msg.Custom)
+				}
+			}
 			if truncated {
 				item.full = fullDisplayText(msg.Content)
 			}

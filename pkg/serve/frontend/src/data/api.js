@@ -15,7 +15,7 @@ import {
   handleWsBashJobStart, handleWsBashJobOutput, handleWsBashJobEnd, handleWsBashComplete,
   handleWsCommand, handleWsTasksUpdate,
   handleWsGoalChange, handleWsGoalIteration, handleWsGoalVerify, handleWsGoalEnd,
-  handleWsAskUser, handleWsContextUpdate, handleWsSteer, handleWsSteersCanceled,
+  handleWsAskUser, handleWsContextUpdate, handleWsSteer, handleWsSteerQueued, handleWsSteersCanceled,
   handleWsUserMessage,
   handleWsMcpChange,
   handleWsCommandQueued, handleWsCommandDequeued,
@@ -626,6 +626,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'steer':
       handleWsSteer(sessionId, evt.data);
+      break;
+    case 'steer_queued':
+      handleWsSteerQueued(sessionId, evt.data);
       break;
     case 'steers_canceled':
       handleWsSteersCanceled(sessionId, evt.data?.discarded_steer_ids, evt.data?.stop_id || evt.data?.recall_id);

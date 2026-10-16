@@ -148,6 +148,7 @@ func runServe(args []string) {
 		serve.WithDeviceAuthentication(),
 		serve.WithPreviewController(preview),
 		serve.WithProviderCredentials(authStore, providerLogins),
+		serve.WithVoiceCalls(serve.VoiceCallOptions{Backend: newVoiceBackendFactory(authStore, nil)}),
 		serve.WithRealtimeClientSecretBroker(func() (string, bool) {
 			// Priority:
 			//  1) dedicated OpenAI API key ("openai-transcribe" slot, shared
