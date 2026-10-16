@@ -58,7 +58,10 @@ type cacheMissTracker struct {
 	at       int64
 	provider string
 	model    string
-	epoch    int
+	// program is the access program the turn asked for: a cache is per
+	// program as much as per model.
+	program string
+	epoch   int
 	// window1h remembers the TTL of the last request that wrote the Anthropic
 	// cache: a pure read does not say which window the entry lives in.
 	window1h bool
@@ -74,7 +77,7 @@ func (t *cacheMissTracker) observe(m *AgentMessage) *CacheMiss {
 	if u.CacheWrite > 0 {
 		t.window1h = u.CacheWrite1h > 0
 	}
-	t.seen, t.ctx, t.at, t.provider, t.model, t.epoch = true, ctx, m.Timestamp, m.Provider, m.Model, epoch
+	t.seen, t.ctx, t.at, t.provider, t.model, t.program, t.epoch = true, ctx, m.Timestamp, m.Provider, m.Model, m.AccessProgram, epoch
 	if !prev.seen || prev.ctx < minCacheablePrefix {
 		return nil
 	}
@@ -96,7 +99,7 @@ func (t *cacheMissTracker) observe(m *AgentMessage) *CacheMiss {
 	switch {
 	case epoch != prev.epoch:
 		miss.Cause = CacheMissCompaction
-	case m.Provider != prev.provider || !sameServedModel(m.Model, prev.model):
+	case m.Provider != prev.provider || !sameServedModel(m.Model, prev.model) || m.AccessProgram != prev.program:
 		miss.Cause = CacheMissModelChanged
 	case float64(ctx) < cutShrinkShare*float64(prev.ctx):
 		miss.Cause = CacheMissContextCut
