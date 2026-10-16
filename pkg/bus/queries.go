@@ -333,6 +333,7 @@ type SubagentSnapshot struct {
 	// bus.SubagentStarted.AccentIndex), used by clients to derive a
 	// deterministic accent color that survives reconnects.
 	AccentIndex int
+	Daybreak    bool
 }
 
 // GetBashJobs returns active/recent background bash jobs for reconnecting UIs.

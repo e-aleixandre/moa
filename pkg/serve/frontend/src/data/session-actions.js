@@ -13,6 +13,7 @@ import { attentionArrival, forgetAttentionArrival, retainAttentionArrivals } fro
 import { loadEvents } from './events.js'; // wake-on-event
 import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artifacts.js';
 import { closeSessionPanelForSession } from './session-panel.js';
+import { DAYBREAK_SWITCH_SPEC } from '../components/Daybreak/daybreak-model.js';
 import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.js';
 import { rewoundFiles, placeRewoundMessage } from './rewind-edit.js';
 import { deviceZone } from './schedule-model.js';
@@ -106,6 +107,8 @@ function normalizeSessionInfo(info, existing, visible) {
     fast: wsOwns ? existing.fast : !!info.fast,
     fastSupported: wsOwns ? existing.fastSupported : !!info.fast_supported,
     fastNote: wsOwns ? existing.fastNote : (info.fast_note || ''),
+    daybreak: wsOwns ? existing.daybreak : !!info.daybreak,
+    daybreakSupported: wsOwns ? existing.daybreakSupported : !!info.daybreak_supported,
     cwd: info.cwd,
     // created — when the session began. Server-owned and immutable, so the
     // poll is its only source; the session panel prints it as the run's start.
@@ -1110,6 +1113,40 @@ export async function setSessionFast(id, fast) {
     });
   }
   return res;
+}
+
+// setSessionDaybreak turns Daybreak on or off for one session. Like fast mode
+// it is allowed while the agent runs: the next request reads it.
+export async function setSessionDaybreak(id, daybreak) {
+  const res = await api('PATCH', `/api/sessions/${id}/daybreak`, { daybreak });
+  if (res) {
+    updateSession(id, { daybreak: res.daybreak, daybreakSupported: res.supported });
+  }
+  return res;
+}
+
+// daybreakSelectorProps wires a session's Daybreak into the model selector.
+// "Switch to GPT-6 Sol" is one configuration change: the daybreak spec moves
+// the session to GPT-6 Sol with Daybreak on and keeps its thinking level.
+export function daybreakSelectorProps(session) {
+  return {
+    daybreak: !!session.daybreak,
+    daybreakSupported: !!session.daybreakSupported,
+    onDaybreakChange: (value) => {
+      setSessionDaybreak(session.id, value).catch((error) => addToast({
+        title: 'Could not change Daybreak',
+        detail: String(error.message || error),
+        type: 'error',
+      }));
+    },
+    onDaybreakSwitch: () => {
+      configureSession(session.id, { model: DAYBREAK_SWITCH_SPEC }).catch((error) => addToast({
+        title: 'Could not switch to GPT-6 Sol',
+        detail: String(error.message || error),
+        type: 'error',
+      }));
+    },
+  };
 }
 
 export async function trustMcp(id) {

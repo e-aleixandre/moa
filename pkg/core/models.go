@@ -134,12 +134,10 @@ var knownModels = map[string]Model{
 			},
 		},
 	},
-	// Daybreak Blue is an alias, not a fixed model: it points at the current
-	// flagship with safeguards calibrated for defensive cybersecurity work.
-	// It today resolves to gpt-5.6-sol (responses come back under that id), so
-	// it mirrors Sol's pricing and limits. When OpenAI repoints the alias, both
-	// must be revisited here — the API bills the new target, not this table.
-	// Requires separate provisioning on the account (openai.com/daybreak).
+	// Retired Daybreak alias. Daybreak is now a mode on GPT-6 Sol (see
+	// daybreak.go); this entry stays so the history recorded under it keeps
+	// its price and identity. It answered under gpt-5.6-sol, hence AliasOf
+	// and Sol's pricing. Not offered for new sessions (see ListModels).
 	"gpt-daybreak-blue-latest": {
 		ID: "gpt-daybreak-blue-latest", Provider: "openai", API: "openai-chat",
 		Name: "Daybreak Blue", MaxInput: 1_050_000, MaxOutput: 128_000,
@@ -294,7 +292,6 @@ var modelAliases = map[string]string{
 	"astra":       "gpt-6-astra",
 	"gpt-6":       "gpt-6-astra",
 	"sol":         "gpt-6.1-sol",
-	"daybreak":    "gpt-daybreak-blue-latest",
 	"terra":       "gpt-5.6-terra",
 	"luna":        "gpt-6-luna",
 	"gpt-5.6":     "gpt-5.6-sol",
@@ -378,6 +375,14 @@ func resolveModelSpec(spec string) (m Model, ok bool, mismatch bool) {
 	// reach a real provider API, where case can be significant.
 	spec = strings.TrimSpace(spec)
 	lower := strings.ToLower(spec)
+
+	// "daybreak" is a mode, not a model: it names GPT-6 Sol, and the callers
+	// that care ask ResolveModelDaybreak whether the program comes with it.
+	// The retired alias's id still resolves to its own entry below, because
+	// history recorded under it is priced and identified by it.
+	if lower == daybreakSpec || lower == "openai/"+daybreakSpec {
+		return knownModels[DaybreakModelID], true, false
+	}
 
 	// Check alias first.
 	if full, ok := modelAliases[lower]; ok {
@@ -471,7 +476,6 @@ var modelDisplayOrder = []string{
 	"gpt-6-sol",
 	"gpt-6-luna",
 	"gpt-5.6-sol",
-	"gpt-daybreak-blue-latest",
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",
 	"gpt-5.5",
@@ -487,6 +491,11 @@ func ListModels() []ModelEntry {
 	// Deduplicate by canonical ID.
 	byID := make(map[string]Model)
 	for _, m := range knownModels {
+		// The retired Daybreak alias is kept for history only: new sessions
+		// ask for Daybreak as a mode on GPT-6 Sol.
+		if m.ID == LegacyDaybreakModelID {
+			continue
+		}
 		byID[m.ID] = m
 	}
 
@@ -544,6 +553,11 @@ func ModelAliases() []string {
 			seen[entry.Alias] = true
 			aliases = append(aliases, entry.Alias)
 		}
+		if entry.Model.ID == DaybreakModelID && !seen[daybreakSpec] {
+			// Not a model's alias but a spec agents can ask for.
+			seen[daybreakSpec] = true
+			aliases = append(aliases, daybreakSpec)
+		}
 	}
 	return aliases
 }
@@ -567,6 +581,10 @@ func AllowedModelAliases(allowedIDs []string) []string {
 	seen := make(map[string]bool, len(allowedIDs))
 	var aliases []string
 	for _, entry := range ListModels() {
+		if entry.Model.ID == DaybreakModelID && !seen[daybreakSpec] && daybreakAllowed(allowedIDs) {
+			seen[daybreakSpec] = true
+			aliases = append(aliases, daybreakSpec)
+		}
 		if entry.Alias == "" || seen[entry.Alias] || !allowed[entry.Model.ID] {
 			continue
 		}

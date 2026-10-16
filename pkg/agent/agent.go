@@ -470,6 +470,9 @@ type AgentConfig struct {
 	// the model supports it. Per session, not global: it is worth paying for
 	// on the conversation you are waiting on, not on every one at once.
 	Fast bool
+	// Daybreak asks for the Daybreak access program on this session's
+	// OpenAI requests. Read per request, like Fast.
+	Daybreak bool
 	// PromptCacheKey identifies this agent's conversation for cache routing on
 	// the Responses providers (OpenAI, xAI). Empty omits the field entirely.
 	PromptCacheKey string
@@ -2182,6 +2185,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		streamOpts:          streamOpts,
 		streamRepairBackoff: a.config.StreamRepairBackoff,
 		fast:                a.Fast,
+		daybreak:            a.Daybreak,
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
 		convertToLLM:        a.config.ConvertToLLM,
@@ -2464,4 +2468,19 @@ func (a *Agent) SetCompactStrategy(strategy string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.config.CompactStrategy = strategy
+}
+
+// Daybreak reports whether this session asks for the Daybreak program.
+func (a *Agent) Daybreak() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config.Daybreak
+}
+
+// SetDaybreak turns the Daybreak program on or off. Like SetFast it is allowed
+// while running: the next request reads it, the one in flight keeps its own.
+func (a *Agent) SetDaybreak(on bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.config.Daybreak = on
 }

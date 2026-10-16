@@ -186,6 +186,8 @@ type ManagedSession struct {
 	// can replace the model. This keeps the model used to clamp fast mode, the
 	// agent state, and the ConfigChanged event in one ordered operation.
 	fastConfigMu sync.Mutex
+	// daybreakCatalog is the manager's account catalog (nil = never loaded).
+	daybreakCatalog func() core.DaybreakAvailability
 	// beforeFastConfigLock and afterFastConfigLock are test hooks around the
 	// fast/configuration serialization boundary.
 	beforeFastConfigLock func()
@@ -313,14 +315,18 @@ type SessionInfo struct {
 	Thinking          string                 `json:"thinking"`
 	// Fast is whether this session buys premium speed, and FastSupported
 	// whether the model it is on can serve it at all.
-	Fast          bool      `json:"fast,omitempty"`
-	FastSupported bool      `json:"fast_supported,omitempty"`
-	FastNote      string    `json:"fast_note,omitempty"`
-	CWD           string    `json:"cwd"`
-	Created       time.Time `json:"created"`
-	Updated       time.Time `json:"updated"`
-	Origin        string    `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
-	Kind          string    `json:"kind,omitempty"`   // session.KindOwner for an owner conversation; empty otherwise
+	Fast          bool   `json:"fast,omitempty"`
+	FastSupported bool   `json:"fast_supported,omitempty"`
+	FastNote      string `json:"fast_note,omitempty"`
+	// Daybreak is whether this session asks for the Daybreak program, and
+	// DaybreakSupported whether its current model would carry it.
+	Daybreak          bool      `json:"daybreak,omitempty"`
+	DaybreakSupported bool      `json:"daybreak_supported,omitempty"`
+	CWD               string    `json:"cwd"`
+	Created           time.Time `json:"created"`
+	Updated           time.Time `json:"updated"`
+	Origin            string    `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
+	Kind              string    `json:"kind,omitempty"`   // session.KindOwner for an owner conversation; empty otherwise
 	// OwnerID / OwnerName name the project owner this session reports to, when
 	// its codebase has one. Additive and per-session because that is what the
 	// chip in a child's header asks: "does THIS conversation belong to a
@@ -478,6 +484,7 @@ func (s *ManagedSession) saveSubagentTranscript(jobID, status, result, resultErr
 			t.Title = info.Title
 			t.Model = info.Model
 			t.Thinking = info.Thinking
+			t.Daybreak = info.Daybreak
 			t.Async = info.Async
 			t.StartedAt = info.StartedAt
 			pct := info.ContextPercent
@@ -505,10 +512,12 @@ func (s *ManagedSession) info() SessionInfo {
 	compactAt, _ := bus.QueryTyped[bus.GetCompactAt, int](b, bus.GetCompactAt{})
 	compactAtMin, _ := bus.QueryTyped[bus.GetCompactAtFloor, int](b, bus.GetCompactAtFloor{})
 
-	fastOn := false
+	fastOn, daybreakOn := false, false
 	if agent := s.runtime.Context().Agent; agent != nil {
 		fastOn = agent.Fast()
+		daybreakOn = agent.Daybreak()
 	}
+	daybreakSupported := s.daybreakAvailability().Sendable(model)
 
 	mcpSummary := s.mcpSummary()
 
@@ -522,32 +531,34 @@ func (s *ManagedSession) info() SessionInfo {
 			streaming, _, _ := s.runtime.Context().SnapshotInFlightWithCut()
 			return streaming.ProviderExecution
 		}(),
-		ID:             s.ID,
-		Title:          s.Title,
-		State:          SessionState(state),
-		Model:          modelDisplayName(model),
-		Provider:       model.Provider,
-		Thinking:       thinking,
-		Fast:           fastOn,
-		FastSupported:  core.SupportsFast(model.ID),
-		FastNote:       core.FastNote(model.ID),
-		CWD:            s.CWD,
-		Created:        s.Created,
-		Updated:        s.Updated,
-		Origin:         nonUserOrigin(s.Origin),
-		Kind:           s.Kind,
-		ownerDetached:  s.ownerDetached.Load(),
-		Error:          stateErr,
-		ErrorDetail:    stateErrDetail,
-		UntrustedMCP:   s.infra.UntrustedMCP,
-		MCP:            mcpSummary,
-		ContextPercent: ctxPct,
-		ContextWindow:  model.MaxInput,
-		CompactAt:      compactAt,
-		CompactAtMin:   compactAtMin,
-		PermissionMode: permMode,
-		CostUSD:        cost,
-		ServerInstance: s.serverInstance,
+		ID:                s.ID,
+		Title:             s.Title,
+		State:             SessionState(state),
+		Model:             modelDisplayName(model),
+		Provider:          model.Provider,
+		Thinking:          thinking,
+		Fast:              fastOn,
+		FastSupported:     core.SupportsFast(model.ID),
+		FastNote:          core.FastNote(model.ID),
+		Daybreak:          daybreakOn,
+		DaybreakSupported: daybreakSupported,
+		CWD:               s.CWD,
+		Created:           s.Created,
+		Updated:           s.Updated,
+		Origin:            nonUserOrigin(s.Origin),
+		Kind:              s.Kind,
+		ownerDetached:     s.ownerDetached.Load(),
+		Error:             stateErr,
+		ErrorDetail:       stateErrDetail,
+		UntrustedMCP:      s.infra.UntrustedMCP,
+		MCP:               mcpSummary,
+		ContextPercent:    ctxPct,
+		ContextWindow:     model.MaxInput,
+		CompactAt:         compactAt,
+		CompactAtMin:      compactAtMin,
+		PermissionMode:    permMode,
+		CostUSD:           cost,
+		ServerInstance:    s.serverInstance,
 
 		BriefAttempting: s.briefAttempting,
 		BriefProgress:   s.briefProgress,
@@ -821,6 +832,8 @@ type Manager struct {
 	eventRateHits          map[string][]time.Time
 	eventRateNotified      map[string]bool
 	defaultModel           core.Model
+	defaultDaybreak        bool
+	daybreakCatalog        func() core.DaybreakAvailability
 	workspaceRoot          string
 	moaCfg                 core.MoaConfig
 	configLoader           func(cwd string) core.MoaConfig
@@ -946,6 +959,12 @@ type ManagerConfig struct {
 	PushDispatcher  *push.Dispatcher   // optional; enables Web Push
 	PushNative      *push.NativeSender // optional; enables native push through the relay
 	DefaultModel    core.Model
+	// DefaultDaybreak turns Daybreak on for new sessions on the default model
+	// (the "daybreak" spec as the default).
+	DefaultDaybreak bool
+	// DaybreakCatalog snapshots the account's model catalog for Daybreak; nil
+	// behaves as a catalog that was never loaded.
+	DaybreakCatalog func() core.DaybreakAvailability
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig
 	// AuxiliaryModelResolver resolves auto-title/session-brief settings against
@@ -1082,6 +1101,8 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		eventsPath:                  eventsPath, // wake-on-event
 		events:                      eventStore, // wake-on-event
 		defaultModel:                cfg.DefaultModel,
+		defaultDaybreak:             cfg.DefaultDaybreak,
+		daybreakCatalog:             cfg.DaybreakCatalog,
 		workspaceRoot:               cfg.WorkspaceRoot,
 		moaCfg:                      cfg.MoaCfg,
 		configLoader:                configLoader,

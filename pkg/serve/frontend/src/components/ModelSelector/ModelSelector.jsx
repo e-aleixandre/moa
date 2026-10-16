@@ -6,7 +6,10 @@ import { addToast } from "../../data/notifications.js";
 import { thinkingOptionsFor, thinkingPositionFor } from "../../data/selectors.js";
 import { groupByProvider, pinnedModelSpecs } from "./model-selector-model.js";
 import { useSheetDismiss } from "../../hooks/useSheetDismiss.js";
+import { SunriseIcon } from "../Daybreak/SunriseIcon.jsx";
+import { DAYBREAK_MODEL_NAME, daybreakBlocks, daybreakOffered, daybreakToggle } from "../Daybreak/daybreak-model.js";
 import "./ModelSelector.css";
+import "../Daybreak/Daybreak.css";
 
 // ModelSelector — the catalogue's model picker, MOVED
 // (catalog/zones-lab.jsx `ModelPicker` / `Popover` / `Sheet`, zones-lab.css the
@@ -86,20 +89,27 @@ function PinMark() {
 // In the pinning mode the chip is a toggle for its pin, so what it reports as
 // pressed is the pin, and the pin mark leads the chip: the trailing check is
 // still "the model you are on", and the two must never read as one mark.
-function ModelChip({ model, on, onPick, pinning = false, pinned = false, onTogglePin }) {
+//
+// `blocked` is a model Daybreak rules out: drawn faded with "No Daybreak" and
+// not pickable. Pinning still works on it; that is not a model change.
+function ModelChip({ model, on, onPick, pinning = false, pinned = false, onTogglePin, blocked = false }) {
   const name = model.codename || model.name;
+  const refused = blocked && !pinning;
   return (
     <button
       type="button"
-      class={`zl-mchip${on ? " is-on" : ""}${pinning ? " is-pinning" : ""}${pinning && pinned ? " is-pinned" : ""}`}
-      onClick={() => (pinning ? onTogglePin(model) : onPick(model.id))}
+      class={`zl-mchip${on ? " is-on" : ""}${pinning ? " is-pinning" : ""}${pinning && pinned ? " is-pinned" : ""}${refused ? " is-blocked" : ""}`}
+      onClick={() => (pinning ? onTogglePin(model) : (refused ? undefined : onPick(model.id)))}
       aria-pressed={pinning ? pinned : on}
-      aria-label={pinning ? `Pin ${name}` : undefined}
+      aria-disabled={refused ? "true" : undefined}
+      aria-label={pinning ? `Pin ${name}` : (refused ? `${name}, no Daybreak` : undefined)}
     >
       {pinning && <PinMark />}
       <span class="zl-mchip-txt">
         <span class="zl-mchip-name">{name}</span>
-        {model.sub && <span class="zl-mchip-sub zl-data">{model.sub}</span>}
+        {refused
+          ? <span class="zl-mchip-sub zl-mchip-note">No Daybreak</span>
+          : model.sub && <span class="zl-mchip-sub zl-data">{model.sub}</span>}
       </span>
       {on && (
         <svg class="zl-mchip-check" viewBox="0 0 12 12" aria-hidden="true">
@@ -194,6 +204,10 @@ export function ModelSelector({
   fast = false,
   fastSupported = false,
   fastNote = "",
+  daybreak = false,
+  daybreakSupported = false,
+  onDaybreakChange,
+  onDaybreakSwitch,
   onSelect,
   onThinkingChange,
   onFastChange,
@@ -219,6 +233,9 @@ export function ModelSelector({
   const preferenceRevisionRef = useRef(0);
   const preferenceQueueRef = useRef(Promise.resolve());
   const [pinning, setPinning] = useState(false);
+  // The "doesn't support Daybreak" offer, open after the switch was turned on
+  // with a model that can't carry it. Nothing changed yet.
+  const [daybreakOffer, setDaybreakOffer] = useState(false);
   // The Pinned grid while pinning: what was pinned on entry stays put, so an
   // unpinned chip does not vanish from under the finger and the next tap does
   // not land on its neighbour. Undoing a mis-tap is the same tap again.
@@ -258,6 +275,17 @@ export function ModelSelector({
   const thinkOpts = thinkingButtonsFor(selectedSpec, sessionProvider);
   const thinkValue = thinkingPositionFor(thinking, selectedSpec, sessionProvider);
   const providerGroup = groups.find((group) => group.provider === view);
+  const showDaybreak = !!onDaybreakChange && daybreakOffered(models, daybreak);
+  const daybreakActive = !!daybreak && !!daybreakSupported;
+  const blocked = (m) => daybreakBlocks(m, models, daybreak);
+  const toggleDaybreak = (on) => {
+    if (daybreakToggle(on, selectedSpec, models, sessionProvider) === "propose") {
+      setDaybreakOffer(true);
+      return;
+    }
+    setDaybreakOffer(false);
+    onDaybreakChange?.(on);
+  };
 
   const applyPinnedIDs = (ids) => {
     fetchedPinsRef.current = ids;
@@ -419,6 +447,7 @@ export function ModelSelector({
                 pinning={pinningActive}
                 pinned={modelIsPinned(m, pinnedIDs)}
                 onTogglePin={togglePin}
+                blocked={blocked(m)}
                 key={m.id}
               />
             ))}
@@ -435,7 +464,10 @@ export function ModelSelector({
           {!modelOnly && (currentName || sessionModel) && (
             <div class="zl-pick-cur">
               <span class="zl-pick-cur-txt">
-                <span class="zl-pick-cur-name">{currentName}</span>
+                <span class="zl-pick-cur-name">
+                  {currentName}
+                  {daybreakActive && <SunriseIcon />}
+                </span>
                 <span class="zl-pick-cur-sub zl-data">{currentSub}</span>
               </span>
             </div>
@@ -473,6 +505,7 @@ export function ModelSelector({
                       pinning={pinningActive}
                       pinned={modelIsPinned(m, pinnedIDs)}
                       onTogglePin={togglePin}
+                      blocked={blocked(m)}
                       key={m.id}
                     />
                   ))}
@@ -523,6 +556,38 @@ export function ModelSelector({
                   disabled={!fastSupported || !onFastChange}
                 />
               </div>
+              {showDaybreak && (
+                <div class="zl-fast">
+                  <span class="zl-fast-txt">
+                    <span class="zl-fast-k">Daybreak</span>
+                    <span class="zl-fast-d">
+                      {daybreak && !daybreakSupported
+                        ? "Not applied on this model"
+                        : "Applies from the next request"}
+                    </span>
+                  </span>
+                  <Switch
+                    on={!!daybreak || daybreakOffer}
+                    onChange={toggleDaybreak}
+                    label="Daybreak"
+                  />
+                </div>
+              )}
+              {daybreakOffer && !daybreak && (
+                <div class="zl-db-offer" role="group" aria-label="Daybreak">
+                  <p>{selectedSpec?.name || currentName} doesn't support Daybreak.</p>
+                  <div class="zl-db-offer-acts">
+                    <button type="button" onClick={() => setDaybreakOffer(false)}>Cancel</button>
+                    <button
+                      type="button"
+                      class="is-primary"
+                      onClick={() => { setDaybreakOffer(false); onDaybreakSwitch?.(); }}
+                    >
+                      Switch to {DAYBREAK_MODEL_NAME}
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </>

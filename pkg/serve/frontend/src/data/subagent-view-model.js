@@ -189,6 +189,7 @@ export function subagentView(session, jobId) {
     // ("Astra") matches no catalog entry, so the thinking meter needs this.
     modelSpec: sub.model || '',
     thinking: sub.thinking || 'off',
+    daybreak: !!sub.daybreak,
     providerExecution: sub.providerExecution || null,
     lifecycleUnverified: !!sub.lifecycleUnverified,
     task: sub.task || '',

@@ -123,6 +123,8 @@ export function handleWsInit(id, data) {
     fast: !!data.fast,
     fastSupported: !!data.fast_supported,
     fastNote: data.fast_note || '',
+    daybreak: !!data.daybreak,
+    daybreakSupported: !!data.daybreak_supported,
     pendingPerm: data.pending_permission || null,
     pendingAsk: data.pending_ask || null,
     // Authoritative, including its absence: a request answered while this
@@ -311,6 +313,7 @@ export function initSubagents(raw) {
       // subagentAccentIndex). Undefined when the server didn't send one
       // (older payload/specimen), falling back to position-based derivation.
       accentIndex: sa.accent_index,
+      daybreak: !!sa.daybreak,
     };
   }
   return out;

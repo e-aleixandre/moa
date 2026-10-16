@@ -110,6 +110,8 @@ export function handleWsConfigChange(id, data) {
   if (data.fast !== undefined) patch.fast = data.fast;
   if (data.fast_supported !== undefined) patch.fastSupported = data.fast_supported;
   if (data.fast_note !== undefined) patch.fastNote = data.fast_note;
+  if (data.daybreak !== undefined) patch.daybreak = data.daybreak;
+  if (data.daybreak_supported !== undefined) patch.daybreakSupported = data.daybreak_supported;
   if (data.permission_mode) {
     patch.permissionMode = data.permission_mode;
   }

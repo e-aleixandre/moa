@@ -58,9 +58,13 @@ type job struct {
 	resultClaimed         bool // completion result owner: a waiter or async notification
 	notifyAsyncCompletion bool // async notification owns the terminal result
 	childAgent            *agent.Agent
-	messages              []core.AgentMessage
-	usage                 *core.Usage
-	costUSD               float64
+	// daybreak is whether the child runs with the Daybreak program, set at
+	// launch or by its own reconfiguration: a parent's later change does not
+	// reach a running child.
+	daybreak bool
+	messages []core.AgentMessage
+	usage    *core.Usage
+	costUSD  float64
 	// contextPct is how full the child's OWN context window is (0-100), or -1
 	// when its model is unknown so no window can be measured. The parent's
 	// percentage says nothing about a child: they hold different transcripts
@@ -99,6 +103,7 @@ type jobSnapshot struct {
 	CostUSD          float64
 	ContextPercent   int
 	AccentIndex      int
+	Daybreak         bool
 }
 
 type jobStore struct {
@@ -252,7 +257,19 @@ func snapshotLocked(j *job) jobSnapshot {
 		CostUSD:          j.costUSD,
 		ContextPercent:   j.contextPct,
 		AccentIndex:      j.accentIndex,
+		Daybreak:         j.daybreak,
 	}
+}
+
+// setDaybreak records the child's Daybreak program before it starts.
+func (s *jobStore) setDaybreak(id string, on bool) {
+	j, ok := s.get(id)
+	if !ok {
+		return
+	}
+	j.mu.Lock()
+	j.daybreak = on
+	j.mu.Unlock()
 }
 
 func (s *jobStore) setTitle(id, title string) {
@@ -643,6 +660,8 @@ type JobInfo struct {
 	// used by clients to pick a deterministic accent color that survives
 	// reconnects.
 	AccentIndex int
+	// Daybreak is whether the child runs with the Daybreak program.
+	Daybreak bool
 }
 
 // Jobs is a handle onto the subagent job store, returned by RegisterAll.
@@ -650,7 +669,9 @@ type Jobs struct {
 	store *jobStore
 }
 
-func (j *Jobs) Reconfigure(jobID string, provider core.Provider, model core.Model, thinking string) (string, error) {
+// Reconfigure switches a running child's model, thinking level and Daybreak
+// program in one change.
+func (j *Jobs) Reconfigure(jobID string, provider core.Provider, model core.Model, thinking string, daybreak bool) (string, error) {
 	if j == nil || j.store == nil {
 		return "", ErrUnknownJob
 	}
@@ -664,12 +685,20 @@ func (j *Jobs) Reconfigure(jobID string, provider core.Provider, model core.Mode
 	if status != statusRunning || child == nil || !child.IsRunning() {
 		return "", ErrNotRunning
 	}
+	// The child reads the program per request: drop it before the new model
+	// and add it after, so no request pairs it with a model it doesn't suit.
+	was := child.Daybreak()
+	if !daybreak {
+		child.SetDaybreak(false)
+	}
 	application, err := child.ReconfigureWithApplication(provider, model, thinking, child.CompactAt())
 	if err != nil {
+		child.SetDaybreak(was)
 		return "", err
 	}
+	child.SetDaybreak(daybreak)
 	job.mu.Lock()
-	job.model, job.thinking = model.ID, thinking
+	job.model, job.thinking, job.daybreak = model.ID, thinking, daybreak
 	job.mu.Unlock()
 	return application, nil
 }
@@ -717,9 +746,19 @@ func (j *Jobs) Snapshot() []JobInfo {
 			CostUSD:           snap.CostUSD,
 			ContextPercent:    snap.ContextPercent,
 			AccentIndex:       snap.AccentIndex,
+			Daybreak:          snap.Daybreak,
 		})
 	}
 	return infos
+}
+
+// Daybreak reports whether jobID runs with the Daybreak program.
+func (j *Jobs) Daybreak(jobID string) bool {
+	if j == nil || j.store == nil {
+		return false
+	}
+	snap, ok := j.store.snapshot(jobID)
+	return ok && snap.Daybreak
 }
 
 // Messages returns a defensive deep copy of the stored transcript for jobID.

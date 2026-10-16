@@ -3118,7 +3118,7 @@ func TestJobsSteerAcceptsARunningJob(t *testing.T) {
 func TestResolveModel_TypoWithProviderPrefixFailsLoudly(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
 	for _, spec := range []string{"opeanai/sol", "foo/sonnet"} {
-		model, res := resolveModel(fallback, map[string]any{"model": spec}, nil)
+		model, _, res := resolveModel(fallback, false, map[string]any{"model": spec}, nil)
 		if res == nil {
 			t.Errorf("resolveModel(%q): expected an error result, got model %q", spec, model.ID)
 			continue
@@ -3133,7 +3133,7 @@ func TestResolveModel_TypoWithProviderPrefixFailsLoudly(t *testing.T) {
 // under a provider that contradicts nothing is still legitimate.
 func TestResolveModel_GenuineCustomModelStillRuns(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
-	model, res := resolveModel(fallback, map[string]any{"model": "openai/my-finetune-v3"}, nil)
+	model, _, res := resolveModel(fallback, false, map[string]any{"model": "openai/my-finetune-v3"}, nil)
 	if res != nil {
 		t.Fatalf("a custom model was rejected: %v", res.Content)
 	}
@@ -3145,7 +3145,7 @@ func TestResolveModel_GenuineCustomModelStillRuns(t *testing.T) {
 // Capitalized aliases are what models actually write when delegating.
 func TestResolveModel_CapitalizedAliasResolves(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
-	model, res := resolveModel(fallback, map[string]any{"model": "Sol"}, nil)
+	model, _, res := resolveModel(fallback, false, map[string]any{"model": "Sol"}, nil)
 	if res != nil {
 		t.Fatalf("unexpected error: %v", res.Content)
 	}
@@ -3187,7 +3187,7 @@ func TestSubagentSchema_IsValidJSONAndNamesTheAliases(t *testing.T) {
 // so it has to carry the right name.
 func TestResolveModel_ErrorSuggestsTheRightAlias(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
-	_, res := resolveModel(fallback, map[string]any{"model": "Sonet"}, nil)
+	_, _, res := resolveModel(fallback, false, map[string]any{"model": "Sonet"}, nil)
 	if res == nil {
 		t.Fatal("expected an error result")
 	}
@@ -3205,7 +3205,7 @@ func TestResolveModel_ErrorSuggestsTheRightAlias(t *testing.T) {
 func TestResolveModel_NoAllowlistAcceptsAnyKnownModel(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
 	for _, alias := range core.ModelAliases() {
-		model, res := resolveModel(fallback, map[string]any{"model": alias}, nil)
+		model, _, res := resolveModel(fallback, false, map[string]any{"model": alias}, nil)
 		if res != nil {
 			t.Errorf("alias %q rejected with no allowlist: %s", alias, resultText(res))
 			continue
@@ -3222,7 +3222,7 @@ func TestResolveModel_AllowlistRejectsExcludedModel(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
 	allowed := []string{"gpt-6.1-sol"}
 
-	_, res := resolveModel(fallback, map[string]any{"model": "terra"}, allowed)
+	_, _, res := resolveModel(fallback, false, map[string]any{"model": "terra"}, allowed)
 	if res == nil {
 		t.Fatal("an excluded model was accepted")
 	}
@@ -3237,7 +3237,7 @@ func TestResolveModel_AllowlistRejectsExcludedModel(t *testing.T) {
 		t.Errorf("error does not list the allowed model: %s", text)
 	}
 
-	model, res := resolveModel(fallback, map[string]any{"model": "sol"}, allowed)
+	model, _, res := resolveModel(fallback, false, map[string]any{"model": "sol"}, allowed)
 	if res != nil {
 		t.Fatalf("an allowed model was rejected: %s", resultText(res))
 	}
@@ -3249,7 +3249,7 @@ func TestResolveModel_AllowlistRejectsExcludedModel(t *testing.T) {
 // A custom "provider/model-id" spec must not be a way around the list.
 func TestResolveModel_AllowlistRejectsCustomSpec(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
-	if _, res := resolveModel(fallback, map[string]any{"model": "openai/my-finetune-v3"}, []string{"gpt-6.1-sol"}); res == nil {
+	if _, _, res := resolveModel(fallback, false, map[string]any{"model": "openai/my-finetune-v3"}, []string{"gpt-6.1-sol"}); res == nil {
 		t.Fatal("a custom spec bypassed the allowlist")
 	}
 }

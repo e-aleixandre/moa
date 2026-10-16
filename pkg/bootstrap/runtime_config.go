@@ -46,5 +46,6 @@ func (s *Session) RuntimeConfig() bus.RuntimeConfig {
 		AutoVerify:        core.IsAutoVerifyEnabled(s.MoaCfg),
 		SessionCheckpoint: s.SessionCheckpoint,
 		GateConfig:        gateConfig,
+		DaybreakCatalog:   s.DaybreakCatalog,
 	}
 }

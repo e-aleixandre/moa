@@ -70,6 +70,8 @@ export function deriveModelSpecs(models) {
       accent: modelAccent(m.name),
       alias: m.alias || '',
       reasoningEfforts: m.reasoning_efforts || [],
+      daybreakSupported: !!m.daybreak_supported,
+      daybreakPending: !!m.daybreak_pending,
     };
   });
 }

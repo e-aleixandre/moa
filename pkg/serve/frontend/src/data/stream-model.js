@@ -237,6 +237,9 @@ export function projectStream(session) {
   unstableBlockIDs.clear();
 
   const blocks = [];
+  // The model the previous assistant response was requested with, so the
+  // move off the retired Daybreak alias is marked once, where it happened.
+  let prevRequested = '';
 
   // The server tells us whether this snapshot omitted older history. Future
   // pagination also uses olderHistory.hasMore for the same leading marker.
@@ -468,6 +471,12 @@ export function projectStream(session) {
     }
 
     if (msg && msg.role === 'assistant') {
+      const migrated = daybreakMigrationLine(prevRequested, msg);
+      if (msg.requested_model) prevRequested = String(msg.requested_model);
+      if (migrated) {
+        currentDoc = null;
+        blocks.push({ kind: 'system', id: blockID('daybreak', msg, i), text: migrated });
+      }
       const text = joinText(msg.content);
       if (text) {
         // What this session said back to the delegate belongs INSIDE the call,
@@ -856,6 +865,18 @@ export function modelRedirectLine(msg) {
   // ids, which is exactly the case where the detail is the whole point.
   if (from === to) return `⤳ ${shortModel(requested)} → ${shortModel(served)}`;
   return `⤳ ${from} → ${to}`;
+}
+
+// The retired model alias Daybreak sessions used before it became a mode.
+export const LEGACY_DAYBREAK_MODEL = 'gpt-daybreak-blue-latest';
+
+// daybreakMigrationLine marks the first response after a session moved from
+// the retired Daybreak alias to GPT-6 Sol with the Daybreak mode.
+export function daybreakMigrationLine(prevRequested, msg) {
+  const prev = String(prevRequested || '').replace(/^openai\//, '');
+  const requested = String(msg?.requested_model || '').replace(/^openai\//, '');
+  if (prev !== LEGACY_DAYBREAK_MODEL || !requested || requested === LEGACY_DAYBREAK_MODEL) return '';
+  return msg?.access_program ? 'Daybreak now runs on GPT-6 Sol' : '';
 }
 
 function modelName(spec) {

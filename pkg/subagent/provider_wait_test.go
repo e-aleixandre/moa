@@ -117,7 +117,7 @@ func TestChildWeeklyWaitPreservesRemainingBudgetAndExternalAuthority(t *testing.
 					}
 				case "target-model":
 					next, _ := core.ResolveModel("sol")
-					application, err := jobs.Reconfigure(id, p, next, "low")
+					application, err := jobs.Reconfigure(id, p, next, "low", false)
 					if err != nil || application != "wake" {
 						t.Fatalf("target=%s/%v", application, err)
 					}
