@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -40,6 +42,55 @@ type voiceJob struct {
 	// do is session-side work of the call (the brief request, an answer to
 	// inject): it runs on the worker, so it stops with the call.
 	do func(context.Context)
+	// handoffKey identifies the delegation; replay marks a repeat of one the
+	// worker already answered (or is about to, as jobs run in order).
+	handoffKey string
+	replay     bool
+}
+
+// claimHandoff registers a delegation item and reports whether it is a repeat.
+// Items are hashed: upstream ids are never persisted or shown raw.
+func (c *voiceCall) claimHandoff(itemID string) (key string, replay bool) {
+	if itemID == "" {
+		return "", false
+	}
+	sum := sha256.Sum256([]byte(itemID))
+	key = hex.EncodeToString(sum[:8])
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.handoffs == nil {
+		c.handoffs = map[string]*string{}
+	}
+	if _, ok := c.handoffs[key]; ok {
+		return key, true
+	}
+	c.handoffs[key] = new(string)
+	return key, false
+}
+
+func (c *voiceCall) storeHandoff(key, text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if slot, ok := c.handoffs[key]; ok {
+		*slot = text
+	}
+}
+
+func (c *voiceCall) handoffText(key string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if slot, ok := c.handoffs[key]; ok {
+		return *slot
+	}
+	return ""
+}
+
+// releaseHandoff forgets a delegation that was refused before it ran, so the
+// provider's retry is a first attempt.
+func (c *voiceCall) releaseHandoff(key string) {
+	c.mu.Lock()
+	delete(c.handoffs, key)
+	c.mu.Unlock()
 }
 
 // voiceNoteQueue bounds the worker's notices to the client.
@@ -83,11 +134,15 @@ type voiceCall struct {
 	minutesOnce sync.Once
 	seq         int           // delivery sequence of this call
 	passed      []voicePassed // the server's ledger of accepted relays
-	asks        int           // ask_session requests accepted (budget)
-	askPending  bool
-	askLatency  []time.Duration // ask_session asked → answered, per answered ask
-	costStart   float64         // the session's text spend when the call opened
-	unsubs      []func()        // bus subscriptions binding asks/brief to their run
+	// handoffs maps the hash of each provider delegation item to its answer
+	// (empty while it runs): the same delegation is one delivery, whatever
+	// ToolCallIDs the backend mints when it is asked again.
+	handoffs   map[string]*string
+	asks       int // ask_session requests accepted (budget)
+	askPending bool
+	askLatency []time.Duration // ask_session asked → answered, per answered ask
+	costStart  float64         // the session's text spend when the call opened
+	unsubs     []func()        // bus subscriptions binding asks/brief to their run
 
 	// Controller-owned.
 	transcript voice.Transcript
@@ -213,7 +268,9 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 		c.submit(voiceJob{tools: ev.Tools})
 	case voice.EventHandoff:
 		h := ev
-		c.submit(voiceJob{handoff: &h, transcript: c.transcript.Tail(voiceHandoffTranscriptChars)})
+		job := voiceJob{handoff: &h, transcript: c.transcript.Tail(voiceHandoffTranscriptChars)}
+		job.handoffKey, job.replay = c.claimHandoff(ev.ItemID)
+		c.submit(job)
 	case voice.EventUsage:
 		c.usage = ev.Usage
 	case voice.EventClosed:
@@ -239,6 +296,9 @@ func (c *voiceCall) submit(job voiceJob) {
 		return
 	}
 	if job.handoff != nil {
+		if !job.replay {
+			c.releaseHandoff(job.handoffKey)
+		}
 		if r, ok := c.up.(voice.HandoffResponder); ok {
 			_ = r.SendHandoffResult(ctx, job.handoff.ItemID, "moa is busy with earlier requests; try again in a moment.")
 		}
@@ -270,7 +330,13 @@ func (c *voiceCall) runJob(job voiceJob) {
 		return
 	}
 	if job.handoff != nil {
-		text := c.runHandoff(ctx, job.transcript, job.handoff.Text)
+		var text string
+		if job.replay {
+			text = c.handoffText(job.handoffKey)
+		} else {
+			text = c.runHandoff(ctx, job.transcript, job.handoff.Text)
+			c.storeHandoff(job.handoffKey, text)
+		}
 		if r, ok := c.up.(voice.HandoffResponder); ok {
 			_ = r.SendHandoffResult(ctx, job.handoff.ItemID, text)
 		}

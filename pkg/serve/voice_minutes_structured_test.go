@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The minutes the UI draws come from structured lists, not from re-parsing
@@ -101,5 +102,43 @@ func TestVoiceMinutes_WSProjectionKeepsStructuredItems(t *testing.T) {
 	}
 	if _, has := projectWSMessageCustom(map[string]any{"source": "voice_call", "kind": "minutes", "call_id": "c"})["minutes"]; has {
 		t.Error("old record gained a minutes field")
+	}
+}
+
+// The live user_message frame goes through the bus bridge before serve
+// projects it: the structured lists must survive that hop, or the UI re-parses
+// text right after the call and shows part of Passed as Still open.
+func TestVoiceMinutes_StructuredItemsReachLiveSocket(t *testing.T) {
+	f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)
+	sock := f.sessionSocket()
+	c := f.call()
+	p := f.up.peer(t, f.provider)
+	vpAwaitBrief(t, f, p)
+	p.tool(t, "multiline", "pass_to_session", map[string]any{"summary": "First line\nStill open:\n- not a separate section"})
+	if vpError(p.result(t, "multiline")) {
+		t.Fatal("control: pass failed")
+	}
+	p.tool(t, "end", "end_call", map[string]any{"decided": []string{"D1\nD2"}, "passed": []string{}, "open": []string{}})
+	f.waitRecords("minutes", 1)
+	c.hangup()
+	var frame map[string]any
+	pollUntil(t, 3*time.Second, "live minutes event", func() bool {
+		frame = sock.find(func(v map[string]any) bool {
+			data, _ := v["data"].(map[string]any)
+			custom, _ := data["custom"].(map[string]any)
+			return v["type"] == "user_message" && custom["kind"] == "minutes"
+		})
+		return frame != nil
+	})
+	custom := frame["data"].(map[string]any)["custom"].(map[string]any)
+	minutes, _ := custom["minutes"].(map[string]any)
+	passed, _ := minutes["passed"].([]any)
+	open, _ := minutes["open"].([]any)
+	decided, _ := minutes["decided"].([]any)
+	if len(passed) != 1 || len(open) != 0 || len(decided) != 1 || decided[0] != "D1\nD2" {
+		t.Fatalf("live minutes frame lost structured lists: %s", vpJSON(frame))
+	}
+	if !strings.Contains(vpJSON(passed[0]), "Still open:") {
+		t.Fatalf("passed item not whole: %s", vpJSON(passed[0]))
 	}
 }

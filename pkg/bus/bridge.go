@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"math"
 	"sync"
@@ -1784,6 +1785,16 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 		for _, key := range []string{"call_id", "question", "kind", "delivery_id", "model_summary", "provider"} {
 			if value, ok := custom[key].(string); ok {
 				projected[key] = value
+			}
+		}
+		// The structured minutes lists are copied through JSON so the event
+		// owns its own data and the record can't be mutated through it.
+		if minutes, ok := custom["minutes"]; ok && minutes != nil {
+			if data, err := json.Marshal(minutes); err == nil {
+				var copied any
+				if json.Unmarshal(data, &copied) == nil {
+					projected["minutes"] = copied
+				}
 			}
 		}
 	}
