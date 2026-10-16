@@ -113,7 +113,9 @@ enum CarPlayListModel {
 // MARK: Creating the call
 
 enum CarPlayCallStart: Equatable {
-    case started(wsPath: String)
+    // sessionId: the owner's conversation, so the phone's page can adopt
+    // the call ("" from a server that does not send it).
+    case started(wsPath: String, sessionId: String)
     case alert(CarPlayAlert)
     // The owner changed under the list (deleted, no conversation) or the
     // credential stopped working: back to a fresh list, which says so.
@@ -130,7 +132,7 @@ enum CarPlayCallStartModel {
             guard let ws = body["ws_url"] as? String, ws.hasPrefix("/api/voice/calls/"), ws.hasSuffix("/ws") else {
                 return .alert(.unreachable)
             }
-            return .started(wsPath: ws)
+            return .started(wsPath: ws, sessionId: body["session_id"] as? String ?? "")
         case (409, "owner_busy"):
             // The owner is being reopened by another request: retryable, but
             // the car does not retry on its own.

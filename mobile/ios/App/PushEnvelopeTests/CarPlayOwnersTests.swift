@@ -70,8 +70,11 @@ final class CarPlayOwnersTests: XCTestCase {
     private func json(_ object: [String: Any]) -> Data { try! JSONSerialization.data(withJSONObject: object) }
 
     func testCallStartOutcomes() {
+        XCTAssertEqual(CarPlayCallStartModel.outcome(status: 201, data: json(["call_id": "c1", "ws_url": "/api/voice/calls/c1/ws",
+                                                                               "session_id": "s1"])),
+                       .started(wsPath: "/api/voice/calls/c1/ws", sessionId: "s1"))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 201, data: json(["call_id": "c1", "ws_url": "/api/voice/calls/c1/ws"])),
-                       .started(wsPath: "/api/voice/calls/c1/ws"))
+                       .started(wsPath: "/api/voice/calls/c1/ws", sessionId: ""))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 201, data: json(["ws_url": "https://evil/ws"])), .alert(.unreachable))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 409, data: json(["error": "call_active"])), .alert(.callActive))
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: 409, data: json(["error": "owner_busy", "retryable": true])),

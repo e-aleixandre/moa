@@ -27,6 +27,14 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         self.list = list
         interfaceController.setRootTemplate(list, animated: false, completion: nil)
         reload()
+        // A call still on from the last connection: its voice screen again.
+        if let surviving = CarPlayCall.surviving,
+           let template = surviving.reattach(onFinish: { [weak self] call, how in self?.ended(call, how) }) {
+            call = surviving
+            interfaceController.pushTemplate(template, animated: false) { _, _ in
+                MainActor.assumeIsolated { surviving.showPhase() }
+            }
+        }
     }
 
     // P5: a call goes on on the iPhone; only the car screen is let go.

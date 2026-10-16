@@ -8,7 +8,8 @@ private let carLog = Logger(subsystem: "com.ealeixandre.moa.app", category: "car
 // same native call engine as the iPhone, without CallKit, so the screen the
 // guide requires while recording stays visible. End and Mute sit in the
 // navigation bar. When the call ends it hands back to the list, with an
-// alert if the end was not expected.
+// alert if the end was not expected. If CarPlay goes away the call goes on
+// (P5) and this object is kept, so a new connection shows the same call.
 @available(iOS 26.4, *)
 @MainActor
 final class CarPlayCall: NSObject, NativeCallObserver {
@@ -17,15 +18,20 @@ final class CarPlayCall: NSObject, NativeCallObserver {
         case reload
     }
 
-    let template: CPVoiceControlTemplate
+    // The call left running when CarPlay went away, for the next connection.
+    private(set) static var surviving: CarPlayCall?
+
+    private(set) var template: CPVoiceControlTemplate!
     private let row: CarPlayRow
     private let client: CarPlayServer
     private let authorization: String
-    private let onFinish: (CarPlayCall, Finish) -> Void
+    private let image: UIImage?
+    // nil while no car screen shows this call.
+    private var onFinish: ((CarPlayCall, Finish) -> Void)?
     private var machine = CarPlayCallMachine()
     private var callId: String?
     private var userEnded = false
-    private var done = false
+    private var closed = false
     private var muteButton: CPBarButton!
 
     // Nothing is opened, and the microphone is not touched, until start().
@@ -34,19 +40,25 @@ final class CarPlayCall: NSObject, NativeCallObserver {
         self.row = row
         self.client = client
         self.authorization = authorization
+        self.image = image
         self.onFinish = onFinish
+        super.init()
+        template = makeTemplate()
+    }
+
+    private func makeTemplate() -> CPVoiceControlTemplate {
         let states = CarPlayCallPhase.allCases.map { phase in
             CPVoiceControlState(identifier: phase.rawValue, titleVariants: [Self.title(phase, row.name)], image: image, repeats: false)
         }
-        template = CPVoiceControlTemplate(voiceControlStates: states)
-        super.init()
+        let template = CPVoiceControlTemplate(voiceControlStates: states)
         let end = CPBarButton(title: CarPlayText.end) { [weak self] _ in self?.end() }
-        muteButton = CPBarButton(title: CarPlayText.mute) { [weak self] _ in self?.toggleMute() }
+        muteButton = CPBarButton(title: machine.muted ? CarPlayText.unmute : CarPlayText.mute) { [weak self] _ in self?.toggleMute() }
         template.leadingNavigationBarButtons = [end]
         template.trailingNavigationBarButtons = [muteButton]
         // The voice screen has no way back but End: leaving it would leave a
         // call running with no screen to end it from.
         template.backButton = CPBarButton(title: CarPlayText.end) { [weak self] _ in self?.end() }
+        return template
     }
 
     static func title(_ phase: CarPlayCallPhase, _ name: String) -> String {
@@ -76,10 +88,10 @@ final class CarPlayCall: NSObject, NativeCallObserver {
             finish(.alert(alert))
         case .reload:
             finish(.reload)
-        case .started(let wsPath):
+        case .started(let wsPath, let sessionId):
             guard
                 let url = client.socketURL(wsPath),
-                let id = NativeVoiceCallManager.shared.startNative(name: row.name, sessionId: "", origin: client.origin,
+                let id = NativeVoiceCallManager.shared.startNative(name: row.name, sessionId: sessionId, origin: client.origin,
                                                                    url: url, authorization: authorization, observer: self)
             else {
                 carLog.error("carplay call created but not opened")
@@ -94,7 +106,7 @@ final class CarPlayCall: NSObject, NativeCallObserver {
 
     // end is the user's End (or the voice screen going away).
     func end() {
-        guard !done, !userEnded else { return }
+        guard !closed, !userEnded else { return }
         userEnded = true
         if let callId {
             NativeVoiceCallManager.shared.hangUpNative(id: callId)
@@ -104,9 +116,27 @@ final class CarPlayCall: NSObject, NativeCallObserver {
     }
 
     // detach: CarPlay went away. The call goes on on the iPhone (P5); only
-    // the car screen is forgotten.
+    // the car screen is forgotten, and the call is kept for the next one.
     func detach() {
-        done = true
+        onFinish = nil
+        if !closed && !userEnded { Self.surviving = self }
+    }
+
+    // reattach gives a new car screen this call's voice screen, with End and
+    // Mute on the same call. Show it, then call showPhase().
+    func reattach(onFinish: @escaping (CarPlayCall, Finish) -> Void) -> CPVoiceControlTemplate? {
+        if Self.surviving === self { Self.surviving = nil }
+        guard !closed, !userEnded else { return nil }
+        self.onFinish = onFinish
+        template = makeTemplate()
+        return template
+    }
+
+    // showPhase puts the voice screen in the call's current state; a
+    // template only switches state once it is on screen.
+    func showPhase() {
+        guard onFinish != nil, !closed else { return }
+        template.activateVoiceControlState(withIdentifier: machine.phase.rawValue)
     }
 
     private func toggleMute() {
@@ -119,7 +149,7 @@ final class CarPlayCall: NSObject, NativeCallObserver {
     }
 
     private func handle(_ id: String, _ event: NativeCallEvent) {
-        guard id == callId, !done else { return }
+        guard id == callId, !closed else { return }
         let mapped: CarPlayCallEvent
         switch event {
         case .open: mapped = .open
@@ -132,7 +162,7 @@ final class CarPlayCall: NSObject, NativeCallObserver {
         }
         switch machine.apply(mapped) {
         case .show(let phase)?:
-            template.activateVoiceControlState(withIdentifier: phase.rawValue)
+            if onFinish != nil { template.activateVoiceControlState(withIdentifier: phase.rawValue) }
         case .end(let alert)?:
             finish(.alert(alert))
         case nil:
@@ -141,8 +171,9 @@ final class CarPlayCall: NSObject, NativeCallObserver {
     }
 
     private func finish(_ how: Finish) {
-        guard !done else { return }
-        done = true
-        onFinish(self, how)
+        guard !closed else { return }
+        closed = true
+        if Self.surviving === self { Self.surviving = nil }
+        onFinish?(self, how)
     }
 }
