@@ -223,7 +223,8 @@ export class VoiceCallController {
         onPlayback: (e) => { if (gen === this.gen) this.playback(e); },
       });
     } catch {
-      if (gen !== this.gen) return;
+      // A hangup while the microphone was opening is not a microphone error.
+      if (gen !== this.gen || this.s.phase === 'ending') return;
       // No microphone: end the call on the server too, so nothing keeps
       // running for a call that cannot hear.
       this.sendJSON({ type: 'hangup' });

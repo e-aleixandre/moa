@@ -176,3 +176,25 @@ test('injected bridge: active() resolves with the app snapshot', async () => {
   b.__event({ id: '', type: 'active', data: { id: 'n1', sessionId: 's', callId: 'k', muted: false } });
   await expect(p).resolves.toEqual({ id: 'n1', sessionId: 's', callId: 'k', muted: false });
 });
+
+test('native call: hanging up while the app opens the microphone ends as hangup, not microphone', async () => {
+  const { b } = await injectedBridge();
+  const deps = createNativeCallDeps(b, { name: () => 'X' });
+  let release;
+  const fetch = async (url) => {
+    if (url === '/api/voice/calls') return { status: 201, ok: true, json: async () => ({ call_id: 'k1', ws_url: '/api/voice/calls/k1/ws' }) };
+    await new Promise((r) => { release = r; });
+    return { status: 200, ok: true, json: async () => ({}) };
+  };
+  const c = new VoiceCallController({ sessionId: 's1', fetch, WebSocket: deps.WebSocket, createAudio: deps.createAudio });
+  c.start();
+  await flush();
+  b.__event({ id: c.ws.id, type: 'open' });
+  await flush();
+  const hung = c.hangup();
+  await flush();
+  release();
+  await hung;
+  expect(c.state().endedReason).toBe('hangup');
+  expect(c.state().message).toBe('');
+});
