@@ -30,6 +30,7 @@ import {
 import { savedSecretsBridge, listSaved } from "../../data/saved-secrets.js";
 import { savedLine, savedValue, sortSaved, withoutAlias } from "./saved-secrets-model.js";
 import { ProvidersPage } from "./ProvidersPage.jsx";
+import { voiceValue, planOptions, paidOptions, usageLine } from "./voice-settings-model.js";
 import { providersValue } from "./providers-model.js";
 import { useProviderStatus } from "../../data/providers.js";
 import "./GlobalSettings.css";
@@ -510,6 +511,93 @@ function CompactModelPage({ state, onDone }) {
   );
 }
 
+function useVoiceSettings(active) {
+  const [status, setStatus] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (!active) return undefined;
+    let live = true;
+    api("GET", "/api/voice/status").catch(() => null).then((next) => {
+      if (!live) return;
+      setStatus(next);
+      setLoaded(true);
+    });
+    return () => { live = false; };
+  }, [active]);
+  const save = (patch) => api("PATCH", "/api/voice/settings", patch)
+    .then((next) => setStatus(next))
+    .catch(() => addToast({ title: "Could not save the voice setting", detail: "Try again.", type: "error" }));
+  return { status, loaded, save };
+}
+
+// Voice calls: which plan a call uses, which paid provider is offered when
+// the plan fails (only ever on a tap), and what recent calls measured.
+function VoicePage({ state, onProviders }) {
+  const { status, loaded, save } = state;
+  if (loaded && !status) return <p class="zl-set-empty">Voice settings are unavailable on this server.</p>;
+  const plans = planOptions(status);
+  const paid = paidOptions(status);
+  const recent = status?.recent || [];
+  return (
+    <>
+      <p class="zl-set-sum">
+        Calls use your plan. A paid provider is only offered when the plan
+        fails, and only starts when you tap it.
+      </p>
+      <span class="zl-set-k is-page">Call with</span>
+      <div role="radiogroup" aria-label="Call with">
+        <Option
+          label="Automatic"
+          desc="ChatGPT plan, then Grok plan."
+          on={!status?.provider}
+          disabled={!loaded}
+          onPick={() => save({ provider: "" })}
+        />
+        {plans.map((o) => (
+          <Option key={o.id} label={o.label} desc={o.desc} on={o.on} disabled={!loaded} onPick={() => save({ provider: o.id })} />
+        ))}
+      </div>
+      <span class="zl-set-k is-page">If the plan fails, offer</span>
+      <div role="radiogroup" aria-label="If the plan fails, offer">
+        <Option
+          label="The plan's own API"
+          desc="Grok API after Grok, OpenAI API after ChatGPT."
+          on={!status?.paid_provider}
+          disabled={!loaded}
+          onPick={() => save({ paid_provider: "" })}
+        />
+        {paid.map((o) => (
+          <Option key={o.id} label={o.label} desc={o.desc} on={o.on} disabled={!loaded} onPick={() => save({ paid_provider: o.id })} />
+        ))}
+      </div>
+      {plans.some((o) => !o.ready) && onProviders && (
+        <button type="button" class="zl-set-link zl-set-inline" onClick={onProviders}>Open Providers</button>
+      )}
+      {status?.backend_model && (
+        <div class="zl-set-row is-static">
+          <span class="zl-set-l">Requests run on<em>The model that works for the call.</em></span>
+          <span class="zl-set-v zl-data">{status.backend_model}</span>
+        </div>
+      )}
+      <span class="zl-set-k is-page">Recent calls</span>
+      {recent.length === 0 ? (
+        <p class="zl-set-empty">No calls since this server started.</p>
+      ) : (
+        <ul class="zl-set-voice-recent">
+          {recent.map((u) => {
+            const line = usageLine(u);
+            return (
+              <li key={u.call_id}>
+                <span class="zl-set-l">{line.facts}<em>{line.delta}</em></span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
+  );
+}
+
 // The allowlist. A page rather than a row's value because fourteen models with
 // a filter and provider folds is a screen's worth on its own — and folding by
 // provider is what keeps it one screen when there are fifty.
@@ -914,6 +1002,7 @@ export function GlobalSettings({
   const subagents = useSubagentModels();
   const devices = useDevices(open);
   const saved = useSavedSecrets(open);
+  const voiceSettings = useVoiceSettings(open);
 
   const [push, setPush] = useState(getPushState());
   useEffect(() => subscribePushState(setPush), []);
@@ -1024,6 +1113,7 @@ export function GlobalSettings({
             {page === "subagent-models" && <SubagentModelsPage state={subagents} />}
             {page === "devices" && <DevicesPage state={devices} onClose={onClose} />}
             {page === "saved-secrets" && <SavedSecretsPage state={saved} />}
+            {page === "voice" && <VoicePage state={voiceSettings} onProviders={() => setPage("providers")} />}
             {page === "providers" && (
               <ProvidersPage
                 focusProvider={providerFocus?.provider || ""}
@@ -1075,6 +1165,18 @@ export function GlobalSettings({
                   label="Push notifications on this device"
                 />
               </Row>
+            </div>
+
+            <div class="zl-set-sec">
+              <span class="zl-set-k">Voice</span>
+              <Row
+                label="Calls"
+                hint="Which plan answers when you call a session."
+                value={voiceValue(voiceSettings.status, voiceSettings.loaded)}
+                loading={!voiceSettings.loaded}
+                onOpen={() => setPage("voice")}
+                pageLabel={SETTINGS_PAGES.voice}
+              />
             </div>
 
             <div class="zl-set-sec">

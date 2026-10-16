@@ -740,3 +740,23 @@ button.zl-set-row[disabled] { cursor: default; }
 .zl-set-dev-pair.is-forget-all { color: var(--zl-red); }
 .zl-set-dev-ask.is-block { margin-top: var(--space-4); width: 100%; }
 .zl-set-dev-ask.is-block > button { flex: 1; min-height: var(--control-touch); }
+
+/* Voice calls page: the two choices stack with their own labels; recent
+   calls are facts, one per line, with the spend delta under them. */
+.zl-set-k.is-page { margin-top: 16px; }
+.zl-set-inline {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--zl-t2);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.zl-set-voice-recent { list-style: none; margin: 0; padding: 0; }
+.zl-set-voice-recent li { padding: 8px 0; border-top: 1px solid var(--zl-line); }
+.zl-set-voice-recent li:first-child { border-top: 0; }

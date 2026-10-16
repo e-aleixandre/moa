@@ -25,6 +25,7 @@ export const SETTINGS_PAGES = {
   devices: "Devices",
   "saved-secrets": "Saved passwords",
   providers: "Providers",
+  voice: "Voice calls",
 };
 
 // providerHue — the catalogue's identity hue (zones-lab.jsx:46), so a provider
