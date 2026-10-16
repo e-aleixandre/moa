@@ -9,7 +9,7 @@ import os
 // in Info.plist, which WebKit reads to stop interrupting capture.
 @MainActor
 final class VoiceAudioSessionController {
-    private static let log = Logger(subsystem: "com.ealeixandre.moa.app", category: "voice-audio")
+    nonisolated private static let log = Logger(subsystem: "com.ealeixandre.moa.app", category: "voice-audio")
 
     private weak var webView: WKWebView?
     private var observation: NSKeyValueObservation?
@@ -35,14 +35,14 @@ final class VoiceAudioSessionController {
     private func begin() {
         let session = AVAudioSession.sharedInstance()
         prior = (session.category, session.mode, session.categoryOptions)
-        // allowBluetooth is hands-free (HFP): the only Bluetooth route with a
+        // allowBluetoothHFP is hands-free: the only Bluetooth route with a
         // microphone, which a car needs. A2DP stays allowed for output-only
         // headsets; the system prefers HFP when both are offered.
         // defaultToSpeaker only applies to the built-in route, so a call
         // without headphones is not played through the earpiece.
         do {
             try session.setCategory(.playAndRecord, mode: .voiceChat,
-                                    options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker])
+                                    options: [.allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker])
         } catch {
             Self.log.error("voice session category: \(error.localizedDescription, privacy: .public)")
         }
