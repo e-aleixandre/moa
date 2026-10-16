@@ -1,4 +1,6 @@
 import "./StatusStrip.css";
+import { SunriseIcon } from "../../components/Daybreak/SunriseIcon.jsx";
+import "../../components/Daybreak/Daybreak.css";
 import { statusItemPriority, statusStripModel } from "../../data/util/status-strip-model.js";
 import { activityPhase } from "../../data/util/activity.js";
 import { sessionOnAPIKey } from "../../data/provider-wait.js";
@@ -71,6 +73,9 @@ export function StatusStrip({
   task,
   spend,
   session,
+  // daybreak marks the model chip; a child's strip passes its own, the
+  // session's comes from the session.
+  daybreak: daybreakProp,
   usage,
   taskLive,
   compact = false,
@@ -98,6 +103,7 @@ export function StatusStrip({
   children,
 }) {
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
+  const daybreakOn = daybreakProp ?? (!!session?.daybreak && !!session?.daybreakSupported);
   // `(a || b) && <div>` would paint a bare 0 for a run that has moved nothing.
   // The tally is a heartbeat: absent until it beats.
   const hasTokens = (tokensUp || 0) > 0 || (tokensDown || 0) > 0;
@@ -157,10 +163,11 @@ export function StatusStrip({
               disabled={!onModel}
               aria-expanded={onModel ? !!modelOpen : undefined}
               aria-haspopup={onModel ? "dialog" : undefined}
-              aria-label={`Model & thinking: ${modelName}, ${thinking}`}
+              aria-label={`Model & thinking: ${modelName}${daybreakOn ? ", Daybreak" : ""}, ${thinking}`}
             >
               {modelMark && <span class="zl-st-model-mark" style={{ background: modelMark }} aria-hidden="true" />}
               <span class="zl-st-word zl-st-model-name">{modelName}</span>
+              {daybreakOn && <SunriseIcon />}
               {meterPosition !== null && <ThinkMeter level={meterPosition} />}
             </button>
             {modelPopover}

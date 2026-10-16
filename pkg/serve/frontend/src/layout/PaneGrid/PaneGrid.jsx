@@ -28,7 +28,7 @@ import { useSessionTasksStatus } from "../../components/Tasks/useSessionTasksSta
 import { useStore } from "../../hooks/useStore.js";
 import { usePresence } from "../../hooks/usePresence.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
-import { openPersistedSubagent, openBashJob, configureSession, setSessionFast, stopRun } from "../../data/session-actions.js";
+import { openPersistedSubagent, openBashJob, configureSession, setSessionFast, daybreakSelectorProps, stopRun } from "../../data/session-actions.js";
 import { matchSelectedModel } from "../../data/selectors.js";
 import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../../data/model-catalog.js";
 import { shortModel, shortPath, sessionDisplayDotState, modelCodename, sessionTitle } from "../../data/util/format.js";
@@ -390,6 +390,7 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
           fast={!!session.fast}
           fastSupported={!!session.fastSupported}
           fastNote={session.fastNote || ""}
+          {...daybreakSelectorProps(session)}
           onFastChange={(value) => {
             setSessionFast(session.id, value).catch((error) => addToast({
               title: "Could not change fast mode",

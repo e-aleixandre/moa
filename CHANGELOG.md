@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Daybreak is a switch, not a model.** It sits under Fast in the model
+  picker of each session, applies from the next request (also mid-run), is
+  saved with the session and passes to the subagents it launches. It is
+  offered only when your plan's model catalog lists a model that takes it, and
+  only over the ChatGPT plan login. With it on, models that don't take it are
+  shown as *No Daybreak* and a change to one is refused. The `daybreak` model
+  spec now means GPT-6 Sol with Daybreak; sessions saved on the retired
+  `gpt-daybreak-blue-latest` alias move to it on their next request, with their
+  history kept as it was.
+
 ## [0.46.0] - 2026-10-15
 
 ### Added

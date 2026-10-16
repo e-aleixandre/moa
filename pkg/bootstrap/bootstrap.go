@@ -88,9 +88,14 @@ type SessionConfig struct {
 	// Context for MCP servers and subagent async jobs. Required.
 	Ctx context.Context
 
+	// DaybreakCatalog snapshots the account's model catalog for Daybreak; nil
+	// behaves as a catalog that was never loaded.
+	DaybreakCatalog func() core.DaybreakAvailability
+
 	// Agent tuning. Zero values use package defaults.
 	ThinkingLevel       string        // Default: "medium"
 	Fast                bool          // Premium speed for this session when the model supports it.
+	Daybreak            bool          // Ask for the Daybreak program on OpenAI requests.
 	MaxTurns            int           // 0 = unlimited (default). Overrides config.json.
 	MaxToolCallsPerTurn int           // 0 = unlimited (default). Overrides config.json.
 	MaxRunDuration      time.Duration // 0 = unlimited (default). Overrides config.json.
@@ -188,6 +193,9 @@ type SessionConfig struct {
 
 // Session is a fully wired session ready for agent.Run/Send.
 type Session struct {
+	// DaybreakCatalog is SessionConfig.DaybreakCatalog, handed to the runtime.
+	DaybreakCatalog func() core.DaybreakAvailability
+
 	Agent         *agent.Agent
 	ToolReg       *core.Registry
 	TaskStore     *tasks.Scope
@@ -612,6 +620,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 	// Build the session struct early so subagent closures can reference it.
 	sess := &Session{
+		DaybreakCatalog:   cfg.DaybreakCatalog,
 		ToolReg:           toolReg,
 		SessionCheckpoint: sessionCheckpoint,
 		TaskStore:         taskStore,
@@ -672,6 +681,13 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			}
 			return cfg.ThinkingLevel
 		},
+		CurrentDaybreak: func() bool {
+			if a := sess.agentHolder.Load(); a != nil {
+				return a.Daybreak()
+			}
+			return cfg.Daybreak
+		},
+		DaybreakCatalog: cfg.DaybreakCatalog,
 		CurrentPermissionCheck: func() func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 			if a := sess.agentHolder.Load(); a != nil {
 				return a.PermissionCheck()
@@ -770,6 +786,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		SystemPrompt:        systemPrompt,
 		ThinkingLevel:       cfg.ThinkingLevel,
 		Fast:                cfg.Fast,
+		Daybreak:            cfg.Daybreak,
 		CacheTTL:            core.GetCacheTTL(moaCfg),
 		PromptCacheKey:      core.PromptCacheKey(cfg.SessionID),
 		Tools:               toolReg,

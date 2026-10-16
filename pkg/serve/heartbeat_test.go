@@ -448,4 +448,3 @@ func TestHeartbeatRespectsConfiguration(t *testing.T) {
 		t.Fatalf("enabled with custom stale_days = %+v", customStale)
 	}
 }
-

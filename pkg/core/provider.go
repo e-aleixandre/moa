@@ -233,6 +233,10 @@ type StreamOptions struct {
 	// because the account cannot use the premium tier. It is process-local
 	// state coordination, never part of a provider payload.
 	OnFastUnavailable func() `json:"-"`
+	// AccessProgram is the access program this request asks for (Daybreak's
+	// DaybreakAccessProgram), "" for standard. Only a transport that supports
+	// it sends it; everyone else ignores it.
+	AccessProgram string `json:"access_program,omitempty"`
 	// OnRequestFingerprint, when set, receives a lazy thunk for the final
 	// provider request body, once per logical request, before it is sent.
 	// Providers that do not fingerprint requests ignore it. The consumer

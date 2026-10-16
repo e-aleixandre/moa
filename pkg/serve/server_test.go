@@ -108,7 +108,7 @@ func TestCancelSteersKeepsLegacyNoContentContract(t *testing.T) {
 func TestListModelsIncludesDeclaredReasoningEfforts(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/models", nil)
 	res := httptest.NewRecorder()
-	handleListModels().ServeHTTP(res, req)
+	handleListModels(nil).ServeHTTP(res, req)
 
 	var models []struct {
 		ID               string   `json:"id"`

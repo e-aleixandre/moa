@@ -59,8 +59,9 @@ func runServe(args []string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defaultModel, _ := core.ResolveModel(*modelFlag)
+	defaultModel, defaultDaybreak, _ := core.ResolveModelDaybreak(*modelFlag)
 	authStore := auth.NewStore("")
+	daybreakCatalog := newDaybreakCatalogs(authStore)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -109,6 +110,8 @@ func runServe(args []string) {
 		PushNative:             pushNative,
 		PushVoIP:               pushVoIP,
 		DefaultModel:           defaultModel,
+		DefaultDaybreak:        defaultDaybreak,
+		DaybreakCatalog:        daybreakCatalog.Snapshot,
 		WorkspaceRoot:          cwd,
 		MoaCfg:                 moaCfg,
 		AuxiliaryModelResolver: auxiliaryModelResolver(authStore),

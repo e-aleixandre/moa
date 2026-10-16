@@ -42,6 +42,8 @@ type InitData struct {
 	Fast              bool                      `json:"fast"`
 	FastSupported     bool                      `json:"fast_supported"`
 	FastNote          string                    `json:"fast_note,omitempty"`
+	Daybreak          bool                      `json:"daybreak,omitempty"`
+	DaybreakSupported bool                      `json:"daybreak_supported,omitempty"`
 	PathScope         string                    `json:"path_scope,omitempty"`
 	PendingPermission *PermissionData           `json:"pending_permission,omitempty"`
 	PendingAsk        *AskData                  `json:"pending_ask,omitempty"`
@@ -176,6 +178,8 @@ type SubagentInitData struct {
 	// by the client to derive a deterministic accent color that survives
 	// reconnects (instead of one derived from array/map position).
 	AccentIndex int `json:"accent_index"`
+	// Daybreak is whether the child runs with the Daybreak program.
+	Daybreak bool `json:"daybreak,omitempty"`
 }
 
 // BashJobInitData restores a live/recent background command after reconnect.
@@ -518,6 +522,9 @@ type ConfigChangeData struct {
 	Fast          *bool   `json:"fast,omitempty"`
 	FastSupported *bool   `json:"fast_supported,omitempty"`
 	FastNote      *string `json:"fast_note,omitempty"`
+	// Daybreak fields follow the Fast pattern: nil = unchanged.
+	Daybreak          *bool `json:"daybreak,omitempty"`
+	DaybreakSupported *bool `json:"daybreak_supported,omitempty"`
 }
 
 // SubagentCountData is sent when async subagent jobs start/finish.
@@ -549,7 +556,8 @@ type SubagentStartData struct {
 	// AccentIndex is the subagent's stable per-session creation ordinal (see
 	// SubagentInitData.AccentIndex). Never omitted: 0 is a valid ordinal
 	// (the session's first subagent).
-	AccentIndex int `json:"accent_index"`
+	AccentIndex int  `json:"accent_index"`
+	Daybreak    bool `json:"daybreak,omitempty"`
 }
 
 // SubagentUsageData carries a subagent's accumulated usage/cost while it is

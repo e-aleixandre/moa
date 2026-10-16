@@ -38,6 +38,7 @@ type RuntimeConfig struct {
 	SecretBroker      *secretaction.Broker // requests published here; answers bypass the bus
 	ProviderFactory   func(core.Model) (core.Provider, error)
 	BaseSystemPrompt  string
+	DaybreakCatalog   func() core.DaybreakAvailability
 	Persister         SessionPersister
 	SteerFilter       func(text string) bool
 	// BeforeFirstRun runs after the first run is admitted and has a cancellable
@@ -130,6 +131,7 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 		SecretBroker:      cfg.SecretBroker,
 		ProviderFactory:   cfg.ProviderFactory,
 		BaseSystemPrompt:  cfg.BaseSystemPrompt,
+		DaybreakCatalog:   cfg.DaybreakCatalog,
 		CWD:               cfg.CWD,
 		AutoVerify:        cfg.AutoVerify,
 		SteerFilter:       cfg.SteerFilter,

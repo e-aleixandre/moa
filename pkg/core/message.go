@@ -168,7 +168,11 @@ type Message struct {
 	Model    string `json:"model,omitempty"`
 	// RequestedModel is the normalized model selected for this response; Model
 	// is the effective model reported by the provider.
-	RequestedModel string          `json:"requested_model,omitempty"`
+	RequestedModel string `json:"requested_model,omitempty"`
+	// AccessProgram is the access program requested for this response (see
+	// StreamOptions.AccessProgram). Empty means standard, which is also what
+	// every response written before it was recorded asked for.
+	AccessProgram  string          `json:"access_program,omitempty"`
 	ProviderSource *ProviderSource `json:"provider_source,omitempty"`
 	Usage          *Usage          `json:"usage,omitempty"`
 	StopReason     string          `json:"stop_reason,omitempty"`

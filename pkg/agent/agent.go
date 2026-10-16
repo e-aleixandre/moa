@@ -470,6 +470,9 @@ type AgentConfig struct {
 	// the model supports it. Per session, not global: it is worth paying for
 	// on the conversation you are waiting on, not on every one at once.
 	Fast bool
+	// Daybreak asks for the Daybreak access program on this session's
+	// OpenAI requests. Read per request, like Fast.
+	Daybreak bool
 	// PromptCacheKey identifies this agent's conversation for cache routing on
 	// the Responses providers (OpenAI, xAI). Empty omits the field entirely.
 	PromptCacheKey string
@@ -2182,6 +2185,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		streamOpts:          streamOpts,
 		streamRepairBackoff: a.config.StreamRepairBackoff,
 		fast:                a.Fast,
+		daybreak:            a.Daybreak,
 		maxTurns:            a.config.MaxTurns,
 		maxToolCallsPerTurn: a.config.MaxToolCallsPerTurn,
 		convertToLLM:        a.config.ConvertToLLM,
@@ -2350,14 +2354,18 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// gets "(interrupted by user)". A provider failure (e.g. a ChatGPT usage
 	// limit / 429) must NOT be mislabeled as a user interruption — that both
 	// confuses the user ("I didn't stop it") and lies to the model on replay.
-	if err != nil && lastLLMRole(a.state.Messages) == "user" {
+	// AppendRecord may write while a stopped run finishes, so the check and
+	// the insert are one section under the mutex.
+	if err != nil {
 		a.mu.Lock()
-		interrupted := core.WrapMessage(core.Message{
-			Role:    "assistant",
-			Content: []core.Content{core.TextContent(interruptedMarkerText(ctx, err))},
-		})
-		interrupted.EnsureMsgID()
-		a.state.Messages = append(a.state.Messages, interrupted)
+		if lastLLMRole(a.state.Messages) == "user" {
+			interrupted := core.WrapMessage(core.Message{
+				Role:    "assistant",
+				Content: []core.Content{core.TextContent(interruptedMarkerText(ctx, err))},
+			})
+			interrupted.EnsureMsgID()
+			a.state.Messages = append(a.state.Messages, interrupted)
+		}
 		a.mu.Unlock()
 	}
 
@@ -2369,8 +2377,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 
 	// Return a copy — the internal slice is reused across turns (Send appends).
 	// Without this, callers could mutate returned messages and corrupt state.
-	msgs := make([]core.AgentMessage, len(a.state.Messages))
-	copy(msgs, a.state.Messages)
+	msgs := a.Messages()
 
 	// Record the run's true accumulated cost — including empty/failed-turn usage
 	// the loop billed internally that never surfaces as an assistant message —
@@ -2461,4 +2468,19 @@ func (a *Agent) SetCompactStrategy(strategy string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.config.CompactStrategy = strategy
+}
+
+// Daybreak reports whether this session asks for the Daybreak program.
+func (a *Agent) Daybreak() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.config.Daybreak
+}
+
+// SetDaybreak turns the Daybreak program on or off. Like SetFast it is allowed
+// while running: the next request reads it, the one in flight keeps its own.
+func (a *Agent) SetDaybreak(on bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.config.Daybreak = on
 }

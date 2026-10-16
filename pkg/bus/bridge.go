@@ -60,6 +60,10 @@ type AgentController interface {
 	// changes it. Allowed while running: the next request reads it.
 	Fast() bool
 	SetFast(on bool)
+	// Daybreak reports whether this session asks for the Daybreak program, and
+	// SetDaybreak changes it. Allowed while running: the next request reads it.
+	Daybreak() bool
+	SetDaybreak(on bool)
 	EffectiveCompactAt() int
 	SetMaxBudget(v float64) error
 	Reset() error
@@ -135,6 +139,10 @@ type SessionContext struct {
 
 	ProviderFactory  func(core.Model) (core.Provider, error)
 	BaseSystemPrompt string
+
+	// DaybreakCatalog snapshots what the account's model catalog says about
+	// Daybreak. nil behaves as a catalog that was never loaded.
+	DaybreakCatalog func() core.DaybreakAvailability
 
 	// ReloadPrompt re-reads the on-disk prompt inputs and rebuilds the base
 	// system prompt. Set by the serve layer, which owns the tool registry and

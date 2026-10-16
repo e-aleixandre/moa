@@ -8,7 +8,7 @@ import { catalogThinkingPosition, ensureModelCatalog, modelCatalog } from "../..
 import { useStore } from "../../../hooks/useStore.js";
 import { usePresence } from "../../../hooks/usePresence.js";
 import { MOTION } from "../../../hooks/motion.js";
-import { configureSession, setSessionFast } from "../../../data/session-actions.js";
+import { configureSession, setSessionFast, daybreakSelectorProps } from "../../../data/session-actions.js";
 import { sessionPanelView, toggleSessionPanel } from "../../../data/session-panel.js";
 import { addToast } from "../../../data/notifications.js";
 import { modelCodename, shortModel } from "../../../data/util/format.js";
@@ -152,6 +152,7 @@ export function MobileStatusLine({ session, usage }) {
               fast={!!session.fast}
               fastSupported={!!session.fastSupported}
               fastNote={session.fastNote || ""}
+              {...daybreakSelectorProps(session)}
               onFastChange={(value) => {
                 setSessionFast(session.id, value).catch((error) => addToast({
                   title: "Could not change fast mode",

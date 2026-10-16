@@ -526,6 +526,11 @@ type ConfigChanged struct {
 	Fast          *bool
 	FastSupported *bool
 	FastNote      *string
+	// Daybreak is whether the session asks for the Daybreak program and
+	// DaybreakSupported whether the current model would carry it. Pointers for
+	// the same reason as Fast: an explicit false is a change.
+	Daybreak          *bool
+	DaybreakSupported *bool
 	// CompactAt is the new soft compaction threshold in tokens, set only on a
 	// threshold change. A pointer because 0 is itself a meaningful value ("use
 	// the model window"), so nil is the only way to say "unchanged" here.
@@ -637,6 +642,8 @@ type SubagentStarted struct {
 	// clients to derive a deterministic accent color that survives WS
 	// reconnects instead of one derived from map iteration order.
 	AccentIndex int
+	// Daybreak is whether the child runs with the Daybreak program.
+	Daybreak bool
 }
 
 // SubagentTitleChanged updates the one-shot generated identity of a child.

@@ -1,0 +1,21 @@
+.db-sunrise { flex: none; width: 14px; height: 14px; color: var(--zl-warm, #e8a25a); }
+.zl-pick-cur-name:has(.db-sunrise) { display: inline-flex; align-items: center; gap: 6px; }
+.zl-st-model .db-sunrise { margin-left: 2px; }
+
+.zl-mchip.is-blocked { opacity: 0.45; cursor: not-allowed; }
+.zl-mchip-note { color: var(--zl-t4); font-size: var(--zl-fs-meta); }
+
+.zl-db-offer { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; padding: 10px 12px; border-radius: var(--zl-r-md); background: var(--zl-raised); box-shadow: var(--zl-rim); }
+.zl-db-offer p { margin: 0; color: var(--zl-t2); }
+.zl-db-offer-acts { display: flex; gap: 8px; justify-content: flex-end; }
+.zl-db-offer-acts button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--zl-r-md);
+  background: var(--zl-control);
+  color: var(--zl-t1);
+  font: inherit;
+  cursor: pointer;
+}
+.zl-db-offer-acts button.is-primary { background: var(--zl-accent); color: var(--zl-on-accent, #fff); }
