@@ -23,11 +23,12 @@ export function modelCatalog(state) {
 // selector), so five strips mounting at once still make one request.
 let inFlight = null;
 
-export function loadModelCatalog() {
+export function loadModelCatalog({ refresh = false } = {}) {
   const slice = modelCatalog(store.get());
-  if (slice.status === 'ready') return Promise.resolve(slice.entries);
+  if (slice.status === 'ready' && !refresh) return Promise.resolve(slice.entries);
   if (inFlight) return inFlight;
-  setState({ modelCatalog: { status: 'loading', entries: null } });
+  // A refresh keeps the ready entries on screen until the new answer lands.
+  if (!refresh) setState({ modelCatalog: { status: 'loading', entries: null } });
   inFlight = api('GET', '/api/models')
     .then((models) => {
       const entries = deriveModelSpecs(models);
@@ -35,6 +36,7 @@ export function loadModelCatalog() {
       return entries;
     })
     .catch(() => {
+      if (refresh) return slice.entries;
       // An error is recoverable: leave the catalog unknown so the next open,
       // reconnect or foreground can ask again.
       setState({ modelCatalog: { status: 'error', entries: null } });
@@ -44,11 +46,19 @@ export function loadModelCatalog() {
   return inFlight;
 }
 
+// daybreakPending: the server answered before it knew which models offer
+// Daybreak, so that part of a ready catalog is still to come.
+function daybreakPending(slice) {
+  return slice.status === 'ready' && (slice.entries || []).some((m) => m.daybreakPending);
+}
+
 // ensureModelCatalog is the "on demand" entry: opening a selector with an idle
-// or failed catalog retries, a ready one costs nothing.
+// or failed catalog retries, and so does one still waiting on Daybreak; a
+// complete one costs nothing.
 export function ensureModelCatalog() {
   const slice = modelCatalog(store.get());
   if (slice.status === 'idle' || slice.status === 'error') loadModelCatalog();
+  else if (daybreakPending(slice)) loadModelCatalog({ refresh: true });
 }
 
 // catalogSpec resolves a spec from whatever identity the caller holds: a

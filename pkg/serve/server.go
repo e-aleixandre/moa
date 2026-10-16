@@ -446,6 +446,10 @@ func handleListModels(mgr *Manager) http.HandlerFunc {
 		// DaybreakSupported is set only when the account's catalog is known
 		// to offer Daybreak on this model over the selected transport.
 		DaybreakSupported bool `json:"daybreak_supported,omitempty"`
+		// DaybreakPending is set while the catalog hasn't been read yet on
+		// the plan transport, so a client asks again instead of keeping this
+		// answer.
+		DaybreakPending bool `json:"daybreak_pending,omitempty"`
 	}
 	entries := core.ListModels()
 	return func(w http.ResponseWriter, _ *http.Request) {
@@ -463,6 +467,7 @@ func handleListModels(mgr *Manager) http.HandlerFunc {
 				MaxInput:          e.Model.MaxInput,
 				ReasoningEfforts:  core.ReasoningEffortsForModel(e.Model),
 				DaybreakSupported: availability.Known && availability.Sendable(e.Model),
+				DaybreakPending:   !availability.Known && availability.Sendable(e.Model),
 			}
 		}
 		writeJSON(w, http.StatusOK, models)

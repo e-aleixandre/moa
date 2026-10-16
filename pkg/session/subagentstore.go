@@ -41,8 +41,11 @@ type SubagentTranscript struct {
 	// distinguishable from a transcript written before this was recorded:
 	// nil means unknown, and unknown hides the ring instead of drawing an
 	// empty one.
-	ContextPercent *int                `json:"context_percent,omitempty"`
-	Messages       []core.AgentMessage `json:"messages"`
+	ContextPercent *int `json:"context_percent,omitempty"`
+	// Daybreak is whether the child ran with the Daybreak program, so a
+	// resume continues in the same mode. Absent on older transcripts (off).
+	Daybreak bool                `json:"daybreak,omitempty"`
+	Messages []core.AgentMessage `json:"messages"`
 }
 
 // SubagentStore persists subagent transcripts for one parent session in a

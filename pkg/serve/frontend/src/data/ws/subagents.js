@@ -84,7 +84,7 @@ export function flushSubagentEvents() {
 	    continue;
 	  }
 	  if (evt.type === 'config_change') {
-	    subs[jobId] = { ...existing, model: evt.data.model || existing.model, thinking: evt.data.thinking || existing.thinking };
+	    subs[jobId] = { ...existing, model: evt.data.model || existing.model, thinking: evt.data.thinking || existing.thinking, daybreak: evt.data.daybreak ?? existing.daybreak };
 	    changed = true;
 	    continue;
 	  }

@@ -275,6 +275,9 @@ type ResumedTranscript struct {
 	Messages []core.AgentMessage
 	Model    string
 	Thinking string
+	// Daybreak is whether the child ran with the Daybreak program; with its
+	// recorded model it resumes in that mode.
+	Daybreak bool
 }
 
 // RegisterAll registers the subagent tools on reg and returns a handle onto
@@ -1722,8 +1725,8 @@ func resolveMaxDuration(params map[string]any) (time.Duration, *core.Result) {
 // field, or a recorded model that no longer resolves — renamed/retired)
 // inherits the parent's current model, which is the historical behaviour.
 //
-// A resumed child recorded under the retired Daybreak alias continues on
-// GPT-6 Sol with Daybreak, which the returned bool reports.
+// A resumed child that ran with Daybreak, or was recorded under the retired
+// Daybreak alias, continues with it, which the returned bool reports.
 func defaultModel(cfg Config, resumed ResumedTranscript) (core.Model, bool) {
 	parent := currentModel(cfg)
 	spec := strings.TrimSpace(resumed.Model)
@@ -1732,7 +1735,7 @@ func defaultModel(cfg Config, resumed ResumedTranscript) (core.Model, bool) {
 	}
 	model, daybreak, ok := core.ResolveModelDaybreak(spec)
 	if ok || model.Provider != "" {
-		return model, daybreak
+		return model, daybreak || resumed.Daybreak
 	}
 	return parent, false
 }

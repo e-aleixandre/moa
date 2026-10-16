@@ -482,6 +482,7 @@ func (s *ManagedSession) saveSubagentTranscript(jobID, status, result, resultErr
 			t.Title = info.Title
 			t.Model = info.Model
 			t.Thinking = info.Thinking
+			t.Daybreak = info.Daybreak
 			t.Async = info.Async
 			t.StartedAt = info.StartedAt
 			pct := info.ContextPercent

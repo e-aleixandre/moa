@@ -232,10 +232,15 @@ func (m *Manager) ReconfigureSubagent(sessionID, jobID, modelSpec, thinking stri
 	if err := core.ValidateModelSpec(modelSpec); err != nil {
 		return nil, ErrInvalidModel
 	}
-	model, ok := core.ResolveModel(modelSpec)
+	model, daybreakSpec, ok := core.ResolveModelDaybreak(modelSpec)
 	if !ok {
 		return nil, ErrInvalidModel
 	}
+	// Same policy as launching a child: it keeps Daybreak (or gains it from a
+	// Daybreak spec) only on an OpenAI model the known catalog doesn't rule
+	// out; otherwise it continues on the requested model in standard.
+	availability := sess.daybreakAvailability()
+	daybreak := (daybreakSpec || sess.subagents.Daybreak(jobID)) && model.Provider == "openai" && !availability.Rejects(model)
 	if thinking == "" {
 		for _, info := range sess.subagents.Snapshot() {
 			if info.JobID == jobID {
@@ -256,14 +261,15 @@ func (m *Manager) ReconfigureSubagent(sessionID, jobID, modelSpec, thinking stri
 	if err != nil {
 		return nil, err
 	}
-	application, err := sess.subagents.Reconfigure(jobID, provider, model, level)
+	application, err := sess.subagents.Reconfigure(jobID, provider, model, level, daybreak)
 	if errors.Is(err, subagent.ErrUnknownJob) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	sess.runtime.Bus.Publish(bus.SubagentEvent{SessionID: sess.ID, JobID: jobID, Inner: bus.ConfigChanged{SessionID: jobID, Model: model.ID, Provider: model.Provider, Thinking: level}})
+	supported := availability.Sendable(model)
+	sess.runtime.Bus.Publish(bus.SubagentEvent{SessionID: sess.ID, JobID: jobID, Inner: bus.ConfigChanged{SessionID: jobID, Model: model.ID, Provider: model.Provider, Thinking: level, Daybreak: &daybreak, DaybreakSupported: &supported}})
 	return map[string]string{"model": model.ID, "thinking": level, "application": application}, nil
 }
 

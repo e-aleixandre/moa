@@ -178,6 +178,9 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	thinking, _ := bus.QueryTyped[bus.GetThinkingLevel, string](sess.runtime.Bus, bus.GetThinkingLevel{})
 	permMode, _ := bus.QueryTyped[bus.GetPermissionMode, string](sess.runtime.Bus, bus.GetPermissionMode{})
 	persisted.SetRuntimeMetadata(bootstrap.FullModelSpec(model), sess.CWD, permMode, thinking)
+	// A Daybreak spec resolves to GPT-6 Sol plus the program, so the model
+	// alone would resume standard.
+	persisted.Metadata[session.MetaDaybreak] = sess.runtime.Context().Agent.Daybreak()
 	save := store.Save
 	if opts.sessionID != "" {
 		save = store.SaveNew
@@ -520,7 +523,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			if err != nil {
 				return subagent.ResumedTranscript{}, err
 			}
-			return subagent.ResumedTranscript{Messages: t.Messages, Model: t.Model, Thinking: t.Thinking}, nil
+			return subagent.ResumedTranscript{Messages: t.Messages, Model: t.Model, Thinking: t.Thinking, Daybreak: t.Daybreak}, nil
 		},
 		// Scoped to this session's own store: job IDs are random identifiers,
 		// not capabilities, so one session must not be able to read another's

@@ -58,8 +58,9 @@ type job struct {
 	resultClaimed         bool // completion result owner: a waiter or async notification
 	notifyAsyncCompletion bool // async notification owns the terminal result
 	childAgent            *agent.Agent
-	// daybreak is whether the child runs with the Daybreak program, fixed at
-	// launch: a parent's later change does not reach a running child.
+	// daybreak is whether the child runs with the Daybreak program, set at
+	// launch or by its own reconfiguration: a parent's later change does not
+	// reach a running child.
 	daybreak bool
 	messages []core.AgentMessage
 	usage    *core.Usage
@@ -668,7 +669,9 @@ type Jobs struct {
 	store *jobStore
 }
 
-func (j *Jobs) Reconfigure(jobID string, provider core.Provider, model core.Model, thinking string) (string, error) {
+// Reconfigure switches a running child's model, thinking level and Daybreak
+// program in one change.
+func (j *Jobs) Reconfigure(jobID string, provider core.Provider, model core.Model, thinking string, daybreak bool) (string, error) {
 	if j == nil || j.store == nil {
 		return "", ErrUnknownJob
 	}
@@ -682,12 +685,20 @@ func (j *Jobs) Reconfigure(jobID string, provider core.Provider, model core.Mode
 	if status != statusRunning || child == nil || !child.IsRunning() {
 		return "", ErrNotRunning
 	}
+	// The child reads the program per request: drop it before the new model
+	// and add it after, so no request pairs it with a model it doesn't suit.
+	was := child.Daybreak()
+	if !daybreak {
+		child.SetDaybreak(false)
+	}
 	application, err := child.ReconfigureWithApplication(provider, model, thinking, child.CompactAt())
 	if err != nil {
+		child.SetDaybreak(was)
 		return "", err
 	}
+	child.SetDaybreak(daybreak)
 	job.mu.Lock()
-	job.model, job.thinking = model.ID, thinking
+	job.model, job.thinking, job.daybreak = model.ID, thinking, daybreak
 	job.mu.Unlock()
 	return application, nil
 }
@@ -741,7 +752,7 @@ func (j *Jobs) Snapshot() []JobInfo {
 	return infos
 }
 
-// Daybreak reports whether jobID was launched with the Daybreak program.
+// Daybreak reports whether jobID runs with the Daybreak program.
 func (j *Jobs) Daybreak(jobID string) bool {
 	if j == nil || j.store == nil {
 		return false

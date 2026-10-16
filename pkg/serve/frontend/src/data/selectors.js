@@ -71,6 +71,7 @@ export function deriveModelSpecs(models) {
       alias: m.alias || '',
       reasoningEfforts: m.reasoning_efforts || [],
       daybreakSupported: !!m.daybreak_supported,
+      daybreakPending: !!m.daybreak_pending,
     };
   });
 }
