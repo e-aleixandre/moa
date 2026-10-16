@@ -127,10 +127,15 @@ func (c *voiceCall) executeOnce(_ context.Context, tc voice.ToolCall) voice.Tool
 			return voiceErrorResult(tc.ID, "decided, passed and open must be lists of strings")
 		}
 		c.mu.Lock()
-		if c.minutes == nil {
+		accepted := c.minutes == nil
+		if accepted {
 			c.minutes = &voiceMinutes{decided: decided, open: open}
 		}
+		j := c.journal
 		c.mu.Unlock()
+		if accepted {
+			j.append(voiceJournalLine{Kind: "minutes", Decided: decided, Open: open})
+		}
 		c.minutesOnce.Do(func() { close(c.minutesCh) })
 		return voiceResult(tc.ID, map[string]any{"status": "ok"})
 	case "pass_to_session":
@@ -376,40 +381,86 @@ func streamMessage(ctx context.Context, prov core.Provider, req core.Request) (c
 	return *final, nil
 }
 
+// voiceCallEnd is what the minutes record of an ended call is built from:
+// the live call at its end, or the journal of a call the server lost.
+type voiceCallEnd struct {
+	callID   string
+	provider voice.ProviderID
+	billing  string
+	reason   string
+	seconds  int
+	// minutes is the model's end_call; nil means the call dropped first.
+	minutes *voiceMinutes
+	// open is added to the minutes' Still open (pending taps, an interrupted call).
+	open       []string
+	passed     []voicePassed
+	transcript string // literal markdown
+	// diag is the safe account of the upstream failure that ended the call.
+	diag *voice.Diagnostic
+	// endingReason is why a call the server lost was already ending.
+	endingReason string
+	custom       map[string]any
+}
+
 // persistMinutes records the call in the called session exactly once:
 // always a minutes record with the literal transcript as transcript.md,
 // saved to disk at hangup even while the session is busy. Without the
 // model's end_call it says the call dropped instead of inventing minutes.
 // Passed comes from the server's ledger, already delivered and never sent
-// again. Only Decided or Still open (which includes anything waiting for a
-// tap) wake the session: one run, or one steer when busy.
-func (c *voiceCall) persistMinutes(reason string) {
+// again. It reports whether the record is saved.
+func (c *voiceCall) persistMinutes(reason string) bool {
 	m := c.reg.mgr
 	sess, ok := m.Get(c.sessionID)
 	if !ok {
 		slog.Warn("voice call minutes not saved: session unavailable", "call", c.id)
-		return
+		return false
 	}
 	c.mu.Lock()
-	minutes := c.minutes
-	passed := append([]voicePassed(nil), c.passed...)
+	end := voiceCallEnd{callID: c.id, provider: c.provider, billing: c.billing.Kind, reason: reason,
+		seconds: int(time.Since(c.started).Seconds()), minutes: c.minutes, passed: append([]voicePassed(nil), c.passed...),
+		transcript: c.transcript.Markdown(), diag: c.endDiagnostic(), custom: map[string]any{}}
 	c.mu.Unlock()
-	var decided, open []string
-	if minutes != nil {
-		decided, open = minutes.decided, append([]string(nil), minutes.open...)
+	end.open = voicePendingTaps(sess)
+	if c.usage != nil && c.usage.Seconds != nil {
+		end.custom["usage_seconds"] = *c.usage.Seconds
 	}
-	open = append(open, voicePendingTaps(sess)...)
+	usage := c.usageRecord(sess, end.seconds, len(end.passed))
+	usage.Reason, usage.Diagnostic = reason, end.diag
+	end.custom["usage"] = usage
+	c.reg.recordUsage(usage)
+	if err := m.saveVoiceMinutes(sess, end); err != nil {
+		slog.Warn("voice call minutes not saved", "call", c.id, "error", err)
+		return false
+	}
+	return true
+}
+
+// saveVoiceMinutes saves the minutes record of an ended call and admits its
+// wake. Only Decided or Still open (which includes anything waiting for a
+// tap) wake the session: one run, or one steer when busy. Saving again the
+// same call is a no-op, so a recovery may repeat it.
+func (m *Manager) saveVoiceMinutes(sess *ManagedSession, e voiceCallEnd) error {
+	var decided, open []string
+	if e.minutes != nil {
+		decided, open = e.minutes.decided, append([]string(nil), e.minutes.open...)
+	}
+	open = append(open, e.open...)
 	wake := len(decided) > 0 || len(open) > 0
-	seconds := int(time.Since(c.started).Seconds())
+	if m.voiceRecorded(sess, e.callID+"/minutes") {
+		m.wakeVoiceMinutes(sess)
+		return nil
+	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "<voice_minutes>\nVoice call ended (%s) after %ds with %s, billing %s.\n\n", reason, seconds, c.provider, c.billing.Kind)
-	if minutes == nil {
+	fmt.Fprintf(&b, "<voice_minutes>\nVoice call ended (%s) after %ds with %s, billing %s.\n\n", e.reason, e.seconds, e.provider, e.billing)
+	if e.minutes == nil {
 		b.WriteString("The call dropped before the voice model wrote its minutes. Only the observed transcript remains.\n\n")
 	}
-	diag := c.endDiagnostic()
-	if diag != nil {
-		fmt.Fprintf(&b, "Upstream diagnostic: %s.\n\n", diag)
+	if e.endingReason != "" {
+		fmt.Fprintf(&b, "It was already ending (%s) when the server stopped.\n\n", e.endingReason)
+	}
+	if e.diag != nil {
+		fmt.Fprintf(&b, "Upstream diagnostic: %s.\n\n", e.diag)
 	}
 	section := func(title string, items []string) {
 		fmt.Fprintf(&b, "%s:\n", title)
@@ -423,12 +474,12 @@ func (c *voiceCall) persistMinutes(reason string) {
 	}
 	section("Decided", decided)
 	b.WriteString("Passed to this session (already_delivered — do not execute again):\n")
-	if len(passed) == 0 {
+	if len(e.passed) == 0 {
 		b.WriteString("- (none)\n")
 	}
-	ledger := make([]map[string]any, 0, len(passed))
+	ledger := make([]map[string]any, 0, len(e.passed))
 	items := voiceMinutesItems{Decided: append([]string{}, decided...), Passed: []voiceMinutesPassed{}, Open: append([]string{}, open...)}
-	for _, p := range passed {
+	for _, p := range e.passed {
 		fmt.Fprintf(&b, "- [%s] already_delivered: %s\n", p.DeliveryID, voiceEscape(p.Summary, "voice_minutes"))
 		ledger = append(ledger, map[string]any{"delivery_id": p.DeliveryID, "already_delivered": true})
 		items.Passed = append(items.Passed, voiceMinutesPassed(p))
@@ -438,25 +489,24 @@ func (c *voiceCall) persistMinutes(reason string) {
 	b.WriteString("</voice_minutes>\n")
 	text := b.String()
 
-	custom := c.custom("minutes")
-	for k, v := range map[string]any{"billing": c.billing.Kind, "reason": reason, "seconds": seconds, "dropped": minutes == nil, "passed": ledger, "wake": wake, "minutes": items} {
+	custom := map[string]any{"source": "voice_call", "kind": "minutes", "call_id": e.callID, "provider": string(e.provider)}
+	for k, v := range e.custom {
 		custom[k] = v
 	}
-	if c.usage != nil && c.usage.Seconds != nil {
-		custom["usage_seconds"] = *c.usage.Seconds
+	for k, v := range map[string]any{"billing": e.billing, "reason": e.reason, "seconds": e.seconds, "dropped": e.minutes == nil, "passed": ledger, "wake": wake, "minutes": items} {
+		custom[k] = v
 	}
-	usage := c.usageRecord(sess, seconds, len(passed))
-	usage.Reason, usage.Diagnostic = reason, diag
-	if diag != nil {
-		custom["diagnostic"] = diag
+	if e.diag != nil {
+		custom["diagnostic"] = e.diag
 	}
-	custom["usage"] = usage
-	c.reg.recordUsage(usage)
+	if e.endingReason != "" {
+		custom["ending_reason"] = e.endingReason
+	}
 	content := []core.Content{core.TextContent(text)}
 	if m.attachStore != nil {
-		d, err := m.attachStore.PutRef(sess.ID, []byte(c.transcript.Markdown()), attachment.PutMeta{Name: "transcript.md", Mime: "text/markdown", Kind: "file"})
+		d, err := m.attachStore.PutRef(sess.ID, []byte(e.transcript), attachment.PutMeta{Name: "transcript.md", Mime: "text/markdown", Kind: "file"})
 		if err != nil {
-			slog.Warn("voice call transcript not saved", "call", c.id, "error", err)
+			slog.Warn("voice call transcript not saved", "call", e.callID, "error", err)
 			content[0].Text += "\nThe transcript could not be saved.\n"
 		} else {
 			content = append([]core.Content{{Type: "document", AttachmentID: d.ID, AttachmentSize: d.Size, MimeType: d.Mime, Filename: d.Name}}, content...)
@@ -471,13 +521,13 @@ func (c *voiceCall) persistMinutes(reason string) {
 	// The save that holds this record derives the header marker from it
 	// (servePersister.settleVoiceOwed), so a restart that loses the wake
 	// finds it from the session header alone.
-	if err := m.recordVoice(sess.ID, c.id+"/minutes", record); err != nil {
-		slog.Warn("voice call minutes not saved", "call", c.id, "error", err)
-		return
+	if err := m.recordVoice(sess.ID, e.callID+"/minutes", record); err != nil {
+		return err
 	}
 	// The wake is owed by the saved record itself (wake=true), under an ID
 	// derived from it: admitted here, or after a restart that lost it.
 	m.wakeVoiceMinutes(sess)
+	return nil
 }
 
 // voicePendingTaps names what still waits for the owner's tap when a call

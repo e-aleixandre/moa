@@ -427,8 +427,15 @@ func TestVoiceQueuedRelaySurvivesCrash(t *testing.T) {
 		first <- vpLastUser(req)
 		return simpleResponse("RELAYED"), nil
 	}
-	m, p, stop := vwRestart(t, s, relayed, simpleResponseHandler("EXTRA-RUN"))
-	pollUntil(t, vpDeadline, "the relay ran after the restart", func() bool { return p.calls.Load() >= 1 })
+	// The crash also lost the live call: it is recovered as server_lost and
+	// wakes the session once, after the relay.
+	lost := make(chan string, 1)
+	lostWake := func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		lost <- vpLastUser(req)
+		return simpleResponse("LOST-CALL-WAKE"), nil
+	}
+	m, p, stop := vwRestart(t, s, relayed, lostWake, simpleResponseHandler("EXTRA-RUN"))
+	pollUntil(t, vpDeadline, "the relay and the lost call's wake ran after the restart", func() bool { return p.calls.Load() >= 2 })
 	sess, ok := m.Get(s.SessionID)
 	if !ok {
 		t.Fatal("the session owing a relay was not loaded at startup")
@@ -442,8 +449,11 @@ func TestVoiceQueuedRelaySurvivesCrash(t *testing.T) {
 		t.Fatalf("first run after restart was not the relay: %q", got)
 	}
 	stop()
-	if n, marked := vwSaved(t, s, "relay"); n != 1 || marked || p.calls.Load() != 1 {
-		t.Fatalf("after the first restart: saved relays=%d marker=%v provider calls=%d, want 1, cleared, 1", n, marked, p.calls.Load())
+	if got := <-lost; !strings.Contains(got, "Voice call ended (server_lost)") {
+		t.Fatalf("second run after restart was not the lost call's wake: %q", got)
+	}
+	if n, marked := vwSaved(t, s, "relay"); n != 1 || marked || p.calls.Load() != 2 {
+		t.Fatalf("after the first restart: saved relays=%d marker=%v provider calls=%d, want 1, cleared, 2", n, marked, p.calls.Load())
 	}
 	for restart := 2; restart <= 3; restart++ {
 		m, p, stop := vwRestart(t, s)
@@ -487,10 +497,18 @@ func TestVoiceCanceledRelayIsNotOwed(t *testing.T) {
 	if s.MarkedLast {
 		t.Fatalf("the stopped relay is still owed on disk: %+v", s)
 	}
-	m, p, stop := vwRestart(t, s)
-	vpStable(t, func() bool { return p.calls.Load() == 0 }, "a restart delivered a stopped relay")
-	if _, loaded := m.Get(s.SessionID); loaded {
-		t.Fatal("a restart loaded a session that owed nothing")
+	// The crash also lost the live call: its server_lost minutes wake the
+	// session once; that is the only run, never the stopped relay.
+	woke := make(chan string, 1)
+	wake := func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		woke <- vpLastUser(req)
+		return simpleResponse("LOST-CALL-WAKE"), nil
+	}
+	_, p, stop := vwRestart(t, s, wake, simpleResponseHandler("EXTRA-RUN"))
+	pollUntil(t, vpDeadline, "the lost call's wake ran", func() bool { return p.calls.Load() >= 1 })
+	vpStable(t, func() bool { return p.calls.Load() == 1 }, "a restart delivered a stopped relay")
+	if got := <-woke; !strings.Contains(got, "Voice call ended (server_lost)") || strings.Contains(got, voiceRelayPrompt("RECOVER-THIS-RELAY")) {
+		t.Fatalf("the only run after restart was not the lost call's wake: %q", got)
 	}
 	stop()
 	if n, _ := vwSaved(t, s, "relay"); n != 0 {

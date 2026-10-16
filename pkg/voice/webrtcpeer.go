@@ -271,6 +271,11 @@ func (p *Peer) WritePCM(pcm []byte) error {
 	for i := 0; i < len(pcm); i += 2 {
 		p.pending = append(p.pending, int16(binary.LittleEndian.Uint16(pcm[i:])))
 	}
+	return p.writeFramesLocked()
+}
+
+// writeFramesLocked sends every whole 20 ms frame pending; sendMu is held.
+func (p *Peer) writeFramesLocked() error {
 	for len(p.pending) >= peerFrameSamples {
 		var up [2 * peerFrameSamples]int16
 		out := p.up.Process(p.pending[:peerFrameSamples], up[:0])
@@ -407,6 +412,14 @@ func (p *Peer) fail(err error) {
 // Control and PCM channels.
 func (p *Peer) Close() error {
 	p.closeOne.Do(func() {
+		// Accepted audio short of a frame is the caller's last words: a clean
+		// close sends it padded with silence instead of dropping it.
+		p.sendMu.Lock()
+		if n := len(p.pending); n > 0 && p.Err() == nil {
+			p.pending = append(p.pending, make([]int16, peerFrameSamples-n)...)
+			_ = p.writeFramesLocked()
+		}
+		p.sendMu.Unlock()
 		p.mu.Lock()
 		p.closing = true
 		p.mu.Unlock()

@@ -430,6 +430,7 @@ func (r *voiceCallRegistry) handleWS(w http.ResponseWriter, req *http.Request) {
 	}
 	attached := time.Now()
 	slog.Info("voice call socket attached", "call", callID, "header_auth", identity.Header, "note", note)
+	go cl.keepalive(voicePingInterval, voicePongTimeout)
 	readErr := c.readClient(cl)
 	slog.Info("voice call socket detached", "call", callID, "after", time.Since(attached).Round(time.Millisecond),
 		"close_status", websocket.CloseStatus(readErr), "err", readErr)
@@ -593,6 +594,36 @@ func (cl *voiceClient) close() {
 		cl.cancel()
 		_ = cl.conn.CloseNow()
 	})
+}
+
+// A call's socket is pinged so a client that vanished without closing it
+// (lost network, phone off, app killed) is noticed in seconds; it then
+// detaches like any closed socket and Grace runs. The queue ahead of a ping
+// is bounded by BufferedBytes of audio, so one missed pong is enough.
+// Variables so tests can shrink them.
+var (
+	voicePingInterval = 5 * time.Second
+	voicePongTimeout  = 5 * time.Second
+)
+
+// keepalive pings until the client goes; a missed pong drops the transport.
+func (cl *voiceClient) keepalive(interval, timeout time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-cl.ctx.Done():
+			return
+		case <-t.C:
+			ctx, cancel := context.WithTimeout(cl.ctx, timeout)
+			err := cl.conn.Ping(ctx)
+			cancel()
+			if err != nil {
+				cl.kill()
+				return
+			}
+		}
+	}
 }
 
 // kill drops the transport immediately (replaced or slow).

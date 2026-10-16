@@ -402,6 +402,16 @@ func (m *Manager) recordVoice(sessionID, deliveryID string, msg core.AgentMessag
 	return m.recordVoiceLocked(sess, deliveryID, msg)
 }
 
+// voiceRecorded reports whether the record of deliveryID is already saved.
+func (m *Manager) voiceRecorded(sess *ManagedSession, deliveryID string) bool {
+	a := &sess.voiceAdmission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.load(sess)
+	_, ok := a.receipts[deliveryID]
+	return ok
+}
+
 // recordVoiceLocked is recordVoice for a caller that holds the admission
 // lock and has decided the record is due.
 func (m *Manager) recordVoiceLocked(sess *ManagedSession, deliveryID string, msg core.AgentMessage) error {

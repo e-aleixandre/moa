@@ -147,6 +147,10 @@ type voiceCall struct {
 	costStart  float64         // the session's text spend when the call opened
 	unsubs     []func()        // bus subscriptions binding asks/brief to their run
 
+	// journal keeps what the call has accepted on disk until its minutes
+	// are saved (nil when it could not be opened).
+	journal *voiceJournal
+
 	// Controller-owned.
 	transcript voice.Transcript
 	usage      *voice.Usage
@@ -218,6 +222,7 @@ func (c *voiceCall) detach(cl *voiceClient) {
 }
 
 func (c *voiceCall) run() {
+	c.openJournal()
 	go c.worker()
 	c.submit(voiceJob{do: c.requestBrief})
 	maxT := time.NewTimer(c.limits.Maximum)
@@ -261,6 +266,40 @@ loop:
 		}
 	}
 	c.finishCall(client, events)
+}
+
+func (c *voiceCall) openJournal() {
+	sess, ok := c.reg.mgr.Get(c.sessionID)
+	if !ok || sess.persister == nil {
+		return
+	}
+	dir := sess.persister.storeDir()
+	if dir == "" {
+		return
+	}
+	j, err := openVoiceJournal(dir, c)
+	if err != nil {
+		slog.Warn("voice call journal not opened: a server crash would lose this call", "call", c.id, "error", err)
+		return
+	}
+	c.mu.Lock()
+	c.journal = j
+	c.mu.Unlock()
+}
+
+// addTranscript records a transcript event, journaling finished turns.
+func (c *voiceCall) addTranscript(ev voice.Event) error {
+	if err := c.transcript.Add(ev); err != nil {
+		return err
+	}
+	c.journalLine().transcript(ev)
+	return nil
+}
+
+func (c *voiceCall) journalLine() *voiceJournal {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.journal
 }
 
 func (c *voiceCall) toClient(client *voiceClient, v any) {
@@ -307,7 +346,7 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 		if ev.Role == "user" && !ev.Final {
 			c.turnEnded = time.Time{} // the user is still talking: not a turn end
 		}
-		if c.transcript.Add(ev) != nil {
+		if c.addTranscript(ev) != nil {
 			c.requestEnd("transcript_limit")
 			return
 		}
@@ -414,20 +453,24 @@ func (c *voiceCall) finishCall(client *voiceClient, events <-chan voice.Event) {
 	if d := c.endDiagnostic(); d != nil {
 		slog.Warn("voice call ended", "call", c.id, "provider", c.provider, "reason", reason, "diagnostic", d)
 	}
+	c.journalLine().append(voiceJournalLine{Kind: "ending", Reason: reason, Diagnostic: c.endDiagnostic()})
 	c.ending.Store(true)
 	if client != nil {
 		client.finish(map[string]any{"type": "ended", "reason": reason})
 	}
+	// The minutes budget also bounds a second backend pass after teardown.
+	minutesDeadline := time.Now().Add(c.limits.Minutes)
+	backendInput := ""
 	if events != nil && !c.hasMinutes() && reason != "upstream_closed" && reason != "upstream_failed" {
-		ctx, cancel := context.WithTimeout(context.Background(), c.limits.Minutes)
+		ctx, cancel := context.WithDeadline(context.Background(), minutesDeadline)
 		var asked error
 		var backend chan struct{}
 		if _, delegates := c.up.(voice.HandoffResponder); delegates {
 			// The ChatGPT voice model never delegates end_call at hangup
 			// (I9): the backend writes the minutes from the observed call.
-			input := c.minutesInput()
+			backendInput = c.minutesInput()
 			backend = make(chan struct{})
-			go func() { defer close(backend); c.backendMinutes(ctx, input) }()
+			go func() { defer close(backend); c.backendMinutes(ctx, backendInput) }()
 		} else {
 			asked = c.up.RequestMinutes(ctx)
 		}
@@ -459,6 +502,7 @@ func (c *voiceCall) finishCall(client *voiceClient, events <-chan voice.Event) {
 	closed := make(chan struct{})
 	c.slot.markTearingDown()
 	go func() { _ = c.up.Close(tctx, reason); close(closed) }()
+	// Turns the provider finishes while closing are part of the call.
 drain:
 	for events != nil {
 		select {
@@ -466,8 +510,11 @@ drain:
 			if !ok {
 				break drain
 			}
-			if ev.Kind == voice.EventUsage {
+			switch ev.Kind {
+			case voice.EventUsage:
 				c.usage = ev.Usage
+			case voice.EventTranscript:
+				_ = c.addTranscript(ev)
 			}
 		case <-tctx.Done():
 			break drain
@@ -490,9 +537,32 @@ drain:
 	for _, u := range unsubs {
 		u()
 	}
-	c.persistMinutes(reason)
+	// The backend wrote the minutes from the call as it was when asked; if
+	// the call went on after that, it writes them again from the final
+	// transcript, within what is left of the same budget.
+	if backendInput != "" && c.minutesInput() != backendInput {
+		ctx, cancel := context.WithDeadline(context.Background(), minutesDeadline)
+		c.rewriteBackendMinutes(ctx)
+		cancel()
+	}
+	c.journalLine().close(c.persistMinutes(reason))
 	c.reg.finish(c)
 	close(c.done)
+}
+
+// rewriteBackendMinutes asks the backend again from the current transcript;
+// the earlier minutes stand if no new ones arrive.
+func (c *voiceCall) rewriteBackendMinutes(ctx context.Context) {
+	c.mu.Lock()
+	prev := c.minutes
+	c.minutes = nil
+	c.mu.Unlock()
+	c.backendMinutes(ctx, c.minutesInput())
+	c.mu.Lock()
+	if c.minutes == nil {
+		c.minutes = prev
+	}
+	c.mu.Unlock()
 }
 
 // handleEnding keeps recording and lets end_call through while minutes are
@@ -500,7 +570,7 @@ drain:
 func (c *voiceCall) handleEnding(ev voice.Event) {
 	switch ev.Kind {
 	case voice.EventTranscript:
-		_ = c.transcript.Add(ev)
+		_ = c.addTranscript(ev)
 	case voice.EventToolBatch, voice.EventHandoff:
 		c.handle(ev, nil)
 	case voice.EventUsage:
