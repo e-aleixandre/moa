@@ -283,9 +283,9 @@ func TestVoiceAbruptAuditController_SilentSocketLiveness(t *testing.T) {
 	interval, timeout := wsPingInterval, wsPongTimeout
 	wsPingInterval, wsPongTimeout = 50*time.Millisecond, 20*time.Millisecond
 	defer func() { wsPingInterval, wsPongTimeout = interval, timeout }()
-	vInterval, vTimeout := voicePingInterval, voicePongTimeout
-	voicePingInterval, voicePongTimeout = 50*time.Millisecond, 20*time.Millisecond
-	defer func() { voicePingInterval, voicePongTimeout = vInterval, vTimeout }()
+	vInterval, vTimeout, vWindow := voicePingInterval, voicePongTimeout, voiceLivenessWindow
+	voicePingInterval, voicePongTimeout, voiceLivenessWindow = 50*time.Millisecond, 20*time.Millisecond, 150*time.Millisecond
+	defer func() { voicePingInterval, voicePongTimeout, voiceLivenessWindow = vInterval, vTimeout, vWindow }()
 	for _, route := range []string{"session_ws_control", "voice_ws", "voice_ws_reading_control"} {
 		t.Run(route, func(t *testing.T) {
 			f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)

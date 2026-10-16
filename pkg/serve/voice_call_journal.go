@@ -26,8 +26,28 @@ type voiceJournal struct {
 	mu   sync.Mutex
 	f    *os.File
 	path string
-	size int64
+	size int64 // bytes queued, written or not
+	// The call never waits for the disk: lines go to one writer goroutine
+	// through a bounded queue, in order. failed is its first error, then
+	// every later append fails; onFail tells the call once.
+	queue  chan voiceJournalWrite
+	done   chan struct{}
+	failed error
+	onFail func(error)
 }
+
+type voiceJournalWrite struct {
+	data   []byte
+	sync   bool
+	synced chan error // nil: nobody waits
+}
+
+// voiceJournalQueue bounds the lines waiting for the disk. A disk that slow
+// fails the journal instead of delaying the call.
+const voiceJournalQueue = 256
+
+// voiceJournalSync is the writer's fsync (a variable so tests can stall it).
+var voiceJournalSync = (*os.File).Sync
 
 // errVoiceJournalFull means the journal reached voiceJournalMaxBytes.
 var errVoiceJournalFull = errors.New("voice call journal limit reached")
@@ -60,6 +80,8 @@ type voiceJournalLine struct {
 	Decided []string `json:"decided,omitempty"`
 	Open    []string `json:"open,omitempty"`
 
+	Late bool `json:"late,omitempty"` // a turn of the owner after accepted minutes
+
 	Reason     string            `json:"reason,omitempty"`
 	Diagnostic *voice.Diagnostic `json:"diagnostic,omitempty"`
 }
@@ -84,10 +106,11 @@ func openVoiceJournal(storeDir string, c *voiceCall) (*voiceJournal, error) {
 	if err != nil {
 		return nil, err
 	}
-	j := &voiceJournal{f: f, path: path}
+	j := &voiceJournal{f: f, path: path, queue: make(chan voiceJournalWrite, voiceJournalQueue), done: make(chan struct{})}
+	go j.writer()
 	err = lockVoiceJournal(f)
 	if err == nil {
-		err = j.append(voiceJournalLine{Kind: "call", CallID: c.id, SessionID: c.sessionID, Provider: string(c.provider), Billing: c.billing.Kind, Started: c.started.Unix()}, true)
+		err = j.appendWait(voiceJournalLine{Kind: "call", CallID: c.id, SessionID: c.sessionID, Provider: string(c.provider), Billing: c.billing.Kind, Started: c.started.Unix()})
 	}
 	// Both directory entries must survive a power loss, or it forgets the file.
 	if err == nil {
@@ -115,45 +138,104 @@ func syncVoiceJournalDir(dir string) error {
 	return err
 }
 
-// append writes one line, syncing it when sync is set; a line written and
-// not yet synced survives the process, not a power loss. A nil journal
-// records nothing.
+// append queues one line for the writer, synced when sync is set (a line
+// written and not yet synced survives the process, not a power loss). It
+// never waits for the disk; it fails once the journal has failed, is full
+// or closed. A nil journal records nothing.
 func (j *voiceJournal) append(line voiceJournalLine, sync bool) error {
+	_, err := j.enqueue(line, sync, false)
+	return err
+}
+
+// appendWait appends a synced line and waits until it is on disk: for the
+// worker, never the call's real-time path.
+func (j *voiceJournal) appendWait(line voiceJournalLine) error {
+	synced, err := j.enqueue(line, true, true)
+	if err != nil || synced == nil {
+		return err
+	}
+	return <-synced
+}
+
+func (j *voiceJournal) enqueue(line voiceJournalLine, sync, wait bool) (chan error, error) {
 	if j == nil {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(line)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	data = append(data, '\n')
+	w := voiceJournalWrite{data: data, sync: sync}
+	if wait {
+		w.synced = make(chan error, 1)
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.f == nil {
-		return errors.New("voice call journal closed")
+	switch {
+	case j.failed != nil:
+		return nil, j.failed
+	case j.f == nil || j.queue == nil:
+		return nil, errors.New("voice call journal closed")
+	case j.size+int64(len(data)) > voiceJournalMaxBytes:
+		return nil, errVoiceJournalFull
 	}
-	if j.size+int64(len(data)) > voiceJournalMaxBytes {
-		return errVoiceJournalFull
+	select {
+	case j.queue <- w:
+	default:
+		j.failLocked(errors.New("voice call journal queue full: the disk is too slow"))
+		return nil, j.failed
 	}
-	n, err := j.f.Write(data)
-	j.size += int64(n)
-	if err == nil && sync {
-		err = j.f.Sync()
+	j.size += int64(len(data))
+	return w.synced, nil
+}
+
+func (j *voiceJournal) writer() {
+	defer close(j.done)
+	for w := range j.queue {
+		j.mu.Lock()
+		f, failed := j.f, j.failed
+		j.mu.Unlock()
+		err := failed
+		if err == nil {
+			_, err = f.Write(w.data)
+			if err == nil && w.sync {
+				err = voiceJournalSync(f)
+			}
+			if err != nil {
+				slog.Warn("voice call journal write failed", "path", j.path, "error", err)
+				j.mu.Lock()
+				j.failLocked(err)
+				j.mu.Unlock()
+			}
+		}
+		if w.synced != nil {
+			w.synced <- err
+		}
 	}
-	if err != nil {
-		slog.Warn("voice call journal write failed", "path", j.path, "error", err)
+}
+
+// failLocked records the journal's first failure and tells the call.
+func (j *voiceJournal) failLocked(err error) {
+	if j.failed != nil {
+		return
 	}
-	return err
+	j.failed = err
+	if j.onFail != nil {
+		go j.onFail(err)
+	}
 }
 
 // transcript journals a transcript event as it was observed, partial
 // captions included: replayed in order they rebuild the same record. A
 // finished turn (a final or a timed Live fragment) is synced.
-func (j *voiceJournal) transcript(ev voice.Event) error {
+// late marks an owner's turn finished after the minutes were accepted, so
+// replay does not depend on the order of the two lines.
+func (j *voiceJournal) transcript(ev voice.Event, late bool) error {
 	if ev.Text == "" && !ev.Final {
 		return nil
 	}
-	return j.append(voiceJournalLine{Kind: "transcript", Role: ev.Role, ItemID: ev.ItemID, Text: ev.Text, Final: ev.Final, StartMS: ev.StartMS, EndMS: ev.EndMS}, ev.Final || ev.StartMS != nil)
+	return j.append(voiceJournalLine{Kind: "transcript", Role: ev.Role, ItemID: ev.ItemID, Text: ev.Text, Final: ev.Final, StartMS: ev.StartMS, EndMS: ev.EndMS, Late: late}, ev.Final || ev.StartMS != nil)
 }
 
 // close stops writing (releasing the lock); remove also deletes the file,
@@ -163,6 +245,14 @@ func (j *voiceJournal) close(remove bool) {
 		return
 	}
 	j.mu.Lock()
+	if j.queue != nil {
+		q := j.queue
+		j.queue = nil
+		j.mu.Unlock()
+		close(q)
+		<-j.done // what was queued is written before the file goes
+		j.mu.Lock()
+	}
 	defer j.mu.Unlock()
 	if j.f != nil {
 		if err := j.f.Close(); err != nil {
@@ -285,7 +375,7 @@ func readVoiceJournal(f *os.File) (voiceCallEnd, string, error) {
 			sessionID, started = line.SessionID, line.Started
 			end.callID, end.provider, end.billing = line.CallID, voice.ProviderID(line.Provider), line.Billing
 		case "transcript":
-			if line.Role == "user" && line.Final && end.minutes != nil {
+			if line.Late || (line.Role == "user" && line.Final && end.minutes != nil) {
 				late = true
 			}
 			_ = transcript.Add(voice.Event{Kind: voice.EventTranscript, Role: line.Role, ItemID: line.ItemID, Text: line.Text, Final: line.Final, StartMS: line.StartMS, EndMS: line.EndMS})

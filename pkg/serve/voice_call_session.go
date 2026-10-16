@@ -86,7 +86,7 @@ func (c *voiceCall) passToSession(toolID, summary string) voice.ToolResult {
 	c.passed = append(c.passed, voicePassed{DeliveryID: id, Summary: summary})
 	j := c.journal
 	c.mu.Unlock()
-	c.journalEnd(j.append(voiceJournalLine{Kind: "passed", DeliveryID: id, Summary: summary}, true))
+	c.journalEnd(j.appendWait(voiceJournalLine{Kind: "passed", DeliveryID: id, Summary: summary}))
 	c.note(map[string]any{"type": "passed", "delivery_id": id, "summary": summary, "queued": r.Action == "steer"})
 	return voiceResult(toolID, map[string]any{"status": "delivered", "delivery_id": id, "queued": r.Action == "steer"})
 }

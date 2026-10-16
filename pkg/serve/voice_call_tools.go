@@ -134,7 +134,7 @@ func (c *voiceCall) executeOnce(_ context.Context, tc voice.ToolCall) voice.Tool
 		j := c.journal
 		c.mu.Unlock()
 		if accepted {
-			c.journalEnd(j.append(voiceJournalLine{Kind: "minutes", Decided: decided, Open: open}, true))
+			c.journalEnd(j.appendWait(voiceJournalLine{Kind: "minutes", Decided: decided, Open: open}))
 		}
 		c.minutesOnce.Do(func() { close(c.minutesCh) })
 		return voiceResult(tc.ID, map[string]any{"status": "ok"})

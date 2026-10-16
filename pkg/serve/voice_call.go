@@ -431,7 +431,7 @@ func (r *voiceCallRegistry) handleWS(w http.ResponseWriter, req *http.Request) {
 	}
 	attached := time.Now()
 	slog.Info("voice call socket attached", "call", callID, "header_auth", identity.Header, "note", note)
-	go cl.keepalive(voicePingInterval, voicePongTimeout)
+	go cl.keepalive(voicePingInterval, voicePongTimeout, voiceLivenessWindow)
 	readErr := c.readClient(cl)
 	slog.Info("voice call socket detached", "call", callID, "after", time.Since(attached).Round(time.Millisecond),
 		"close_status", websocket.CloseStatus(readErr), "err", readErr)
@@ -465,9 +465,9 @@ type voiceClient struct {
 	done   chan struct{}
 	once   sync.Once
 
-	// wrote is when the last audio frame reached the transport (unix
-	// nanoseconds): audio is the only backlog a pong can wait behind.
-	wrote atomic.Int64
+	// heard is when the last frame or pong came from the client (unix
+	// nanoseconds).
+	heard atomic.Int64
 
 	mu       sync.Mutex
 	queue    []voiceFrame
@@ -506,9 +506,6 @@ func (cl *voiceClient) write() {
 		err := cl.conn.Write(ctx, f.kind, f.data)
 		cancel()
 		cl.release(f)
-		if err == nil && f.kind == websocket.MessageBinary {
-			cl.wrote.Store(time.Now().UnixNano())
-		}
 		if err != nil {
 			cl.cancel()
 			_ = cl.conn.CloseNow()
@@ -606,20 +603,21 @@ func (cl *voiceClient) close() {
 
 // A call's socket is pinged so a client that vanished without closing it
 // (lost network, phone off, app killed) is noticed in seconds; it then
-// detaches like any closed socket and Grace runs. A pong can wait behind up
-// to a minute of queued provider audio, so a late pong alone is not proof:
-// the client is dead when it does not answer and no audio of ours, still
-// being written, explains the delay. A dead peer stops taking audio once
-// the transport's buffers are full.
-// Variables so tests can shrink them.
+// detaches like any closed socket and Grace runs. A client is alive while
+// something arrives from it: microphone audio (every 20 ms unless muted),
+// a control, or a pong. A pong can wait behind up to a minute of queued
+// provider audio, so a late one is not death by itself; nothing heard for
+// voiceLivenessWindow is. Variables so tests can shrink them.
 var (
-	voicePingInterval = 5 * time.Second
-	voicePongTimeout  = 5 * time.Second
+	voicePingInterval   = 5 * time.Second
+	voicePongTimeout    = 5 * time.Second
+	voiceLivenessWindow = 15 * time.Second
 )
 
-// keepalive pings until the client goes; a missed pong with no frame
-// written meanwhile drops the transport.
-func (cl *voiceClient) keepalive(interval, timeout time.Duration) {
+// keepalive pings until the client goes and drops the transport once
+// nothing has been heard from it for window.
+func (cl *voiceClient) keepalive(interval, timeout, window time.Duration) {
+	cl.heardNow()
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -630,18 +628,22 @@ func (cl *voiceClient) keepalive(interval, timeout time.Duration) {
 			ctx, cancel := context.WithTimeout(cl.ctx, timeout)
 			err := cl.conn.Ping(ctx)
 			cancel()
-			if err == nil || cl.ctx.Err() != nil {
-				continue
+			if err == nil {
+				cl.heardNow()
 			}
-			if time.Since(time.Unix(0, cl.wrote.Load())) < interval+timeout {
-				continue // still reading: the pong is behind our frames
+			if cl.ctx.Err() != nil {
+				return
 			}
-			slog.Info("voice call socket missed its pong", "timeout", timeout, "error", err)
-			cl.kill()
-			return
+			if silent := time.Since(time.Unix(0, cl.heard.Load())); silent > window {
+				slog.Info("voice call socket silent", "for", silent.Round(time.Millisecond), "error", err)
+				cl.kill()
+				return
+			}
 		}
 	}
 }
+
+func (cl *voiceClient) heardNow() { cl.heard.Store(time.Now().UnixNano()) }
 
 // kill drops the transport immediately (replaced or slow).
 func (cl *voiceClient) kill() {
@@ -660,6 +662,7 @@ func (c *voiceCall) readClient(cl *voiceClient) error {
 		if err != nil {
 			return err
 		}
+		cl.heardNow()
 		if kind == websocket.MessageBinary {
 			if len(data) == 0 || len(data)%2 != 0 || len(data) > voice.MaxPCMFrameBytes {
 				c.requestEnd("protocol_violation")

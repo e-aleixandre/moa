@@ -283,6 +283,11 @@ func (c *voiceCall) openJournal() {
 		return
 	}
 	j, err := openVoiceJournal(dir, c)
+	if j != nil {
+		j.mu.Lock()
+		j.onFail = func(error) { c.requestEnd("journal_failed") }
+		j.mu.Unlock()
+	}
 	c.mu.Lock()
 	c.journal, c.journalErr = j, err
 	c.mu.Unlock()
@@ -302,14 +307,15 @@ func (c *voiceCall) addTranscript(ev voice.Event) error {
 	}
 	c.mu.Lock()
 	j, err := c.journal, c.journalErr
-	if ev.Role == "user" && ev.Final && c.minutes != nil {
+	late := ev.Role == "user" && ev.Final && c.minutes != nil
+	if late {
 		c.lateUser = true
 	}
 	c.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	return j.transcript(ev)
+	return j.transcript(ev, late)
 }
 
 // journalEnd ends the call whose journal refused an event (or reached its

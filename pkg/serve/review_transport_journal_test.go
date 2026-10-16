@@ -49,12 +49,13 @@ func TestReviewHeartbeatActivePacedReader(t *testing.T) {
 		cl := newVoiceClient(conn, voice.MaxPendingOutputAudio)
 		defer cl.close()
 		accepted <- cl
-		go cl.keepalive(voicePingInterval, voicePongTimeout)
+		go cl.keepalive(voicePingInterval, voicePongTimeout, voiceLivenessWindow)
 		defer close(readDone)
 		for {
 			if _, _, err := conn.Read(cl.ctx); err != nil {
 				return
 			}
+			cl.heardNow() // as readClient does for every frame
 		}
 	}))
 	defer srv.Close()
@@ -68,7 +69,7 @@ func TestReviewHeartbeatActivePacedReader(t *testing.T) {
 		return paced, nil
 	}}
 	defer tr.CloseIdleConnections()
-	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 42*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, srv.URL, &websocket.DialOptions{HTTPClient: &http.Client{Transport: tr}})
 	if err != nil {
@@ -84,6 +85,22 @@ func TestReviewHeartbeatActivePacedReader(t *testing.T) {
 			t.Fatal("audio burst rejected before probe")
 		}
 	}
+	// The live client's microphone: 20 ms PCM frames, as the app sends
+	// unless muted.
+	go func() {
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				if conn.Write(ctx, websocket.MessageBinary, make([]byte, 960)) != nil {
+					return
+				}
+			}
+		}
+	}()
 	var frames atomic.Int64
 	go func() {
 		for {
@@ -100,7 +117,7 @@ func TestReviewHeartbeatActivePacedReader(t *testing.T) {
 			t.Error("active peer did not consume enough complete frames for the positive control")
 		}
 		t.Error("FALSE_POSITIVE_HEARTBEAT: live reader consuming complete audio frames was dropped on the first unanswered control ping")
-	case <-time.After(12 * time.Second):
+	case <-time.After(36 * time.Second):
 		t.Log("active paced reader survived the observation window")
 	}
 	cl.kill()
@@ -123,7 +140,7 @@ func TestReviewHeartbeatBudgets(t *testing.T) {
 		{name: "delayed_pong_3s", read: true, delay: 3 * time.Second, alive: true},
 		{name: "delayed_pong_6s", read: true, delay: 6 * time.Second},
 		{name: "no_reader"},
-		{name: "app_keepalive_without_pong", read: true, appPing: true},
+		{name: "app_keepalive_without_pong", read: true, appPing: true, alive: true}, // frames arrive: alive
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			accepted := make(chan *voiceClient, 1)
@@ -137,13 +154,14 @@ func TestReviewHeartbeatBudgets(t *testing.T) {
 				cl := newVoiceClient(conn, voice.MaxPendingOutputAudio)
 				defer cl.close()
 				accepted <- cl
-				go cl.keepalive(voicePingInterval, voicePongTimeout)
+				go cl.keepalive(voicePingInterval, voicePongTimeout, voiceLivenessWindow)
 				defer close(readDone)
 				for {
 					_, data, err := conn.Read(cl.ctx)
 					if err != nil {
 						return
 					}
+					cl.heardNow() // as readClient does for every frame
 					if string(data) == `{"type":"ping"}` {
 						controls.Add(1)
 						cl.sendJSON(map[string]any{"type": "pong"})
@@ -151,7 +169,7 @@ func TestReviewHeartbeatBudgets(t *testing.T) {
 				}
 			}))
 			defer srv.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			conn, _, err := websocket.Dial(ctx, srv.URL, &websocket.DialOptions{OnPingReceived: func(ctx context.Context, _ []byte) bool {
 				if tc.appPing {
@@ -203,11 +221,11 @@ func TestReviewHeartbeatBudgets(t *testing.T) {
 				if tc.alive {
 					t.Error("healthy/delayed-under-budget reader was killed")
 				}
-				if time.Since(start) < 9*time.Second {
+				if time.Since(start) < voiceLivenessWindow {
 					t.Error("transport killed before production ping+pong budget")
 				}
-			case <-time.After(12 * time.Second):
-				t.Logf("alive_at=12s app_keepalives_read=%d", controls.Load())
+			case <-time.After(voiceLivenessWindow + 2*voicePingInterval):
+				t.Logf("alive_at=%s app_keepalives_read=%d", voiceLivenessWindow+2*voicePingInterval, controls.Load())
 				if !tc.alive {
 					t.Error("unresponsive peer survived production ping+pong budget")
 				}
@@ -234,6 +252,11 @@ func TestReviewJournalEmptyFinalGrowth(t *testing.T) {
 	for i := 0; i < n; i++ {
 		if err := c.addTranscript(voice.Event{Kind: voice.EventTranscript, Role: "user", ItemID: fmt.Sprintf("empty-%d", i), Final: true}); err != nil {
 			t.Fatal(err)
+		}
+		if i%100 == 99 { // a provider does not emit thousands of finals at once
+			if err := j.appendWait(voiceJournalLine{Kind: "ending"}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	st, err := os.Stat(j.path)

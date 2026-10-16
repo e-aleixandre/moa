@@ -234,6 +234,11 @@ func TestVoiceCall_ChatGPTTurnEndLatency(t *testing.T) {
 	p := f.up.peer(t, f.provider)
 	vpAwaitBrief(t, f, p)
 	p.user(t, "u1", "hello")
+	// The clock starts when the controller has taken the turn, not when the
+	// peer sent it: the final reaches the client just before turn.done.
+	c.await("turn taken", func(v map[string]any) bool {
+		return v["type"] == "transcript" && v["final"] == true && v["text"] == "hello"
+	})
 	time.Sleep(80 * time.Millisecond)
 	p.audio(t, vpPCM())
 	pollUntil(t, vpDeadline, "audio frame", func() bool {

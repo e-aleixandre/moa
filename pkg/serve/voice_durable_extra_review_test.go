@@ -21,7 +21,7 @@ func TestDurableReviewTwoJournalsSameSession(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := j.transcript(voice.Event{Role: "user", ItemID: id, Text: "OBSERVED-" + id, Final: true}); err != nil {
+		if err := j.transcript(voice.Event{Role: "user", ItemID: id, Text: "OBSERVED-" + id, Final: true}, false); err != nil {
 			t.Fatal(err)
 		}
 		j.close(false)
@@ -75,6 +75,13 @@ func TestDurableReviewJournalSyncFailure(t *testing.T) {
 	j.f = full
 	j.mu.Unlock()
 	err = c.addTranscript(voice.Event{Kind: voice.EventTranscript, Role: "user", ItemID: "after-io-fail", Text: "LOST-AFTER-JOURNAL-IO-ERROR", Final: true})
+	// The writer fails beside the call: the next event is refused.
+	if werr := j.appendWait(voiceJournalLine{Kind: "ending"}); werr == nil {
+		t.Fatal("control: the failing descriptor accepted a synced line")
+	}
+	if err == nil {
+		err = c.addTranscript(voice.Event{Kind: voice.EventTranscript, Role: "user", ItemID: "after-io-fail-2", Text: "NEXT", Final: true})
+	}
 	j.close(false)
 	end, _, ok := readJournalPath(t, j.path)
 	if !ok {

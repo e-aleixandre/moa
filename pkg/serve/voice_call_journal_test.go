@@ -103,6 +103,10 @@ func TestVoiceJournalLateTurnAfterMinutes(t *testing.T) {
 {"kind":"minutes","decided":["D"]}`, false},
 		{"after", `{"kind":"minutes","decided":["D"]}
 {"kind":"transcript","role":"user","text":"LATE","final":true}`, true},
+		// The live call accepted the minutes before this turn, but the
+		// lines reached the journal in the other order.
+		{"late_line_first", `{"kind":"transcript","role":"user","text":"LATE","final":true,"late":true}
+{"kind":"minutes","decided":["D"]}`, true},
 		{"assistant_after", `{"kind":"minutes","decided":["D"]}
 {"kind":"transcript","role":"assistant","text":"BYE","final":true}`, false},
 	} {
