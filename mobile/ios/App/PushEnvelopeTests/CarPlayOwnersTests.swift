@@ -88,6 +88,19 @@ final class CarPlayOwnersTests: XCTestCase {
         XCTAssertEqual(CarPlayCallStartModel.outcome(status: nil, data: nil), .alert(.unreachable))
     }
 
+    func testThePostCarriesTheCSRFMarkerAndTheVoiceCredential() throws {
+        let client = CarPlayClient(origin: "https://moa.example", authorization: "Moa-Voice d.k")
+        let post = try XCTUnwrap(client.makeRequest("POST", "/api/voice/owners/o1/call", body: Data("{}".utf8)))
+        XCTAssertEqual(post.url?.absoluteString, "https://moa.example/api/voice/owners/o1/call")
+        XCTAssertEqual(post.httpMethod, "POST")
+        XCTAssertEqual(post.value(forHTTPHeaderField: "X-Moa-Request"), "1")
+        XCTAssertEqual(post.value(forHTTPHeaderField: "Authorization"), "Moa-Voice d.k")
+        XCTAssertEqual(post.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        let get = try XCTUnwrap(client.makeRequest("GET", "/api/voice/directory", body: nil))
+        XCTAssertEqual(get.value(forHTTPHeaderField: "Authorization"), "Moa-Voice d.k")
+        XCTAssertNil(CarPlayClient(origin: "http://moa.example", authorization: "x").makeRequest("POST", "/a", body: nil))
+    }
+
     // MARK: Call events → voice state
 
     func testEventsDriveTheVoiceStates() {

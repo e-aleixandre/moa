@@ -253,20 +253,29 @@ final class CarPlayClient: NSObject, URLSessionTaskDelegate, CarPlayServer {
     }
 
     private func request(_ method: String, _ path: String, body: Data?, _ done: @escaping (Int?, Data?) -> Void) {
-        guard origin.hasPrefix("https://"), let url = URL(string: origin + path) else {
+        guard let request = makeRequest(method, path, body: body) else {
             done(nil, nil)
             return
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue(authorization, forHTTPHeaderField: "Authorization")
-        if let body {
-            request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         session.dataTask(with: request) { data, response, _ in
             done((response as? HTTPURLResponse)?.statusCode, data)
         }.resume()
+    }
+
+    // makeRequest is every request the car sends. A POST carries the
+    // X-Moa-Request marker the server's CSRF check requires of every
+    // non-GET, native credentials included.
+    func makeRequest(_ method: String, _ path: String, body: Data?) -> URLRequest? {
+        guard origin.hasPrefix("https://"), let url = URL(string: origin + path) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        if method != "GET" { request.setValue("1", forHTTPHeaderField: "X-Moa-Request") }
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        return request
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
