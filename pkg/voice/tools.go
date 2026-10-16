@@ -9,15 +9,19 @@ import (
 
 // Technical bounds of a call. They are resource limits, not product settings.
 const (
-	MaxPCMFrameBytes     = 9600   // one client audio frame (200 ms PCM24k)
-	MaxPendingAudio      = 48_000 // bytes queued per direction (1 s)
-	MaxControlJSON       = 64 << 10
-	MaxControlQueue      = 32
-	MaxTranscriptBytes   = 2 << 20
-	contextAppendMax     = 500 // bytes per ChatGPT context append (Codex v3)
-	upstreamEventQueue   = 64
-	upstreamWriteQueue   = 64
-	upstreamWriteTimeout = 5 * time.Second
+	MaxPCMFrameBytes = 9600   // one client audio frame (200 ms PCM24k)
+	MaxPendingAudio  = 48_000 // capture bytes queued towards the provider (1 s)
+	// MaxPendingOutputAudio bounds provider audio queued towards moa and
+	// towards the client: 60 s of PCM24k, the playback the client already
+	// holds. Providers send audio faster than real time in chunks above 1 s.
+	MaxPendingOutputAudio = 2_880_000
+	MaxControlJSON        = 64 << 10
+	MaxControlQueue       = 32
+	MaxTranscriptBytes    = 2 << 20
+	contextAppendMax      = 500 // bytes per ChatGPT context append (Codex v3)
+	upstreamEventQueue    = 64
+	upstreamWriteQueue    = 64
+	upstreamWriteTimeout  = 5 * time.Second
 )
 
 // The two canonical sentences of the common instructions. Every speaker and

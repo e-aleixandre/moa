@@ -407,6 +407,10 @@ func (c *voiceCall) persistMinutes(reason string) {
 	if minutes == nil {
 		b.WriteString("The call dropped before the voice model wrote its minutes. Only the observed transcript remains.\n\n")
 	}
+	diag := c.endDiagnostic()
+	if diag != nil {
+		fmt.Fprintf(&b, "Upstream diagnostic: %s.\n\n", diag)
+	}
 	section := func(title string, items []string) {
 		fmt.Fprintf(&b, "%s:\n", title)
 		if len(items) == 0 {
@@ -442,6 +446,10 @@ func (c *voiceCall) persistMinutes(reason string) {
 		custom["usage_seconds"] = *c.usage.Seconds
 	}
 	usage := c.usageRecord(sess, seconds, len(passed))
+	usage.Reason, usage.Diagnostic = reason, diag
+	if diag != nil {
+		custom["diagnostic"] = diag
+	}
 	custom["usage"] = usage
 	c.reg.recordUsage(usage)
 	content := []core.Content{core.TextContent(text)}

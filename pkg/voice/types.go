@@ -134,6 +134,41 @@ type Event struct {
 	Tools          []ToolCall
 	Usage          *Usage
 	Reason         string
+	// Diagnostic explains a failed or closed event with normalized facts only.
+	Diagnostic *Diagnostic
+}
+
+// Diagnostic is the safe, normalized account of why an upstream ended. It
+// holds enums and numbers, never provider messages, bodies, close reasons or
+// IDs, so it can be logged, persisted and shown as is.
+type Diagnostic struct {
+	Cause       string `json:"cause"` // FailInboundOverflow | FailProviderError | upstream_closed
+	ErrorCode   string `json:"error_code,omitempty"`
+	ErrorType   string `json:"error_type,omitempty"`
+	WSCloseCode *int   `json:"ws_close_code,omitempty"` // only when a close frame was observed
+	ChunkBytes  *int   `json:"chunk_bytes,omitempty"`
+	QueuedBytes *int   `json:"queued_bytes,omitempty"`
+	LimitBytes  *int   `json:"limit_bytes,omitempty"`
+}
+
+// String is the one-line form for the minutes text.
+func (d *Diagnostic) String() string {
+	s := d.Cause
+	if d.ErrorCode != "" {
+		s += " code=" + d.ErrorCode
+	}
+	if d.ErrorType != "" {
+		s += " type=" + d.ErrorType
+	}
+	for _, f := range []struct {
+		name string
+		v    *int
+	}{{"ws_close_code", d.WSCloseCode}, {"chunk_bytes", d.ChunkBytes}, {"queued_bytes", d.QueuedBytes}, {"limit_bytes", d.LimitBytes}} {
+		if f.v != nil {
+			s += fmt.Sprintf(" %s=%d", f.name, *f.v)
+		}
+	}
+	return s
 }
 
 // ToolCall is one function call from the provider or the backend loop.

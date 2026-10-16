@@ -153,19 +153,16 @@ func TestAdapterWSInboundAudioBoundInBytes(t *testing.T) {
 			if live {
 				typ = "session.output_audio.delta"
 			}
-			// Six valid 200 ms frames exceed the one-second budget while
-			// nobody consumes: the upstream must fail, not hold them.
-			for i := 0; i < 6; i++ {
-				wsSend(t, c, map[string]any{"type": typ, "delta": base64.StdEncoding.EncodeToString(make([]byte, MaxPCMFrameBytes))})
-			}
-			eventually(t, "reader to take all frames", func() bool { return len(u.events) >= 6 || u.ctx.Err() != nil })
+			// One chunk above the 60 s output budget fails the upstream.
+			wsSend(t, c, map[string]any{"type": typ, "delta": base64.StdEncoding.EncodeToString(make([]byte, MaxPendingOutputAudio+2))})
+			eventually(t, "reader to take the chunk", func() bool { return len(u.events) >= 1 || u.ctx.Err() != nil })
 			queued, failed := 0, false
 			for _, e := range drainUntilClosed(t, up.Events()) {
 				queued += len(e.PCM)
 				failed = failed || e.Kind == EventFailed
 			}
-			if queued > MaxPendingAudio || !failed {
-				t.Fatalf("queued_audio_bytes=%d max=%d failed=%v", queued, MaxPendingAudio, failed)
+			if queued > MaxPendingOutputAudio || !failed {
+				t.Fatalf("queued_audio_bytes=%d max=%d failed=%v", queued, MaxPendingOutputAudio, failed)
 			}
 		})
 	}
@@ -317,12 +314,12 @@ func TestPeerInboundPCMBoundInBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// RFC 6716 code 3 CBR packet: six 20 ms frames, 120 ms (5760 bytes of
-	// PCM24k). Eleven of them exceed the one-second budget.
+	// PCM24k). The packet backlog (50) fills long before the 60 s byte budget.
 	multi := []byte{packet[0]&0xfc | 3, 6}
 	for i := 0; i < 6; i++ {
 		multi = append(multi, packet[1:n]...)
 	}
-	for i := 0; i < 11; i++ {
+	for i := 0; i < 200; i++ {
 		if err := a.track.WriteSample(media.Sample{Data: bytes.Clone(multi), Duration: 120 * time.Millisecond}); err != nil {
 			t.Fatal(err)
 		}
@@ -335,7 +332,7 @@ func TestPeerInboundPCMBoundInBytes(t *testing.T) {
 			return false
 		}
 	}
-	eventually(t, "the peer to take all packets", func() bool { return len(p.pcm) >= 11 || done() })
+	eventually(t, "the peer to take all packets", done)
 	queued := 0
 	timeout := time.After(2 * time.Second)
 drain:
@@ -350,8 +347,8 @@ drain:
 			break drain
 		}
 	}
-	if queued > MaxPendingAudio || p.Err() == nil {
-		t.Fatalf("queued_audio_bytes=%d max=%d err=%v", queued, MaxPendingAudio, p.Err())
+	if queued > MaxPendingOutputAudio || p.Err() == nil {
+		t.Fatalf("queued_audio_bytes=%d max=%d err=%v", queued, MaxPendingOutputAudio, p.Err())
 	}
 }
 
@@ -366,7 +363,7 @@ func TestProviderErrorClassification(t *testing.T) {
 		`{"error":{"type":"moderation","code":null}}`:                                                            true,
 		`{"error":"not an object"}`:                                                                              true,
 	} {
-		if got := providerErrorFatal([]byte(raw)); got != fatal {
+		if got, _ := providerErrorFatal([]byte(raw)); got != fatal {
 			t.Errorf("%s: fatal=%v, want %v", raw, got, fatal)
 		}
 	}

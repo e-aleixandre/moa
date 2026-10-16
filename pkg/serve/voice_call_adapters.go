@@ -32,7 +32,7 @@ type VoiceCallLimits struct {
 }
 
 func (l VoiceCallLimits) withDefaults() VoiceCallLimits {
-	d := VoiceCallLimits{Grace: 10 * time.Second, Maximum: 60 * time.Minute, Minutes: 8 * time.Second, Teardown: 2 * time.Second, BufferedBytes: voice.MaxPendingAudio, BriefChars: 8000}
+	d := VoiceCallLimits{Grace: 10 * time.Second, Maximum: 60 * time.Minute, Minutes: 8 * time.Second, Teardown: 2 * time.Second, BufferedBytes: voice.MaxPendingOutputAudio, BriefChars: 8000}
 	if l.Grace > 0 {
 		d.Grace = l.Grace
 	}

@@ -3,7 +3,6 @@ package voice
 import (
 	"encoding/json"
 	"log/slog"
-	"regexp"
 	"strings"
 )
 
@@ -37,7 +36,8 @@ var fatalErrorTypes = map[string]bool{
 	"server_error":         true,
 }
 
-// providerErrorFatal classifies an `error` event received after open.
+// providerErrorFatal classifies an `error` event received after open and
+// returns the safe diagnostic of a fatal one.
 //
 // Rule, from the documented error envelope {type, code, client_event_id}:
 //  1. a fatal code or type ends the call (checked first: a validation failure
@@ -47,7 +47,7 @@ var fatalErrorTypes = map[string]bool{
 //     (e.g. cancelling a response that is no longer active);
 //  3. anything else, including an envelope we cannot read, is fatal: an
 //     unclassified session error must not leave a call that looks alive.
-func providerErrorFatal(raw []byte) bool {
+func providerErrorFatal(raw []byte) (bool, *Diagnostic) {
 	var e struct {
 		Error struct {
 			Type          string `json:"type"`
@@ -56,7 +56,8 @@ func providerErrorFatal(raw []byte) bool {
 		} `json:"error"`
 	}
 	if json.Unmarshal(raw, &e) != nil {
-		return true
+		slog.Warn("voice provider error", "fatal", true)
+		return true, &Diagnostic{Cause: FailProviderError}
 	}
 	typ, code := strings.ToLower(e.Error.Type), strings.ToLower(e.Error.Code)
 	fatal := true
@@ -65,22 +66,32 @@ func providerErrorFatal(raw []byte) bool {
 	case e.Error.ClientEventID != "" || typ == "invalid_request_error":
 		fatal = false
 	}
-	slog.Warn("voice provider error", "type", safeToken(typ), "code", safeToken(code), "fatal", fatal)
-	return fatal
+	d := &Diagnostic{Cause: FailProviderError, ErrorCode: knownCode(code), ErrorType: knownType(typ)}
+	slog.Warn("voice provider error", "type", d.ErrorType, "code", d.ErrorCode, "fatal", fatal)
+	if !fatal {
+		return false, nil
+	}
+	return true, d
 }
 
-var tokenRe = regexp.MustCompile(`^[a-z0-9_.]{1,64}$`)
-
-// safeToken keeps an enum-like provider token for the logs and drops
-// anything that could be free text.
-func safeToken(s string) string {
-	if tokenRe.MatchString(s) {
+// knownCode and knownType keep only the provider enums documented above:
+// an enum-like string we do not know could still carry anything, so it is
+// reported as the literal "unknown".
+func knownCode(s string) string {
+	if s == "" || fatalErrorCodes[s] {
 		return s
 	}
-	return ""
+	return "unknown"
 }
 
-// inboundAudio bounds the PCM bytes waiting in a buffered channel with a
+func knownType(s string) string {
+	if s == "" || fatalErrorTypes[s] || s == "invalid_request_error" {
+		return s
+	}
+	return "unknown"
+}
+
+// inboundAudio bounds the provider PCM bytes waiting in a buffered channel with a
 // single producer, without asking the consumer to report: what left the
 // channel is inferred from its length, oldest first. The producer calls
 // admit for every value it is about to send, in send order.
@@ -96,10 +107,16 @@ func (q *inboundAudio) admit(queued, pcm int) bool {
 		q.bytes -= q.sizes[0]
 		q.sizes = q.sizes[1:]
 	}
-	if q.bytes+pcm > MaxPendingAudio {
+	if q.bytes+pcm > MaxPendingOutputAudio {
 		return false
 	}
 	q.sizes = append(q.sizes, pcm)
 	q.bytes += pcm
 	return true
+}
+
+// overflow describes the rejection just reported by admit.
+func (q *inboundAudio) overflow(pcm int) *Diagnostic {
+	chunk, queued, limit := pcm, q.bytes, MaxPendingOutputAudio
+	return &Diagnostic{Cause: FailInboundOverflow, ChunkBytes: &chunk, QueuedBytes: &queued, LimitBytes: &limit}
 }

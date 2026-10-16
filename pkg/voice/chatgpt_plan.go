@@ -196,7 +196,7 @@ func (u *chatGPTUpstream) read() {
 
 func (u *chatGPTUpstream) emit(ev Event) bool {
 	if !u.inAudio.admit(len(u.events), len(ev.PCM)) {
-		ev = Event{Kind: EventFailed, Reason: FailInboundOverflow}
+		ev = Event{Kind: EventFailed, Reason: FailInboundOverflow, Diagnostic: u.inAudio.overflow(len(ev.PCM))}
 		select {
 		case u.events <- ev:
 		case <-u.stop:
@@ -235,8 +235,8 @@ func parseChatGPT(data []byte) []Event {
 	}
 	switch e.Type {
 	case "error":
-		if providerErrorFatal(data) {
-			return []Event{{Kind: EventFailed, Reason: FailProviderError}}
+		if fatal, d := providerErrorFatal(data); fatal {
+			return []Event{{Kind: EventFailed, Reason: FailProviderError, Diagnostic: d}}
 		}
 		return nil
 	case "input_transcript.added":

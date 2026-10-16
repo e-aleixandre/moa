@@ -116,11 +116,14 @@ func (u *wsUpstream) read() {
 	for {
 		_, data, err := u.conn.Read(u.ctx)
 		if err != nil {
-			reason := "upstream_closed"
+			ev := Event{Kind: EventClosed, Reason: "upstream_closed", Diagnostic: &Diagnostic{Cause: "upstream_closed"}}
 			if u.ctx.Err() != nil {
-				reason = "closed"
+				ev = Event{Kind: EventClosed, Reason: "closed"}
+			} else if code := websocket.CloseStatus(err); code != -1 {
+				c := int(code)
+				ev.Diagnostic.WSCloseCode = &c
 			}
-			u.emit(Event{Kind: EventClosed, Reason: reason})
+			u.emit(ev)
 			return
 		}
 		var env wsEvent
@@ -128,8 +131,8 @@ func (u *wsUpstream) read() {
 			continue
 		}
 		if env.Type == "error" {
-			if providerErrorFatal(data) {
-				u.emit(Event{Kind: EventFailed, Reason: FailProviderError})
+			if fatal, d := providerErrorFatal(data); fatal {
+				u.emit(Event{Kind: EventFailed, Reason: FailProviderError, Diagnostic: d})
 				return
 			}
 			continue
@@ -148,7 +151,7 @@ func (u *wsUpstream) read() {
 		}
 		for _, ev := range events {
 			if !u.inAudio.admit(len(u.events), len(ev.PCM)) {
-				u.emit(Event{Kind: EventFailed, Reason: FailInboundOverflow})
+				u.emit(Event{Kind: EventFailed, Reason: FailInboundOverflow, Diagnostic: u.inAudio.overflow(len(ev.PCM))})
 				return
 			}
 			if !u.emit(ev) {

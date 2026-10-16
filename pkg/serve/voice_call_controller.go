@@ -114,6 +114,7 @@ type voiceCall struct {
 	endCh    chan struct{}
 	reasonMu sync.Mutex
 	reason   string
+	diag     *voice.Diagnostic // safe account of the failure that set reason, if any
 	done     chan struct{}
 
 	attachCh chan *voiceClient
@@ -174,13 +175,24 @@ func newVoiceCall(r *voiceCallRegistry, id, principal, sessionID string, provide
 
 // requestEnd is the only way into ending; the first reason wins and the
 // state never goes back.
-func (c *voiceCall) requestEnd(reason string) {
+func (c *voiceCall) requestEnd(reason string) { c.requestEndDiag(reason, nil) }
+
+// requestEndDiag is requestEnd for an upstream ending: the diagnostic is kept
+// with the first reason, so a later teardown cannot replace the cause.
+func (c *voiceCall) requestEndDiag(reason string, d *voice.Diagnostic) {
 	c.endOnce.Do(func() {
 		c.reasonMu.Lock()
 		c.reason = reason
+		c.diag = d
 		c.reasonMu.Unlock()
 		close(c.endCh)
 	})
+}
+
+func (c *voiceCall) endDiagnostic() *voice.Diagnostic {
+	c.reasonMu.Lock()
+	defer c.reasonMu.Unlock()
+	return c.diag
 }
 
 func (c *voiceCall) endReason() string {
@@ -310,10 +322,10 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 	case voice.EventUsage:
 		c.usage = ev.Usage
 	case voice.EventClosed:
-		c.requestEnd("upstream_closed")
+		c.requestEndDiag("upstream_closed", ev.Diagnostic)
 	case voice.EventFailed:
 		// A fatal provider error ends this call; there is no fallback.
-		c.requestEnd("upstream_failed")
+		c.requestEndDiag("upstream_failed", ev.Diagnostic)
 	}
 }
 
@@ -399,6 +411,9 @@ func (c *voiceCall) hasMinutes() bool {
 // budget, stop the worker, persist the record, release the admission.
 func (c *voiceCall) finishCall(client *voiceClient, events <-chan voice.Event) {
 	reason := c.endReason()
+	if d := c.endDiagnostic(); d != nil {
+		slog.Warn("voice call ended", "call", c.id, "provider", c.provider, "reason", reason, "diagnostic", d)
+	}
 	c.ending.Store(true)
 	if client != nil {
 		client.finish(map[string]any{"type": "ended", "reason": reason})

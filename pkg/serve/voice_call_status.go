@@ -42,20 +42,22 @@ const voiceRecentCalls = 20
 // text spend changed while the call was open: it includes anything else that
 // session ran meanwhile, so it is a delta, not the call's cost.
 type voiceUsage struct {
-	CallID           string           `json:"call_id"`
-	SessionID        string           `json:"session_id"`
-	Provider         voice.ProviderID `json:"provider"`
-	Billing          string           `json:"billing"`
-	EndedAt          int64            `json:"ended_at"`
-	Seconds          int              `json:"seconds"`                    // wall clock, opened → ended
-	ProviderSeconds  *float64         `json:"provider_seconds,omitempty"` // as the provider reported it
-	InputTokens      *int64           `json:"input_tokens,omitempty"`
-	OutputTokens     *int64           `json:"output_tokens,omitempty"`
-	TotalTokens      *int64           `json:"total_tokens,omitempty"`
-	Deliveries       int              `json:"deliveries"`
-	Asks             int              `json:"asks"`
-	AskLatencyMsMax  int64            `json:"ask_latency_ms_max,omitempty"`
-	AskLatencyMsMean int64            `json:"ask_latency_ms_mean,omitempty"`
+	CallID           string            `json:"call_id"`
+	SessionID        string            `json:"session_id"`
+	Provider         voice.ProviderID  `json:"provider"`
+	Billing          string            `json:"billing"`
+	EndedAt          int64             `json:"ended_at"`
+	Reason           string            `json:"reason,omitempty"`
+	Diagnostic       *voice.Diagnostic `json:"diagnostic,omitempty"`
+	Seconds          int               `json:"seconds"`                    // wall clock, opened → ended
+	ProviderSeconds  *float64          `json:"provider_seconds,omitempty"` // as the provider reported it
+	InputTokens      *int64            `json:"input_tokens,omitempty"`
+	OutputTokens     *int64            `json:"output_tokens,omitempty"`
+	TotalTokens      *int64            `json:"total_tokens,omitempty"`
+	Deliveries       int               `json:"deliveries"`
+	Asks             int               `json:"asks"`
+	AskLatencyMsMax  int64             `json:"ask_latency_ms_max,omitempty"`
+	AskLatencyMsMean int64             `json:"ask_latency_ms_mean,omitempty"`
 	// Speech latency: the user stops talking (provider's speech_stopped) →
 	// first audio back, as moa saw it. Absent when the provider reports no
 	// speech_stopped; zero would claim an instant answer.
