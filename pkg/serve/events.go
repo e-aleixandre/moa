@@ -42,6 +42,8 @@ type InitData struct {
 	Fast              bool                      `json:"fast"`
 	FastSupported     bool                      `json:"fast_supported"`
 	FastNote          string                    `json:"fast_note,omitempty"`
+	Daybreak          bool                      `json:"daybreak,omitempty"`
+	DaybreakSupported bool                      `json:"daybreak_supported,omitempty"`
 	PathScope         string                    `json:"path_scope,omitempty"`
 	PendingPermission *PermissionData           `json:"pending_permission,omitempty"`
 	PendingAsk        *AskData                  `json:"pending_ask,omitempty"`
@@ -507,6 +509,9 @@ type ConfigChangeData struct {
 	Fast          *bool   `json:"fast,omitempty"`
 	FastSupported *bool   `json:"fast_supported,omitempty"`
 	FastNote      *string `json:"fast_note,omitempty"`
+	// Daybreak fields follow the Fast pattern: nil = unchanged.
+	Daybreak          *bool `json:"daybreak,omitempty"`
+	DaybreakSupported *bool `json:"daybreak_supported,omitempty"`
 }
 
 // SubagentCountData is sent when async subagent jobs start/finish.

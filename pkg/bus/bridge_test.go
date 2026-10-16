@@ -57,6 +57,7 @@ type fakeAgent struct {
 	thinkingLevel    string
 	compactStrategy  string
 	fast             bool
+	daybreak         bool
 	messages         []core.AgentMessage
 	compactionEpoch  int
 	resetCalled      bool
@@ -484,6 +485,18 @@ func (f *fakeAgent) SetFast(on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.fast = on
+}
+
+func (f *fakeAgent) Daybreak() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.daybreak
+}
+
+func (f *fakeAgent) SetDaybreak(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.daybreak = on
 }
 
 func (f *fakeAgent) SetDefaultCompactAt(tokens int) {

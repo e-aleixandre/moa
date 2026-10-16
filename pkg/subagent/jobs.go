@@ -643,6 +643,8 @@ type JobInfo struct {
 	// used by clients to pick a deterministic accent color that survives
 	// reconnects.
 	AccentIndex int
+	// Daybreak is whether the child runs with the Daybreak program.
+	Daybreak bool
 }
 
 // Jobs is a handle onto the subagent job store, returned by RegisterAll.

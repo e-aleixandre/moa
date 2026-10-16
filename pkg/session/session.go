@@ -88,6 +88,8 @@ const (
 	MetaAllowedPaths   = "allowed_paths"
 	MetaCompactAt      = "compact_at"
 	MetaFast           = "fast"
+	// MetaDaybreak records whether the session asks for the Daybreak program.
+	MetaDaybreak = "daybreak"
 	// MetaSessionCostUSD is the session's accumulated spend in USD, so the
 	// total survives closing and reopening the session.
 	MetaSessionCostUSD = "session_cost_usd"
@@ -276,6 +278,12 @@ func (s *Session) FastMeta() bool {
 	}
 	fast, _ := s.Metadata[MetaFast].(bool)
 	return fast
+}
+
+// DaybreakMeta returns whether the Daybreak program was on when this session
+// was last saved. Missing and malformed values mean off.
+func (s *Session) DaybreakMeta() bool {
+	return false
 }
 
 // SetRuntimeMetadata persists the core session configuration (model, cwd,

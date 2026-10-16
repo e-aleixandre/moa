@@ -57,7 +57,10 @@ type Dialect struct {
 	SupportsPromptCacheKey           bool
 	SupportsExplicitCacheBreakpoints bool
 	SupportsServiceTier              bool
-	AllowedReasoningEfforts          []string
+	// SupportsAccessPrograms gates access_programs: only the ChatGPT plan
+	// transport is known to honour it.
+	SupportsAccessPrograms  bool
+	AllowedReasoningEfforts []string
 }
 
 // BuildRequestBody encodes a stateless streaming Responses API request.

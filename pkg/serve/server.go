@@ -134,6 +134,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("PATCH /api/compact-strategy", handleCompactStrategy(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/fast", handleSessionFast(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/fast", handleSessionFast(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/daybreak", handleSessionDaybreak(manager))
+	mux.HandleFunc("PATCH /api/sessions/{id}/daybreak", handleSessionDaybreak(manager))
 	mux.HandleFunc("GET /api/version", handleVersion(manager, static.buildID))
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))

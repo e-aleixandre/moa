@@ -207,6 +207,13 @@ type Config struct {
 	// trying it.
 	AllowedModels []string
 
+	// CurrentDaybreak reports whether the launching session asks for the
+	// Daybreak program; a child inherits it when it starts. nil = off.
+	CurrentDaybreak func() bool
+	// DaybreakCatalog snapshots the account's model catalog for Daybreak. nil
+	// behaves as a catalog that was never loaded.
+	DaybreakCatalog func() core.DaybreakAvailability
+
 	// LoadAllowedModels reads the current global delegation policy. It keeps
 	// already-open sessions subject to policy changes without recreating them.
 	LoadAllowedModels func() []string

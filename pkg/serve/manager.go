@@ -311,14 +311,18 @@ type SessionInfo struct {
 	Thinking          string                 `json:"thinking"`
 	// Fast is whether this session buys premium speed, and FastSupported
 	// whether the model it is on can serve it at all.
-	Fast          bool      `json:"fast,omitempty"`
-	FastSupported bool      `json:"fast_supported,omitempty"`
-	FastNote      string    `json:"fast_note,omitempty"`
-	CWD           string    `json:"cwd"`
-	Created       time.Time `json:"created"`
-	Updated       time.Time `json:"updated"`
-	Origin        string    `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
-	Kind          string    `json:"kind,omitempty"`   // session.KindOwner for an owner conversation; empty otherwise
+	Fast          bool   `json:"fast,omitempty"`
+	FastSupported bool   `json:"fast_supported,omitempty"`
+	FastNote      string `json:"fast_note,omitempty"`
+	// Daybreak is whether this session asks for the Daybreak program, and
+	// DaybreakSupported whether its current model would carry it.
+	Daybreak          bool      `json:"daybreak,omitempty"`
+	DaybreakSupported bool      `json:"daybreak_supported,omitempty"`
+	CWD               string    `json:"cwd"`
+	Created           time.Time `json:"created"`
+	Updated           time.Time `json:"updated"`
+	Origin            string    `json:"origin,omitempty"` // who created it; omitted for ordinary user sessions
+	Kind              string    `json:"kind,omitempty"`   // session.KindOwner for an owner conversation; empty otherwise
 	// OwnerID / OwnerName name the project owner this session reports to, when
 	// its codebase has one. Additive and per-session because that is what the
 	// chip in a child's header asks: "does THIS conversation belong to a
@@ -814,6 +818,8 @@ type Manager struct {
 	eventRateHits          map[string][]time.Time
 	eventRateNotified      map[string]bool
 	defaultModel           core.Model
+	defaultDaybreak        bool
+	daybreakCatalog        func() core.DaybreakAvailability
 	workspaceRoot          string
 	moaCfg                 core.MoaConfig
 	configLoader           func(cwd string) core.MoaConfig
@@ -939,6 +945,12 @@ type ManagerConfig struct {
 	PushDispatcher  *push.Dispatcher   // optional; enables Web Push
 	PushNative      *push.NativeSender // optional; enables native push through the relay
 	DefaultModel    core.Model
+	// DefaultDaybreak turns Daybreak on for new sessions on the default model
+	// (the "daybreak" spec as the default).
+	DefaultDaybreak bool
+	// DaybreakCatalog snapshots the account's model catalog for Daybreak; nil
+	// behaves as a catalog that was never loaded.
+	DaybreakCatalog func() core.DaybreakAvailability
 	WorkspaceRoot   string
 	MoaCfg          core.MoaConfig
 	// AuxiliaryModelResolver resolves auto-title/session-brief settings against
@@ -1075,6 +1087,8 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		eventsPath:                  eventsPath, // wake-on-event
 		events:                      eventStore, // wake-on-event
 		defaultModel:                cfg.DefaultModel,
+		defaultDaybreak:             cfg.DefaultDaybreak,
+		daybreakCatalog:             cfg.DaybreakCatalog,
 		workspaceRoot:               cfg.WorkspaceRoot,
 		moaCfg:                      cfg.MoaCfg,
 		configLoader:                configLoader,
