@@ -93,7 +93,8 @@ func (m *Manager) admitVoice(sessionID, deliveryID, text string, atts []Attachme
 
 // recordVoice appends a display-only voice record (session_event) once per
 // delivery_id and saves the session to disk before returning, also while a
-// run is in flight.
+// run is in flight. Its receipt exists only once the record is saved, so a
+// failed save can be retried without appending the record twice.
 func (m *Manager) recordVoice(sessionID, deliveryID string, msg core.AgentMessage) error {
 	sess, ok := m.Get(sessionID)
 	if !ok {
@@ -106,19 +107,28 @@ func (m *Manager) recordVoice(sessionID, deliveryID string, msg core.AgentMessag
 	if _, ok := a.receipts[deliveryID]; ok {
 		return nil
 	}
-	msg.Custom["delivery_id"] = deliveryID
-	msg.EnsureMsgID()
-	if err := sess.runtime.Bus.Execute(bus.AppendRecord{SessionID: sess.ID, Message: msg}); err != nil {
-		return err
+	msgID := ""
+	for _, prev := range sess.runtime.Context().Agent.Messages() {
+		if voiceDeliveryID(prev.Custom) == deliveryID {
+			msgID = prev.MsgID
+		}
 	}
-	a.receipts[deliveryID] = voiceReceipt{Action: "record", ID: msg.MsgID}
+	if msgID == "" {
+		msg.Custom["delivery_id"] = deliveryID
+		msg.EnsureMsgID()
+		if err := sess.runtime.Bus.Execute(bus.AppendRecord{SessionID: sess.ID, Message: msg}); err != nil {
+			return err
+		}
+		msgID = msg.MsgID
+	}
 	if err := sess.runtime.Flush(); err != nil {
 		return err
 	}
 	// The saved snapshot is the tree's: a record missing from it after the
 	// Flush was never saved, whatever replaced the agent's history meanwhile.
-	if tree := sess.runtime.Context().Tree; tree != nil && !tree.HasMsgID(msg.MsgID) {
+	if tree := sess.runtime.Context().Tree; tree != nil && !tree.HasMsgID(msgID) {
 		return fmt.Errorf("voice record %s was not saved", deliveryID)
 	}
+	a.receipts[deliveryID] = voiceReceipt{Action: "record", ID: msgID}
 	return nil
 }

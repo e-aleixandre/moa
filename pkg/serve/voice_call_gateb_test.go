@@ -3,8 +3,14 @@ package serve
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 // A repeated provider ToolCall must not deliver twice even once the result
@@ -42,5 +48,52 @@ func TestVoiceCall_ToolRetryAfterResultCacheFull(t *testing.T) {
 	minutes := f.waitRecords("minutes", 1)[0]
 	if passed := vpJSON(minutes.Custom["passed"]); strings.Count(passed, "delivery_id") != 1 {
 		t.Fatalf("minutes Passed ledger = %v, want the one delivery", minutes.Custom["passed"])
+	}
+}
+
+// A failed save of a voice record leaves no receipt: the same record can be
+// retried and is saved once.
+func TestVoiceRecordRetryAfterFailedSave(t *testing.T) {
+	m := newTestManagerWithConfig(t, context.Background(), newMockProvider(), t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off"})
+	sess, err := m.CreateSession(CreateOpts{Title: "record write failure"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.runtime.Bus.Drain(2 * time.Second)
+	if err := sess.runtime.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	_, store, err := session.FindSessionReadOnly(m.sessionBaseDir, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store.Dir(), sess.ID+".json")
+	backup := path + ".before-test"
+	if err := os.Rename(path, backup); err != nil {
+		t.Fatal(err)
+	}
+	// A directory in place of the file makes the real FileStore rename fail.
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	msg := core.AgentMessage{Message: core.Message{Role: "session_event", Content: []core.Content{core.TextContent("MUST-BE-DURABLE")}}, Custom: map[string]any{"source": "voice_call", "kind": "minutes"}}
+	if err := m.recordVoice(sess.ID, "failed/minutes", msg); err == nil {
+		t.Fatal("real FileStore failure not reached")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(backup, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.recordVoice(sess.ID, "failed/minutes", msg); err != nil {
+		t.Fatal(err)
+	}
+	saved, _, err := session.FindSessionReadOnly(m.sessionBaseDir, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(vpSavedVoice(saved, "minutes")); n != 1 {
+		t.Fatalf("retried record after the disk recovered: saved minutes=%d, want 1", n)
 	}
 }
