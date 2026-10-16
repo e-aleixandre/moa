@@ -160,3 +160,31 @@ test('a microphone refusal hangs up the server call and says what to do', async 
   expect(h.c.state().message).toContain('microphone');
   expect(h.engines[0].calls).toContain('stop');
 });
+
+// I1: the screen says Listening only once the call can be heard and can
+// hear. Until the microphone is granted and playback exists it keeps saying
+// it is calling; the audio that arrives meanwhile is handed to the engine,
+// which keeps it for playback.
+test('listening is not shown until audio is ready; audio before then still reaches the engine', async () => {
+  const h = harness();
+  let ready;
+  const original = h.c.createAudio;
+  h.c.createAudio = () => {
+    const e = original();
+    e.start = (onPCM, opts) => new Promise((resolve) => { e.calls.push('start'); e.capture = onPCM; e.onPlayback = opts?.onPlayback; ready = resolve; });
+    return e;
+  };
+  const p = h.c.start();
+  await flush();
+  const ws = h.sockets[0];
+  ws.open();
+  await flush();
+  ws.control({ type: 'state', state: 'listening' });
+  ws.onmessage({ data: new ArrayBuffer(960) });
+  expect(h.c.state().phase).toBe('connecting');
+  expect(h.engines[0].calls.filter((x) => x === 'play')).toHaveLength(1);
+  ready();
+  await p;
+  expect(h.c.state().phase).toBe('listening');
+  expect(h.c.state().startedAt).toBeGreaterThan(0);
+});

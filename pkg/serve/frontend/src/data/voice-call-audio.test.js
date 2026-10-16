@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import {
-  workletSource, createCallAudio, CALL_SAMPLE_RATE, CAPTURE_FRAME_SAMPLES, PLAYBACK_MAX_SECONDS,
+  workletSource, createCallAudio, CALL_SAMPLE_RATE, CAPTURE_FRAME_SAMPLES, PLAYBACK_MAX_SECONDS, PENDING_MAX_SECONDS,
 } from './voice-call-audio.js';
 
 // Loads the exact module source the browser's AudioWorklet runs into a
@@ -221,4 +221,62 @@ test('engine: stopping while the microphone prompt is open still releases the mi
   expect(b.track.readyState).toBe('ended');
   expect(b.log).not.toContain('wake.claim');
   expect(b.log.filter((l) => l === 'ctx.close')).toHaveLength(1);
+});
+
+// I1: the provider can speak while the microphone prompt or the worklet load
+// is still pending. That audio is kept (bounded) and plays once playback is
+// ready; it is not dropped.
+const pcmFrame = (n, fill) => new Uint8Array(n).fill(fill).buffer;
+
+test('engine: audio received before playback is ready plays, in order, once it is ready', async () => {
+  const b = fakeBrowser();
+  let grant;
+  b.deps.mediaDevices.getUserMedia = () => new Promise((resolve) => { grant = resolve; });
+  const engine = createCallAudio(b.deps);
+  const started = engine.start(() => {});
+  await Promise.resolve();
+  engine.play(pcmFrame(4, 1));
+  engine.play(new Uint8Array([9, 9, 2, 2, 2, 2]).subarray(2));
+  grant({ getTracks: () => [b.track], getAudioTracks: () => [b.track] });
+  await started;
+  const playback = b.nodes[2];
+  const pcm = playback.port.posted.filter((m) => m.type === 'pcm').map((m) => Array.from(new Uint8Array(m.pcm)));
+  expect(pcm).toEqual([[1, 1, 1, 1], [2, 2, 2, 2]]);
+  engine.play(pcmFrame(2, 3));
+  expect(playback.port.posted.filter((m) => m.type === 'pcm')).toHaveLength(3);
+});
+
+test('engine: the audio kept before ready is bounded; overflow drops the oldest and counts it', async () => {
+  const b = fakeBrowser();
+  let grant;
+  b.deps.mediaDevices.getUserMedia = () => new Promise((resolve) => { grant = resolve; });
+  const engine = createCallAudio(b.deps);
+  const started = engine.start(() => {});
+  await Promise.resolve();
+  const cap = CALL_SAMPLE_RATE * 2 * PENDING_MAX_SECONDS;
+  const chunk = CALL_SAMPLE_RATE * 2; // one second
+  for (let i = 0; i < PENDING_MAX_SECONDS + 3; i++) engine.play(pcmFrame(chunk, i + 1));
+  expect(engine.pendingDropped).toBe(3 * chunk);
+  grant({ getTracks: () => [b.track], getAudioTracks: () => [b.track] });
+  await started;
+  const sent = b.nodes[2].port.posted.filter((m) => m.type === 'pcm');
+  expect(sent.reduce((n, m) => n + m.pcm.byteLength, 0)).toBe(cap);
+  expect(new Uint8Array(sent[0].pcm)[0]).toBe(4);
+  expect(engine.pendingDropped).toBe(3 * chunk);
+});
+
+test('engine: a barge-in before ready discards what was waiting; stop discards it too', async () => {
+  const b = fakeBrowser();
+  let grant;
+  b.deps.mediaDevices.getUserMedia = () => new Promise((resolve) => { grant = resolve; });
+  const engine = createCallAudio(b.deps);
+  const started = engine.start(() => {});
+  await Promise.resolve();
+  engine.play(pcmFrame(4, 1));
+  engine.interrupt();
+  engine.play(pcmFrame(4, 2));
+  grant({ getTracks: () => [b.track], getAudioTracks: () => [b.track] });
+  await started;
+  const pcm = b.nodes[2].port.posted.filter((m) => m.type === 'pcm').map((m) => Array.from(new Uint8Array(m.pcm)));
+  expect(pcm).toEqual([[2, 2, 2, 2]]);
 });

@@ -190,6 +190,8 @@ export class VoiceCallController {
     const loc = globalThis.location;
     const path = typeof wsURL === 'string' && wsURL.startsWith('/') ? wsURL : `/api/voice/calls/${encodeURIComponent(callId)}/ws`;
     const url = `${loc?.protocol === 'http:' ? 'ws:' : 'wss:'}//${loc?.host}${path}`;
+    this.audioReady = false;
+    this.heldPhase = '';
     const ws = new this.WebSocket(url);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
@@ -219,6 +221,11 @@ export class VoiceCallController {
       return;
     }
     if (gen !== this.gen) return;
+    this.audioReady = true;
+    // What the server said while the microphone was being granted is shown
+    // now, when the call can actually be heard.
+    if (this.heldPhase && this.s.phase === 'connecting') this.set({ phase: this.heldPhase });
+    this.heldPhase = '';
     if (this.s.muted) this.audio.setMuted?.(true);
   }
 
@@ -261,7 +268,8 @@ export class VoiceCallController {
           patch.phase = 'consulting';
           patch.asks = Math.min(MAX_ASKS, this.s.asks + 1);
         } else if (msg.state === 'listening' || msg.state === 'speaking') {
-          patch.phase = msg.state;
+          if (this.audioReady === false) this.heldPhase = msg.state;
+          else patch.phase = msg.state;
         }
         this.set(patch);
         return;

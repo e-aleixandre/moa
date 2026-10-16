@@ -16,6 +16,9 @@ export const CAPTURE_FRAME_SAMPLES = 480;
 // time, so a long answer arrives well ahead of being heard; beyond the cap
 // new audio is dropped and reported rather than growing without bound.
 export const PLAYBACK_MAX_SECONDS = 60;
+// What the provider may say while the microphone prompt or the worklet load is
+// still pending: kept for playback, bounded; overflow drops the oldest.
+export const PENDING_MAX_SECONDS = 4;
 
 // RateConverter turns a float stream at one rate into another. Downsampling
 // averages each output period (a box filter that keeps aliasing down);
@@ -259,9 +262,12 @@ export function createCallAudio({
   let moduleURL = '';
   let releaseWake = null;
   let stopped = false;
+  let pending = [];
+  let pendingBytes = 0;
 
   const engine = {
     get stream() { return stream; },
+    pendingDropped: 0,
     supported: !!(AudioContextImpl && AudioWorkletNodeImpl && mediaDevices?.getUserMedia),
 
     // prepare runs inside the user's tap: browsers only let an AudioContext
@@ -295,17 +301,33 @@ export function createCallAudio({
       // destination; its output is silence.
       capture.connect(ctx.destination);
       playback.connect(ctx.destination);
+      for (const chunk of pending) playback.port.postMessage({ type: 'pcm', pcm: chunk }, [chunk]);
+      pending = [];
+      pendingBytes = 0;
       await ctx.resume?.();
       releaseWake = claimWakeLock ? claimWakeLock() : null;
     },
 
     play(pcm) {
-      if (stopped || !playback) return;
+      if (stopped) return;
       const bytes = pcm instanceof ArrayBuffer ? pcm : pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength);
+      if (!playback) {
+        pending.push(bytes);
+        pendingBytes += bytes.byteLength;
+        const cap = CALL_SAMPLE_RATE * 2 * PENDING_MAX_SECONDS;
+        while (pendingBytes > cap && pending.length) {
+          const dropped = pending.shift();
+          pendingBytes -= dropped.byteLength;
+          engine.pendingDropped += dropped.byteLength;
+        }
+        return;
+      }
       playback.port.postMessage({ type: 'pcm', pcm: bytes }, [bytes]);
     },
 
     interrupt() {
+      pending = [];
+      pendingBytes = 0;
       if (!stopped) playback?.port.postMessage({ type: 'clear' });
     },
 
@@ -316,6 +338,8 @@ export function createCallAudio({
     stop() {
       if (stopped) return;
       stopped = true;
+      pending = [];
+      pendingBytes = 0;
       try { capture?.port.postMessage({ type: 'stop' }); } catch { /* closing */ }
       try { playback?.port.postMessage({ type: 'stop' }); } catch { /* closing */ }
       for (const node of [source, capture, playback]) {
