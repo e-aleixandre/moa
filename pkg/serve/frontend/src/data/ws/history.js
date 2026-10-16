@@ -108,6 +108,8 @@ export function normalizeHistory(raw, liveSubagents = []) {
     } else if (msg.custom?.source === 'provider_wait') {
       result.push({ _type: 'system', _msg_id: msg.msg_id, timestamp: msg.timestamp,
         text: (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('') });
+    } else if (msg.role === 'session_event' && msg.custom?.source === 'voice_call' && msg.custom.kind === 'minutes_wake_stopped') {
+      // Kept in the record, not drawn: the wake a Stop dropped, which carries no content.
     } else if (msg.role === 'session_event' && msg.custom?.source === 'voice_call') {
       // A call's minutes record. It arrives live as a user_message with the
       // same custom, so it takes the same shape here and projects the same

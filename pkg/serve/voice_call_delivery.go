@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -23,7 +24,13 @@ type voiceAdmission struct {
 	// watching is set once the session's canceled steers are watched for
 	// owed relays (watchCanceledVoiceRelays).
 	watching bool
+	// wakeSteers maps the queued steer of a minutes wake to its delivery, so
+	// that a Stop that drops it can be told apart from any other canceled
+	// steer.
+	wakeSteers map[string]voiceWakeSteer
 }
+
+type voiceWakeSteer struct{ deliveryID, callID string }
 
 // voiceReceipt is how a delivery was admitted. A rehydrated receipt only
 // knows that it was.
@@ -170,7 +177,9 @@ func (m *Manager) admitVoiceRelay(sessionID, deliveryID string, custom map[strin
 
 // watchCanceledVoiceRelays makes a queued relay that is canceled with its
 // steer (Stop, queue recall) no longer owed: it was dropped on purpose and
-// a restart must not deliver it. Called with the admission lock held.
+// a restart must not deliver it. A queued minutes wake dropped the same way
+// is consumed too (stoppedVoiceWake), while its minutes stay. Called with
+// the admission lock held.
 func (m *Manager) watchCanceledVoiceRelays(sess *ManagedSession) {
 	a := &sess.voiceAdmission
 	if a.watching {
@@ -192,6 +201,15 @@ func (m *Manager) watchCanceledVoiceRelays(sess *ManagedSession) {
 				dropped = true
 			}
 		}
+		for steerID, w := range a.wakeSteers {
+			if !canceled[steerID] {
+				continue
+			}
+			delete(a.wakeSteers, steerID)
+			if err := m.stoppedVoiceWake(sess, w); err != nil {
+				slog.Warn("stopped voice wake not recorded", "session", sess.ID, "error", err)
+			}
+		}
 		if !dropped {
 			return
 		}
@@ -199,6 +217,21 @@ func (m *Manager) watchCanceledVoiceRelays(sess *ManagedSession) {
 			slog.Warn("canceled voice relay withdrawal not saved", "session", sess.ID, "error", err)
 		}
 	})
+}
+
+// stoppedVoiceWake saves, under the wake's own delivery ID, the display-only
+// record that says its wake was dropped on purpose. The save that holds it
+// counts the wake as consumed (voiceSaved) and so clears the voice marker:
+// the next boot does not wake the session, and the minutes record, saved
+// apart, stays in the conversation. The record has no content, so no reader
+// shows it. Called with the admission lock held.
+func (m *Manager) stoppedVoiceWake(sess *ManagedSession, w voiceWakeSteer) error {
+	record := core.AgentMessage{
+		Message: core.Message{Role: "session_event", Timestamp: time.Now().Unix()},
+		Custom:  map[string]any{"source": "voice_call", "kind": "minutes_wake_stopped", "call_id": w.callID},
+	}
+	record.EnsureMsgID()
+	return m.recordVoiceLocked(sess, w.deliveryID, record)
 }
 
 // admitOwedVoiceRelays admits, once each, the relays the session header
@@ -273,13 +306,20 @@ func (m *Manager) wakeVoiceMinutes(sess *ManagedSession) int {
 			continue
 		}
 		custom := map[string]any{"source": "voice_call", "kind": "minutes_wake", "call_id": rec.Custom["call_id"], "provider": rec.Custom["provider"], "minutes_msg_id": rec.MsgID}
-		_, dup, err := m.admitVoiceLocked(sess, wakeID, m.voiceWakeText(sess, rec), nil, custom)
+		r, dup, err := m.admitVoiceLocked(sess, wakeID, m.voiceWakeText(sess, rec), nil, custom)
 		if err != nil {
 			slog.Warn("voice call minutes did not wake the session", "session", sess.ID, "delivery", wakeID, "error", err)
 			continue
 		}
 		if !dup {
 			admitted++
+			if r.Action == "steer" {
+				if a.wakeSteers == nil {
+					a.wakeSteers = map[string]voiceWakeSteer{}
+				}
+				callID, _ := rec.Custom["call_id"].(string)
+				a.wakeSteers[r.ID] = voiceWakeSteer{deliveryID: wakeID, callID: callID}
+			}
 		}
 	}
 	return admitted
@@ -359,6 +399,13 @@ func (m *Manager) recordVoice(sessionID, deliveryID string, msg core.AgentMessag
 	if _, ok := a.receipts[deliveryID]; ok {
 		return nil
 	}
+	return m.recordVoiceLocked(sess, deliveryID, msg)
+}
+
+// recordVoiceLocked is recordVoice for a caller that holds the admission
+// lock and has decided the record is due.
+func (m *Manager) recordVoiceLocked(sess *ManagedSession, deliveryID string, msg core.AgentMessage) error {
+	a := &sess.voiceAdmission
 	msgID := ""
 	for _, prev := range sess.runtime.Context().Agent.Messages() {
 		if voiceDeliveryID(prev.Custom) == deliveryID {

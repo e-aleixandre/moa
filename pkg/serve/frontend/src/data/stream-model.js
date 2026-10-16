@@ -513,7 +513,7 @@ export function projectStream(session) {
         const voiceKind = msg.custom.kind || 'question';
         // The wake that hands the minutes to the model is the model's input,
         // shown as the minutes block it carries, never as a message.
-        if (voiceKind === 'minutes_wake') continue;
+        if (voiceKind === 'minutes_wake' || voiceKind === 'minutes_wake_stopped') continue;
         // The record a call leaves at hangup: its own block, with the
         // transcript to download. Not a waypoint and never a draft.
         if (voiceKind === 'minutes') {

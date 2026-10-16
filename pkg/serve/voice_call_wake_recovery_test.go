@@ -19,8 +19,8 @@ import (
 )
 
 type vwCrashState struct {
-	Root, Base, Workspace, SessionID, WakeID string
-	Queued, DiskMinutes, DiskWake, DiskRelay int
+	Root, Base, Workspace, SessionID, WakeID              string
+	Queued, DiskMinutes, DiskWake, DiskRelay, DiskStopped int
 	// Set by the wake_saved_* phases: saves that held the wake with the
 	// marker still set, whether the marker was on disk while the wake was
 	// owed, and whether it was still on disk at the checkpoint.
@@ -41,7 +41,7 @@ func vwCrashWith(t *testing.T, f *vpFixture, wakeID string, edit func(*vwCrashSt
 		t.Fatal(err)
 	}
 	s := vwCrashState{Root: f.root, Base: f.mgr.sessionBaseDir, Workspace: f.mgr.workspaceRoot, SessionID: f.sess.ID, WakeID: wakeID,
-		DiskMinutes: len(vpSavedVoice(saved, "minutes")), DiskWake: len(vpSavedVoice(saved, "minutes_wake")), DiskRelay: len(vpSavedVoice(saved, "relay")),
+		DiskMinutes: len(vpSavedVoice(saved, "minutes")), DiskWake: len(vpSavedVoice(saved, "minutes_wake")), DiskRelay: len(vpSavedVoice(saved, "relay")), DiskStopped: len(vpSavedVoice(saved, "minutes_wake_stopped")),
 		MarkedLast: saved.Metadata[session.MetaVoiceWake] == true}
 	for _, q := range f.sess.runtime.Context().Agent.PendingSteers() {
 		if voiceDeliveryID(q.Custom) == wakeID {
@@ -145,6 +145,22 @@ func TestVoiceWakeCrashChild(t *testing.T) {
 		}
 		return false
 	})
+	if phase == "stopped_wake" {
+		// Stop drops the queued wake with the run; the owner saw the minutes
+		// and chose to stop what they set off.
+		if err := f.mgr.Cancel(f.sess.ID); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(vpDeadline)
+		for time.Now().Before(deadline) {
+			saved, _, err := session.FindSessionReadOnly(f.mgr.sessionBaseDir, f.sess.ID)
+			if err == nil && len(vpSavedVoice(saved, "minutes_wake_stopped")) == 1 && saved.Metadata[session.MetaVoiceWake] != true {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		vwCrash(t, f, wakeID)
+	}
 	if err := f.sess.runtime.Flush(); err != nil {
 		t.Fatal(err)
 	}
@@ -321,6 +337,52 @@ func TestVoiceWakeSurvivesCrash(t *testing.T) {
 			}
 			vwAssertRecoveredOnce(t, s)
 		})
+	}
+}
+
+// Stop consumes a queued minutes wake: the session is not woken at the next
+// boot, across restarts, and the minutes stay saved and readable.
+func TestVoiceStoppedWakeIsNotOwed(t *testing.T) {
+	s := vwRunChild(t, "stopped_wake")
+	if s.DiskMinutes != 1 || s.DiskWake != 0 || s.DiskStopped != 1 || s.MarkedLast {
+		t.Fatalf("the stopped wake is still owed on disk: %+v", s)
+	}
+	for restart := 1; restart <= 2; restart++ {
+		m, p, stop := vwRestart(t, s)
+		vpStable(t, func() bool { return p.calls.Load() == 0 }, "a restart woke the session for minutes the owner stopped")
+		if _, loaded := m.Get(s.SessionID); loaded {
+			t.Fatalf("restart %d loaded a session that owed nothing", restart)
+		}
+		stop()
+		if n, marked := vwSaved(t, s, "minutes_wake_stopped"); n != 1 || marked {
+			t.Fatalf("restart %d: stopped records=%d marker=%v, want 1 and cleared", restart, n, marked)
+		}
+	}
+	// The minutes are still there for whoever opens the conversation, and the
+	// stop record is not: nothing of it reaches /messages or read_session.
+	m, _, _ := vwRestart(t, s)
+	sess, err := m.ResumeSession(s.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := m.conversationSnapshot(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minutes := 0
+	for _, msg := range snap.messages {
+		if msg.Kind == "minutes" {
+			minutes++
+		}
+		if msg.Kind == "minutes_wake_stopped" {
+			t.Fatal("the stop record is shown in the conversation")
+		}
+	}
+	if minutes != 1 {
+		t.Fatalf("minutes in the conversation = %d, want 1", minutes)
+	}
+	if text := voiceResultText(m.readSession(sess.ID, sessionReadOptions{})); strings.Contains(text, "minutes_wake_stopped") {
+		t.Fatalf("read_session shows the stop record:\n%s", text)
 	}
 }
 
