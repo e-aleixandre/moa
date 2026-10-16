@@ -1184,6 +1184,7 @@ function toLedgerRow(msg) {
       row.toolLabel = mark.title;
       row.arg = { text: mark.reason };
       row.argTail = false;
+      if (mark.reason) row.detail = mark.reason;
       row.status = 'ok';
       row.out = '';
       delete row.echo;

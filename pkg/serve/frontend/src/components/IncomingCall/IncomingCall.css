@@ -68,6 +68,7 @@
 }
 .icall.is-phone .icall-head { flex-direction: column; text-align: center; gap: 10px; }
 .icall.is-phone .icall-name { font-size: 22px; white-space: normal; }
+.icall.is-phone .icall-verb { font-size: 15px; }
 .icall.is-phone .icall-glyph { width: 72px; height: 72px; }
 .icall.is-phone .icall-reason { text-align: center; font-size: 17px; max-height: 40vh; }
 .icall.is-phone .icall-acts { margin-top: auto; }

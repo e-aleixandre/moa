@@ -40,3 +40,4 @@
 .cl-yes { border: 1px solid var(--zl-accent-line); background: var(--zl-accent-dim); color: var(--zl-t1); }
 .cl-no { border: 1px solid var(--zl-line); background: transparent; color: var(--zl-t2); }
 .cl-link { min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--zl-yellow); font: inherit; font-weight: 500; cursor: pointer; }
+.cl-fail { margin: 0; color: var(--zl-yellow); }

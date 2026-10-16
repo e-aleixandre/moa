@@ -138,3 +138,17 @@ test("a request_call history result becomes one compact ledger row", () => {
   expect(rows).toContain("Missed call · no answer");
   expect(rows).toContain("Deploy is blocked");
 });
+
+test("the sidebar roster repaints when a request to talk arrives or ends", async () => {
+  const { store } = await import("./store.js");
+  const { selectDesktopChrome, __resetDesktopChromeForTests } = await import("../layout/Sidebar/sessions.js");
+  const base = store.get();
+  const withRequests = (list) => ({ ...base, owners: { ...base.owners, list: [{ id: "o1", name: "Infra", session_id: "s1" }] }, callRequests: { list, loaded: true } });
+  __resetDesktopChromeForTests();
+  const quiet = selectDesktopChrome(withRequests([]));
+  const ringing = selectDesktopChrome(withRequests([ring]));
+  expect(ringing).not.toBe(quiet);
+  expect(ringing.owners[0].wantsToTalk).toBe(true);
+  expect(selectDesktopChrome(withRequests([])).owners[0].wantsToTalk).toBe(false);
+  __resetDesktopChromeForTests();
+});
