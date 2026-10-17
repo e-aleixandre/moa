@@ -232,7 +232,9 @@ func TestRunSkillCommand_InlineWhileBusyIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess.runtime.State.Transition(bus.StateRunning)
+	if err := sess.runtime.State.Transition(bus.StateRunning); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := mgr.ExecCommand(sess.ID, "/deploy", ""); !errors.Is(err, ErrBusy) {
 		t.Fatalf("err = %v, want ErrBusy", err)
 	}
