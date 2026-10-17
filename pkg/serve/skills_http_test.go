@@ -276,8 +276,12 @@ func TestRunSkillCommand_InlineRefusesWhenTheQueueIsNotEmpty(t *testing.T) {
 // as the compact row.
 func TestProjectWSMessageCustom_LegacySkillMessage(t *testing.T) {
 	got := projectWSMessageCustom(map[string]any{"skill": "deploy"})
-	if got["source"] != "skill" || got["skill"] != "deploy" {
+	if got["source"] != "skill" || got["skill"] != "deploy" || got["skill_command"] != "/deploy" {
 		t.Fatalf("got %+v", got)
+	}
+	// A skill named like a built-in was invoked as /skill:compact.
+	if got := projectWSMessageCustom(map[string]any{"skill": "compact"}); got["skill_command"] != "/skill:compact" {
+		t.Fatalf("collided legacy record: %+v", got)
 	}
 	if got := projectWSMessageCustom(map[string]any{"source": "skill_fork", "skill": "learn", "subagent_job_id": "j"}); got["source"] != "skill_fork" {
 		t.Fatalf("fork changed: %+v", got)

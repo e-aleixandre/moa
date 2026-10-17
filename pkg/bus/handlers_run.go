@@ -213,7 +213,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			if sctx.Agent.QueueLen() > 0 {
 				return ErrNotIdle
 			}
-			if (cmd.AllowBackgroundWork && (sctx.AutoVerifying() || sctx.GoalVerifying())) ||
+			if (cmd.AllowBackgroundWork && !cmd.InterruptVerification && (sctx.AutoVerifying() || sctx.GoalVerifying())) ||
 				(!cmd.AllowBackgroundWork && sctx.hasBackgroundWork()) {
 				return ErrNotIdle
 			}

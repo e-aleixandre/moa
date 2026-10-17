@@ -94,3 +94,39 @@ func TestSendPromptIdleOnlyKeepsVerifiersRunningDespiteBackgroundExemption(t *te
 		})
 	}
 }
+
+// An explicit human prompt (InterruptVerification) is admitted atomically like
+// any idle-only prompt, but unlike an owner report it does not wait for a
+// verifier: it reaches the same hooks as a typed message, which cancel it.
+func TestSendPromptIdleOnlyInterruptsVerifiersWhenAsked(t *testing.T) {
+	for _, verifier := range []string{"auto", "goal"} {
+		t.Run(verifier, func(t *testing.T) {
+			b := NewLocalBus()
+			defer b.Close()
+			fa := &fakeAgent{}
+			sctx := newTestSessionContextWithState(b, fa)
+			canceled := false
+			RegisterHandlers(sctx)
+			sctx.cancelGoalVerify = func() { canceled = true }
+			if verifier == "auto" {
+				sctx.beginAutoVerify()
+				defer sctx.endAutoVerify()
+			} else {
+				sctx.beginGoalVerify()
+				defer sctx.endGoalVerify()
+			}
+			err := b.Execute(SendPrompt{Text: "skill", Custom: map[string]any{"source": "skill"}, IdleOnly: true, AllowBackgroundWork: true, InterruptVerification: true})
+			if err != nil {
+				t.Fatalf("SendPrompt during %s verification = %v", verifier, err)
+			}
+			ended, mu := collect[RunEnded](b)
+			waitForLen(b, ended, mu, 1, 2*time.Second)
+			if !fa.sendCalled {
+				t.Fatal("the prompt did not start a run")
+			}
+			if verifier == "goal" && !canceled {
+				t.Fatal("the goal verification was not asked to stop")
+			}
+		})
+	}
+}

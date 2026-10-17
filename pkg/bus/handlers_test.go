@@ -431,10 +431,26 @@ func TestRewind_SkillInvocationReturnsTheTypedCommand(t *testing.T) {
 		Message: core.Message{Role: "user", Content: []core.Content{body}},
 		Custom:  map[string]any{"skill": "deploy"},
 	}})
+	// Historical records of a skill that shares a built-in's name: the
+	// built-in would win a bare /compact, so the rewind must say /skill:compact.
+	collide := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{
+		Message: core.Message{Role: "user", Content: []core.Content{body}},
+		Custom:  map[string]any{"skill": "compact"},
+	}})
+	collideArgs := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{
+		Message: core.Message{Role: "user", Content: []core.Content{body}},
+		Custom:  map[string]any{"source": "skill", "skill": "compact", "skill_args": "staging"},
+	}})
 	sctx.Tree = tree
+	prev := core.IsReservedSlashName
+	core.IsReservedSlashName = func(name string) bool { return name == "compact" }
+	t.Cleanup(func() { core.IsReservedSlashName = prev })
 	RegisterHandlers(sctx)
 
-	for id, want := range map[string]string{modern: "/skill:deploy staging --fast", legacy: "/deploy"} {
+	for id, want := range map[string]string{
+		modern: "/skill:deploy staging --fast", legacy: "/deploy",
+		collide: "/skill:compact", collideArgs: "/skill:compact staging",
+	} {
 		msg, err := QueryTyped[GetBranchMessage, core.Message](b, GetBranchMessage{EntryID: id})
 		if err != nil || len(msg.Content) != 1 || msg.Content[0].Text != want {
 			t.Fatalf("rewind message = %+v err=%v, want %q", msg.Content, err, want)

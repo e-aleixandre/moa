@@ -39,6 +39,10 @@ var reservedCommandNames = func() map[string]bool {
 	return names
 }()
 
+func init() {
+	core.IsReservedSlashName = func(name string) bool { return reservedCommandNames[name] }
+}
+
 // invocableAs returns the slash name for a skill, and whether it can be
 // invoked at all.
 //
@@ -133,12 +137,14 @@ func runSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*Comma
 	// IdleOnly makes the bus decide idleness under the lock that admits the
 	// prompt: a skill that lost a race must be refused, not queued behind a
 	// "started". Background work (async subagents, bash jobs) does not make the
-	// session busy for a typed message, so it must not for this one either.
+	// session busy for a typed message, and neither do the verifiers: like a
+	// typed message, the run this starts cancels them.
 	err = sess.runtime.Bus.Execute(bus.SendPrompt{
-		SessionID:           sess.ID,
-		Text:                skill.RenderBody(body, args),
-		IdleOnly:            true,
-		AllowBackgroundWork: true,
+		SessionID:             sess.ID,
+		Text:                  skill.RenderBody(body, args),
+		IdleOnly:              true,
+		AllowBackgroundWork:   true,
+		InterruptVerification: true,
 		Custom: map[string]any{
 			"source": "skill", "skill": s.Name, "skill_args": strings.Join(args, " "), "skill_command": command,
 		},
