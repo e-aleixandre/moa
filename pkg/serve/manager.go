@@ -811,6 +811,9 @@ type Manager struct {
 	// Shutdown ends their calls before any session is torn down.
 	voiceCallsMu sync.Mutex
 	voiceCalls   []*voiceCallRegistry
+	// callReqs are the owners' call requests (request_call), made on first use.
+	callReqOnce sync.Once
+	callReqs    *callRequestRegistry
 
 	providerFactory   func(model core.Model) (core.Provider, error)
 	compactSummarizer func(sessionModel core.Model) (core.Provider, core.Model, string)

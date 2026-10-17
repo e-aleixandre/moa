@@ -62,7 +62,9 @@ jobs:
           git diff --exit-code go.sum
 
       - name: Test
-        run: go test -race -count=1 ./...
+        # pkg/serve alone takes close to go test's default 10 minutes with
+        # -race; splitting it is pending.
+        run: go test -race -count=1 -timeout=20m ./...
 
       - name: Check Go vulnerabilities
         run: |

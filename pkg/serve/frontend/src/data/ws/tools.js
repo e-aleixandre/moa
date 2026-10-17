@@ -177,6 +177,7 @@ export function handleWsToolEnd(id, data) {
         note,
         ...(data.ask_responder ? { askResponder: data.ask_responder } : {}),
         ...(data.patch_files ? { patchFiles: data.patch_files } : {}),
+        ...(data.call_request ? { callRequest: data.call_request } : {}),
       };
     }
     return m;

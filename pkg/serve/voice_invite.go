@@ -52,8 +52,10 @@ const (
 
 var (
 	errNoIncomingDevice = errors.New("no device can receive incoming calls")
-	errTooManyRinging   = errors.New("too many calls ringing")
-	errInviteNotFound   = errors.New("invitation not found")
+	// inviteLostClaim is the reason of an answer that lost its Claim.
+	inviteLostClaim   = "answered_elsewhere"
+	errTooManyRinging = errors.New("too many calls ringing")
+	errInviteNotFound = errors.New("invitation not found")
 )
 
 // RingOptions shapes one invitation.
@@ -61,6 +63,24 @@ type RingOptions struct {
 	Name     string        // shown by CallKit; the session title when empty
 	Provider string        // the voice provider to open on answer; the default plan when empty
 	TTL      time.Duration // how long it rings; voiceInviteTTL when zero
+	// Intro is why moa calls: the voice speaks first and says it. nil is a
+	// test call, and the voice says so.
+	Intro *callIntro
+	// Claim, if set, is asked once the user answers and before the call
+	// opens; false makes the answer lose (answered_elsewhere): an owner's
+	// call request answered on another screen.
+	Claim func() bool
+	// Answer, if set, ties the answered call to the owner's request it
+	// answers: withdrawing the request abandons the opening, and the call is
+	// published only through it.
+	Answer *callAnswer
+	// Decline, if set, decides an iPhone's Decline before it is
+	// acknowledged; false (the request is being answered elsewhere) refuses it.
+	Decline func() bool
+	// Done, if set, learns how the invitation ended, once, synchronously with
+	// that end and before whoever ended it is answered: it does not depend
+	// on RingDevices returning.
+	Done func(InviteOutcome)
 }
 
 // InviteOutcome is how an invitation ended, for the caller that rang it.
@@ -73,6 +93,10 @@ type InviteOutcome struct {
 type voiceInvite struct {
 	id, sessionID, name, provider string
 	expires                       time.Time
+	intro                         *callIntro // never nil: an incoming call always opens by saying why
+	claim, decline                func() bool
+	answerTo                      *callAnswer
+	done                          func(InviteOutcome)
 
 	state    string
 	answerer string         // principal that won the answer
@@ -138,7 +162,7 @@ func (r *voiceCallRegistry) RingDevices(ctx context.Context, sessionID string, o
 		name = "moa"
 	}
 	inv := &voiceInvite{
-		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider,
+		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider, intro: incomingIntro(opts.Intro), claim: opts.Claim, decline: opts.Decline, answerTo: opts.Answer, done: opts.Done,
 		expires: time.Now().Add(ttl), state: inviteRinging,
 		left: make(chan struct{}), resolved: make(chan struct{}),
 	}
@@ -207,9 +231,9 @@ func (r *voiceCallRegistry) WaitInvite(ctx context.Context, id string) (InviteOu
 func (r *voiceCallRegistry) endInvite(id, from, to string) bool {
 	t := r.inviteTable()
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	inv, ok := t.byID[id]
 	if !ok || inv.state != from {
+		t.mu.Unlock()
 		return false
 	}
 	inv.state = to
@@ -221,8 +245,20 @@ func (r *voiceCallRegistry) endInvite(id, from, to string) bool {
 		close(inv.resolved)
 		t.retire(id)
 		slog.Info("voice invite ended", "invite", id, "state", to)
+		t.mu.Unlock()
+		inv.notify(InviteOutcome{State: to})
+		return true
 	}
+	t.mu.Unlock()
 	return true
+}
+
+// notify tells the invitation's Done how it ended. Never under t.mu: Done
+// moves a call request, whose own transitions cancel invitations.
+func (inv *voiceInvite) notify(out InviteOutcome) {
+	if inv.done != nil {
+		inv.done(out)
+	}
 }
 
 // retire keeps an ended invitation answering its status, bounded.
@@ -276,10 +312,23 @@ func (r *voiceCallRegistry) answer(scope context.Context, id, principal string) 
 	}
 	t.mu.Unlock()
 
-	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider)
+	if inv.claim != nil && !inv.claim() {
+		t.mu.Lock()
+		inv.state, inv.reason = inviteFailed, inviteLostClaim
+		inv.status, inv.result = http.StatusConflict, map[string]any{"error": "answered_elsewhere"}
+		close(inv.resolved)
+		t.retire(id)
+		status, result := inv.status, inv.result
+		t.mu.Unlock()
+		inv.notify(InviteOutcome{State: inviteFailed, Reason: inviteLostClaim})
+		return status, result
+	}
+	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider, inv.intro, inv.answerTo)
+	if inv.claim != nil {
+		delete(out, "paid_option") // an owner's call never offers the paid API (I21)
+	}
 
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	inv.status, inv.result = status, out
 	if status == http.StatusCreated {
 		inv.state = inviteAnswered
@@ -291,6 +340,9 @@ func (r *voiceCallRegistry) answer(scope context.Context, id, principal string) 
 	close(inv.resolved)
 	t.retire(id)
 	slog.Info("voice invite answered", "invite", id, "state", inv.state, "reason", inv.reason)
+	ended := InviteOutcome{State: inv.state, CallID: inv.callID, Reason: inv.reason}
+	t.mu.Unlock()
+	inv.notify(ended)
 	return status, out
 }
 
@@ -315,7 +367,9 @@ func (r *voiceCallRegistry) handleInviteCreate(w http.ResponseWriter, req *http.
 	var in struct {
 		SessionID string `json:"session_id"`
 		Name      string `json:"name"`
-		Provider  string `json:"provider"`
+		// Reason, optional, is what the voice opens the test call with.
+		Reason   string `json:"reason"`
+		Provider string `json:"provider"`
 	}
 	if err := json.NewDecoder(io.LimitReader(req.Body, voice.MaxControlJSON)).Decode(&in); err != nil || in.SessionID == "" {
 		voiceError(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
@@ -327,7 +381,7 @@ func (r *voiceCallRegistry) handleInviteCreate(w http.ResponseWriter, req *http.
 			return
 		}
 	}
-	id, err := r.RingDevices(req.Context(), in.SessionID, RingOptions{Name: in.Name, Provider: in.Provider})
+	id, err := r.RingDevices(req.Context(), in.SessionID, RingOptions{Name: in.Name, Provider: in.Provider, Intro: testIntro(in.Reason)})
 	switch {
 	case errors.Is(err, errInviteNotFound):
 		voiceError(w, http.StatusNotFound, map[string]any{"error": "session_not_found"})
@@ -433,6 +487,12 @@ func (r *voiceCallRegistry) handleInviteDecline(w http.ResponseWriter, req *http
 	inv, ok := r.invite(id)
 	if !ok {
 		voiceError(w, http.StatusNotFound, map[string]any{"error": "invite_not_found"})
+		return
+	}
+	// The request behind the invitation is decided first: no Decline (not
+	// even a retry) is acknowledged before it is.
+	if inv.decline != nil && !inv.decline() {
+		voiceError(w, http.StatusConflict, map[string]any{"error": "answered_elsewhere"})
 		return
 	}
 	if r.endInvite(id, inviteRinging, inviteDeclined) {

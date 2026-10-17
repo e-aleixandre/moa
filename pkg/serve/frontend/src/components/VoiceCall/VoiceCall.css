@@ -67,6 +67,7 @@
   font-size: var(--zl-fs-meta);
   color: var(--zl-t3);
 }
+.vcall-bar-phase + .vcall-bar-meta { flex-shrink: 100; } /* the clock/plan gives way before the state's words */
 .vcall-icon {
   flex: none;
   display: inline-grid;

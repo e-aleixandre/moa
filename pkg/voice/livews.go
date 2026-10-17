@@ -77,6 +77,10 @@ func (a *liveWS) Open(ctx context.Context, spec CallSpec) (Upstream, error) {
 	up.closeFrame = map[string]any{"type": "session.close"}
 	up.closedType = "session.closed"
 	up.start()
+	if err := up.open(spec.Opening); err != nil {
+		_ = up.close(ctx)
+		return nil, err
+	}
 	return up, nil
 }
 

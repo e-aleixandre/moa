@@ -1,0 +1,219 @@
+package serve
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/e-aleixandre/moa/pkg/voice"
+)
+
+// Who speaks first is the phone's rule (owner's decision, 17/10, after
+// CarPlay): whoever picks up. Calling an owner, the owner picks up, so the
+// voice greets at once, only a greeting. When an owner
+// calls the user, the user picks up: the voice waits for their hello and
+// answers it with the reason; if they say nothing for ~2 s it speaks anyway.
+//
+// # language: en
+// Feature: whoever picks up speaks first
+//   Scenario: an owner's request_call is answered and the user says hello
+//     Given "Infra" is at Ring and asks to call with a reason, an urgency and a written question
+//     When the user answers and says hello within 2 seconds
+//     Then the voice's initial context carries the reason, the urgency and the question
+//     And says to wait for the user's hello and answer it with the reason
+//     And the provider is not told to speak before the user
+//   Scenario: the user answers and says nothing
+//     When the user answers and stays silent for 2 seconds
+//     Then the provider is told to speak
+//   Scenario: a test invitation with or without a reason
+//     Then the voice opens with that reason, or says it is a test call
+//   Scenario: the user calls (owner's change from CarPlay, 17/10)
+//     When the user places a call
+//     Then the voice is told to greet at once, only a greeting: no summary
+//       unless the user asks how things are going
+//     And that what came before is context: the user has asked nothing yet
+//     And the provider is told to speak before any user audio (the ChatGPT
+//       plan, which has no such command, gets a context nudge saying the
+//       user has said nothing yet)
+//   Scenario: the ChatGPT plan, incoming, user silent
+//     Then nothing nudges it: it waits for the hello like any call
+
+const incomingMarker = "INCOMING CALL"
+
+// testOpenSilence stands for the ~2 s an incoming call waits for the user's
+// hello: the same behaviour, shorter, so the package stays within go test's
+// default timeout.
+const testOpenSilence = 400 * time.Millisecond
+
+func shortOpenSilence(t *testing.T, d time.Duration) {
+	prev := voice.SetOpenSilence(d)
+	t.Cleanup(func() { voice.SetOpenSilence(prev) })
+}
+
+const outgoingMarker = "OUTGOING CALL"
+
+// openingTrigger: the provider was asked to speak before the user's audio.
+func openingTrigger(v map[string]any) bool { return v["type"] == "response.create" }
+
+// awaitOpening checks the incoming context and that, with the user silent,
+// the voice speaks after the short wait (not at once).
+func awaitOpening(t *testing.T, p *vpPeer, wants ...string) {
+	t.Helper()
+	cfg := vpJSON(p.await(t, "incoming context", func(v map[string]any) bool { return strings.Contains(vpJSON(v), incomingMarker) }))
+	for _, w := range wants {
+		if !strings.Contains(cfg, w) {
+			t.Errorf("incoming context lacks %q: %s", w, cfg)
+		}
+	}
+	p.await(t, "the voice speaks after the user's silence", openingTrigger)
+}
+
+func TestIncoming_RequestCallOpensWithReason(t *testing.T) {
+	shortOpenSilence(t, testOpenSilence)
+	for _, provider := range []string{"grok-plan", "xai-api", "openai-live-api"} {
+		t.Run(provider, func(t *testing.T) {
+			f := rcNewFixture(t, "grok-plan", "ring")
+			if provider != "grok-plan" {
+				f = rcNewFixture(t, provider, "")
+				f.mustRequest(http.MethodPatch, "/api/voice/settings", map[string]any{"paid_provider": provider}, f.owner(), http.StatusOK)
+				f.mustRequest(http.MethodPatch, "/api/owners/"+f.own.ID, map[string]any{"call_level": "ring", "cost_ack_provider": provider}, f.owner(), http.StatusOK)
+			}
+			f.ask()
+			req := f.awaitRequest("ringing")
+			var c vpCreated
+			_ = json.Unmarshal(f.mustRequest(http.MethodPost, "/api/voice/calls", map[string]any{"session_id": f.osess.ID, "call_request_id": req.ID}, f.owner(), http.StatusCreated), &c)
+			f.created = true
+			call := f.dial(c, f.owner(), false)
+			awaitOpening(t, f.up.peer(t, c.Provider), "RC-REASON-SENTINEL", "RC-QUESTION-SENTINEL", "urgent", "hello")
+			call.hangup()
+		})
+	}
+}
+
+func TestIncoming_TestInviteOpensWithReasonOrSaysTest(t *testing.T) {
+	shortOpenSilence(t, testOpenSilence)
+	for name, reason := range map[string]string{"with_reason": "RC-TEST-REASON", "without_reason": ""} {
+		t.Run(name, func(t *testing.T) {
+			f := newInviteFixture(t, 1)
+			body := map[string]any{"session_id": f.sess.ID}
+			if reason != "" {
+				body["reason"] = reason
+			}
+			var inv map[string]any
+			_ = json.Unmarshal(f.mustRequest("POST", "/api/voice/invites", body, f.owner(), http.StatusCreated), &inv)
+			var c vpCreated
+			_ = json.Unmarshal(f.mustRequest("POST", "/api/voice/invites/"+inv["id"].(string)+"/answer", map[string]any{}, f.voice(0), http.StatusCreated), &c)
+			f.created = true
+			call := f.dial(c, f.voice(0), false)
+			want := "test call"
+			if reason != "" {
+				want = reason
+			}
+			awaitOpening(t, f.up.peer(t, c.Provider), want)
+			call.send(map[string]any{"type": "hangup"})
+		})
+	}
+}
+
+func TestIncoming_UserHelloIsAnsweredWithoutSpeakingFirst(t *testing.T) {
+	// Long enough for the hello to arrive first even under -race load.
+	shortOpenSilence(t, time.Second)
+	for _, provider := range []string{"grok-plan", "openai-live-api"} {
+		t.Run(provider, func(t *testing.T) {
+			f := rcNewFixture(t, "grok-plan", "ring")
+			if provider != "grok-plan" {
+				f = rcNewFixture(t, provider, "")
+				f.mustRequest(http.MethodPatch, "/api/voice/settings", map[string]any{"paid_provider": provider}, f.owner(), http.StatusOK)
+				f.mustRequest(http.MethodPatch, "/api/owners/"+f.own.ID, map[string]any{"call_level": "ring", "cost_ack_provider": provider}, f.owner(), http.StatusOK)
+			}
+			f.ask()
+			req := f.awaitRequest("ringing")
+			var c vpCreated
+			_ = json.Unmarshal(f.mustRequest(http.MethodPost, "/api/voice/calls", map[string]any{"session_id": f.osess.ID, "call_request_id": req.ID}, f.owner(), http.StatusCreated), &c)
+			f.created = true
+			call := f.dial(c, f.owner(), false)
+			p := f.up.peer(t, c.Provider)
+			p.await(t, "incoming context", func(v map[string]any) bool { return strings.Contains(vpJSON(v), incomingMarker) })
+			p.user(t, "u1", "hola")
+			time.Sleep(2 * voice.OpenSilence())
+			for _, v := range p.snapshot() {
+				if openingTrigger(v) {
+					t.Fatalf("the voice was told to speak although the user said hello: %s", vpJSON(v))
+				}
+			}
+			call.hangup()
+		})
+	}
+}
+
+func TestIncoming_OutgoingCallOnlyGreetsAtOnce(t *testing.T) {
+	for _, provider := range []string{"grok-plan", "xai-api", "openai-live-api", "chatgpt-plan"} {
+		t.Run(provider, func(t *testing.T) {
+			f := vpNewFixture(t, provider, vpBriefHandlers()...)
+			call := f.call()
+			p := f.up.peer(t, f.provider)
+			if provider == "chatgpt-plan" {
+				// Its session body is not recorded by the fake: the same
+				// context rides in its instructions (chatgpt_plan.go); what
+				// opens it is the nudge.
+				nudge := vpJSON(p.await(t, "open nudge", func(v map[string]any) bool { return strings.Contains(vpJSON(v), "has not said anything yet") }))
+				for _, w := range []string{"only a short greeting", "no summary"} {
+					if !strings.Contains(nudge, w) {
+						t.Errorf("open nudge lacks %q: %s", w, nudge)
+					}
+				}
+				call.hangup()
+				return
+			}
+			cfg := vpJSON(p.await(t, "outgoing context", func(v map[string]any) bool { return strings.Contains(vpJSON(v), outgoingMarker) }))
+			for _, w := range []string{"only a short greeting", "No summary", "unless they ask how things are going", "has not asked anything"} {
+				if !strings.Contains(cfg, w) {
+					t.Errorf("outgoing context lacks %q: %s", w, cfg)
+				}
+			}
+			for _, bad := range []string{"where things stand", incomingMarker} {
+				if strings.Contains(cfg, bad) {
+					t.Errorf("outgoing context has %q: %s", bad, cfg)
+				}
+			}
+			p.await(t, "the voice speaks at once", openingTrigger)
+			call.hangup()
+		})
+	}
+}
+
+// A brief that arrives mid-call is context, never something the user said
+// (call B2Lrf50d0v9Yr: the plan answered "lo nuevo que me has dicho" to it).
+func TestIncoming_BriefIsMarkedAsContextNotTheUser(t *testing.T) {
+	f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)
+	call := f.call()
+	p := f.up.peer(t, f.provider)
+	brief := vpJSON(p.await(t, "brief", func(v map[string]any) bool { return strings.Contains(vpJSON(v), "BRIEF-READY") }))
+	if !strings.Contains(brief, "not something the user said") || !strings.Contains(brief, "do not answer it") {
+		t.Errorf("brief not marked as context: %s", brief)
+	}
+	call.hangup()
+}
+
+// The ChatGPT plan cannot count a silence and a nudge did not make it speak
+// (I12): on an incoming call it waits for the hello like any call.
+func TestIncoming_ChatGPTPlanWaitsForHelloWithoutNudge(t *testing.T) {
+	shortOpenSilence(t, testOpenSilence)
+	f := rcNewFixture(t, "chatgpt-plan", "ring")
+	f.ask()
+	req := f.awaitRequest("ringing")
+	var c vpCreated
+	_ = json.Unmarshal(f.mustRequest(http.MethodPost, "/api/voice/calls", map[string]any{"session_id": f.osess.ID, "call_request_id": req.ID}, f.owner(), http.StatusCreated), &c)
+	f.created = true
+	call := f.dial(c, f.owner(), false)
+	p := f.up.peer(t, c.Provider)
+	time.Sleep(3 * testOpenSilence)
+	for _, v := range p.snapshot() {
+		if strings.Contains(vpJSON(v), "has not said anything yet") {
+			t.Fatalf("an incoming call on the ChatGPT plan was nudged: %s", vpJSON(v))
+		}
+	}
+	call.hangup()
+}

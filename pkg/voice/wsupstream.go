@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -87,7 +88,13 @@ type wsUpstream struct {
 	closeOnce    sync.Once
 	closeSent    bool // written once under closeOnce
 	teardownOnce sync.Once
-	workers      sync.WaitGroup
+	// heard is set once the user's speech is seen (OpenOnSilence).
+	heard atomic.Bool
+	// openMu orders a pending opening against Close: once closing is set
+	// (before the close frame is sent) the opening sends nothing.
+	openMu  sync.Mutex
+	closing bool
+	workers sync.WaitGroup
 	// inAudio bounds the PCM bytes waiting in events; reader-owned.
 	inAudio inboundAudio
 	// usage is the latest usage the provider reported. It is kept outside
@@ -201,7 +208,35 @@ func (u *wsUpstream) Usage() *Usage {
 	return u.usage
 }
 
+// open starts the call as opening says. Both dialects ask for a response
+// with the same frame.
+func (u *wsUpstream) open(opening Opening) error {
+	speak := map[string]any{"type": "response.create"}
+	switch opening {
+	case OpenNow:
+		return u.send(speak)
+	case OpenOnSilence:
+		go func() {
+			t := time.NewTimer(OpenSilence())
+			defer t.Stop()
+			select {
+			case <-t.C:
+				u.openMu.Lock()
+				if !u.closing && !u.heard.Load() {
+					_ = u.send(speak)
+				}
+				u.openMu.Unlock()
+			case <-u.ctx.Done():
+			}
+		}()
+	}
+	return nil
+}
+
 func (u *wsUpstream) emit(ev Event) bool {
+	if ev.Kind == EventSpeechStarted || (ev.Kind == EventTranscript && ev.Role == "user") {
+		u.heard.Store(true)
+	}
 	select {
 	case u.events <- ev:
 		return true
@@ -282,6 +317,9 @@ func (u *wsUpstream) Events() <-chan Event { return u.events }
 // confirmation within ctx, then tears the socket and both workers down.
 // Every caller waits within its own ctx: only the frame is sent once.
 func (u *wsUpstream) close(ctx context.Context) error {
+	u.openMu.Lock()
+	u.closing = true
+	u.openMu.Unlock()
 	u.closeOnce.Do(func() {
 		u.closeSent = u.closeFrame != nil && u.send(u.closeFrame) == nil
 	})

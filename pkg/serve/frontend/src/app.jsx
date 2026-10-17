@@ -19,6 +19,9 @@ import { loadOwners } from "./data/owners.js";
 import { loadProviderStatus } from "./data/providers.js";
 import { startTasksSync, resumeTasksSync } from "./data/tasks.js";
 import { TasksScreen } from "./components/Tasks/TasksScreen.jsx";
+import { IncomingCall } from "./components/IncomingCall/IncomingCall.jsx";
+import { startCallRequestsSync, resumeCallRequestsSync, openCallRequestLink } from "./data/call-requests.js";
+import { requestIdFromSearch } from "./data/call-requests-model.js";
 import { VoiceCallScreen } from "./components/VoiceCall/VoiceCall.jsx";
 import { adoptNativeCall } from "./data/voice-call-session.js";
 import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
@@ -125,6 +128,7 @@ function useBootstrap() {
         const params = new URLSearchParams(location.search);
         const wanted = params.get("session");
         const wantedInbox = params.get("inbox") === "1";
+        const wantedCall = requestIdFromSearch(location.search);
         const wantedShare = shareIdFromLocation(location.search);
         let stripped = false;
         if (wanted && openSession(wanted)) {
@@ -137,6 +141,12 @@ function useBootstrap() {
           autoSelectMobile();
         } else {
           autoFillTiles();
+        }
+        if (wantedCall) {
+          // A one-shot link from the call notification, like ?session=.
+          openCallRequestLink(wantedCall);
+          params.delete("call_request");
+          stripped = true;
         }
         if (wantedInbox) {
           openInbox();
@@ -175,6 +185,8 @@ function useBootstrap() {
     // Tasks: the sidebar's count and every open task view read one slice,
     // kept fresh by /api/tasks/ws (an invalidation; each one re-reads).
     startTasksSync();
+    // Owners asking to talk: the incoming call card reads this slice.
+    startCallRequestsSync();
     // The owners are read with the first roster above and again on return,
     // like the model catalog: an owner is created by hand and their number is
     // one per project, so nothing is gained by polling them.
@@ -211,6 +223,7 @@ function useBootstrap() {
           loadEvents(); // wake-on-event: an event may have arrived while away
           loadProviderStatus();
           resumeTasksSync();
+          resumeCallRequestsSync();
           loadOwners();
           // Also restarts the usage timer, and refreshes immediately so the
           // status line is not showing a number from before the app was hidden.
@@ -382,6 +395,7 @@ function App() {
         <ArtifactsDrawer />
         {/* The phone's call screen, over everything while a call is shown. */}
         <VoiceCallScreen />
+        <IncomingCall />
         <ToastContainer />
       </>
     );
@@ -397,6 +411,7 @@ function App() {
       {/* Artifacts — ONE shared drawer for conversation and grid, mounted
           globally so switching screens never duplicates or loses a reader. */}
       <ArtifactsDrawer />
+      <IncomingCall />
       <ToastContainer />
     </>
   );

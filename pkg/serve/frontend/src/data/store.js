@@ -171,6 +171,8 @@ let state = {
   isMobile: false,
   // The one voice call of this client (data/voice-call-session.js), or null.
   voiceCall: null,
+  // Owners asking to talk (data/call-requests.js): the server's full list.
+  callRequests: { list: [], loaded: false },
 
   // view — which screen is showing: null = single conversation (or mobile),
   // 'grid' = pane grid. Seeded from the URL.

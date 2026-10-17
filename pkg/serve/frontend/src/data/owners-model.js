@@ -152,7 +152,10 @@ export function ownerLine(owner) {
   // answer" rather than a bare "Asks you", so the row can be decided from.
   const own = owner?.ownReason || "";
   const lead =
-    state === "asks" ? { tone: "yellow", text: own || "Asks you" }
+    // A request to talk is the owner asking for you now; amber like every
+    // "waiting on you", and said before what its conversation is doing.
+    owner?.wantsToTalk && state !== "asks" ? { tone: "yellow", text: "wants to talk" }
+    : state === "asks" ? { tone: "yellow", text: own || "Asks you" }
       : state === "working" ? { tone: "blue", text: own || "Working…" }
         : state === "unread" ? { tone: "mauve", text: own || "Wrote to you · not read yet" }
           // A parked owner does not count sessions it is no longer watching
@@ -162,7 +165,7 @@ export function ownerLine(owner) {
           : state === "saved" ? null
             : summary.working > 0 ? { tone: "blue", text: `${summary.working} working` }
               : null;
-  const stated = state === "asks" || state === "working" || state === "unread";
+  const stated = state === "asks" || state === "working" || state === "unread" || !!owner?.wantsToTalk;
   return { lead, tail: summary.waiting > 0 ? `${summary.waiting} waiting on you` : "", stated };
 }
 
@@ -271,7 +274,7 @@ function relAge(updated, now) {
 // (data/owners.js loadOwnerSessions). Its live state, unseen flag and reason
 // win over the GET /api/owners snapshot, which is only a fallback before that
 // conversation has been loaded.
-export function ownerRows(owners = [], sessions = {}, now = Date.now()) {
+export function ownerRows(owners = [], sessions = {}, now = Date.now(), wantsToTalk = null) {
   const byOwner = new Map();
   for (const sess of Object.values(sessions || {})) {
     if ((sess?.kind || "") === "owner") {
@@ -297,6 +300,8 @@ export function ownerRows(owners = [], sessions = {}, now = Date.now()) {
       unseen: mine ? !!mine.unseen : !!own.unseen,
       ownReason: reason?.text || "",
       updated: mine?.updated || 0,
+      // A live request to talk (data/call-requests-model.js wantsToTalkIds).
+      wantsToTalk: !!wantsToTalk?.has(own.id),
     };
   });
 }

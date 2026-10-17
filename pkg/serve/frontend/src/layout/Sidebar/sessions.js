@@ -1,6 +1,7 @@
 import { focusedSessionId } from "../../data/selectors.js";
 import { sessionDisplayDotState, sessionTitle, shortPath } from "../../data/util/format.js";
 import { attentionKind, ordinarySessions } from "../../data/util/project-sessions.js";
+import { wantsToTalkIds } from "../../data/call-requests-model.js";
 import { ownerRows } from "../../data/owners-model.js";
 import { ownersHealth, ownersSlice } from "../../data/owners.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
@@ -133,7 +134,7 @@ function spineListSig(list) {
 
 function ownersSig(list) {
   return (list || []).map((o) => [
-    o.id, o.name, o.session_state || "", o.unseen ? 1 : 0, o.updated || 0, o.ownReason || "",
+    o.id, o.name, o.session_state || "", o.unseen ? 1 : 0, o.wantsToTalk ? 1 : 0, o.updated || 0, o.ownReason || "",
     o.avatar?.shape || "", o.avatar?.color || "",
     (o.children || []).map((c) => c.id + c.state + (c.unseen ? 1 : 0)).join(","),
   ].join("\0")).join("\n");
@@ -170,7 +171,7 @@ export function selectDesktopChrome(state) {
   // snapshot holds: one projection, so the dossier, the list and the inbox's
   // "send to the owner" destination can never disagree about which session
   // is waiting.
-  const owners = ownerRows(ownersSlice(state).list, state.sessions);
+  const owners = ownerRows(ownersSlice(state).list, state.sessions, undefined, wantsToTalkIds(state.callRequests?.list));
   const inbox = inboxCards(state.sessions, state.events, owners); // wake-on-event
   const next = {
     active,

@@ -41,6 +41,10 @@ var ErrInvalidOwnerName = errors.New("owner name is required")
 // itself or an owner that does not exist.
 var ErrInvalidTaskPermission = errors.New("invalid can_send_tasks_to")
 
+// ErrInvalidCallLevel is a call_level that is not a level, or one that would
+// let an owner start a paid call whose cost the user has not accepted.
+var ErrInvalidCallLevel = errors.New("invalid call_level")
+
 // ownerStore resolves the on-disk owner store. It is resolved per call rather
 // than cached on the Manager so the config directory is read the same way
 // memory reads it, from the environment in force now.
@@ -55,6 +59,9 @@ type OwnerInfo struct {
 	// SessionState is the state of the owner's conversation, or "saved" when it
 	// is not loaded. Empty when the owner has no session yet.
 	SessionState SessionState `json:"session_state,omitempty"`
+	// CallCostAckProvider is the paid provider whose cost the user accepted
+	// for this owner's calls, if any.
+	CallCostAckProvider string `json:"call_cost_ack_provider,omitempty"`
 }
 
 // ListOwners returns every owner with the state of its conversation.
@@ -96,7 +103,11 @@ func (m *Manager) ownerInfo(own owner.Owner) OwnerInfo {
 	// computing their own default would only agree as long as both implement
 	// the same hash.
 	own.Avatar = own.ResolvedAvatar()
+	own.CallLevel = own.Calls()
 	info := OwnerInfo{Owner: own}
+	if own.CallCostAck != nil {
+		info.CallCostAckProvider = own.CallCostAck.Provider
+	}
 	if own.SessionID == "" {
 		return info
 	}
@@ -127,6 +138,11 @@ type UpdateOwnerOpts struct {
 	// CanSendTasksTo replaces the owners this one may send tasks to without
 	// asking ([] clears it).
 	CanSendTasksTo *[]string `json:"can_send_tasks_to"`
+	// CallLevel sets how the owner may call the user. Any level but never,
+	// with no plan signed in, needs CostAckProvider naming the paid provider
+	// such calls would use.
+	CallLevel       *string `json:"call_level"`
+	CostAckProvider *string `json:"cost_ack_provider"`
 }
 
 func validateOwnerAvatar(avatar owner.Avatar) error {
@@ -256,6 +272,11 @@ func (m *Manager) UpdateOwner(id string, opts UpdateOwnerOpts) (OwnerInfo, error
 			return OwnerInfo{}, err
 		}
 		own.CanSendTasksTo = ids
+	}
+	if opts.CallLevel != nil {
+		if err := m.setCallLevel(&own, *opts.CallLevel, opts.CostAckProvider); err != nil {
+			return OwnerInfo{}, err
+		}
 	}
 	if err := store.Save(own); err != nil {
 		return OwnerInfo{}, err
@@ -604,7 +625,12 @@ func handleUpdateOwner(mgr *Manager) http.HandlerFunc {
 		case errors.Is(err, owner.ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
 			return
-		case errors.Is(err, ErrInvalidAvatar), errors.Is(err, ErrInvalidOwnerName), errors.Is(err, ErrInvalidTaskPermission):
+		case errors.As(err, new(*callLevelError)):
+			var cl *callLevelError
+			errors.As(err, &cl)
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": cl.Error(), "code": cl.code, "provider": cl.provider})
+			return
+		case errors.Is(err, ErrInvalidAvatar), errors.Is(err, ErrInvalidOwnerName), errors.Is(err, ErrInvalidTaskPermission), errors.Is(err, ErrInvalidCallLevel):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		case err != nil:

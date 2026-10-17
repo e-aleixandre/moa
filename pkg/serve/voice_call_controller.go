@@ -263,6 +263,10 @@ func (c *voiceCall) run() {
 	grace := time.NewTimer(c.limits.Grace)
 	defer grace.Stop()
 	var client *voiceClient
+	// The voice may open the call (a greeting) before the first client
+	// connects after the 201: that audio waits for it, bounded, once.
+	var early [][]byte
+	earlyBytes, attached := 0, false
 	events := c.up.Events()
 loop:
 	for {
@@ -280,6 +284,16 @@ loop:
 			client = cl
 			grace.Stop()
 			c.toClient(client, map[string]any{"type": "state", "state": "listening"})
+			if !attached {
+				attached = true
+				for _, pcm := range early {
+					if !client.sendAudio(pcm) {
+						c.requestEnd("slow_client")
+						break
+					}
+				}
+				early = nil
+			}
 		case v := <-c.notes:
 			c.toClient(client, v)
 		case cl := <-c.detachCh:
@@ -292,6 +306,10 @@ loop:
 				events = nil
 				c.requestEnd("upstream_closed")
 				continue
+			}
+			if !attached && ev.Kind == voice.EventAudio && earlyBytes+len(ev.PCM) <= c.limits.BufferedBytes {
+				early = append(early, ev.PCM)
+				earlyBytes += len(ev.PCM)
 			}
 			c.handle(ev, client)
 		}

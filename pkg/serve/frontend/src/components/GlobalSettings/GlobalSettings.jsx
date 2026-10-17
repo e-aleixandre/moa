@@ -29,6 +29,10 @@ import {
 } from "./settings-rows.js";
 import { savedSecretsBridge, listSaved } from "../../data/saved-secrets.js";
 import { savedLine, savedValue, sortSaved, withoutAlias } from "./saved-secrets-model.js";
+import { OwnerCallsSettings } from "./OwnerCallsSettings.jsx";
+import { createCallsWriter } from "../../data/owner-calls.js";
+import { openOwnerConversation } from "../../data/owners.js";
+import { openSessionPanel } from "../../data/session-panel.js";
 import { ProvidersPage } from "./ProvidersPage.jsx";
 import { voiceValue, planOptions, paidOptions, usageLine, backendModelChoices, backendModelName } from "./voice-settings-model.js";
 import { providersValue } from "./providers-model.js";
@@ -562,12 +566,25 @@ function useVoiceSettings(active) {
   const save = (patch) => api("PATCH", "/api/voice/settings", patch)
     .then((next) => setStatus(next))
     .catch(() => addToast({ title: "Could not save the voice setting", detail: "Try again.", type: "error" }));
-  return { status, loaded, save, models };
+  // The calls block is written one change at a time from the confirmed block.
+  const latest = useRef(null);
+  latest.current = status;
+  const writer = useRef(null);
+  if (!writer.current) {
+    writer.current = createCallsWriter({
+      getCalls: () => latest.current?.calls,
+      send: (patch) => api("PATCH", "/api/voice/settings", patch),
+      onStatus: (next) => { latest.current = next; setStatus(next); },
+      onError: () => addToast({ title: "Could not save the voice setting", detail: "Try again.", type: "error" }),
+    });
+  }
+  const saveCalls = (change) => writer.current.write(change);
+  return { status, loaded, save, saveCalls, models };
 }
 
 // Calls: which plan a call uses, which paid provider is offered when
 // the plan fails (only ever on a tap), and what recent calls measured.
-export function VoicePage({ state, onProviders, onModel }) {
+export function VoicePage({ state, onProviders, onModel, onEditOwner }) {
   const { status, loaded, save, models = [] } = state;
   if (loaded && !status) return <p class="zl-set-empty">Voice settings are unavailable on this server.</p>;
   const plans = planOptions(status);
@@ -622,6 +639,7 @@ export function VoicePage({ state, onProviders, onModel }) {
           pageLabel="Requests run on"
         />
       )}
+      <OwnerCallsSettings state={state} onEditOwner={onEditOwner} />
       <span class="zl-set-k is-page">Recent calls</span>
       {recent.length === 0 ? (
         <p class="zl-set-empty">No calls since this server started.</p>
@@ -1047,6 +1065,13 @@ export function GlobalSettings({
   const saved = useSavedSecrets(open);
   const voiceSettings = useVoiceSettings(open);
 
+  // A row of Calls from owners opens that owner's own page, where its level lives.
+  const editOwner = (owner) => {
+    if (!openOwnerConversation(owner)) return;
+    openSessionPanel(owner.session_id, "ownerEdit");
+    onClose?.();
+  };
+
   const [push, setPush] = useState(getPushState());
   useEffect(() => subscribePushState(setPush), []);
   const pushOn = push === "subscribed";
@@ -1156,7 +1181,7 @@ export function GlobalSettings({
             {page === "subagent-models" && <SubagentModelsPage state={subagents} />}
             {page === "devices" && <DevicesPage state={devices} onClose={onClose} />}
             {page === "saved-secrets" && <SavedSecretsPage state={saved} />}
-            {page === "voice" && <VoicePage state={voiceSettings} onProviders={() => setPage("providers")} onModel={() => setPage("voice-model")} />}
+            {page === "voice" && <VoicePage state={voiceSettings} onProviders={() => setPage("providers")} onModel={() => setPage("voice-model")} onEditOwner={editOwner} />}
             {page === "voice-model" && <VoiceModelPage state={voiceSettings} onDone={() => setPage("voice")} />}
             {page === "providers" && (
               <ProvidersPage

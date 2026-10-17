@@ -148,6 +148,7 @@
 //     waypoint gutter carry the time where it is read, and a `tick` row between
 //     turns would be a third place saying the same thing.
 
+import { callBlockModel } from './call-requests-model.js';
 import {
   toolInputLine,
   toolPath,
@@ -1174,6 +1175,22 @@ function toLedgerRow(msg) {
     row.out = add || del ? `+${add} −${del}` : '';
     delete row.echo;
     return row;
+  }
+  // An owner's request to talk is one compact line: answered, or missed and why,
+  // with its reason. The written question that follows is the ordinary card.
+  if (name.toLowerCase() === 'request_call' && msg.callRequest) {
+    const mark = callBlockModel({ call_request: msg.callRequest });
+    if (mark) {
+      row.toolLabel = mark.title;
+      row.arg = { text: mark.reason };
+      row.argTail = false;
+      if (mark.reason) row.detail = mark.reason;
+      // A missed or written call is not a success: amber mark, like a rejection.
+      row.status = mark.answered ? 'ok' : 'warn';
+      row.out = '';
+      delete row.echo;
+      return row;
+    }
   }
   if (body && !row.history) row.body = body;
   // The tool currently in flight (status running/generating) is marked `live`

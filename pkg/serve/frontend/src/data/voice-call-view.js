@@ -18,7 +18,11 @@ export function callStatus(call, name = '') {
     case 'consulting': return name ? `Asking ${name}` : 'Asking the session';
     case 'ending': return 'Saving the call…';
     case 'ended': return call.message || 'Call ended';
-    case 'failed': return call.message || 'The call could not start.';
+    case 'failed':
+      if (call.callRequestId && call.error === 'plan_unavailable') {
+        return `The call could not connect. ${name || call.name || 'The owner'}'s question is waiting in writing.`;
+      }
+      return call.message || 'The call could not start.';
     default: return '';
   }
 }
@@ -34,7 +38,7 @@ const NOT_RETRYABLE = new Set(['no_plan', 'credentials', 'unauthorized', 'forbid
 // retryAction is the one primary action of a plan failure: call again on the
 // plan, which costs nothing extra.
 export function retryAction(call) {
-  if (call?.phase !== 'failed' || call.error !== 'plan_unavailable' || NOT_RETRYABLE.has(call.reason)) return null;
+  if (call?.phase !== 'failed' || call.callRequestId || call.error !== 'plan_unavailable' || NOT_RETRYABLE.has(call.reason)) return null;
   return { label: 'Call again' };
 }
 

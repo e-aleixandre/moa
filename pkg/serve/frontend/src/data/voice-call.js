@@ -51,6 +51,7 @@ const START_COPY = {
   session_not_found: 'This conversation is no longer open. Reopen it and call again.',
   shutting_down: 'moa is restarting. Call again in a moment.',
   unauthenticated: 'Sign in to moa again, then call.',
+  request_not_live: 'That call is no longer waiting. Its question is in the conversation.',
   unknown_provider: 'That voice provider is not available. Pick another in Settings → Calls.',
   microphone: 'Allow the microphone for moa, then call again.',
   network: 'Could not reach moa. Check the connection and call again.',
@@ -93,6 +94,7 @@ function initialState(sessionId) {
     billing: null,
     billingLabel: '',
     paidOption: null,
+    callRequestId: '',
     error: '',
     reason: '',
     message: '',
@@ -141,7 +143,7 @@ export class VoiceCallController {
 
   // start opens a call. Without provider the server picks the plan; a paid
   // provider is only ever passed here by the user's explicit choice.
-  async start({ provider } = {}) {
+  async start({ provider, callRequestId } = {}) {
     if (this.s.active) return;
     const gen = ++this.gen;
     if (this.createAudio) this.audio = this.createAudio();
@@ -150,9 +152,11 @@ export class VoiceCallController {
       ...initialState(this.sessionId),
       phase: 'starting',
       provider: provider || '',
+      callRequestId: callRequestId || '',
     });
     const body = { session_id: this.sessionId };
     if (provider) body.provider = provider;
+    if (callRequestId) body.call_request_id = callRequestId;
     let res;
     let data = null;
     try {
@@ -168,7 +172,8 @@ export class VoiceCallController {
       const reason = typeof data?.reason === 'string' ? data.reason : '';
       // Only a plan failure may offer the paid alternative, and only one the
       // server named as usable; it is never taken from here.
-      const offer = error === 'plan_unavailable' && typeof data?.paid_option?.provider === 'string'
+      // An owner's request never offers it: it already became a written question.
+      const offer = !callRequestId && error === 'plan_unavailable' && typeof data?.paid_option?.provider === 'string'
         && data.paid_option.provider.endsWith('-api')
         ? { provider: data.paid_option.provider, billing: data.paid_option.billing || null }
         : null;

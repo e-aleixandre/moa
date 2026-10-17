@@ -44,9 +44,21 @@ export function ownersHealth(state) {
   return { status: 'ready' };
 }
 
+// An owner write is confirmed with its own answer; a GET that started before
+// it may carry the roster as it was (an old level, or not yet the owner) and
+// is dropped whole: the projection already holds the write, and the next
+// load brings the rest. Revoking never waits for a GET.
+let rosterGeneration = 0;
+
+export function noteOwnerWriteConfirmed() {
+  rosterGeneration += 1;
+}
+
 export async function loadOwners() {
+  const started = rosterGeneration;
   try {
     const list = await api('GET', '/api/owners');
+    if (rosterGeneration !== started) return;
     patch({ list: Array.isArray(list) ? list : [], loaded: true, error: null, retrying: false });
   } catch (e) {
     // The previous list keeps saying what is still true; only the health moves.
@@ -65,6 +77,7 @@ export async function retryOwners() {
 // works on one it knows.
 export async function createOwner({ root, name, model, thinking, avatar }) {
   const info = await api('POST', '/api/owners', { root, name, model, thinking, avatar });
+  noteOwnerWriteConfirmed();
   await loadOwners();
   await loadSessions();
   if (info?.session_id) openOwnerConversation(info);
@@ -78,6 +91,7 @@ export async function updateOwner(id, { name, avatar, can_send_tasks_to }) {
   // Only when it changed (ownerEditBody): omitted means unchanged.
   if (can_send_tasks_to) body.can_send_tasks_to = can_send_tasks_to;
   const info = await api('PATCH', `/api/owners/${id}`, body);
+  noteOwnerWriteConfirmed();
   await loadOwners();
   await loadSessions();
   return info;

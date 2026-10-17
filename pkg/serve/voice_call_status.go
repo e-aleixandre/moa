@@ -31,6 +31,11 @@ type voiceStatus struct {
 	Providers    []voiceProviderStatus `json:"providers"`
 	ActiveCalls  int                   `json:"active_calls"`
 	Recent       []voiceUsage          `json:"recent"` // newest first
+	// Calls are the owner-call settings; OwnerCallsPaidProvider is the paid
+	// provider whose cost activating an owner needs accepted when no plan is
+	// signed in ("" with a plan, or with no paid key at all).
+	Calls                  core.VoiceCallsConfig `json:"calls"`
+	OwnerCallsPaidProvider voice.ProviderID      `json:"owner_calls_paid_provider,omitempty"`
 }
 
 // voiceRecentCalls bounds the usage kept in memory for Settings.
@@ -160,7 +165,10 @@ func (m *Manager) ActiveVoiceCalls() int {
 func (r *voiceCallRegistry) status() voiceStatus {
 	cfg := voiceSettings()
 	out := voiceStatus{Provider: cfg.Provider, PaidProvider: cfg.PaidProvider, BackendModel: cfg.BackendModel,
-		Providers: []voiceProviderStatus{}, ActiveCalls: r.mgr.ActiveVoiceCalls(), Recent: r.recentUsage()}
+		Providers: []voiceProviderStatus{}, ActiveCalls: r.mgr.ActiveVoiceCalls(), Recent: r.recentUsage(), Calls: cfg.Calls}
+	if !r.mgr.voicePlanSignedIn() {
+		out.OwnerCallsPaidProvider = r.mgr.ownerCallsPaidProvider()
+	}
 	if p, ok := r.defaultPlan(); ok {
 		out.Default = p
 	}
@@ -188,6 +196,8 @@ func (r *voiceCallRegistry) handleSettings(w http.ResponseWriter, req *http.Requ
 		Provider     *string `json:"provider"`
 		PaidProvider *string `json:"paid_provider"`
 		BackendModel *string `json:"backend_model"`
+		// Calls replaces the owner-call settings whole.
+		Calls *core.VoiceCallsConfig `json:"calls"`
 	}
 	if err := json.NewDecoder(io.LimitReader(req.Body, maxJSONBodySize)).Decode(&in); err != nil {
 		voiceError(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
@@ -223,6 +233,12 @@ func (r *voiceCallRegistry) handleSettings(w http.ResponseWriter, req *http.Requ
 			return
 		}
 	}
+	if in.Calls != nil {
+		if code := validCallsSettings(*in.Calls); code != "" {
+			voiceError(w, http.StatusBadRequest, map[string]any{"error": code})
+			return
+		}
+	}
 	r.mgr.configMutationMu.Lock()
 	err := core.SaveGlobalConfig(func(cfg *core.MoaConfig) {
 		v := core.VoiceConfig{}
@@ -238,7 +254,10 @@ func (r *voiceCallRegistry) handleSettings(w http.ResponseWriter, req *http.Requ
 		if model != nil {
 			v.BackendModel = *model
 		}
-		if v == (core.VoiceConfig{}) {
+		if in.Calls != nil {
+			v.Calls = *in.Calls
+		}
+		if v.Provider == "" && v.PaidProvider == "" && v.BackendModel == "" && v.Calls.RingSeconds == 0 && v.Calls.PausedUntil == "" && v.Calls.Hours == nil {
 			cfg.Voice = nil
 		} else {
 			cfg.Voice = &v
@@ -292,4 +311,24 @@ func handleActivity(m *Manager) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, m.activity())
 	}
+}
+
+// validCallsSettings returns the error code of an invalid calls block.
+func validCallsSettings(c core.VoiceCallsConfig) string {
+	if c.RingSeconds != 0 && (c.RingSeconds < 10 || c.RingSeconds > 120) {
+		return "invalid_ring_seconds"
+	}
+	if c.PausedUntil != "" {
+		if _, err := time.Parse(time.RFC3339, c.PausedUntil); err != nil {
+			return "invalid_paused_until"
+		}
+	}
+	if h := c.Hours; h != nil {
+		_, ok1 := parseHHMM(h.From)
+		_, ok2 := parseHHMM(h.Until)
+		if _, err := time.LoadLocation(h.TZ); !ok1 || !ok2 || err != nil || h.TZ == "" || h.From == h.Until {
+			return "invalid_hours"
+		}
+	}
+	return ""
 }

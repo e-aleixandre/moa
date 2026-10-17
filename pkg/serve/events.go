@@ -142,6 +142,8 @@ type LiveToolInitData struct {
 	Images []core.Content `json:"images,omitempty"`
 	// PatchFiles is an apply_patch's per-file diff record (see ToolEndData).
 	PatchFiles any `json:"patch_files,omitempty"`
+	// CallRequest is a request_call's outcome record (absent for other tools).
+	CallRequest any `json:"call_request,omitempty"`
 }
 
 // SubagentInitData describes one live subagent job for reconnecting clients
@@ -275,6 +277,8 @@ type ToolEndData struct {
 	// and the unified diff of what was written (bounded by the tool). Display
 	// only; the model's result text is just the M/A/D list.
 	PatchFiles any `json:"patch_files,omitempty"`
+	// CallRequest is a request_call's outcome record (absent for other tools).
+	CallRequest any `json:"call_request,omitempty"`
 	// Images are stored-image references (never bytes) the client fetches from
 	// the session's attachment endpoint, same keys as history content blocks.
 	Images []core.Content `json:"images,omitempty"`
