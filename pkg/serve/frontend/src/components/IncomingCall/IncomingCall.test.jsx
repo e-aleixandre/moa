@@ -50,7 +50,13 @@ test("call level: three radios, Never by default", () => {
   const radios = find(tree, (n) => n.props?.role === "radio");
   expect(radios.map(text)).toEqual(["Never", "Ask first", "Ring"]);
   expect(radios.map((n) => n.props["aria-checked"])).toEqual([true, false, false]);
-  expect(find(tree, (n) => n.type === "p").map(text)).toContain("Ask first: urgent notification, no ring. Ring: it rings.");
+  expect(find(tree, (n) => n.type === "p").map(text)).toContain("This owner won't ask to call you.");
+});
+
+test("call level: the hint describes only the chosen level", () => {
+  const hint = (call_level) => find(CallLevelField({ owner: { id: "o1", name: "Infra", call_level }, status: {} }), (n) => n.props?.class === "ow-hint").map(text);
+  expect(hint("ask_first")).toEqual(["When it wants to talk, you get a notification. Call back if you want."]);
+  expect(hint("ring")).toEqual(["When it wants to talk, your phone rings."]);
 });
 
 test("incoming: a failed Write shows a recoverable message on the card", () => {

@@ -6,7 +6,7 @@ import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { ownerState } from "../../data/owners-model.js";
 import {
   PAUSE_OPTIONS, RING_DEFAULT, RING_MAX, RING_MIN, deviceTimeZone, hoursBlock,
-  ownerCallsRow, pauseUntil, pausedLabel, pausedNow, ringSecondsValue, CALL_LEVEL_HELP,
+  ownerCallsRow, pauseUntil, pausedLabel, pausedNow, ringSecondsValue,
 } from "../../data/owner-calls.js";
 import "./OwnerCallsSettings.css";
 
@@ -142,7 +142,7 @@ export function OwnerCallsSettings({ state, onEditOwner }) {
         <p class="zl-set-empty">No owners yet.</p>
       ) : (
         <>
-          <p class="ow-hint oc-help">{CALL_LEVEL_HELP} Tap an owner to change it.</p>
+          <p class="ow-hint oc-help">Tap an owner to change whether it can call you.</p>
           <ul class="oc-owners">
             {owners.map((o) => {
               const row = ownerCallsRow(o);

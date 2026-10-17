@@ -14,7 +14,11 @@ export const CALL_LEVELS = [
   { id: 'ring', label: 'Ring' },
 ];
 
-export const CALL_LEVEL_HELP = 'Ask first: urgent notification, no ring. Ring: it rings.';
+export const CALL_LEVEL_HELP = {
+  never: "This owner won't ask to call you.",
+  ask_first: 'When it wants to talk, you get a notification. Call back if you want.',
+  ring: 'When it wants to talk, your phone rings.',
+};
 export const NO_PLAN_COPY = 'Sign in to a voice plan under Providers';
 
 export function addKeyCopy(provider) {
