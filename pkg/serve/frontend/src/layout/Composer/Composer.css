@@ -109,6 +109,48 @@
 }
 .zl-ta::placeholder { color: var(--zl-t4); }
 
+/* The field: the textarea plus the mirror that highlights @mentions behind it.
+   It takes over the textarea's seat in the slab (full row, first). The mirror
+   borrows .zl-ta for font, padding and line-height, so both wrap identically. */
+.zl-composer-field {
+  position: relative;
+  flex: 1 0 100%;
+  order: 1;
+  min-width: 0;
+}
+.zl-composer-field > .zl-ta:not(.zl-ta-mirror) {
+  position: relative;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+.zl-ta.zl-ta-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  min-height: 0;
+  max-height: none;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  color: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.zl-mention-mark {
+  color: transparent;
+  border-radius: 5px;
+  background: var(--zl-accent-med);
+  box-shadow: 0 0 0 2px var(--zl-accent-med);
+}
+.zl-mention-mark.is-session {
+  background: rgba(137, 180, 250, 0.22);
+  box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.22);
+}
+
 /* The control row. It FLOATS: no fill of its own and no divider, so it reads
    as the same plane as the field rather than as a panel bolted under it.
    `+` at the left, the mic and Send at the right — two separate buttons with
@@ -321,7 +363,7 @@
    The clouds are radial gradients, not a blur filter, and they drift on
    keyframes the compositor runs; script only scales and fades their parent.
    Colours are the page aurora's (tokens/shell.css), no peach. */
-.zl-composer.is-voice > :is(.zl-ta, .zl-controls, .attach-preview-strip, .cache-warn, .steer-hint) {
+.zl-composer.is-voice > :is(.zl-composer-field, .zl-controls, .attach-preview-strip, .cache-warn, .steer-hint) {
   position: relative;
 }
 .zl-aurora-wash {

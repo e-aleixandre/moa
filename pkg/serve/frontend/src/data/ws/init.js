@@ -32,6 +32,7 @@ export function mergeSteers(snapshot, local) {
     images: s.images || 0,
     // A task notice: shown in the queue, never handed back to the composer.
     non_recallable: !!s.non_recallable,
+    ...(s.session_mentions?.length ? { session_mentions: s.session_mentions } : {}),
     confirmed: true,
   }));
   const serverIds = new Set(server.map(s => s.id));

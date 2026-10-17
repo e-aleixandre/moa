@@ -589,22 +589,29 @@ func registerTreeHandlers(sctx *SessionContext) {
 		return nil
 	})
 
-	b.OnQuery(func(q GetBranchMessage) (core.Message, error) {
+	branchOriginal := func(entryID string) (core.AgentMessage, error) {
 		if sctx.Tree == nil {
-			return core.Message{}, fmt.Errorf("branching not available (no session tree)")
+			return core.AgentMessage{}, fmt.Errorf("branching not available (no session tree)")
 		}
-		e, ok := sctx.Tree.Entry(q.EntryID)
+		e, ok := sctx.Tree.Entry(entryID)
 		if !ok || e.Type != session.EntryMessage || e.Message.Role != "user" {
-			return core.Message{}, fmt.Errorf("entry %s is not a user message", q.EntryID)
+			return core.AgentMessage{}, fmt.Errorf("entry %s is not a user message", entryID)
 		}
+		msg := e.Message
+		msg.Custom = core.CloneArgs(msg.Custom)
 		// What goes back to the composer is what the user typed. For an invoked
 		// skill that is the slash command, never the SKILL.md it expanded to.
-		if command, ok := core.SkillInvocation(e.Message.Custom); ok {
-			msg := e.Message.Message
+		if command, ok := core.SkillInvocation(msg.Custom); ok {
 			msg.Content = []core.Content{core.TextContent(command)}
-			return msg, nil
 		}
-		return e.Message.Message, nil
+		return msg, nil
+	}
+	b.OnQuery(func(q GetBranchMessage) (core.Message, error) {
+		msg, err := branchOriginal(q.EntryID)
+		return msg.Message, err
+	})
+	b.OnQuery(func(q GetBranchOriginal) (core.AgentMessage, error) {
+		return branchOriginal(q.EntryID)
 	})
 
 	b.OnQuery(func(q GetDisplayMessages) ([]core.AgentMessage, error) {

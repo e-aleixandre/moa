@@ -134,8 +134,9 @@ marked.use({ renderer });
 // rest is switched off with tokenizers that return nothing (marked falls back
 // to its default only on `false`).
 const off = () => undefined;
-const userMarked = new Marked({ gfm: true });
-userMarked.use({
+function createUserMarked() {
+const m = new Marked({ gfm: true });
+m.use({
   renderer,
   tokenizer: {
     // block: keep fences, paragraphs and blank lines
@@ -145,7 +146,7 @@ userMarked.use({
     escape: off, tag: off, reflink: off, del: off, br: off,
   },
 });
-userMarked.use({
+m.use({
   renderer: {
     // Whitespace is the user's: blank lines and trailing newlines come back
     // verbatim, and text is escaped in full (marked would keep `&amp;`).
@@ -168,6 +169,38 @@ userMarked.use({
     token.text = token.raw;
     delete token.tokens;
   },
+});
+return m;
+}
+const userMarked = createUserMarked();
+
+
+// @owner / @session mentions in a user message. Which labels are mentions is
+// the message's own (the block it carries, util/mentions.js), so they reach the
+// tokenizer through `mentionLabels` for the one synchronous parse. Being an
+// INLINE extension it never fires inside code spans or fences. The span's class
+// carries the mention's index; the waypoint paints the pill into it
+// (components/UserWaypoint/MentionedText.jsx).
+let mentionLabels = null;
+const MENTION_WORD = /[\p{L}\p{N}_]/u;
+const userMentionMarked = createUserMarked();
+userMentionMarked.use({
+  extensions: [{
+    name: 'mention',
+    level: 'inline',
+    start: (src) => src.indexOf('@'),
+    tokenizer(src) {
+      if (!mentionLabels || src[0] !== '@') return undefined;
+      for (const { label, index } of mentionLabels) {
+        const raw = `@${label}`;
+        if (!src.startsWith(raw)) continue;
+        if (src.length > raw.length && MENTION_WORD.test(src[raw.length])) continue;
+        return { type: 'mention', raw, index };
+      }
+      return undefined;
+    },
+    renderer: (token) => `<span class="md-mention md-mention-${token.index}">${escapeHtml(token.raw)}</span>`,
+  }],
 });
 
 // Copy handler via event delegation, so code blocks carry no inline onclick —
@@ -303,7 +336,22 @@ export function renderMarkdown(text) {
 
 // Same sanitizer and the same bounded cache as assistant prose; the key is
 // namespaced because identical text renders differently in user mode.
-export function renderUserMarkdown(text) {
+// `mentions` ([{ label }]) are the message's @owner/@session mentions, painted
+// as `.md-mention` spans; without them the render is exactly the plain one.
+export function renderUserMarkdown(text, mentions) {
+  if (mentions?.length) {
+    const labels = mentions
+      .map(({ label }, index) => ({ label, index }))
+      .sort((a, b) => b.label.length - a.label.length);
+    return renderCached(`\u0000usermention:${JSON.stringify(labels)}:${text}`, text, (t) => {
+      mentionLabels = labels;
+      try {
+        return sanitizeRendered(userMentionMarked.parse(t));
+      } finally {
+        mentionLabels = null;
+      }
+    }, true);
+  }
   // A user message is stable, so unlike tool output it is cached whatever its
   // size (the byte ceiling still bounds memory).
   return renderCached(`\u0000user:${text}`, text, (t) => sanitizeRendered(userMarked.parse(t)), true);

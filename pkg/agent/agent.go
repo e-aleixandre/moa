@@ -686,12 +686,21 @@ func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, e
 // so subscribers only learn about it once it is genuinely in history — see
 // announceUserMessage.
 func (a *Agent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error) {
+	return a.SendWithMsgIDCustom(ctx, prompt, msgID, nil)
+}
+
+// SendWithMsgIDCustom is SendWithMsgID for a human message that carries benign
+// metadata (the session mentions receipt). Unlike SendWithCustom it keeps the
+// message a plain announced prompt: the Custom only rides along to the
+// transcript.
+func (a *Agent) SendWithMsgIDCustom(ctx context.Context, prompt, msgID string, custom map[string]any) ([]core.AgentMessage, error) {
 	var appended *core.AgentMessage
 	msgs, err := a.executeAnnounced(ctx, func() {
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
 		}
 		msg := core.WrapMessage(core.NewUserMessage(prompt))
+		msg.Custom = core.CloneArgs(custom)
 		if msgID != "" {
 			msg.MsgID = msgID
 		} else {
@@ -824,7 +833,7 @@ func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content
 			a.state.Model = a.config.Model
 		}
 		msg := core.WrapMessage(core.NewUserMessageWithContent(cc))
-		msg.Custom = custom
+		msg.Custom = core.CloneArgs(custom)
 		if msgID != "" {
 			msg.MsgID = msgID
 		} else {

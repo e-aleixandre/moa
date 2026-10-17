@@ -13,6 +13,10 @@ type rewoundMessage struct {
 	// live on disk (native budget full, oversized image) and the message only
 	// kept a note with their path, not a stored attachment.
 	Unavailable []string `json:"unavailable,omitempty"`
+	// SessionMentions are the sessions the original message explicitly
+	// selected, from its server-minted receipt only (never from its text).
+	// Handing them back does not grant anything: the resend is a new message.
+	SessionMentions []string `json:"session_mentions,omitempty"`
 }
 
 type rewoundAttachment struct {

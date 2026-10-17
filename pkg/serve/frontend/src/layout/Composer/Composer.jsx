@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
 import { Paperclip, X, Mic, Loader2, PhoneCall, PhoneOff, TriangleAlert } from "lucide-preact";
-import { FileSuggestions } from "../../components/FileSuggestions/FileSuggestions.jsx";
+import { MentionSuggestions } from "../../components/MentionSuggestions/MentionSuggestions.jsx";
+import { MentionMirror } from "./MentionMirror.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import {
@@ -20,10 +21,14 @@ import { addToast } from "../../data/notifications.js";
 import { sendMayClear } from "../../data/composer-queue.js";
 import {
   slashSuggestions, findMentionToken, computeMentionInsertion, normalizeDashes,
+  ownerSuggestions, sessionSuggestions, flattenMentionGroups, computeLabelInsertion, pickMention,
 } from "../../data/composer-suggest.js";
+import {
+  backspaceMention, mentionsBlock, sessionMentionIds, withLiveMeta,
+} from "../../data/util/mentions.js";
 import { useSessionSkills } from '../../hooks/useSessionSkills.js';
 import { interceptSecretCommand } from "../../data/secrets.js";
-import { loadDraft, saveDraft } from "../../data/composer-draft.js";
+import { loadDraft, saveDraft, loadDraftMentions, saveDraftMentions } from "../../data/composer-draft.js";
 import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/command-policy.js";
 import { processFile } from "../../data/util/attachments.js";
 import { formatShortcut } from "../../data/util/shortcut.js";
@@ -114,6 +119,15 @@ function getHistory(id) {
 }
 const MAX_HISTORY = 100;
 
+// The mirror paints behind the textarea and has to show the same slice of text:
+// it follows the textarea's scroll and is as wide as its text area (a visible
+// scrollbar takes width the text then wraps around).
+function syncMirrorGeometry(el, mirror) {
+  if (!el || !mirror) return;
+  if (el.clientWidth) mirror.style.width = `${el.clientWidth}px`;
+  mirror.scrollTop = el.scrollTop || 0;
+}
+
 export function keepCommandSuggestionVisible(list, index) {
   const item = list?.children?.[index];
   if (!item) return;
@@ -162,10 +176,24 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // Writes go through writeComposer so a new one cannot forget to bump it —
   // the previous fix listed the routes by hand and missed four.
   const composerEpoch = useRef(0);
+  // The text the highlight mirror paints, and the @owner/@session mentions the
+  // draft holds. The textarea stays the source of truth for the text; the
+  // mirror copy exists only so the highlight re-renders. `draftMentionsRef` is
+  // the synchronous read for handlers, the state is for painting.
+  const [mirrorText, setMirrorText] = useState("");
+  const [draftMentions, setDraftMentionsState] = useState([]);
+  const draftMentionsRef = useRef([]);
+  const mirrorRef = useRef(null);
+  const setDraftMentions = useCallback((next) => {
+    draftMentionsRef.current = next;
+    setDraftMentionsState(next);
+    saveDraftMentions(sessionId, next);
+  }, [sessionId]);
   const writeComposer = useCallback((el, value) => {
     if (!el) return;
     el.value = value;
     composerEpoch.current += 1;
+    setMirrorText(value);
   }, []);
 
 
@@ -174,10 +202,13 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   const [canTranscribe, setCanTranscribe] = useState(false);
   const [cmdSuggestions, setCmdSuggestions] = useState(null); // null = hidden
   const [cmdCursor, setCmdCursor] = useState(0);
-  const [fileSuggestions, setFileSuggestions] = useState(null); // [{path, is_dir}] or null
-  const [fileCursor, setFileCursor] = useState(0);
+  // The @ menu: { owners, sessions, files } — each group arrives on its own —
+  // or null when hidden. `mentionItems` is the same data laid out in menu order.
+  const [mentionGroups, setMentionGroups] = useState(null);
+  const [mentionCursor, setMentionCursor] = useState(0);
+  const mentionItems = flattenMentionGroups(mentionGroups);
   const cmdSuggestionsRef = useRef(null);
-  const fileAbortRef = useRef(null);
+  const mentionAbortRef = useRef([]);
   const fileDebounceRef = useRef(null);
 
   useEffect(() => {
@@ -219,6 +250,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     if (!el) return;
     el.style.height = "0";
     el.style.height = Math.min(el.scrollHeight, 132) + "px";
+    syncMirrorGeometry(el, mirrorRef.current);
   }, []);
 
   // A scheduled draft leaves the box once the server has it, and only if the
@@ -242,9 +274,13 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     if (!el) return;
     el.value = loadDraft(sessionId);
     inputValueRef.current = el.value;
+    setMirrorText(el.value);
+    const mentions = steer ? [] : loadDraftMentions(sessionId);
+    draftMentionsRef.current = mentions;
+    setDraftMentionsState(mentions);
     setHasText(!!el.value.trim());
     setCmdSuggestions(null);
-    setFileSuggestions(null);
+    setMentionGroups(null);
     setAttachments([]);
     autoResize();
   }, [sessionId, autoResize]);
@@ -285,50 +321,61 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     setCmdCursor(0);
   }, [goalFlags, skills, refreshSkills]);
 
-  // --- File suggestions (@mention) ---
-  const cancelFileRequest = useCallback(() => {
-    if (fileAbortRef.current) {
-      fileAbortRef.current.abort();
-      fileAbortRef.current = null;
-    }
+  // --- @ menu: Owners, Sessions, Files ---
+  const cancelMentionRequests = useCallback(() => {
+    for (const controller of mentionAbortRef.current) controller.abort();
+    mentionAbortRef.current = [];
   }, []);
 
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
-      cancelFileRequest();
+      cancelMentionRequests();
       clearTimeout(fileDebounceRef.current);
     };
-  }, [cancelFileRequest]);
+  }, [cancelMentionRequests]);
 
-  const updateFileSuggestions = useCallback(() => {
+  // Each group paints when ITS request lands: a slow file listing never holds
+  // back the owners (a store read, so instant) or the sessions.
+  const updateMentionSuggestions = useCallback(() => {
     const el = textareaRef.current;
     if (!el || !sessionId) return;
     const mention = findMentionToken(el.value, el.selectionStart);
     if (!mention) {
-      cancelFileRequest();
-      setFileSuggestions(null);
+      cancelMentionRequests();
+      setMentionGroups(null);
       return;
     }
 
-    // Abort previous request.
-    cancelFileRequest();
-    const controller = new AbortController();
-    fileAbortRef.current = controller;
+    cancelMentionRequests();
+    // "@dir/" is a folder being browsed: files only. A steer box writes to a
+    // subagent, which has nobody to mention.
+    const wantsPeople = !steer && !mention.filter.includes('/');
+    const owners = wantsPeople
+      ? ownerSuggestions(store.get().owners?.list, mention.filter, { excludeSessionId: sessionId })
+      : [];
+    setMentionGroups((prev) => ({ owners, sessions: wantsPeople ? (prev?.sessions || []) : [], files: prev?.files || [] }));
+    setMentionCursor(0);
 
-    fetch(`/api/sessions/${sessionId}/files?q=${encodeURIComponent(mention.filter)}&limit=50`, {
-      signal: controller.signal,
-      headers: { 'X-Moa-Request': '1' },
-    })
-      .then(r => r.json())
-      .then(items => {
-        if (!controller.signal.aborted) {
-          setFileSuggestions(items.length > 0 ? items : null);
-          setFileCursor(0);
-        }
+    const request = (path, onRows) => {
+      const controller = new AbortController();
+      mentionAbortRef.current.push(controller);
+      fetch(`/api/sessions/${sessionId}/${path}`, {
+        signal: controller.signal,
+        headers: { 'X-Moa-Request': '1' },
       })
-      .catch(() => {}); // aborted or network error
-  }, [sessionId, cancelFileRequest]);
+        .then(r => (r.ok ? r.json() : []))
+        .then(rows => { if (!controller.signal.aborted) onRows(Array.isArray(rows) ? rows : []); })
+        .catch(() => {}); // aborted or network error
+    };
+    const q = encodeURIComponent(mention.filter);
+    request(`files?q=${q}&limit=50`, (files) => setMentionGroups((g) => ({ ...(g || {}), files })));
+    if (wantsPeople) {
+      request(`mention-sessions?q=${q}&limit=5`, (rows) => (
+        setMentionGroups((g) => ({ ...(g || {}), sessions: sessionSuggestions(rows) }))
+      ));
+    }
+  }, [sessionId, steer, cancelMentionRequests]);
 
   const acceptFileMention = useCallback((path, isDir) => {
     const el = textareaRef.current;
@@ -336,14 +383,34 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     const { value, cursor, retrigger } = computeMentionInsertion(el.value, el.selectionStart, path, isDir);
     writeComposer(el, value);
     el.selectionStart = el.selectionEnd = cursor;
-    setFileSuggestions(null);
-    if (retrigger) setTimeout(updateFileSuggestions, 50); // navigate into directory
+    setMentionGroups(null);
+    if (retrigger) setTimeout(updateMentionSuggestions, 50); // navigate into directory
     el.dispatchEvent(new Event('input', { bubbles: true }));
     // Entering a folder keeps browsing: a programmatic focus() would raise the
     // iOS keyboard on every pick. The menu's mousedown preventDefault already
     // leaves an open keyboard open, so only a final file takes focus back.
     if (!isDir) el.focus();
-  }, [updateFileSuggestions]);
+  }, [updateMentionSuggestions]);
+
+  // An owner or a session keeps its "@" and gets its label plus a space. Like a
+  // folder it never calls focus(): the menu's mousedown preventDefault already
+  // leaves the keyboard as it was.
+  const acceptLabelMention = useCallback((item) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const mention = pickMention(item, draftMentionsRef.current);
+    const { value, cursor } = computeLabelInsertion(el.value, el.selectionStart, mention.label);
+    writeComposer(el, value);
+    el.selectionStart = el.selectionEnd = cursor;
+    setMentionGroups(null);
+    setDraftMentions([...draftMentionsRef.current.filter((m) => m.label !== mention.label), mention]);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, [writeComposer, setDraftMentions]);
+
+  const acceptMention = useCallback((item) => {
+    if (item.kind === 'file') acceptFileMention(item.path, item.is_dir);
+    else acceptLabelMention(item);
+  }, [acceptFileMention, acceptLabelMention]);
 
   const acceptSuggestion = useCallback((cmd) => {
     const el = textareaRef.current;
@@ -447,6 +514,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       const el = textareaRef.current;
       if (el) {
         writeComposer(el, appendSharedText(el.value, drop.text));
+        // A rewound message brings its mentions back highlighted; the server
+        // vouched for the sessions among them (data/rewind-edit.js).
+        if (!steer && drop.mentions?.length) {
+          const keep = draftMentionsRef.current.filter((m) => !drop.mentions.some((d) => d.label === m.label));
+          setDraftMentions([...keep, ...drop.mentions]);
+        }
         setHasText(!!el.value.trim());
         saveDraft(sessionId, el.value);
         autoResize();
@@ -459,7 +532,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       }
     }
     if (drop.files?.length) addFiles(drop.files);
-  }, [drop, sessionId, steer, addFiles, autoResize, writeComposer]);
+  }, [drop, sessionId, steer, addFiles, autoResize, writeComposer, setDraftMentions]);
 
   const handlePaste = useCallback((e) => {
     const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));
@@ -505,10 +578,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       // accidentally typed value and must never enter composer history or its
       // persisted localStorage draft.
       el.value = secretCommand.composerDraft;
+      setMirrorText(el.value);
       saveDraft(sessionId, secretCommand.composerDraft);
       setHasText(false);
       setCmdSuggestions(null);
-      setFileSuggestions(null);
+      setMentionGroups(null);
       autoResize();
       if (atts.length > 0) {
         addToast({ title: 'Cannot attach files here', detail: 'Remove the attachments before storing secrets', type: 'info' });
@@ -547,10 +621,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         // this steer's to empty.
         if (!sendMayClear(steerEpoch, composerEpoch.current)) return;
         el.value = '';
+        setMirrorText('');
         saveDraft(sessionId, '');
         setHasText(false);
         setCmdSuggestions(null);
-        setFileSuggestions(null);
+        setMentionGroups(null);
         setAttachments([]);
         autoResize();
       } catch (e) {
@@ -581,10 +656,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       compositionRef.current = compositionSubmitted(compositionRef.current);
       el.value = '';
       inputValueRef.current = '';
+      setMirrorText('');
+      setDraftMentions([]);
       saveDraft(sessionId, '');
       setHasText(false);
       setCmdSuggestions(null);
-      setFileSuggestions(null);
+      setMentionGroups(null);
       setAttachments([]);
       autoResize();
     };
@@ -717,8 +794,25 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       return;
     }
 
+    // The agent gets the comment plus the block that says who each @mention
+    // is, built from what is STILL written (a hand-edited label is dropped) and
+    // with the roster's current title/state. Queue and steer carry the same
+    // text. Nothing mentioned, nothing appended: the text is what was typed.
+    const body = transformMessage ? transformMessage(text) : text;
+    const mentions = withLiveMeta(draftMentionsRef.current, {
+      owners: store.get().owners?.list,
+      sessions: store.get().sessions,
+    });
+    const block = mentionsBlock(text, mentions, { ownerConversation: session?.kind === 'owner' });
+    const sessionIds = block ? sessionMentionIds(text, mentions) : [];
+
     try {
-      await sendMessage(sessionId, transformMessage ? transformMessage(text) : text, atts);
+      await sendMessage(
+        sessionId,
+        block ? body.replace(/\s+$/, '') + block : body,
+        atts,
+        ...(sessionIds.length > 0 ? [{ sessionMentions: sessionIds }] : []),
+      );
       if (text) pushHistory(text);
       clearSentComposer();
       onSent?.();
@@ -728,7 +822,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       // reason (e.g. a 400) so it's not silent.
       addToast({ sessionId, title: 'Message not sent', detail: `${String(e.message || e)} Your text and attachments are still here; you can retry.`, type: 'error' });
     }
-  }, [sessionId, sessionState, attachments, pushHistory, autoResize, steer, onSecret, transformMessage, onSent]);
+  }, [sessionId, sessionState, session?.kind, attachments, pushHistory, autoResize, steer, onSecret, transformMessage, onSent, setDraftMentions]);
 
   const handleSend = useCallback(() => {
     setPlusMenuOpen(false);
@@ -895,28 +989,44 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       }
     }
 
-    // File suggestion navigation (takes priority over cmd suggestions).
-    if (fileSuggestions) {
+    // @ menu navigation (takes priority over cmd suggestions).
+    if (mentionItems.length > 0) {
+      const at = Math.min(mentionCursor, mentionItems.length - 1);
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setFileCursor(i => Math.max(0, i - 1));
+        setMentionCursor(Math.max(0, at - 1));
         return;
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setFileCursor(i => Math.min(fileSuggestions.length - 1, i + 1));
+        setMentionCursor(Math.min(mentionItems.length - 1, at + 1));
         return;
       }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
         e.preventDefault();
-        const item = fileSuggestions[fileCursor];
-        acceptFileMention(item.path, item.is_dir);
+        acceptMention(mentionItems[at]);
         return;
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        setFileSuggestions(null);
+        setMentionGroups(null);
         return;
+      }
+    }
+
+    // Backspace right after a complete @mention removes the whole mention.
+    if (e.key === 'Backspace' && draftMentionsRef.current.length > 0
+      && !e.isComposing && !compositionRef.current.composing) {
+      const el = textareaRef.current;
+      if (el && el.selectionStart === el.selectionEnd) {
+        const gone = backspaceMention(el.value, el.selectionStart, draftMentionsRef.current);
+        if (gone) {
+          e.preventDefault();
+          writeComposer(el, gone.value);
+          el.selectionStart = el.selectionEnd = gone.cursor;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          return;
+        }
       }
     }
 
@@ -1025,8 +1135,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       return;
     }
   }, [
-    sessionId, busy, fileSuggestions, fileCursor, cmdSuggestions, cmdCursor,
-    handleDequeueSteers, handleStop, dispatchContentSendActivation, acceptFileMention, acceptSuggestion,
+    sessionId, busy, mentionItems, mentionCursor, cmdSuggestions, cmdCursor, writeComposer,
+    handleDequeueSteers, handleStop, dispatchContentSendActivation, acceptMention, acceptSuggestion,
     cursorRow, totalRows, autoResize, updateSuggestions, recording, cancelVoice,
   ]);
 
@@ -1040,6 +1150,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       if (restored != null) {
         e.target.value = restored;
         inputValueRef.current = restored;
+        setMirrorText(restored);
         saveDraft(sessionId, restored);
         setHasText(!!restored.trim());
       }
@@ -1047,6 +1158,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       return;
     }
     inputValueRef.current = e.target.value;
+    setMirrorText(e.target.value);
     autoResize();
     updateSuggestions();
     // saveDraft recognizes /secret from its first line and removes any prior
@@ -1055,8 +1167,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     setHasText(!!e.target.value.trim());
     // File suggestions with debounce.
     clearTimeout(fileDebounceRef.current);
-    fileDebounceRef.current = setTimeout(updateFileSuggestions, 100);
-  }, [sessionId, autoResize, updateSuggestions, updateFileSuggestions]);
+    fileDebounceRef.current = setTimeout(updateMentionSuggestions, 100);
+  }, [sessionId, autoResize, updateSuggestions, updateMentionSuggestions]);
 
   const handleCompositionStart = useCallback(() => {
     compositionRef.current = compositionStarted(compositionRef.current);
@@ -1200,12 +1312,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         accept={ATTACH_ACCEPT}
         onChange={handleAttachChange}
       />
-      {fileSuggestions && !cmdSuggestions && (
-        <FileSuggestions
-          items={fileSuggestions}
-          cursor={fileCursor}
-          onSelect={acceptFileMention}
-          onHover={setFileCursor}
+      {mentionItems.length > 0 && !cmdSuggestions && (
+        <MentionSuggestions
+          items={mentionItems}
+          cursor={Math.min(mentionCursor, mentionItems.length - 1)}
+          onSelect={acceptMention}
+          onHover={setMentionCursor}
         />
       )}
       {cmdSuggestions && (
@@ -1224,6 +1336,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           ))}
         </div>
       )}
+      <div class="zl-composer-field">
+        <MentionMirror text={mirrorText} mentions={draftMentions} mirrorRef={mirrorRef} />
       <textarea
         ref={textareaRef}
         rows={1}
@@ -1238,7 +1352,9 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         onFocus={onFocusChange ? () => onFocusChange(true) : undefined}
         onBlur={onFocusChange ? () => onFocusChange(false) : undefined}
         readOnly={contentSendPending}
+        onScroll={() => syncMirrorGeometry(textareaRef.current, mirrorRef.current)}
       />
+      </div>
       {busy && hasText && (
         <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
       )}

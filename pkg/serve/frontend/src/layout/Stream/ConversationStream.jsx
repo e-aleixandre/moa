@@ -24,6 +24,8 @@ import { ProviderErrorAction } from "../../components/ProviderErrorAction/Provid
 import { turnFinalResponse } from "../../data/stream-model.js";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { parsePreviewReference } from "../../data/util/preview-reference.js";
+import { parseMentions } from "../../data/util/mentions.js";
+import { MentionedText } from "../../components/UserWaypoint/MentionedText.jsx";
 import { renderMarkdown, renderMarkdownWithCaret, renderUserMarkdown } from "../../data/util/markdown.js";
 import { retryHistoryHydration } from "../../data/api.js";
 import { openSession } from "../../data/tile-actions.js";
@@ -183,8 +185,12 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       // agent needs verbatim; the transcript paints it as a reference tied to
       // the message's spine and shows only the comment as text. Messages
       // without the block (and every older transcript) are untouched.
-      const parsed = parsePreviewReference(block.text);
-      const text = parsed ? parsed.comment : block.text;
+      // The @mentions block (util/mentions.js) is last, so it comes off first;
+      // its comment may still carry a preview reference. Neither is shown raw.
+      const mentioned = parseMentions(block.text);
+      const body = mentioned ? mentioned.comment : block.text;
+      const parsed = parsePreviewReference(body);
+      const text = parsed ? parsed.comment : body;
       // Your own messages rewind to just before them and come back to the
       // composer; the owner's and the parent agent's are not yours to edit.
       const rewindEditable = !block.fromOwner && !block.fromParent;
@@ -216,7 +222,9 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
         >
           {/* Presentation only: block.text (rewind preview, model input) is
               untouched. Same sanitizer as assistant prose via markdown.js. */}
-          {text && <div class="zl-prose wp-md" dangerouslySetInnerHTML={{ __html: renderUserMarkdown(text) }} />}
+          {text && (mentioned
+            ? <MentionedText text={text} mentions={mentioned.mentions} />
+            : <div class="zl-prose wp-md" dangerouslySetInnerHTML={{ __html: renderUserMarkdown(text) }} />)}
         </UserWaypoint>
       );
     }

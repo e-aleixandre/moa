@@ -1,5 +1,6 @@
 import { useRef } from "preact/hooks";
 import { recallActivates } from "../../data/composer-queue.js";
+import { plainMessageText } from "../../data/util/mentions.js";
 import "./QueuedTail.css";
 
 // QueuedTail — what you have already said, at the end of the thread.
@@ -64,7 +65,7 @@ export function QueuedTail({ queue, onBringBack }) {
       {items.map((m) => (
         <div class={`queued-trace${m.command ? " is-command" : ""}`} key={m.id}>
           <span class="queued-prefix" aria-hidden="true">›</span>
-          <span class="queued-text">{m.text}</span>
+          <span class="queued-text">{plainMessageText(m.text)}</span>
         </div>
       ))}
     </div>

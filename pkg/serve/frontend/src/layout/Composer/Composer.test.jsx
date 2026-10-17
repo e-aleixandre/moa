@@ -722,11 +722,11 @@ test("the voice wash is drawn only while dictating or during a live call", () =>
 // Picking a file still returns focus, as before.
 function mentionPick(isDir) {
   const src = require("node:fs").readFileSync(new URL("./Composer.jsx", import.meta.url), "utf8");
-  const slot = src.slice(0, src.indexOf("const [fileSuggestions")).split("useState(").length - 1;
+  const slot = src.slice(0, src.indexOf("const [mentionGroups")).split("useState(").length - 1;
   refs.length = 0;
   stateCalls = 0;
   stateOverrides.clear();
-  stateOverrides.set(slot, [{ path: "src", is_dir: true }, { path: "a.go", is_dir: false }]);
+  stateOverrides.set(slot, { files: [{ path: "src", is_dir: true }, { path: "a.go", is_dir: false }] });
   const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
   stateOverrides.clear();
   const menu = descendants(tree).find((n) => typeof n.type === "function" && n.props?.onSelect);
@@ -736,7 +736,7 @@ function mentionPick(isDir) {
     value: "@sr", selectionStart: 3, selectionEnd: 3, style: {}, scrollHeight: 24,
     focus() { focused += 1; }, dispatchEvent(e) { events.push(e.type); },
   };
-  menu.props.onSelect(isDir ? "src" : "a.go", isDir);
+  menu.props.onSelect(isDir ? { kind: "file", path: "src", is_dir: true } : { kind: "file", path: "a.go", is_dir: false });
   return { focused, textarea: refs[0].current, events };
 }
 
@@ -844,4 +844,102 @@ test("a call's minutes never touch the composer: owner and ordinary sessions kee
     if (hadStorage) Object.defineProperty(globalThis, "localStorage", hadStorage); else delete globalThis.localStorage;
     if (hadLocation) Object.defineProperty(globalThis, "location", hadLocation); else delete globalThis.location;
   }
+});
+
+// --- @owner / @session mentions ---------------------------------------------
+// The draft's mentions live in the ref initialised to an array (the only one).
+const draftMentionsRef = () => refs.find((r) => Array.isArray(r.current));
+const infra = { label: "Infra", type: "owner", id: "o1", meta: { root: "/work/infra" } };
+const fix = { label: "Fix login cookie", type: "session", id: "3f61a326c0e1aa", meta: { title: "Fix login cookie", state: "idle" } };
+
+async function sendWith(value, mentions, session = { state: "idle" }) {
+  refs.length = 0;
+  sent.length = 0;
+  sendResult = Promise.resolve();
+  const tree = Composer({ sessionId: "s1", session });
+  draftMentionsRef().current = mentions;
+  refs[0].current = { value, style: {}, scrollHeight: 24 };
+  descendants(tree).find((n) => n.type === "textarea").props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false,
+    isComposing: false, preventDefault() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  return sent[0];
+}
+
+test("a message with a live mention carries the block and the session ids", async () => {
+  const args = await sendWith("ask @Infra and read @Fix login cookie", [infra, fix]);
+  expect(args[1]).toContain("ask @Infra and read @Fix login cookie\n\n[Mentions · moa]\n");
+  expect(args[1]).toContain("@Infra = owner/o1 · project infra (/work/infra) · only the project's owner can send it tasks");
+  expect(args[1]).toContain("read it with read_session session_id=3f61a326c0e1aa");
+  expect(args[3]).toEqual({ sessionMentions: ["3f61a326c0e1aa"] });
+});
+
+test("an owner conversation names its own tools in the block", async () => {
+  const args = await sendWith("ask @Infra", [infra], { state: "idle", kind: "owner" });
+  expect(args[1]).toContain("send it tasks with tasks send to=o1");
+});
+
+test("a hand-edited mention is dropped: no block and the same call as before", async () => {
+  const args = await sendWith("ask @Infrax", [infra]);
+  expect(args).toEqual(["s1", "ask @Infrax", []]);
+});
+
+test("Backspace right after a complete mention removes it whole", () => {
+  refs.length = 0;
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
+  draftMentionsRef().current = [infra];
+  const events = [];
+  refs[0].current = {
+    value: "ask @Infra", selectionStart: 10, selectionEnd: 10, style: {}, scrollHeight: 24,
+    dispatchEvent(e) { events.push(e.type); },
+  };
+  let prevented = false;
+  descendants(tree).find((n) => n.type === "textarea").props.onKeyDown({
+    key: "Backspace", isComposing: false, preventDefault() { prevented = true; },
+  });
+  expect(prevented).toBe(true);
+  expect(refs[0].current.value).toBe("ask ");
+  expect(refs[0].current.selectionStart).toBe(4);
+  expect(events).toContain("input");
+});
+
+test("Backspace elsewhere is left to the browser", () => {
+  refs.length = 0;
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
+  draftMentionsRef().current = [infra];
+  refs[0].current = { value: "ask @Infra", selectionStart: 8, selectionEnd: 8, style: {}, scrollHeight: 24 };
+  let prevented = false;
+  descendants(tree).find((n) => n.type === "textarea").props.onKeyDown({
+    key: "Backspace", isComposing: false, preventDefault() { prevented = true; },
+  });
+  expect(prevented).toBe(false);
+  expect(refs[0].current.value).toBe("ask @Infra");
+});
+
+test("picking an owner keeps the @, adds the label and a space, and never focuses", () => {
+  const src = require("node:fs").readFileSync(new URL("./Composer.jsx", import.meta.url), "utf8");
+  const slot = src.slice(0, src.indexOf("const [mentionGroups")).split("useState(").length - 1;
+  refs.length = 0;
+  stateCalls = 0;
+  stateOverrides.clear();
+  stateOverrides.set(slot, { owners: [{ kind: "owner", id: "o1", label: "Infra", root: "/work/infra", owner: { id: "o1" } }] });
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" } });
+  stateOverrides.clear();
+  const menu = descendants(tree).find((n) => typeof n.type === "function" && n.props?.onSelect);
+  let focused = 0;
+  const events = [];
+  refs[0].current = {
+    value: "ask @in", selectionStart: 7, selectionEnd: 7, style: {}, scrollHeight: 24,
+    focus() { focused += 1; }, dispatchEvent(e) { events.push(e.type); },
+  };
+  menu.props.onSelect({ kind: "owner", id: "o1", label: "Infra", root: "/work/infra", owner: { id: "o1" } });
+  expect(refs[0].current.value).toBe("ask @Infra ");
+  expect(refs[0].current.selectionStart).toBe(11);
+  expect(focused).toBe(0);
+  expect(events).toContain("input");
+  expect(draftMentionsRef().current).toEqual([
+    { label: "Infra", type: "owner", id: "o1", meta: { root: "/work/infra" } },
+  ]);
 });

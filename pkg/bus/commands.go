@@ -66,6 +66,11 @@ type SendPrompt struct {
 	// direct-send path (a queued prompt becomes a steer and is identified by its
 	// chip ID instead).
 	AcceptedMsgID *string
+	// HumanMentions are the session IDs the human explicitly selected for this
+	// message. Only the /send handler sets it; it travels as the benign
+	// human_session_mentions receipt and, unlike Custom, leaves the prompt an
+	// ordinary announced user message.
+	HumanMentions []string
 	// SteerID, when set, is the identity to use if the prompt cannot start a run
 	// (the queue rail is not empty) and is converted into a queued steer. It
 	// never lands in AcceptedMsgID: the two rails have distinct identities.
@@ -110,6 +115,8 @@ type SendPromptWithContent struct {
 	MsgID string
 	// AcceptedMsgID mirrors SendPrompt.AcceptedMsgID.
 	AcceptedMsgID *string
+	// HumanMentions mirrors SendPrompt.HumanMentions.
+	HumanMentions []string
 	// SteerID mirrors SendPrompt.SteerID.
 	SteerID string
 	// AcceptedSteerID mirrors SendPrompt.AcceptedSteerID.

@@ -294,6 +294,10 @@ type GetBranchPoints struct{ SessionID string }
 // for anything that is not a user message.
 type GetBranchMessage struct{ EntryID string }
 
+// GetBranchOriginal is GetBranchMessage with the message's Custom, so a rewind
+// can hand back the session mentions receipt. Handler returns: core.AgentMessage.
+type GetBranchOriginal struct{ EntryID string }
+
 // GetSubagents returns a snapshot of currently live subagent jobs (running or
 // cancelling), plus terminal children that still own a retained background
 // bash job, including their accumulated transcript. Used to populate the

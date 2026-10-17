@@ -5,6 +5,9 @@
 // handleSendInner). Kept DOM-free (value + cursor in, plain data out) so the
 // Composer just wires them to the textarea ref/fetch.
 
+import { fuzzyMatch } from './fuzzy.js';
+import { cleanLabel, uniqueLabel } from './util/mentions.js';
+
 // Available commands for the suggestion popup. Copied 1:1 from InputBar.jsx —
 // keep in sync with the server's command table if it changes.
 export const COMMANDS = [
@@ -131,4 +134,103 @@ export function computeMentionInsertion(value, cursor, path, isDir) {
 // rewritten; a real em-dash inside prose (word—word) is left untouched.
 export function normalizeDashes(text) {
   return text.replace(/(^|\s)[\u2013\u2014](?=[A-Za-z])/g, '$1--');
+}
+
+export const MENTION_MAX_OWNERS = 4;
+export const MENTION_MAX_SESSIONS = 5;
+
+function projectName(root) {
+  const clean = String(root || '').replace(/[\\/]+$/, '');
+  return clean.slice(Math.max(clean.lastIndexOf('/'), clean.lastIndexOf('\\')) + 1);
+}
+
+// ownerSuggestions filters the owners roster for the @ menu: fuzzy on the name
+// and on the project's root, the name matching first, at most four. The owner
+// whose conversation this is (its session_id) cannot mention itself. A filter with "/" is a
+// folder path, which is the Files group's alone.
+export function ownerSuggestions(owners, filter, { excludeSessionId = '' } = {}) {
+  if (filter.includes('/')) return [];
+  const q = filter.toLowerCase();
+  const scored = [];
+  for (const owner of owners || []) {
+    if (!owner?.id || (excludeSessionId && owner.session_id === excludeSessionId)) continue;
+    const name = String(owner.name || '').toLowerCase();
+    const root = String(owner.root || '').toLowerCase();
+    let rank;
+    if (!q || name.startsWith(q)) rank = 0;
+    else if (name.includes(q)) rank = 1;
+    else if (fuzzyMatch(q, name)) rank = 2;
+    else if (root.includes(q) || fuzzyMatch(q, projectName(root))) rank = 3;
+    else continue;
+    scored.push({ rank, owner });
+  }
+  scored.sort((a, b) => a.rank - b.rank); // stable: roster order within a rank
+  return scored.slice(0, MENTION_MAX_OWNERS).map(({ owner }) => ({
+    kind: 'owner',
+    id: owner.id,
+    label: cleanLabel(owner.name),
+    project: projectName(owner.root),
+    root: owner.root || '',
+    saved: owner.session_state === 'saved',
+    owner,
+  }));
+}
+
+// sessionSuggestions shapes the mention-sessions endpoint's answer.
+export function sessionSuggestions(rows) {
+  return (Array.isArray(rows) ? rows : []).slice(0, MENTION_MAX_SESSIONS).map((row) => ({
+    kind: 'session',
+    id: row.id,
+    label: cleanLabel(row.title) || 'untitled',
+    title: row.title || '',
+    state: row.saved ? 'saved' : (row.state || ''),
+    updated: row.updated,
+    saved: !!row.saved,
+  }));
+}
+
+export const MENTION_GROUPS = [
+  { key: 'owners', title: 'Owners' },
+  { key: 'sessions', title: 'Sessions' },
+  { key: 'files', title: 'Files' },
+];
+
+// flattenMentionGroups lays the groups out in menu order (Owners, Sessions,
+// Files) as one list the cursor walks. An empty or missing group contributes
+// nothing, so it has no header either. Files keep their endpoint shape plus a
+// kind; with `dirOnly` (a "dir/" filter) only the Files group is shown.
+export function flattenMentionGroups(groups) {
+  const out = [];
+  if (!groups) return out;
+  for (const { key, title } of MENTION_GROUPS) {
+    const items = groups[key];
+    if (!items || items.length === 0) continue;
+    items.forEach((item, i) => {
+      out.push({ ...item, kind: key === 'files' ? 'file' : item.kind, group: title, first: i === 0 });
+    });
+  }
+  return out;
+}
+
+// computeLabelInsertion accepts an owner/session mention: unlike a file, the
+// "@" stays and the label follows it, then a space for the next word.
+export function computeLabelInsertion(value, cursor, label) {
+  let atIdx = -1;
+  for (let i = cursor - 1; i >= 0; i--) {
+    if (value[i] === '@') { atIdx = i; break; }
+    if (/\s/.test(value[i])) break;
+  }
+  const before = atIdx >= 0 ? value.slice(0, atIdx) : value.slice(0, cursor);
+  const after = value.slice(cursor);
+  const replacement = '@' + label + ' ';
+  return { value: before + replacement + after, cursor: before.length + replacement.length };
+}
+
+// pickMention builds the draft mention for an accepted owner/session row.
+export function pickMention(item, existing = []) {
+  const label = uniqueLabel(item.label, item.id, existing);
+  if (item.kind === 'owner') {
+    return { label, type: 'owner', id: item.id, meta: { root: item.root } };
+  }
+  return { label, type: 'session', id: item.id, meta: { title: item.title, state: item.state } };
 }

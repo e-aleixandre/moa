@@ -62,6 +62,9 @@ var excludedTools = map[string]bool{
 	// The history tool reads the session it is registered in, which for a
 	// child would be its parent's.
 	"history": true,
+	// read_session is authorized by the human mentions of the parent's own
+	// conversation; a child that inherited the closure would inherit them.
+	"read_session": true,
 }
 
 type readOnlyFilesKey struct{}

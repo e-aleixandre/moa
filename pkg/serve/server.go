@@ -188,6 +188,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/branch", handleBranch(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/branches", handleListBranches(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files", handleListFiles(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/mention-sessions", handleMentionSessions(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
 	mux.HandleFunc("HEAD /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/artifacts", handleListArtifacts(manager))
@@ -577,6 +578,10 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			Attachments []Attachment `json:"attachments"`
 			SteerID     string       `json:"steer_id"`
 			MsgID       string       `json:"msg_id"`
+			// SessionMentions are the sessions the human explicitly selected
+			// (@). Only this list mints the read_session receipt; the text
+			// never does.
+			SessionMentions json.RawMessage `json:"session_mentions"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -586,8 +591,13 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "text required", http.StatusBadRequest)
 			return
 		}
+		mentions, err := parseSessionMentions(body.SessionMentions)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		sessionID := r.PathValue("id")
-		action, acceptedID, descriptors, err := mgr.Send(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID)
+		action, acceptedID, descriptors, err := mgr.SendHuman(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID, mentions)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -1331,10 +1341,11 @@ func recallableSteers(discarded []core.SteerItem) []PendingSteerData {
 			continue
 		}
 		steers = append(steers, PendingSteerData{
-			ID:      steer.ID,
-			Text:    steer.Text,
-			Command: steer.IsBarrier(),
-			Images:  countImageContent(steer.Content),
+			ID:              steer.ID,
+			Text:            steer.Text,
+			Command:         steer.IsBarrier(),
+			Images:          countImageContent(steer.Content),
+			SessionMentions: steerSessionMentions(steer),
 		})
 	}
 	return steers
@@ -1657,12 +1668,13 @@ func handleBranch(mgr *Manager) http.HandlerFunc {
 		// succeeded but could not report what it rewound would strand the text.
 		var rewound *rewoundMessage
 		if body.Before {
-			msg, err := bus.QueryTyped[bus.GetBranchMessage, core.Message](sess.runtime.Bus, bus.GetBranchMessage{EntryID: body.EntryID})
+			msg, err := bus.QueryTyped[bus.GetBranchOriginal, core.AgentMessage](sess.runtime.Bus, bus.GetBranchOriginal{EntryID: body.EntryID})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			rewound = newRewoundMessage(msg)
+			rewound = newRewoundMessage(msg.Message)
+			rewound.SessionMentions = trustedSessionMentions(&msg)
 		}
 		if err := sess.runtime.Bus.Execute(bus.BranchTo{EntryID: body.EntryID, Before: body.Before}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

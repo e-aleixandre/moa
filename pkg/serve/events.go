@@ -107,6 +107,10 @@ type PendingSteerData struct {
 	Command       bool   `json:"command,omitempty"`
 	Images        int    `json:"images,omitempty"`
 	NonRecallable bool   `json:"non_recallable,omitempty"`
+	// SessionMentions are the sessions this steer's own receipt carries, so a
+	// recalled draft keeps the selection. Omitted without a valid receipt; it is
+	// never derived from the text.
+	SessionMentions []string `json:"session_mentions,omitempty"`
 }
 
 // LiveToolInitData is one tool call that is still generating its arguments or

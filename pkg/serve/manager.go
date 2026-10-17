@@ -1304,6 +1304,18 @@ func (m *Manager) send(sessionID, text string, atts []Attachment, steerID, msgID
 // sending cannot safely authorize only its earlier roster entry: the same ID
 // may resolve to a different persisted record when it is resumed.
 func (m *Manager) sendValidated(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
+	return m.sendCore(sessionID, text, atts, steerID, msgID, custom, nil, validate)
+}
+
+// SendHuman is Send for the human /send endpoint: mentions are the sessions the
+// human explicitly selected, recorded as a receipt on the message only once it
+// enters the transcript (a queued steer carries it until delivery). It is the
+// only producer of that receipt.
+func (m *Manager) SendHuman(sessionID, text string, atts []Attachment, steerID, msgID string, mentions []string) (action, id string, descriptors []attachment.Descriptor, err error) {
+	return m.sendCore(sessionID, text, atts, steerID, msgID, nil, mentions, nil)
+}
+
+func (m *Manager) sendCore(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, mentions []string, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", "", nil, ErrNotFound
@@ -1357,7 +1369,7 @@ retryAfterTerminalRun:
 			steerID = core.NewSteerID()
 		}
 		if len(atts) == 0 {
-			if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Custom: custom}); err != nil {
+			if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Custom: steerCustom(custom, mentions)}); err != nil {
 				if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
 					goto retryAfterTerminalRun
 				}
@@ -1377,7 +1389,7 @@ retryAfterTerminalRun:
 		if text != "" {
 			content = append(content, core.TextContent(text))
 		}
-		if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Content: content, Custom: custom}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Content: content, Custom: steerCustom(custom, mentions)}); err != nil {
 			// The steer was rejected (e.g. full queue) — roll back any files
 			// written for it so they don't orphan and count against the quota.
 			for _, p := range writtenFiles {
@@ -1425,7 +1437,7 @@ retryAfterTerminalRun:
 	if len(atts) == 0 {
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{
 			Text: text, MsgID: msgID, AcceptedMsgID: &accepted,
-			SteerID: steerID, AcceptedSteerID: &acceptedSteer, Custom: custom,
+			SteerID: steerID, AcceptedSteerID: &acceptedSteer, Custom: custom, HumanMentions: mentions,
 		}); err != nil {
 			if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
 				goto retryAfterTerminalRun
@@ -1455,7 +1467,7 @@ retryAfterTerminalRun:
 	}
 	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{
 		Content: content, MsgID: msgID, AcceptedMsgID: &accepted,
-		SteerID: steerID, AcceptedSteerID: &acceptedSteer, Custom: custom,
+		SteerID: steerID, AcceptedSteerID: &acceptedSteer, Custom: custom, HumanMentions: mentions,
 	}); err != nil {
 		// The message never entered the conversation — roll back any files
 		// written for it so they don't orphan and count against the quota.
@@ -1474,6 +1486,15 @@ retryAfterTerminalRun:
 		return "steer", acceptedSteer, descriptors, nil
 	}
 	return "send", accepted, descriptors, nil
+}
+
+// steerCustom is the Custom of a queued steer: the caller's provenance, or the
+// human receipt when this is a human send (the two never coexist).
+func steerCustom(custom map[string]any, mentions []string) map[string]any {
+	if custom == nil {
+		return core.HumanSessionMentionsCustom(mentions)
+	}
+	return custom
 }
 
 func (m *Manager) releaseAttachmentRefs(sessionID string, descriptors []attachment.Descriptor) {

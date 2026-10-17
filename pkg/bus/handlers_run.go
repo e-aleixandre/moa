@@ -230,7 +230,11 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			if id == "" {
 				id = core.NewSteerID()
 			}
-			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: cmd.Text, Custom: cmd.Custom}); err != nil {
+			custom := cmd.Custom
+			if custom == nil {
+				custom = core.HumanSessionMentionsCustom(cmd.HumanMentions)
+			}
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: cmd.Text, Custom: custom}); err != nil {
 				return err
 			}
 			// Report the identity on the STEER rail: a chip ID must never be
@@ -292,6 +296,9 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 				}
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
 			}
+			if receipt := core.HumanSessionMentionsCustom(cmd.HumanMentions); receipt != nil {
+				return sctx.Agent.SendWithMsgIDCustom(ctx, cmd.Text, msgID, receipt)
+			}
 			if msgID != "" {
 				return sctx.Agent.SendWithMsgID(ctx, cmd.Text, msgID)
 			}
@@ -324,7 +331,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			// Carry the plain text alongside the content blocks: the Steered
 			// event (and every client rendering it) shows Text, so a queued
 			// send with attachments would otherwise surface as an empty chip.
-			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content, Custom: cmd.Custom}); err != nil {
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content, Custom: promptCustom(cmd.Custom, cmd.HumanMentions)}); err != nil {
 				return err
 			}
 			if cmd.AcceptedSteerID != nil {
@@ -363,8 +370,8 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			*cmd.AcceptedMsgID = msgID
 		}
 		if err := startRunWithOrigin(sctx, label, originFromCustom(cmd.Custom), func(ctx context.Context) ([]core.AgentMessage, error) {
-			if cmd.Custom != nil {
-				return sctx.Agent.SendWithContentCustomAnnounced(ctx, cmd.Content, msgID, cmd.Custom)
+			if custom := promptCustom(cmd.Custom, cmd.HumanMentions); custom != nil {
+				return sctx.Agent.SendWithContentCustomAnnounced(ctx, cmd.Content, msgID, custom)
 			}
 			return sctx.Agent.SendWithContentAnnounced(ctx, cmd.Content, msgID)
 		}); err != nil {
@@ -799,3 +806,13 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 // internal "stream: provider: …" plumbing prefixes and, for a usage/quota
 // limit, uses the typed error's clean message ("… quota exceeded: … (resets in
 // X)") so the user sees an actionable reason instead of raw HTTP noise or —
+
+// promptCustom is the Custom a prompt's message carries: a non-typed
+// producer's provenance, or the human session-mentions receipt of a typed send
+// (the two never coexist).
+func promptCustom(custom map[string]any, mentions []string) map[string]any {
+	if custom != nil {
+		return custom
+	}
+	return core.HumanSessionMentionsCustom(mentions)
+}

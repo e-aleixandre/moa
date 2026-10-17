@@ -588,6 +588,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	if opts != nil && opts.ownerSession {
 		core.RegisterOrLog(bs.ToolReg, newSessionsTool(m, core.CodebaseKey(bs.CWD)))
 		core.RegisterOrLog(bs.ToolReg, m.newRequestCallTool(id, bs.AskBridge))
+	} else {
+		// A normal conversation reads the sessions its user selected with @.
+		// The caller is this session, fixed here; sess is assigned below.
+		core.RegisterOrLog(bs.ToolReg, newReadSessionTool(m, id, func() *ManagedSession { return sess }))
 	}
 
 	// Build RuntimeConfig from bootstrap session + serve-specific fields.

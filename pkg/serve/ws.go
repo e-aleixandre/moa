@@ -850,11 +850,12 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		data.PendingSteers = make([]PendingSteerData, 0, len(pendingSteers))
 		for _, s := range pendingSteers {
 			entry := PendingSteerData{
-				ID:            s.ID,
-				Text:          s.Text,
-				Command:       s.IsBarrier(),
-				Images:        countImageContent(s.Content),
-				NonRecallable: isTaskNotice(s.Custom),
+				ID:              s.ID,
+				Text:            s.Text,
+				Command:         s.IsBarrier(),
+				Images:          countImageContent(s.Content),
+				NonRecallable:   isTaskNotice(s.Custom),
+				SessionMentions: steerSessionMentions(s),
 			}
 			if label, ok := voiceQueuedText(s.Custom); ok {
 				// The call's records read as what they are, never as the

@@ -283,6 +283,26 @@ func NewToolResultMessage(toolCallID, toolName string, content []Content, isErro
 	}
 }
 
+// CustomKeyHumanSessionMentions is the Custom key under which the serve layer
+// records the sessions a human explicitly selected (@) in a message. It is a
+// receipt minted only by the human /send path; read_session authorizes against
+// it, never against the message text.
+const CustomKeyHumanSessionMentions = "human_session_mentions"
+
+// HumanSessionMentionsCustom builds the Custom of a human message that selected
+// the given sessions. The IDs are stored as []any so a deep clone (and the
+// JSON round trip of persistence) never shares or changes their shape.
+func HumanSessionMentionsCustom(ids []string) map[string]any {
+	if len(ids) == 0 {
+		return nil
+	}
+	list := make([]any, len(ids))
+	for i, id := range ids {
+		list[i] = id
+	}
+	return map[string]any{CustomKeyHumanSessionMentions: list}
+}
+
 // AgentMessage wraps Message with extension-custom data.
 // Custom messages (role not user/assistant/tool_result) are filtered before LLM calls.
 type AgentMessage struct {

@@ -1894,3 +1894,136 @@ test('files that live only on disk are reported as not coming back, never pasted
   const toast = getToasts().find((t) => /could not come back/i.test(t.title));
   expect(toast?.detail).toContain('shot.png');
 });
+
+// --- @owner / @session mentions -------------------------------------------
+
+test('sendMessage lists the picked sessions only when there are some', async () => {
+  const bodies = [];
+  globalThis.fetch = (path, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    return Promise.resolve(new Response(JSON.stringify({ action: 'send' }), { status: 200 }));
+  };
+  setState({ sessions: { s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] } } });
+
+  await sendMessage('s1', 'plain', []);
+  expect(Object.keys(bodies[0]).sort()).toEqual(['attachments', 'msg_id', 'steer_id', 'text']);
+
+  await sendMessage('s1', 'read @Fix', [], { sessionMentions: ['full-id-1'] });
+  expect(bodies[1].session_mentions).toEqual(['full-id-1']);
+});
+
+test('a queued message keeps its text and the mention ids on the steer rail', async () => {
+  const bodies = [];
+  globalThis.fetch = (path, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    return Promise.resolve(new Response(JSON.stringify({ action: 'steer' }), { status: 200 }));
+  };
+  setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] } } });
+  await sendMessage('s1', 'look at @Fix\n\n[Mentions · moa]\n@Fix = session/abc', [], { sessionMentions: ['abc'] });
+  expect(bodies[0].text).toContain('[Mentions · moa]');
+  expect(bodies[0].session_mentions).toEqual(['abc']);
+});
+
+test('a recalled queue comes back as the comment with its owners, never the raw block', async () => {
+  setState({ composerDrops: {} });
+  const queued = 'ask @Infra\n\n[Mentions · moa]\n@Infra = owner/o1 · project infra (/x/infra) · only the project\'s owner can send it tasks';
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    discarded_steer_ids: ['recall-m1'],
+    discarded_steers: [{ id: 'recall-m1', text: queued }],
+  }), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'recall-m1', text: queued }] } } });
+
+  recallQueuedSteers('s1');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const drop = store.get().composerDrops.s1;
+  expect(drop.text).toBe('ask @Infra');
+  expect(drop.mentions.map((m) => [m.label, m.type, m.id])).toEqual([['Infra', 'owner', 'o1']]);
+});
+
+test('rewinding your message restores the comment and mentions, sessions only if the server vouches', async () => {
+  setState({ composerDrops: {} });
+  const sent = 'ask @Infra, read @Bench cache\n\n[Mentions · moa]\n@Infra = owner/o1 · project infra (/x/infra) · x\n@Bench cache = session/s9 · "Bench cache" · saved · read it with read_session session_id=s9';
+  const { rewindBeforeMessage } = await import('./session-actions.js');
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    ok: true, message: { text: sent, attachments: [], session_mentions: ['s9'] },
+  }), { status: 200 }));
+  await rewindBeforeMessage('s1', 'entry');
+  let drop = store.get().composerDrops.s1;
+  expect(drop.text).toBe('ask @Infra, read @Bench cache');
+  expect(drop.mentions.map((m) => m.id)).toEqual(['o1', 's9']);
+
+  setState({ composerDrops: {} });
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    ok: true, message: { text: sent, attachments: [] },
+  }), { status: 200 }));
+  await rewindBeforeMessage('s1', 'entry');
+  drop = store.get().composerDrops.s1;
+  expect(drop.text).toBe('ask @Infra, read @Bench cache');
+  expect(drop.mentions.map((m) => m.id)).toEqual(['o1']);
+});
+
+// --- recalled queue keeps the session selection (server-vouched) ------------
+
+const mentionedQueue = 'ask @Infra, read @Bench cache\n\n[Mentions · moa]\n@Infra = owner/o1 · project infra (/x/infra) · x\n@Bench cache = session/s9 · "Bench cache" · saved · read it with read_session session_id=s9';
+
+async function recalledDrop(steer) {
+  setState({ composerDrops: {} });
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    discarded_steer_ids: [steer.id], discarded_steers: [steer],
+  }), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: steer.id, text: steer.text }] } } });
+  recallQueuedSteers('s1');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return store.get().composerDrops.s1;
+}
+
+test('a recalled queue keeps the sessions the server vouches for, and resending lists them', async () => {
+  const { sessionMentionIds } = await import('./util/mentions.js');
+  const drop = await recalledDrop({ id: 'recall-m2', text: mentionedQueue, session_mentions: ['s9'] });
+  expect(drop.text).toBe('ask @Infra, read @Bench cache');
+  expect(drop.mentions.map((m) => m.id)).toEqual(['o1', 's9']);
+  expect(sessionMentionIds(drop.text, drop.mentions)).toEqual(['s9']);
+});
+
+test('a recalled queue without server-vouched sessions never reactivates one from its text', async () => {
+  const drop = await recalledDrop({ id: 'recall-m3', text: mentionedQueue });
+  expect(drop.mentions.map((m) => m.id)).toEqual(['o1']);
+});
+
+test('a queued steer snapshot keeps its vouched sessions for a recall whose reply is lost', async () => {
+  const { mergeSteers } = await import('./ws/init.js');
+  const merged = mergeSteers([{ id: 'q1', text: 'x', session_mentions: ['s9'] }, { id: 'q2', text: 'y' }], []);
+  expect(merged[0].session_mentions).toEqual(['s9']);
+  expect(merged[1].session_mentions).toBeUndefined();
+});
+
+test('a queued message remembers its picked sessions on its chip', async () => {
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({ action: 'steer' }), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] } } });
+  await sendMessage('s1', 'look at @Fix', [], { sessionMentions: ['abc'] });
+  expect(store.get().sessions.s1.pendingSteers[0].session_mentions).toEqual(['abc']);
+});
+
+test('a send queued after a stale idle prediction keeps its own selection through a recall', async () => {
+  const A = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+  const wire = `mira @Target\n\n[Mentions · moa]\n@Target = session/${A} · read it with read_session session_id=${A}`;
+  const { sessionMentionIds } = await import('./util/mentions.js');
+  __resetSteerRestoreForTests();
+  setState({ sessions: { s1: { id: 's1', state: 'idle', messages: [], subagents: {}, pendingSteers: null } }, composerDrops: {} });
+  let sent;
+  globalThis.fetch = (url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (url.endsWith('/send')) {
+      sent = body;
+      return Promise.resolve(new Response(JSON.stringify({ action: 'steer', steer_id: body.steer_id }), { status: 200 }));
+    }
+    handleWsSteersCanceled('s1', [sent.steer_id], body.stop_id);
+    return Promise.resolve(new Response(JSON.stringify({ discarded_steer_ids: [sent.steer_id], discarded_steers: [{ id: sent.steer_id, text: wire, session_mentions: [A] }] }), { status: 200 }));
+  };
+  await sendMessage('s1', wire, [], { sessionMentions: [A] });
+  expect(sent.session_mentions).toEqual([A]);
+  await stopRun('s1');
+  const d = store.get().composerDrops.s1;
+  expect(sessionMentionIds(d.text, d.mentions)).toEqual([A]);
+});

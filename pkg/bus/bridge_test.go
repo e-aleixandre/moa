@@ -579,6 +579,14 @@ func (f *fakeAgent) SendWithContentMsgID(ctx context.Context, content []core.Con
 	return f.SendWithContent(ctx, content)
 }
 
+func (f *fakeAgent) SendWithMsgIDCustom(ctx context.Context, prompt, msgID string, _ map[string]any) ([]core.AgentMessage, error) {
+	return f.SendWithMsgID(ctx, prompt, msgID)
+}
+
+func (f *fakeAgent) SendWithContentAnnouncedCustom(ctx context.Context, content []core.Content, msgID string, _ map[string]any) ([]core.AgentMessage, error) {
+	return f.SendWithContentAnnounced(ctx, content, msgID)
+}
+
 func (f *fakeAgent) SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
 	f.mu.Lock()
 	announce := f.announce

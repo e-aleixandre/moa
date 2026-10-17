@@ -72,6 +72,9 @@ type AgentController interface {
 	CanStartFresh() bool
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
 	SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error)
+	// SendWithMsgIDCustom is SendWithMsgID for a human message carrying benign
+	// metadata (the session mentions receipt).
+	SendWithMsgIDCustom(ctx context.Context, prompt, msgID string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithCustomAnnounced(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)

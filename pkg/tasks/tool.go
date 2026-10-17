@@ -200,7 +200,7 @@ func toParam(owner bool) string {
 	return `
 				"to": {
 					"type": "string",
-					"description": "For send: the other owner's name"
+					"description": "For send: the other owner's name or ID"
 				},`
 }
 

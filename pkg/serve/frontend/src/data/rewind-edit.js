@@ -40,7 +40,7 @@ export async function rewoundFiles(sessionId, attachments, { fetch: fetchImpl = 
 // placeRewoundMessage leaves the message for the session's composer. Anything
 // already waiting there (or already typed — the composer appends) stays: a
 // rewind never costs you a draft.
-export function placeRewoundMessage(sessionId, { text, files }) {
+export function placeRewoundMessage(sessionId, { text, files, mentions }) {
   setState((state) => {
     const prev = state.composerDrops[sessionId];
     return {
@@ -50,6 +50,7 @@ export function placeRewoundMessage(sessionId, { text, files }) {
           id: `rewind-${Date.now()}`,
           text: appendSharedText(prev?.text || '', text || ''),
           files: [...(prev?.files || []), ...(files || [])],
+          mentions: [...(prev?.mentions || []), ...(mentions || [])],
           focus: true,
         },
       },

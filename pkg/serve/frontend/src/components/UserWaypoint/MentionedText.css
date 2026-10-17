@@ -1,0 +1,53 @@
+/* A mention in a sent message: a pill with the owner's face or the session's
+   dot. Violet for owners, blue for sessions; grey and struck through when the
+   target no longer exists. */
+.md-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  vertical-align: baseline;
+  height: 22px;
+  padding: 0 7px 0 3px;
+  border-radius: 999px;
+  font-weight: 500;
+  line-height: 22px;
+  white-space: nowrap;
+  position: relative;
+  top: 1px;
+  background: var(--zl-accent-dim);
+  color: var(--zl-accent);
+}
+.md-mention.is-session {
+  padding-left: 6px;
+  background: rgba(137, 180, 250, 0.12);
+  color: var(--blue);
+}
+.md-mention[role="button"] { cursor: pointer; }
+@media (hover: hover) {
+  .md-mention[role="button"]:hover { background: var(--zl-accent-med); }
+  .md-mention.is-session[role="button"]:hover { background: rgba(137, 180, 250, 0.22); }
+}
+.md-mention:focus-visible { outline: 2px solid var(--zl-accent-line); outline-offset: 1px; }
+.md-mention-lead {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+.md-mention.is-deleted {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--zl-t4);
+  cursor: default;
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 255, 255, 0.18);
+}
+.md-mention-tag {
+  display: inline-block;
+  margin-left: 2px;
+  padding: 0 4px;
+  border: 1px solid var(--zl-line-2);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--zl-t4);
+  text-decoration: none;
+}

@@ -33,6 +33,13 @@ func (m *Manager) readSession(id string, opts sessionReadOptions) core.Result {
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot read session %s: %v", id, err))
 	}
+	return readSessionSnapshot(snapshot, opts)
+}
+
+// readSessionSnapshot formats an already authorized snapshot. Who may read it
+// is decided by the caller: the owner's tool and read_session differ only
+// there.
+func readSessionSnapshot(snapshot conversationSnapshot, opts sessionReadOptions) core.Result {
 	if opts.messageID != "" {
 		return readSessionMessage(snapshot, opts.messageID, opts.offset)
 	}
