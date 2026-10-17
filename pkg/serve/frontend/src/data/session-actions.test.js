@@ -2004,3 +2004,26 @@ test('a queued message remembers its picked sessions on its chip', async () => {
   await sendMessage('s1', 'look at @Fix', [], { sessionMentions: ['abc'] });
   expect(store.get().sessions.s1.pendingSteers[0].session_mentions).toEqual(['abc']);
 });
+
+test('a send queued after a stale idle prediction keeps its own selection through a recall', async () => {
+  const A = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+  const wire = `mira @Target\n\n[Mentions · moa]\n@Target = session/${A} · read it with read_session session_id=${A}`;
+  const { sessionMentionIds } = await import('./util/mentions.js');
+  __resetSteerRestoreForTests();
+  setState({ sessions: { s1: { id: 's1', state: 'idle', messages: [], subagents: {}, pendingSteers: null } }, composerDrops: {} });
+  let sent;
+  globalThis.fetch = (url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (url.endsWith('/send')) {
+      sent = body;
+      return Promise.resolve(new Response(JSON.stringify({ action: 'steer', steer_id: body.steer_id }), { status: 200 }));
+    }
+    handleWsSteersCanceled('s1', [sent.steer_id], body.stop_id);
+    return Promise.resolve(new Response(JSON.stringify({ discarded_steer_ids: [sent.steer_id], discarded_steers: [{ id: sent.steer_id, text: wire, session_mentions: [A] }] }), { status: 200 }));
+  };
+  await sendMessage('s1', wire, [], { sessionMentions: [A] });
+  expect(sent.session_mentions).toEqual([A]);
+  await stopRun('s1');
+  const d = store.get().composerDrops.s1;
+  expect(sessionMentionIds(d.text, d.mentions)).toEqual([A]);
+});

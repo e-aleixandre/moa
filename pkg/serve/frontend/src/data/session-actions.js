@@ -633,7 +633,7 @@ function adoptMessageRail(id, { optimisticMsg, msgId, effMsgId, optimisticSteer,
 // or had a queued item by the time the server decided), the optimistic message
 // is fiction: drop it and show the confirmed chip instead — unless a Steered
 // event already delivered the chip, which is the authoritative removal.
-function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRunStartedAtMs, prevRunEpoch }) {
+function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, sessionMentions = [], prevRunStartedAtMs, prevRunEpoch }) {
   const cur = store.get().sessions[id];
   if (!cur) return;
   const steers = cur.pendingSteers || [];
@@ -666,6 +666,9 @@ function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRunSt
   if (!delivered) {
     const chip = { ...(existing || { id: effSteerId, text }), confirmed: true };
     if (!existing && images > 0) chip.images = images;
+    // Own selection (live composer ids, never parsed from the text), so a recall
+    // of a chip created here keeps it.
+    if (!existing && sessionMentions.length > 0) chip.session_mentions = sessionMentions;
     patch.pendingSteers = existing
       ? steers.map((s) => (s === existing ? chip : s))
       : [...steers, chip];
@@ -782,6 +785,7 @@ export async function sendMessage(id, text, attachments = [], { sessionMentions 
         effSteerId,
         text,
         images: attachments.filter((a) => a.isImage).length,
+        sessionMentions,
         prevRunStartedAtMs,
         prevRunEpoch,
       });
