@@ -368,3 +368,15 @@ func TestProviderErrorClassification(t *testing.T) {
 		}
 	}
 }
+
+func TestPassToSessionOnlyOnOwnerRequest(t *testing.T) {
+	for _, spec := range ToolSpecs() {
+		if spec.Name == "pass_to_session" {
+			if !strings.Contains(spec.Description, "ONLY when the owner has asked") || strings.Contains(spec.Description, "stated explicitly") {
+				t.Fatalf("pass_to_session description: %s", spec.Description)
+			}
+			return
+		}
+	}
+	t.Fatal("pass_to_session missing")
+}
