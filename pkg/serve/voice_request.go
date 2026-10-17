@@ -3,7 +3,6 @@ package serve
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"sort"
@@ -79,7 +78,11 @@ type callRequest struct {
 	invite    string           // the iPhones' ringing invitation (Ring), if any
 	why       string
 	stop      func() bool
-	done      chan struct{} // closed once terminal
+	// withdrawCtx ends, with errRequestWithdrawn, when the request is
+	// withdrawn; withdraw ends it.
+	withdrawCtx context.Context
+	withdraw    context.CancelCauseFunc
+	done        chan struct{} // closed once terminal
 }
 
 type callRequestRegistry struct {
@@ -142,6 +145,7 @@ func (r *callRequestRegistry) open(sessionID string, own owner.Owner, reason, ur
 		Reason: reason, Urgency: urgency, Level: level, State: crRinging, Created: now,
 		provider: provider, question: question, done: make(chan struct{}),
 	}
+	req.withdrawCtx, req.withdraw = context.WithCancelCause(context.Background())
 	if onCall {
 		req.State = crHeld
 	} else {
@@ -172,20 +176,7 @@ func (r *callRequestRegistry) resolve(id string, from []string, state, why strin
 		r.mu.Unlock()
 		return nil, false
 	}
-	invite := ""
-	if req.State == crRinging {
-		invite = req.invite
-	}
-	if req.stop != nil {
-		req.stop()
-		req.stop = nil
-	}
-	req.State, req.why, req.Expires = state, why, nil
-	if state == crAnswered || state == crWritten || state == crCancelled {
-		delete(r.live, id)
-		close(req.done)
-	}
-	r.changedLocked()
+	invite := r.moveLocked(req, state, why)
 	r.mu.Unlock()
 	if invite != "" {
 		// No-op once the iPhone is answering: that answer claimed this
@@ -195,6 +186,76 @@ func (r *callRequestRegistry) resolve(id string, from []string, state, why strin
 		}
 	}
 	return req, true
+}
+
+// moveLocked is every transition of a live request, under r.mu. It returns
+// the invitation that must stop ringing, if any (cancel it after unlocking).
+func (r *callRequestRegistry) moveLocked(req *callRequest, state, why string) string {
+	invite := ""
+	if req.State == crRinging {
+		invite = req.invite
+	}
+	if req.stop != nil {
+		req.stop()
+		req.stop = nil
+	}
+	req.State, req.why, req.Expires = state, why, nil
+	if state == crCancelled {
+		req.withdraw(errRequestWithdrawn)
+	}
+	if state == crAnswered || state == crWritten || state == crCancelled {
+		delete(r.live, req.ID)
+		close(req.done)
+	}
+	r.changedLocked()
+	return invite
+}
+
+// errRequestWithdrawn is why an opening that answers a withdrawn request
+// stops: the owner's run was stopped.
+var errRequestWithdrawn = errors.New("call request withdrawn")
+
+// callAnswer ties a call being opened to the owner's request it answers.
+// withdrawn ends when the request is withdrawn: the opening checks it before
+// reaching the provider and its handshake is cancelled. publish is the one
+// place the request's outcome is decided: under r.mu it registers the call
+// and marks the request answered, or reports the request was withdrawn.
+// Stop takes the same lock, so exactly one of them wins, and answered is
+// never told before the call is registered.
+type callAnswer struct {
+	withdrawn context.Context
+	publish   func(register func() bool) (registered, withdrawn bool)
+}
+
+func (r *callRequestRegistry) answering(req *callRequest) *callAnswer {
+	return &callAnswer{
+		withdrawn: req.withdrawCtx,
+		publish: func(register func() bool) (bool, bool) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if cur, ok := r.live[req.ID]; !ok || cur.State != crConnecting {
+				return false, true
+			}
+			if !register() {
+				return false, false
+			}
+			r.moveLocked(req, crAnswered, "")
+			return true, false
+		},
+	}
+}
+
+// declined is an iPhone's Decline, decided before it is acknowledged: it
+// reports false while the request is being answered elsewhere.
+// The invitation is left to the Decline that asked (it ends it as declined).
+func (r *callRequestRegistry) declined(req *callRequest) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cur, ok := r.live[req.ID]; ok && cur.State == crRinging {
+		r.moveLocked(req, crWritten, whyDeclined)
+		return true
+	}
+	return req.State == crWritten || req.State == crCancelled
 }
 
 // outcome reads a request's final state and why.
@@ -246,8 +307,9 @@ func (r *callRequestRegistry) ringDevices(ctx context.Context, req *callRequest)
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	inviteID, err := vr.RingDevices(ctx, req.SessionID, RingOptions{
 		Name: req.OwnerName, Provider: string(req.provider), TTL: r.ringTime(), Intro: req.intro(),
-		Claim:  func() bool { _, ok := r.resolve(id, []string{crRinging}, crConnecting, ""); return ok },
-		Commit: r.committer(id),
+		Claim:   func() bool { _, ok := r.resolve(id, []string{crRinging}, crConnecting, ""); return ok },
+		Answer:  r.answering(req),
+		Decline: func() bool { return r.declined(req) },
 		Done: func(out InviteOutcome) {
 			switch out.State {
 			case inviteFailed:
@@ -280,15 +342,6 @@ func (r *callRequestRegistry) ringDevices(ctx context.Context, req *callRequest)
 		vr.CancelInvite(inviteID)
 	}
 	return true
-}
-
-// committer is the last step before the call answering request id is
-// published: it fails once the request was withdrawn.
-func (r *callRequestRegistry) committer(id string) func() bool {
-	return func() bool {
-		_, ok := r.resolve(id, []string{crConnecting}, crAnswered, "")
-		return ok
-	}
 }
 
 func (r *callRequestRegistry) isState(id, state string) bool {
@@ -461,23 +514,30 @@ func (m *Manager) ownerCallProvider(own owner.Owner) (voice.ProviderID, bool) {
 	return paid, true
 }
 
+// callLevelError is a rejected call_level, with a code clients act on (the
+// provider is the paid one it concerns, if any). It is ErrInvalidCallLevel.
+type callLevelError struct{ code, provider, msg string }
+
+func (e *callLevelError) Error() string { return ErrInvalidCallLevel.Error() + ": " + e.msg }
+func (e *callLevelError) Unwrap() error { return ErrInvalidCallLevel }
+
 // setCallLevel validates a level change: without a plan, any level but
 // never needs the cost of the current paid provider accepted (I22).
 func (m *Manager) setCallLevel(own *owner.Owner, level string, ack *string) error {
 	level = strings.TrimSpace(level)
 	if !owner.ValidCallLevel(level) {
-		return fmt.Errorf("%w: must be never, ask_first or ring", ErrInvalidCallLevel)
+		return &callLevelError{code: "invalid_level", msg: "must be never, ask_first or ring"}
 	}
 	if level != owner.CallNever && !m.voicePlanSignedIn() {
 		paid := m.ownerCallsPaidProvider()
 		if paid == "" {
-			return fmt.Errorf("%w: no voice plan is signed in and no paid provider has a key", ErrInvalidCallLevel)
+			return &callLevelError{code: "no_plan", msg: "no voice plan is signed in and no paid provider has a key"}
 		}
 		if r := m.voiceRegistry(); r == nil || !r.selectable(paid) {
-			return fmt.Errorf("%w: no voice plan is signed in and %s has no API key: add one under Providers", ErrInvalidCallLevel, paid)
+			return &callLevelError{code: "api_key_required", provider: string(paid), msg: "no voice plan is signed in and " + string(paid) + " has no API key: add one under Providers"}
 		}
 		if ack == nil || strings.TrimSpace(*ack) != string(paid) {
-			return fmt.Errorf("%w: accept the per-minute cost of %s first (cost_ack_provider)", ErrInvalidCallLevel, paid)
+			return &callLevelError{code: "cost_ack_required", provider: string(paid), msg: "accept the per-minute cost of " + string(paid) + " first (cost_ack_provider)"}
 		}
 		own.CallCostAck = &owner.CallCostAck{Provider: string(paid), At: time.Now().UTC()}
 	}

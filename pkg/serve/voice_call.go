@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -260,11 +261,11 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 		answering, in.Provider = req, string(req.provider)
 		intro = req.intro()
 	}
-	var commit func() bool
+	var answer *callAnswer
 	if answering != nil {
-		commit = r.mgr.callRequests().committer(answering.ID)
+		answer = r.mgr.callRequests().answering(answering)
 	}
-	status, out, retry := r.openCall(r.ctx, identity.auditID(), in.SessionID, in.Provider, intro, commit)
+	status, out, retry := r.openCall(r.ctx, identity.auditID(), in.SessionID, in.Provider, intro, answer)
 	if answering != nil && status != http.StatusCreated {
 		// An owner's call is the plan it was asked with or nothing: any
 		// failure makes it the written question and offers no paid API (I21).
@@ -281,13 +282,12 @@ func (r *voiceCallRegistry) handleCreate(w http.ResponseWriter, req *http.Reques
 // both a call the user places and an incoming invitation they answer. It
 // answers the HTTP status and body to send, and a Retry-After when limited.
 // Ending scope (r.ctx or narrower) aborts an opening that has not answered.
-// intro and commit belong to calls moa places: commit, if set, is asked
-// right before the call is published, and false abandons it.
-func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID, providerName string, intro *callIntro, commit func() bool) (int, map[string]any, int) {
+// intro and answer belong to calls moa places (see callAnswer).
+func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID, providerName string, intro *callIntro, answer *callAnswer) (int, map[string]any, int) {
 	if _, ok := r.mgr.Get(sessionID); !ok {
 		return http.StatusNotFound, map[string]any{"error": "session_not_found"}, 0
 	}
-	return r.openCallWith(scope, principal, providerName, intro, commit, func() (*ManagedSession, int, map[string]any) {
+	return r.openCallWith(scope, principal, providerName, intro, answer, func() (*ManagedSession, int, map[string]any) {
 		if sess, ok := r.mgr.Get(sessionID); ok {
 			return sess, 0, nil
 		}
@@ -299,7 +299,18 @@ func (r *voiceCallRegistry) openCall(scope context.Context, principal, sessionID
 // the admission budget and the principal's slot have all said yes: a
 // resolver with side effects (reopening an owner) runs for admitted calls
 // and never for refused ones.
-func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, providerName string, intro *callIntro, commit func() bool, resolve func() (*ManagedSession, int, map[string]any)) (int, map[string]any, int) {
+func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, providerName string, intro *callIntro, answer *callAnswer, resolve func() (*ManagedSession, int, map[string]any)) (int, map[string]any, int) {
+	if answer != nil {
+		ctx, cancel := context.WithCancelCause(scope)
+		stop := context.AfterFunc(answer.withdrawn, func() { cancel(errRequestWithdrawn) })
+		defer stop()
+		defer cancel(nil)
+		scope = ctx
+	}
+	withdrawn := func() bool { return errors.Is(context.Cause(scope), errRequestWithdrawn) }
+	if withdrawn() {
+		return http.StatusConflict, map[string]any{"error": "request_withdrawn"}, 0
+	}
 	provider := voice.ProviderID(providerName)
 	if provider == "" {
 		p, found := r.defaultPlan()
@@ -329,6 +340,10 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 		r.release(principal, slot)
 		return status, out, 0
 	}
+	if withdrawn() {
+		r.release(principal, slot)
+		return http.StatusConflict, map[string]any{"error": "request_withdrawn"}, 0
+	}
 	id := newVoiceCallID()
 	// Read once: the call keeps this model to its end, whatever Settings says later.
 	model := voiceModel()
@@ -344,6 +359,10 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 		_ = up.Close(ctx, "unauthorized")
 		cancel()
 		err = scope.Err()
+	}
+	if err != nil && withdrawn() {
+		r.release(principal, slot)
+		return http.StatusConflict, map[string]any{"error": "request_withdrawn"}, 0
 	}
 	if err != nil && scope.Err() != nil && r.ctx.Err() == nil {
 		r.release(principal, slot)
@@ -366,7 +385,13 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 		opened := creds.opened()
 		plan = &opened
 	}
-	if commit != nil && !commit() {
+	registered, lost := false, false
+	if answer != nil {
+		registered, lost = answer.publish(func() bool { return r.register(c, plan, model) })
+	} else {
+		registered = r.register(c, plan, model)
+	}
+	if lost {
 		// The request this call answers was withdrawn (Stop) while it
 		// opened: it never becomes a call.
 		ctx, cancel := context.WithTimeout(context.Background(), r.opts.Limits.Teardown)
@@ -375,7 +400,7 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 		r.release(principal, slot)
 		return http.StatusConflict, map[string]any{"error": "request_withdrawn"}, 0
 	}
-	if !r.register(c, plan, model) {
+	if !registered {
 		ctx, cancel := context.WithTimeout(context.Background(), r.opts.Limits.Teardown)
 		_ = up.Close(ctx, "shutdown")
 		cancel()

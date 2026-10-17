@@ -77,7 +77,7 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge) c
 				id = req.ID
 				// Stopping the run withdraws the request at any point from
 				// here on, delivery and opening included: a withdrawn
-				// request never becomes a call (see committer).
+				// request never becomes a call (see callAnswer).
 				stop := context.AfterFunc(ctx, func() {
 					reg.resolve(id, []string{crRinging, crHeld, crAccepted, crConnecting}, crCancelled, "")
 				})

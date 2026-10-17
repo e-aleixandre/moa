@@ -70,9 +70,13 @@ type RingOptions struct {
 	// opens; false makes the answer lose (answered_elsewhere): an owner's
 	// call request answered on another screen.
 	Claim func() bool
-	// Commit, if set, is asked right before the answered call is published;
-	// false abandons it (the request was withdrawn while it opened).
-	Commit func() bool
+	// Answer, if set, ties the answered call to the owner's request it
+	// answers: withdrawing the request abandons the opening, and the call is
+	// published only through it.
+	Answer *callAnswer
+	// Decline, if set, decides an iPhone's Decline before it is
+	// acknowledged; false (the request is being answered elsewhere) refuses it.
+	Decline func() bool
 	// Done, if set, learns how the invitation ended, once, synchronously with
 	// that end and before whoever ended it is answered: it does not depend
 	// on RingDevices returning.
@@ -90,7 +94,8 @@ type voiceInvite struct {
 	id, sessionID, name, provider string
 	expires                       time.Time
 	intro                         *callIntro // never nil: an incoming call always opens by saying why
-	claim, commit                 func() bool
+	claim, decline                func() bool
+	answerTo                      *callAnswer
 	done                          func(InviteOutcome)
 
 	state    string
@@ -157,7 +162,7 @@ func (r *voiceCallRegistry) RingDevices(ctx context.Context, sessionID string, o
 		name = "moa"
 	}
 	inv := &voiceInvite{
-		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider, intro: incomingIntro(opts.Intro), claim: opts.Claim, commit: opts.Commit, done: opts.Done,
+		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider, intro: incomingIntro(opts.Intro), claim: opts.Claim, decline: opts.Decline, answerTo: opts.Answer, done: opts.Done,
 		expires: time.Now().Add(ttl), state: inviteRinging,
 		left: make(chan struct{}), resolved: make(chan struct{}),
 	}
@@ -318,7 +323,7 @@ func (r *voiceCallRegistry) answer(scope context.Context, id, principal string) 
 		inv.notify(InviteOutcome{State: inviteFailed, Reason: inviteLostClaim})
 		return status, result
 	}
-	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider, inv.intro, inv.commit)
+	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider, inv.intro, inv.answerTo)
 	if inv.claim != nil {
 		delete(out, "paid_option") // an owner's call never offers the paid API (I21)
 	}
@@ -482,6 +487,12 @@ func (r *voiceCallRegistry) handleInviteDecline(w http.ResponseWriter, req *http
 	inv, ok := r.invite(id)
 	if !ok {
 		voiceError(w, http.StatusNotFound, map[string]any{"error": "invite_not_found"})
+		return
+	}
+	// The request behind the invitation is decided first: no Decline (not
+	// even a retry) is acknowledged before it is.
+	if inv.decline != nil && !inv.decline() {
+		voiceError(w, http.StatusConflict, map[string]any{"error": "answered_elsewhere"})
 		return
 	}
 	if r.endInvite(id, inviteRinging, inviteDeclined) {

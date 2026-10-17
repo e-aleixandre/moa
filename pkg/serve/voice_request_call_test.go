@@ -246,7 +246,12 @@ func TestOwnerCallLevel_NonNeverWithoutPlanRequiresCostConfirmation(t *testing.T
 	f.mustRequest(http.MethodPatch, "/api/voice/settings", map[string]any{"paid_provider": "xai-api"}, f.owner(), http.StatusOK)
 	path := "/api/owners/" + f.own.ID
 	f.mustRequest(http.MethodPatch, path, map[string]any{"call_level": "ask_first"}, f.owner(), http.StatusBadRequest)
-	f.mustRequest(http.MethodPatch, path, map[string]any{"call_level": "ring", "cost_ack_provider": "openai-live-api"}, f.owner(), http.StatusBadRequest)
+	// A stale acknowledgement says which cost to confirm, as a code.
+	code, body, _, err := f.request(http.MethodPatch, path, map[string]any{"call_level": "ring", "cost_ack_provider": "openai-live-api"}, f.owner())
+	var rej struct{ Code, Provider string }
+	if err != nil || code != http.StatusBadRequest || json.Unmarshal(body, &rej) != nil || rej.Code != "cost_ack_required" || rej.Provider != "xai-api" {
+		t.Fatalf("stale ack: %d %s %v", code, body, err)
+	}
 	var info struct {
 		CallLevel string `json:"call_level"`
 	}

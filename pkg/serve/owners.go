@@ -625,6 +625,11 @@ func handleUpdateOwner(mgr *Manager) http.HandlerFunc {
 		case errors.Is(err, owner.ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
 			return
+		case errors.As(err, new(*callLevelError)):
+			var cl *callLevelError
+			errors.As(err, &cl)
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": cl.Error(), "code": cl.code, "provider": cl.provider})
+			return
 		case errors.Is(err, ErrInvalidAvatar), errors.Is(err, ErrInvalidOwnerName), errors.Is(err, ErrInvalidTaskPermission), errors.Is(err, ErrInvalidCallLevel):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
