@@ -105,3 +105,32 @@ func TestVoiceOnlyCredentialCallsOwnersOnly(t *testing.T) {
 		}
 	}
 }
+
+// Open owners come first, then the closed ones, each block alphabetical: the
+// owner being worked with is never at the bottom of the car's list.
+func TestVoiceDirectoryListsOpenOwnersFirstThenClosedAlphabetically(t *testing.T) {
+	f := newInviteFixture(t, 1)
+	f.harnessOnly = true
+	for _, name := range []string{"winerim", "Alapar", "Quolli", "Bugbounty"} {
+		own, _ := ownerWithSession(t, f.mgr, t.TempDir(), name)
+		if name == "Alapar" || name == "Quolli" {
+			if err := f.mgr.CloseSession(own.SessionID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var out struct {
+		Owners []struct{ Name, State string } `json:"owners"`
+	}
+	if err := json.Unmarshal(f.mustRequest("GET", "/api/voice/directory", nil, f.voice(0), http.StatusOK), &out); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, o := range out.Owners {
+		got = append(got, o.Name+":"+o.State)
+	}
+	want := "Bugbounty:open winerim:open Alapar:closed Quolli:closed"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("directory order = %v, want %s", got, want)
+	}
+}

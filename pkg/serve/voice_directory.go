@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -47,6 +49,21 @@ func (r *voiceCallRegistry) handleDirectory(w http.ResponseWriter, req *http.Req
 		}
 		out = append(out, voiceDirectoryEntry{ID: own.ID, Name: own.Name, Avatar: own.Avatar, State: state})
 	}
+	// The car lists the owners being worked with first, so the one in use
+	// is never last: open ones, then the rest, each block alphabetical.
+	// The app keeps this order.
+	slices.SortStableFunc(out, func(a, b voiceDirectoryEntry) int {
+		if ao, bo := a.State == "open", b.State == "open"; ao != bo {
+			if ao {
+				return -1
+			}
+			return 1
+		}
+		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
 	if !lease.within(func() { writeJSON(w, http.StatusOK, map[string]any{"owners": out}) }) {
 		voiceError(w, http.StatusUnauthorized, map[string]any{"error": "unauthenticated"})
 	}
