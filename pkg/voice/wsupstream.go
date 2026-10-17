@@ -213,7 +213,7 @@ func (u *wsUpstream) open(opening Opening) error {
 		return u.send(speak)
 	case OpenOnSilence:
 		go func() {
-			t := time.NewTimer(OpenSilence)
+			t := time.NewTimer(OpenSilence())
 			defer t.Stop()
 			select {
 			case <-t.C:

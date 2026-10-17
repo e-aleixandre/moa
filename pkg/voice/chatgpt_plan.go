@@ -174,9 +174,9 @@ type chatGPTUpstream struct {
 // said nothing, so the voice never answers words nobody said.
 const OpenNudge = "The user picked up but has not said anything yet; nothing they said exists in this call. Speak now: greet briefly and say why you are calling, as your instructions say."
 
-// openOnSilence nudges the plan after OpenSilence unless someone spoke.
+// openOnSilence nudges the plan after OpenSilence() unless someone spoke.
 func (u *chatGPTUpstream) openOnSilence() {
-	t := time.NewTimer(OpenSilence)
+	t := time.NewTimer(OpenSilence())
 	defer t.Stop()
 	select {
 	case <-t.C:

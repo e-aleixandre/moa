@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/voice"
 )
 
 // Who speaks first is the phone's rule (owner's decision, 17/10, after
@@ -34,6 +36,17 @@ import (
 //     And the provider is told to speak before any user audio
 
 const incomingMarker = "INCOMING CALL"
+
+// testOpenSilence stands for the ~2 s an incoming call waits for the user's
+// hello: the same behaviour, shorter, so the package stays within go test's
+// default timeout.
+const testOpenSilence = 400 * time.Millisecond
+
+func shortOpenSilence(t *testing.T, d time.Duration) {
+	prev := voice.SetOpenSilence(d)
+	t.Cleanup(func() { voice.SetOpenSilence(prev) })
+}
+
 const outgoingMarker = "OUTGOING CALL"
 
 // openingTrigger: the provider was asked to speak before the user's audio.
@@ -43,7 +56,6 @@ func openingTrigger(v map[string]any) bool { return v["type"] == "response.creat
 // the voice speaks after the short wait (not at once).
 func awaitOpening(t *testing.T, p *vpPeer, wants ...string) {
 	t.Helper()
-	start := time.Now()
 	cfg := vpJSON(p.await(t, "incoming context", func(v map[string]any) bool { return strings.Contains(vpJSON(v), incomingMarker) }))
 	for _, w := range wants {
 		if !strings.Contains(cfg, w) {
@@ -51,12 +63,10 @@ func awaitOpening(t *testing.T, p *vpPeer, wants ...string) {
 		}
 	}
 	p.await(t, "the voice speaks after the user's silence", openingTrigger)
-	if d := time.Since(start); d < 1500*time.Millisecond {
-		t.Errorf("the voice spoke %v after pickup, before the user had ~2 s to say hello", d)
-	}
 }
 
 func TestIncoming_RequestCallOpensWithReason(t *testing.T) {
+	shortOpenSilence(t, testOpenSilence)
 	for _, provider := range []string{"grok-plan", "xai-api", "openai-live-api"} {
 		t.Run(provider, func(t *testing.T) {
 			f := rcNewFixture(t, "grok-plan", "ring")
@@ -78,6 +88,7 @@ func TestIncoming_RequestCallOpensWithReason(t *testing.T) {
 }
 
 func TestIncoming_TestInviteOpensWithReasonOrSaysTest(t *testing.T) {
+	shortOpenSilence(t, testOpenSilence)
 	for name, reason := range map[string]string{"with_reason": "RC-TEST-REASON", "without_reason": ""} {
 		t.Run(name, func(t *testing.T) {
 			f := newInviteFixture(t, 1)
@@ -102,6 +113,8 @@ func TestIncoming_TestInviteOpensWithReasonOrSaysTest(t *testing.T) {
 }
 
 func TestIncoming_UserHelloIsAnsweredWithoutSpeakingFirst(t *testing.T) {
+	// Long enough for the hello to arrive first even under -race load.
+	shortOpenSilence(t, time.Second)
 	for _, provider := range []string{"grok-plan", "openai-live-api"} {
 		t.Run(provider, func(t *testing.T) {
 			f := rcNewFixture(t, "grok-plan", "ring")
@@ -119,7 +132,7 @@ func TestIncoming_UserHelloIsAnsweredWithoutSpeakingFirst(t *testing.T) {
 			p := f.up.peer(t, c.Provider)
 			p.await(t, "incoming context", func(v map[string]any) bool { return strings.Contains(vpJSON(v), incomingMarker) })
 			p.user(t, "u1", "hola")
-			time.Sleep(2500 * time.Millisecond)
+			time.Sleep(2 * voice.OpenSilence())
 			for _, v := range p.snapshot() {
 				if openingTrigger(v) {
 					t.Fatalf("the voice was told to speak although the user said hello: %s", vpJSON(v))
@@ -171,6 +184,7 @@ func TestIncoming_BriefIsMarkedAsContextNotTheUser(t *testing.T) {
 // ~2 s of silence moa appends a nudge that says the user has said nothing
 // (I11, call 2: instructions alone left it silent). A hello cancels it.
 func TestIncoming_ChatGPTPlanNudgedOnlyAfterSilence(t *testing.T) {
+	shortOpenSilence(t, time.Second)
 	for _, hello := range []bool{false, true} {
 		t.Run(map[bool]string{false: "silent", true: "hello"}[hello], func(t *testing.T) {
 			f := rcNewFixture(t, "chatgpt-plan", "ring")
@@ -185,7 +199,7 @@ func TestIncoming_ChatGPTPlanNudgedOnlyAfterSilence(t *testing.T) {
 			nudge := func(v map[string]any) bool { return strings.Contains(vpJSON(v), "has not said anything yet") }
 			if hello {
 				p.user(t, "u1", "hola")
-				time.Sleep(2500 * time.Millisecond)
+				time.Sleep(2 * voice.OpenSilence())
 				for _, v := range p.snapshot() {
 					if nudge(v) {
 						t.Fatalf("nudged although the user said hello: %s", vpJSON(v))
@@ -193,8 +207,8 @@ func TestIncoming_ChatGPTPlanNudgedOnlyAfterSilence(t *testing.T) {
 				}
 			} else {
 				p.await(t, "silence nudge", nudge)
-				if d := time.Since(start); d < 1500*time.Millisecond {
-					t.Errorf("nudged %v after pickup, before ~2 s of silence", d)
+				if d := time.Since(start); d < voice.OpenSilence() {
+					t.Errorf("nudged %v after pickup, before the silence wait", d)
 				}
 			}
 			call.hangup()

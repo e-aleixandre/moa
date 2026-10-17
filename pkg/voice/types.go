@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -102,8 +103,18 @@ const (
 	OpenOnSilence
 )
 
+// openSilence is how long OpenOnSilence waits for the user's hello.
+var openSilence atomic.Int64
+
+func init() { openSilence.Store(int64(2 * time.Second)) }
+
 // OpenSilence is how long OpenOnSilence waits for the user's hello.
-var OpenSilence = 2 * time.Second
+func OpenSilence() time.Duration { return time.Duration(openSilence.Load()) }
+
+// SetOpenSilence changes that wait and returns the previous one (tests).
+func SetOpenSilence(d time.Duration) time.Duration {
+	return time.Duration(openSilence.Swap(int64(d)))
+}
 
 // Adapter opens upstream calls for one provider.
 type Adapter interface {
