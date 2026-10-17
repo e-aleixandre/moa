@@ -227,7 +227,23 @@ func handleMentionSessions(mgr *Manager) http.HandlerFunc {
 		}
 		selfKey := codebaseKeyOf(selfCWD)
 		keys := map[string]string{selfCWD: selfKey}
-		for _, info := range mgr.ListWith(ListOptions{}) {
+		sameKey := func(cwd string) bool {
+			key, known := keys[cwd]
+			if !known {
+				key = codebaseKeyOf(cwd)
+				keys[cwd] = key
+			}
+			return key == selfKey
+		}
+		// The roster (its saved part is cached) only enumerates candidates; a
+		// saved one is offered from its current record, loaded read-only, so a
+		// session that moved codebase or was deleted since the scan is omitted.
+		infos := mgr.ListWith(ListOptions{})
+		sort.SliceStable(infos, func(i, j int) bool { return infos[i].Updated.After(infos[j].Updated) })
+		for _, info := range infos {
+			if len(rows) >= limit {
+				break
+			}
 			if info.ID == self.ID || info.Kind == session.KindOwner || info.CWD == "" {
 				continue
 			}
@@ -237,13 +253,21 @@ func handleMentionSessions(mgr *Manager) http.HandlerFunc {
 			if query != "" && !strings.Contains(strings.ToLower(info.Title), query) {
 				continue
 			}
-			key, known := keys[info.CWD]
-			if !known {
-				key = codebaseKeyOf(info.CWD)
-				keys[info.CWD] = key
-			}
-			if key != selfKey {
+			if !sameKey(info.CWD) {
 				continue
+			}
+			if info.State == StateSaved {
+				current, _, err := session.FindSessionReadOnly(mgr.sessionBaseDir, info.ID)
+				if err != nil {
+					continue
+				}
+				cwd, _ := current.Metadata[session.MetaCWD].(string)
+				if current.Kind() == session.KindOwner || cwd == "" || !sameKey(cwd) ||
+					(selfKind == session.KindOwner && current.OwnerDetached()) ||
+					(query != "" && !strings.Contains(strings.ToLower(current.Title), query)) {
+					continue
+				}
+				info.Title, info.Updated = current.Title, current.Updated
 			}
 			rows = append(rows, mentionSessionRow{
 				ID: info.ID, Title: info.Title, State: info.State,

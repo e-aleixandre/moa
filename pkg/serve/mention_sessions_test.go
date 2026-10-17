@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 func (e *rsEnv) mentionRows(callerID, query string) (int, []mentionSessionRow, string) {
@@ -191,5 +193,31 @@ func TestMentionSessionsIncludesOtherWorktreeOfTheSameRepo(t *testing.T) {
 	_, rows, _ := env.mentionRows(caller.ID, "")
 	if got := rowIDs(rows); len(got) != 1 || got[0] != sibling.ID {
 		t.Errorf("rows = %v, want only the sibling worktree session (not %s)", got, elsewhere.ID)
+	}
+}
+
+// The roster only enumerates candidates: a saved session whose persisted CWD
+// moved to another codebase after the roster was cached must not be offered.
+func TestMentionSessionsRevalidatesSavedRecordAgainstDisk(t *testing.T) {
+	env := newRSEnv(t, nil)
+	env.mgr.savedCacheTTL = time.Hour
+	caller := env.titled(env.root, "caller", 0)
+	target := env.titled(env.root, "MOVED_TARGET_TITLE", time.Minute)
+	if err := env.mgr.CloseSession(target.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, rows, body := env.mentionRows(caller.ID, "?q=MOVED_TARGET_TITLE"); len(rows) != 1 {
+		t.Fatalf("warm roster should offer the saved target: %s", body)
+	}
+	saved, store, err := session.FindSessionReadOnly(env.mgr.sessionBaseDir, target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.Metadata[session.MetaCWD] = t.TempDir()
+	if err := store.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	if _, rows, body := env.mentionRows(caller.ID, "?q=MOVED_TARGET_TITLE"); len(rows) != 0 || strings.Contains(body, target.ID) {
+		t.Errorf("moved saved session still offered from the cached roster: %s", body)
 	}
 }
