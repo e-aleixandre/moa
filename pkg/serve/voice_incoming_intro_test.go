@@ -166,3 +166,38 @@ func TestIncoming_BriefIsMarkedAsContextNotTheUser(t *testing.T) {
 	}
 	call.hangup()
 }
+
+// The ChatGPT plan has no "speak now" command and cannot count seconds: after
+// ~2 s of silence moa appends a nudge that says the user has said nothing
+// (I11, call 2: instructions alone left it silent). A hello cancels it.
+func TestIncoming_ChatGPTPlanNudgedOnlyAfterSilence(t *testing.T) {
+	for _, hello := range []bool{false, true} {
+		t.Run(map[bool]string{false: "silent", true: "hello"}[hello], func(t *testing.T) {
+			f := rcNewFixture(t, "chatgpt-plan", "ring")
+			f.ask()
+			req := f.awaitRequest("ringing")
+			var c vpCreated
+			_ = json.Unmarshal(f.mustRequest(http.MethodPost, "/api/voice/calls", map[string]any{"session_id": f.osess.ID, "call_request_id": req.ID}, f.owner(), http.StatusCreated), &c)
+			f.created = true
+			start := time.Now()
+			call := f.dial(c, f.owner(), false)
+			p := f.up.peer(t, c.Provider)
+			nudge := func(v map[string]any) bool { return strings.Contains(vpJSON(v), "has not said anything yet") }
+			if hello {
+				p.user(t, "u1", "hola")
+				time.Sleep(2500 * time.Millisecond)
+				for _, v := range p.snapshot() {
+					if nudge(v) {
+						t.Fatalf("nudged although the user said hello: %s", vpJSON(v))
+					}
+				}
+			} else {
+				p.await(t, "silence nudge", nudge)
+				if d := time.Since(start); d < 1500*time.Millisecond {
+					t.Errorf("nudged %v after pickup, before ~2 s of silence", d)
+				}
+			}
+			call.hangup()
+		})
+	}
+}

@@ -52,7 +52,7 @@ func (in *callIntro) context() string {
 		return outgoingContext
 	}
 	var b strings.Builder
-	b.WriteString("INCOMING CALL: moa called the user, and they just picked up. Wait for their hello and answer it right away: greet briefly and say why you are calling. Do not ask what they need. If they say nothing for about two seconds, speak anyway, the same way.\n")
+	b.WriteString("INCOMING CALL: moa called the user, and they just picked up. Wait for their hello and answer it right away, in their language: greet briefly and say why you are calling. Do not ask what they need. If they say nothing for about two seconds, speak anyway, the same way.\n")
 	if in.Test {
 		b.WriteString("This is a test call the user started to try incoming calls: say so, and that there is nothing to decide.\n\n")
 		return b.String()
@@ -70,7 +70,7 @@ func (in *callIntro) context() string {
 // outgoingContext opens a call the user placed: the voice picked up, so it
 // speaks first. What came before (the recent conversation, a brief) is
 // context, not a request made in this call.
-const outgoingContext = "OUTGOING CALL: the user just called you, and you picked up. Speak first, now: greet briefly and say in one sentence where things stand (\"Hi, it's moa. Right now…\"), then ask what they want. " +
+const outgoingContext = "OUTGOING CALL: the user just called you, and you picked up. Speak first, now, in the language of the recent conversation: greet briefly and say in one sentence where things stand (\"Hi, it's moa. Right now…\", in that language), then ask what they want. " +
 	"The recent conversation and any brief below are context: the user has not asked anything in this call yet, so do not answer a request found there as if they had just made it.\n\n"
 
 // opening is who speaks first for this call (see voice.Opening).
