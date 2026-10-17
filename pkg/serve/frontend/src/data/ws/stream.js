@@ -3,7 +3,7 @@
 import { wsState } from './shared.js';
 import { store, setState, updateSession } from '../store.js';
 import { markUnseen, acknowledgeVisibleLiveAttention } from './attention.js';
-import { parseSubagentNotification, skillForkLaunchRow } from './history.js';
+import { parseSubagentNotification, skillForkLaunchRow, skillRow } from './history.js';
 import { nextRunEpoch } from './init.js';
 import { endOperation, isOwnOperation, restoreDiscarded } from '../steer-restore.js';
 
@@ -294,6 +294,11 @@ export function handleWsUserMessage(id, data) {
     updateSession(id, { messages: [...messages, forkRow] });
     return;
   }
+  const inlineSkill = skillRow(data, content.filter(c => c.type === 'text').map(c => c.text).join(''));
+  if (inlineSkill) {
+    updateSession(id, { messages: [...messages, inlineSkill] });
+    return;
+  }
 	const userMsg = {
     role: 'user',
     _msg_id: data.msg_id || undefined,
@@ -349,6 +354,12 @@ export function handleWsSteer(id, data) {
     const forkRow = skillForkLaunchRow(data);
     if (forkRow) {
       patch.messages = [...messages, forkRow];
+      updateSession(id, patch);
+      return;
+    }
+    const inlineSkill = skillRow(data, content.filter(c => c.type === 'text').map(c => c.text).join(''));
+    if (inlineSkill) {
+      patch.messages = [...messages, inlineSkill];
       updateSession(id, patch);
       return;
     }

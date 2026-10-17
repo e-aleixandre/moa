@@ -648,8 +648,11 @@ with `load_skill`, and you can invoke it yourself by typing `/<name>`. Arguments
 land wherever you write `$ARGUMENTS`; if the file has no placeholder they are
 appended at the end.
 
-Invoking a skill without `context: fork` drops its content into the conversation
-as a message — nothing runs. A skill with `context: fork` instead starts an
+Invoking a skill without `context: fork` (`/<name> [args]`) loads it and starts a
+run, as if you had sent the rendered `SKILL.md` as a message. The transcript
+shows it as a compact "Skill: <name>" row (arguments beside it, content on
+expand) rather than as a message from you. Like any other command that adds to
+the conversation, it is refused while the session is running. A skill with `context: fork` instead starts an
 isolated subagent: the rendered `SKILL.md` is the child's task, and the parent
 does not inherit that body.
 

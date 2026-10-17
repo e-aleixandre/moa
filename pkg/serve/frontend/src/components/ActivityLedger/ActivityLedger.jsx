@@ -92,6 +92,7 @@ const ICONS = {
   subagent: <><circle cx="8" cy="5.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M3 13.5c.6-2.6 2.5-4 5-4s4.4 1.4 5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></>,
   // A capability arriving: the bolt is what the skill adds, not a file.
   load_skill: <path d="M9.4 1.9L4 8.9h3.4l-.7 5.3 5.4-7.2H8.7z" {...STROKE} />,
+  skill: <path d="M9.4 1.9L4 8.9h3.4l-.7 5.3 5.4-7.2H8.7z" {...STROKE} />,
 
   // The genuine unknown. It keeps the wrench precisely because it is the one
   // case where the ledger has nothing to say about what the call does.

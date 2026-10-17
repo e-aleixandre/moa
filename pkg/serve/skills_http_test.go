@@ -175,13 +175,14 @@ func TestSkillCommands_SkipsUnusableNames(t *testing.T) {
 	}
 }
 
-func TestRunSkillCommand_InlineLoadsIntoConversation(t *testing.T) {
+func TestRunSkillCommand_InlineStartsARun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
 	t.Setenv("HOME", t.TempDir())
 	writeTestSkill(t, dir, "deploy", "# Deploy\n\nShip it.\n")
-	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(), dir, core.MoaConfig{
+	prov := newMockProvider(simpleResponseHandler("shipped"))
+	mgr := newTestManagerWithConfig(t, ctx, prov, dir, core.MoaConfig{
 		DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off",
 	})
 	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
@@ -189,15 +190,54 @@ func TestRunSkillCommand_InlineLoadsIntoConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := mgr.ExecCommand(sess.ID, "/deploy", "")
+	res, err := mgr.ExecCommand(sess.ID, "/deploy staging", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.OK || !strings.Contains(res.Message, "loaded skill") {
+	if !res.OK {
 		t.Fatalf("got %+v", res)
 	}
-	if !conversationContains(sess, "Ship it.") {
-		t.Fatal("inline slash did not put the skill body in the parent conversation")
+	// The model gets the rendered skill and the run actually happens.
+	pollUntil(t, 3*time.Second, "assistant reply", func() bool {
+		return conversationContains(sess, "shipped")
+	})
+	if !conversationContains(sess, "Ship it.") || !conversationContains(sess, "ARGUMENTS: staging") {
+		t.Fatal("the rendered skill did not reach the conversation")
+	}
+	var found *core.AgentMessage
+	msgs := sess.runtime.Context().Agent.Messages()
+	for i := range msgs {
+		if msgs[i].Custom["skill"] == "deploy" {
+			found = &msgs[i]
+		}
+	}
+	if found == nil || found.Role != "user" {
+		t.Fatal("no user message tagged with the skill")
+	}
+	if found.Custom["source"] != "skill" || found.Custom["skill_args"] != "staging" {
+		t.Fatalf("custom = %+v", found.Custom)
+	}
+}
+
+func TestRunSkillCommand_InlineWhileBusyIsRefused(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	writeTestSkill(t, dir, "deploy", "# Deploy\n\nShip it.\n")
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(simpleResponseHandler("ok")), dir, core.MoaConfig{
+		DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off",
+	})
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.runtime.State.Transition(bus.StateRunning)
+	if _, err := mgr.ExecCommand(sess.ID, "/deploy", ""); !errors.Is(err, ErrBusy) {
+		t.Fatalf("err = %v, want ErrBusy", err)
+	}
+	if conversationContains(sess, "Ship it.") {
+		t.Fatal("a refused skill still entered the conversation")
 	}
 }
 

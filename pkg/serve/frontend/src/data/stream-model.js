@@ -1077,6 +1077,14 @@ function toLedgerRow(msg) {
     // keeps its reason on the row.
     if (status !== 'err' && status !== 'warn') delete row.echo;
   }
+  // A skill the user invoked: the name is the subject, what they typed after
+  // it is the dim part, and the SKILL.md opens as the detail.
+  if (name.toLowerCase() === 'skill') {
+    const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
+    row.toolLabel = 'Skill';
+    row.arg = { text: args?.name || '', detail: args?.arguments || undefined };
+    delete row.echo;
+  }
   if (msg.detailUrl) row.detailUrl = msg.detailUrl;
   if (msg.images) row.images = msg.images;
   const inputLine = toolInputLine(name, msg.args);

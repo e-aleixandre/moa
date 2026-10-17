@@ -531,6 +531,16 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 			projected["skill"] = name
 		}
 	}
+	// A user-invoked inline skill: the row names the skill and what the user
+	// typed after it; the SKILL.md itself is the message body.
+	if source == "skill" {
+		if name, ok := custom["skill"].(string); ok && name != "" {
+			projected["skill"] = name
+		}
+		if args, ok := custom["skill_args"].(string); ok && args != "" {
+			projected["skill_args"] = args
+		}
+	}
 	if source == "secret_batch" {
 		switch aliases := custom["secret_aliases"].(type) {
 		case []string:
