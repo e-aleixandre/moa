@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,5 +139,29 @@ func vpSeedOwnerBook(t *testing.T, f *vpFixture, path, content string) {
 	}
 	if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The block stays bounded: the brief is always there, then the newest
+// answers and files that fit; a re-read file replaces its older copy.
+func TestVoiceCallDataKeepsBriefAndNewestWithinBudget(t *testing.T) {
+	c := &voiceCall{}
+	c.remember("brief", "", "BRIEF-KEPT")
+	for i := range voiceCallDataItems + 2 {
+		c.remember("book", fmt.Sprintf("work/f%d.md", i), fmt.Sprintf("FILE-%d ", i)+strings.Repeat("x", voiceCallDataBookChar))
+	}
+	c.remember("book", "work/f7.md", "FILE-7-REREAD")
+	data := c.callData()
+	if n := len([]rune(data)); n > voiceCallDataChars+1000 {
+		t.Fatalf("call data is %d chars", n)
+	}
+	if !strings.Contains(data, "BRIEF-KEPT") || !strings.Contains(data, "FILE-7-REREAD") || strings.Contains(data, "FILE-7 ") {
+		t.Fatalf("brief or newest file lost, or stale copy kept")
+	}
+	if strings.Contains(data, "FILE-0 ") || strings.Contains(data, "FILE-1 ") {
+		t.Fatalf("oldest files kept over the budget")
+	}
+	if strings.Count(data, "x") > voiceCallDataChars {
+		t.Fatal("book files not bounded")
 	}
 }
