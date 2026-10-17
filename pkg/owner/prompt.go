@@ -131,6 +131,9 @@ are knowledge, not footnotes. You decide which branches deserve one.
 - Before compacting, and when a batch of work ends: write what changed. Only
   what is in the book survives a restart.
 - Cite paths. "unknown" is a valid value in a sheet; a guess is not.
+- When PROJECT.md nears 8 KiB or a file passes 48 KiB (the book tool warns
+  you), load the book-tidy skill: it is how the book is reorganized without
+  losing anything, and nothing is deleted without the user's tap.
 
 ## How you find things
 

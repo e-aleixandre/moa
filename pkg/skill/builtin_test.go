@@ -15,10 +15,15 @@ func TestBuiltin_BookInitShips(t *testing.T) {
 	t.Setenv("MOA_CONFIG_DIR", configDir)
 
 	skills := Discover(cwd, Options{Builtin: true})
-	if len(skills) != 1 {
-		t.Fatalf("expected 1 built-in skill, got %d", len(skills))
+	var s Skill
+	for _, k := range skills {
+		if k.Name == "book-init" {
+			s = k
+		}
 	}
-	s := skills[0]
+	if len(skills) != 2 {
+		t.Fatalf("expected 2 built-in skills, got %d", len(skills))
+	}
 	if s.Name != "book-init" {
 		t.Fatalf("name: got %q", s.Name)
 	}
@@ -70,10 +75,15 @@ func TestBuiltin_OverriddenByUserCopy(t *testing.T) {
 	writeSkill(t, filepath.Join(configDir, "skills"), "book-init", "# Mine\n\nMy own version.\n")
 
 	skills := Discover(cwd, Options{Builtin: true})
-	if len(skills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(skills))
+	if len(skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(skills))
 	}
-	s := skills[0]
+	var s Skill
+	for _, k := range skills {
+		if k.Name == "book-init" {
+			s = k
+		}
+	}
 	if s.DisplayName != "Mine" {
 		t.Fatalf("expected the user copy to win, got %q", s.DisplayName)
 	}

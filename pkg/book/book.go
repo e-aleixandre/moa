@@ -472,7 +472,33 @@ func write(dir, rel, content string, appendTo bool) (core.Result, error) {
 	if appendTo {
 		verb = "Appended to"
 	}
-	return core.TextResult(fmt.Sprintf("%s %s in the book.", verb, rel)), nil
+	msg := fmt.Sprintf("%s %s in the book.", verb, rel)
+	if w := sizeWarning(CleanPath(rel), len(content)); w != "" {
+		msg += "\n\n" + w
+	}
+	return core.TextResult(msg), nil
+}
+
+const (
+	// indexWarnBytes leaves PROJECT.md a margin under the 8KB the owner's
+	// injection keeps (owner.MaxProjectBytes); docWarnBytes does the same under
+	// the read and search limit. Both are measured on the final file, in bytes.
+	indexWarnBytes = 7 * 1024
+	docWarnBytes   = 48 * 1024
+)
+
+// sizeWarning says when a file is past the point where the book stops serving
+// it whole. It only informs: nothing is blocked or removed, and it also fires
+// for a file that was already over before this write.
+func sizeWarning(rel string, size int) string {
+	var parts []string
+	if rel == "PROJECT.md" && size > indexWarnBytes {
+		parts = append(parts, fmt.Sprintf("Warning: PROJECT.md is now %d bytes. Sessions receive at most 8192 bytes of it and the rest is cut off. Keep it an index and move detail into other files; load_skill book-tidy for the method.", size))
+	}
+	if size > docWarnBytes {
+		parts = append(parts, fmt.Sprintf("Warning: %s is now %d bytes. read cuts a file at %d bytes and search skips files larger than that, so its tail cannot be found. Split it without summarizing; load_skill book-tidy for the method.", rel, size, maxFileBytes))
+	}
+	return strings.Join(parts, "\n")
 }
 
 // truncateUTF8 caps s at limit bytes without splitting a rune.

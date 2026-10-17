@@ -28,7 +28,10 @@ index.
   `session_id`.
 - **The book** lives in `~/.config/moa/codebases/<key>/book/`. It has no size
   limit. Only `PROJECT.md` (capped at 8 KiB) is injected into prompts: it is
-  the index, and pointing at the rest of the book is its job. The owner writes
+  the index, and pointing at the rest of the book is its job. When the index is
+  longer, the injected text ends with an `[Index cut: N of M bytes shown. …]`
+  mark that sessions see too (N counts the bytes really kept; the mark fits
+  inside the 8 KiB). The owner writes
   the book; you can edit the files directly.
 
 ## Loops
@@ -386,6 +389,30 @@ What it does:
 - An area closes with its `README.md` (inspected, gaps, `coverage`) and its
   line in `PROJECT.md`. Coverage is per area; there is no completion
   percentage, because there is nothing to measure it against.
+
+## Keeping the book usable: the `book-tidy` skill
+
+Past a few limits a book keeps its information on disk and loses it for
+everyone: sessions get 8192 bytes of `PROJECT.md`, `read` returns 64 KiB of a
+file, and `search` skips files larger than 64 KiB. So the `book` tool says so
+when a `write` or `append` leaves `PROJECT.md` above 7 KiB or any file above
+48 KiB (measured on the final file, in bytes, every time, not just when the line
+is crossed). It only warns: nothing is blocked or removed, and a file edited by
+hand never triggers it.
+
+The warning points to the built-in `book-tidy` skill (`/book-tidy`, or
+`load_skill` by the owner). Its method: freeze the scope; take a snapshot; split
+files over 48 KiB into literal parts with a movement map and sha256; test
+recovery questions using only what a session has (8 KiB of index, `search`,
+`read`); and never delete or summarize on its own authority: the owner proposes
+a concrete list and you confirm it with a tap. Decisions are never pruned.
+
+Snapshots go to `~/.config/moa/codebases/<key>/snapshots/<UTC>-<digest>/`, next
+to the book (so they are not searched) and inside moa's directory (so removing
+moa removes them), directories 0700 and files 0600, with a manifest and a
+restore rehearsal. Retention: always the one before a cleanup until it is
+accepted; otherwise the last 10 and at least 90 days, telling you before any
+purge. Same disk as the book: it guards against a bad edit, not a dead server.
 
 ## Limits of this first version
 
