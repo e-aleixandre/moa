@@ -128,13 +128,13 @@ func (r *callRequestRegistry) open(sessionID string, own owner.Owner, reason, ur
 	if !ok {
 		return nil, whyNoPlan
 	}
-	onCall, withThisOwner := r.m.voiceCallState(sessionID)
-	if withThisOwner {
-		return nil, whyBusy
-	}
+	// Calls are looked at under r.mu, the lock callsEnded also holds when it
+	// looks: a request held for a call that is ending is either seen by
+	// callsEnded or not held at all.
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.live) > 0 {
+	onCall, withThisOwner := r.m.voiceCallState(sessionID)
+	if withThisOwner || len(r.live) > 0 {
 		return nil, whyBusy
 	}
 	req := &callRequest{
@@ -208,11 +208,11 @@ func (r *callRequestRegistry) outcome(req *callRequest) (state, why string) {
 // CallKit when one can ring; otherwise, and for Ask first, it is the urgent
 // call_request push (none while the conversation is in view). Open apps ring
 // from the requests feed either way.
-func (r *callRequestRegistry) announce(req *callRequest) {
+func (r *callRequestRegistry) announce(ctx context.Context, req *callRequest) {
 	if !r.isState(req.ID, crRinging) {
 		return
 	}
-	if req.Level == owner.CallRing && r.ringDevices(req) {
+	if req.Level == owner.CallRing && r.ringDevices(ctx, req) {
 		return
 	}
 	sess, ok := r.m.Get(req.SessionID)
@@ -231,57 +231,64 @@ func (r *callRequestRegistry) announce(req *callRequest) {
 	})
 }
 
-// ringDevices rings the iPhones for req and follows the invitation to its
-// end. Answering on an iPhone claims the request first, so it and an answer
-// on the web have one winner. It reports whether an iPhone rings.
-func (r *callRequestRegistry) ringDevices(req *callRequest) bool {
+// ringDevices rings the iPhones for req. The invitation and the request
+// end as one: answering on an iPhone claims the request before the call
+// opens and commits it before the call is published, and every other end
+// of the invitation reaches the request synchronously through Done, so
+// neither depends on the relay's acknowledgement. It reports whether an
+// iPhone rings.
+func (r *callRequestRegistry) ringDevices(ctx context.Context, req *callRequest) bool {
 	vr := r.m.voiceRegistry()
 	if vr == nil || !vr.CanRing() {
 		return false
 	}
 	id := req.ID
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	inviteID, err := vr.RingDevices(ctx, req.SessionID, RingOptions{
 		Name: req.OwnerName, Provider: string(req.provider), TTL: r.ringTime(), Intro: req.intro(),
-		Claim: func() bool { _, ok := r.resolve(id, []string{crRinging}, crConnecting, ""); return ok },
+		Claim:  func() bool { _, ok := r.resolve(id, []string{crRinging}, crConnecting, ""); return ok },
+		Commit: r.committer(id),
+		Done: func(out InviteOutcome) {
+			switch out.State {
+			case inviteFailed:
+				if out.Reason != inviteLostClaim {
+					r.resolve(id, []string{crConnecting}, crWritten, whyPlanFailed)
+				}
+			case inviteDeclined:
+				r.resolve(id, []string{crRinging}, crWritten, whyDeclined)
+			case inviteExpired:
+				r.resolve(id, []string{crRinging}, crWritten, whyMissed)
+			}
+		},
 	})
 	cancel()
 	if err != nil {
 		slog.Info("call request: no iPhone rang", "err", err)
 		return false
 	}
-	// The iPhone may have been answered (the request is connecting) before
-	// RingDevices returned: the follower must run then too, or the request
-	// never learns how that answer ended.
+	// The request may have ended on another screen while the push was being
+	// delivered: then this invitation must stop ringing. Cancelling an
+	// invitation an iPhone already answered does nothing.
 	r.mu.Lock()
 	live := r.live[id]
-	if live != nil && live.State == crRinging {
+	ringing := live != nil && live.State == crRinging
+	if ringing {
 		live.invite = inviteID
 	}
 	r.mu.Unlock()
-	if live == nil {
+	if !ringing {
 		vr.CancelInvite(inviteID)
-		return true
 	}
-	go func() {
-		out, err := vr.WaitInvite(context.Background(), inviteID)
-		if err != nil {
-			return
-		}
-		switch out.State {
-		case inviteAnswered:
-			r.resolve(id, []string{crConnecting}, crAnswered, "")
-		case inviteFailed:
-			if out.Reason != inviteLostClaim {
-				r.resolve(id, []string{crConnecting}, crWritten, whyPlanFailed)
-			}
-		case inviteDeclined:
-			r.resolve(id, []string{crRinging}, crWritten, whyDeclined)
-		case inviteExpired:
-			r.resolve(id, []string{crRinging}, crWritten, whyMissed)
-		}
-	}()
 	return true
+}
+
+// committer is the last step before the call answering request id is
+// published: it fails once the request was withdrawn.
+func (r *callRequestRegistry) committer(id string) func() bool {
+	return func() bool {
+		_, ok := r.resolve(id, []string{crConnecting}, crAnswered, "")
+		return ok
+	}
 }
 
 func (r *callRequestRegistry) isState(id, state string) bool {
@@ -307,6 +314,10 @@ func (r *callRequestRegistry) claim(id, sessionID string) (*callRequest, bool) {
 // up without choosing.
 func (r *callRequestRegistry) callsEnded() {
 	r.mu.Lock()
+	if active, _ := r.m.voiceCallState(""); active {
+		r.mu.Unlock()
+		return
+	}
 	var held []string
 	for id, req := range r.live {
 		if req.State == crHeld {
@@ -461,6 +472,9 @@ func (m *Manager) setCallLevel(own *owner.Owner, level string, ack *string) erro
 		paid := m.ownerCallsPaidProvider()
 		if paid == "" {
 			return fmt.Errorf("%w: no voice plan is signed in and no paid provider has a key", ErrInvalidCallLevel)
+		}
+		if r := m.voiceRegistry(); r == nil || !r.selectable(paid) {
+			return fmt.Errorf("%w: no voice plan is signed in and %s has no API key: add one under Providers", ErrInvalidCallLevel, paid)
 		}
 		if ack == nil || strings.TrimSpace(*ack) != string(paid) {
 			return fmt.Errorf("%w: accept the per-minute cost of %s first (cost_ack_provider)", ErrInvalidCallLevel, paid)

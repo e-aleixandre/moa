@@ -34,7 +34,8 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge) c
 					"description": "The question asked in writing when no call happens.",
 					"properties": {
 						"question": {"type": "string"},
-						"options": {"type": "array", "items": {"type": "string"}}
+						"options": {"type": "array", "items": {"type": "string"}},
+						"requires_tap": {"type": "boolean", "description": "true when the answer approves a deployment, a release, a merge or a permission: it then needs the user's tap or typed answer, never a voice relay. Same rule as ask_user."}
 					},
 					"required": ["question"]
 				}
@@ -44,7 +45,7 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge) c
 		Effect: core.EffectInteractive,
 		Execute: func(ctx context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
 			reason, _ := params["reason"].(string)
-			reason = strings.TrimSpace(reason)
+			reason = strings.Join(strings.Fields(reason), " ") // one line, as announced
 			if reason == "" || len(reason) > 1000 || !utf8.ValidString(reason) {
 				return core.ErrorResult("reason is required (one line, at most 1000 bytes)"), nil
 			}
@@ -60,6 +61,11 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge) c
 			if err != nil {
 				return core.ErrorResult("written_fallback: " + err.Error()), nil
 			}
+			// An approval asked in writing keeps its tap requirement whatever
+			// path led to writing; accepted at either level, never dropped.
+			fbTap, _ := fb["requires_tap"].(bool)
+			topTap, _ := params["requires_tap"].(bool)
+			requiresTap := fbTap || topTap
 			own, err := m.callingOwner(sessionID)
 			if err != nil {
 				return core.ErrorResult(err.Error()), nil
@@ -69,28 +75,31 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge) c
 			id := ""
 			if req != nil {
 				id = req.ID
-				reg.announce(req)
-				select {
-				case <-req.done:
-				case <-ctx.Done():
+				// Stopping the run withdraws the request at any point from
+				// here on, delivery and opening included: a withdrawn
+				// request never becomes a call (see committer).
+				stop := context.AfterFunc(ctx, func() {
 					reg.resolve(id, []string{crRinging, crHeld, crAccepted, crConnecting}, crCancelled, "")
+				})
+				reg.announce(ctx, req)
+				<-req.done
+				stop()
+				state, w := reg.outcome(req)
+				if state == crCancelled {
 					return core.ErrorResult("Call request withdrawn: this run was stopped."), nil
 				}
-				state, w := reg.outcome(req)
 				switch state {
 				case crAnswered:
 					res := core.TextResult("The user answered: they are on a voice call with you now, through the call relay. End your turn. What you agree arrives as call minutes and relayed tasks.")
 					res.Custom = map[string]any{"call_request": map[string]any{"id": id, "outcome": crAnswered, "reason": reason}}
 					return res, nil
-				case crCancelled:
-					return core.ErrorResult("Call request withdrawn."), nil
 				}
 				why = w
 			}
 			if bridge == nil {
 				return core.ErrorResult("No call (" + whyText[why] + ") and this session cannot ask in writing."), nil
 			}
-			res := askuser.Ask(ctx, bridge, []askuser.Question{question}, false)
+			res := askuser.Ask(ctx, bridge, []askuser.Question{question}, requiresTap)
 			var b strings.Builder
 			b.WriteString("No call: " + whyText[why] + ". Your written_fallback was asked in writing instead.")
 			if !res.IsError {

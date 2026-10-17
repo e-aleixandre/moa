@@ -70,6 +70,13 @@ type RingOptions struct {
 	// opens; false makes the answer lose (answered_elsewhere): an owner's
 	// call request answered on another screen.
 	Claim func() bool
+	// Commit, if set, is asked right before the answered call is published;
+	// false abandons it (the request was withdrawn while it opened).
+	Commit func() bool
+	// Done, if set, learns how the invitation ended, once, synchronously with
+	// that end and before whoever ended it is answered: it does not depend
+	// on RingDevices returning.
+	Done func(InviteOutcome)
 }
 
 // InviteOutcome is how an invitation ended, for the caller that rang it.
@@ -83,7 +90,8 @@ type voiceInvite struct {
 	id, sessionID, name, provider string
 	expires                       time.Time
 	intro                         *callIntro // never nil: an incoming call always opens by saying why
-	claim                         func() bool
+	claim, commit                 func() bool
+	done                          func(InviteOutcome)
 
 	state    string
 	answerer string         // principal that won the answer
@@ -149,7 +157,7 @@ func (r *voiceCallRegistry) RingDevices(ctx context.Context, sessionID string, o
 		name = "moa"
 	}
 	inv := &voiceInvite{
-		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider, intro: incomingIntro(opts.Intro), claim: opts.Claim,
+		id: newInviteID(), sessionID: sess.ID, name: cutRunes(name, voiceInviteNameMax), provider: opts.Provider, intro: incomingIntro(opts.Intro), claim: opts.Claim, commit: opts.Commit, done: opts.Done,
 		expires: time.Now().Add(ttl), state: inviteRinging,
 		left: make(chan struct{}), resolved: make(chan struct{}),
 	}
@@ -218,9 +226,9 @@ func (r *voiceCallRegistry) WaitInvite(ctx context.Context, id string) (InviteOu
 func (r *voiceCallRegistry) endInvite(id, from, to string) bool {
 	t := r.inviteTable()
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	inv, ok := t.byID[id]
 	if !ok || inv.state != from {
+		t.mu.Unlock()
 		return false
 	}
 	inv.state = to
@@ -232,8 +240,20 @@ func (r *voiceCallRegistry) endInvite(id, from, to string) bool {
 		close(inv.resolved)
 		t.retire(id)
 		slog.Info("voice invite ended", "invite", id, "state", to)
+		t.mu.Unlock()
+		inv.notify(InviteOutcome{State: to})
+		return true
 	}
+	t.mu.Unlock()
 	return true
+}
+
+// notify tells the invitation's Done how it ended. Never under t.mu: Done
+// moves a call request, whose own transitions cancel invitations.
+func (inv *voiceInvite) notify(out InviteOutcome) {
+	if inv.done != nil {
+		inv.done(out)
+	}
 }
 
 // retire keeps an ended invitation answering its status, bounded.
@@ -289,20 +309,21 @@ func (r *voiceCallRegistry) answer(scope context.Context, id, principal string) 
 
 	if inv.claim != nil && !inv.claim() {
 		t.mu.Lock()
-		defer t.mu.Unlock()
 		inv.state, inv.reason = inviteFailed, inviteLostClaim
 		inv.status, inv.result = http.StatusConflict, map[string]any{"error": "answered_elsewhere"}
 		close(inv.resolved)
 		t.retire(id)
-		return inv.status, inv.result
+		status, result := inv.status, inv.result
+		t.mu.Unlock()
+		inv.notify(InviteOutcome{State: inviteFailed, Reason: inviteLostClaim})
+		return status, result
 	}
-	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider, inv.intro)
+	status, out, _ := r.openCall(scope, principal, inv.sessionID, inv.provider, inv.intro, inv.commit)
 	if inv.claim != nil {
 		delete(out, "paid_option") // an owner's call never offers the paid API (I21)
 	}
 
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	inv.status, inv.result = status, out
 	if status == http.StatusCreated {
 		inv.state = inviteAnswered
@@ -314,6 +335,9 @@ func (r *voiceCallRegistry) answer(scope context.Context, id, principal string) 
 	close(inv.resolved)
 	t.retire(id)
 	slog.Info("voice invite answered", "invite", id, "state", inv.state, "reason", inv.reason)
+	ended := InviteOutcome{State: inv.state, CallID: inv.callID, Reason: inv.reason}
+	t.mu.Unlock()
+	inv.notify(ended)
 	return status, out
 }
 
