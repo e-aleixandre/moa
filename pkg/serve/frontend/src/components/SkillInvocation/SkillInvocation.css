@@ -1,0 +1,41 @@
+.zl-skill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+}
+.zl-skill-ledger { flex: 1 1 auto; min-width: 0; }
+.zl-skill-rewind {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--surface1);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--duration) var(--ease), background var(--duration) var(--ease);
+}
+.zl-skill-rewind::before { content: ""; position: absolute; inset: -12px; }
+.zl-skill-rewind .lucide { width: 14px; height: 14px; }
+.zl-skill-rewind:active:not(:disabled) { color: var(--zl-t1); background: var(--zl-hi); }
+@media (hover: hover) {
+  .zl-skill:hover .zl-skill-rewind:not(:disabled) { color: var(--zl-t4); }
+  .zl-skill-rewind:hover:not(:disabled) { color: var(--zl-t1); background: var(--zl-hi); }
+}
+@media (hover: none) {
+  .zl-skill-rewind { color: var(--zl-t4); }
+}
+.zl-skill:focus-within .zl-skill-rewind:not(:disabled) { color: var(--zl-t4); }
+.zl-skill-rewind:disabled { opacity: 0.35; cursor: default; }
+.zl-skill-rewind:focus-visible {
+  color: var(--zl-t1);
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}

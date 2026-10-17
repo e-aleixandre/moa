@@ -18,6 +18,7 @@ import {
 import { Prose } from "../../components/AssistantDocument/AssistantDocument.jsx";
 import { TurnFoot } from "../../components/AssistantDocument/TurnFoot.jsx";
 import { VoiceMinutesForSession } from "../../components/VoiceCallBlock/VoiceMinutesBlock.jsx";
+import { SkillInvocation } from "../../components/SkillInvocation/SkillInvocation.jsx";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { ProviderErrorAction } from "../../components/ProviderErrorAction/ProviderErrorAction.jsx";
 import { turnFinalResponse } from "../../data/stream-model.js";
@@ -167,6 +168,16 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
     // The record a call left at hangup, with its transcript to download.
     case "voice_minutes":
       return <VoiceMinutesForSession text={block.text} minutes={block.minutes} attachments={block.attachments} time={block.time} sessionId={sessionId} />;
+    case "skill":
+      return (
+        <SkillInvocation
+          rows={fuseLedgerDetails([block.row], [], sessionId)}
+          command={block.command}
+          onRewind={rewind && block.msgId ? () => rewind.to(block.msgId, { edit: true }) : undefined}
+          rewindDisabled={rewind?.disabled}
+          onOpenTimeline={rewind?.openTimeline}
+        />
+      );
     case "waypoint": {
       // A message sent from the Live Preview carries the feedback block the
       // agent needs verbatim; the transcript paints it as a reference tied to

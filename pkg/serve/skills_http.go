@@ -2,9 +2,11 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/bootstrap"
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -36,6 +38,10 @@ var reservedCommandNames = func() map[string]bool {
 	}
 	return names
 }()
+
+func init() {
+	core.IsReservedSlashName = func(name string) bool { return reservedCommandNames[name] }
+}
 
 // invocableAs returns the slash name for a skill, and whether it can be
 // invoked at all.
@@ -105,11 +111,13 @@ func findInvocableSkill(cwd string, builtin bool, typed string) (skill.Skill, bo
 	return skill.Skill{}, false
 }
 
-// runSkillCommand handles a user slash-invocation of a skill. Inline skills
-// enter the transcript as a user message rather than the system prompt: it is
-// what the user asked for now, it stays visible in the conversation, and it
-// leaves the cached prefix untouched. Forked skills spawn an isolated child
-// instead and do not put SKILL.md into the parent conversation.
+// runSkillCommand handles a user slash-invocation of a skill. An inline skill
+// starts a run exactly as if the user had sent the rendered SKILL.md: it is
+// what they asked for now, it stays in the conversation, and it leaves the
+// cached prefix untouched. The message is tagged (source "skill") so clients
+// show a compact skill row instead of a user turn holding the whole file.
+// Forked skills spawn an isolated child instead and do not put SKILL.md into
+// the parent conversation.
 func runSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*CommandResult, error) {
 	if err := requireIdle(sess); err != nil {
 		return nil, err
@@ -121,26 +129,37 @@ func runSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*Comma
 	if err != nil {
 		return &CommandResult{OK: false, Message: "could not read skill " + s.Name + ": " + err.Error()}, nil
 	}
-
-	msg := core.AgentMessage{
-		Message: core.Message{
-			Role:    "user",
-			Content: []core.Content{core.TextContent(skill.RenderBody(body, args))},
-		},
-		Custom: map[string]any{"skill": s.Name},
+	typed, _ := invocableAs(s)
+	command := "/" + typed
+	if len(args) > 0 {
+		command += " " + strings.Join(args, " ")
 	}
-	if err := sess.runtime.Bus.Execute(bus.AppendToConversation{SessionID: sess.ID, Message: msg}); err != nil {
+	// IdleOnly makes the bus decide idleness under the lock that admits the
+	// prompt: a skill that lost a race must be refused, not queued behind a
+	// "started". Background work (async subagents, bash jobs) does not make the
+	// session busy for a typed message, and neither do the verifiers: like a
+	// typed message, the run this starts cancels them.
+	err = sess.runtime.Bus.Execute(bus.SendPrompt{
+		SessionID:             sess.ID,
+		Text:                  skill.RenderBody(body, args),
+		IdleOnly:              true,
+		AllowBackgroundWork:   true,
+		InterruptVerification: true,
+		Custom: map[string]any{
+			"source": "skill", "skill": s.Name, "skill_args": strings.Join(args, " "), "skill_command": command,
+		},
+	})
+	if errors.Is(err, bus.ErrNotIdle) {
+		return nil, ErrBusy
+	}
+	if err != nil {
 		return nil, err
 	}
-	// Appending mutates the agent's state in memory; persistence and the web's
-	// re-render both hang off the re-sync that CommandExecuted triggers. Without
-	// this the skill is loaded for the live run but lost on restart.
-	sess.runtime.Bus.Publish(bus.CommandExecuted{
-		SessionID: sess.ID,
-		Command:   "skill",
-		Messages:  sess.runtime.Context().Agent.Messages(),
-	})
-	return &CommandResult{OK: true, Message: "loaded skill: " + s.Name}, nil
+	sess.mu.Lock()
+	sess.Updated = time.Now()
+	sess.mu.Unlock()
+	sess.sendGeneration.Add(1)
+	return &CommandResult{OK: true, Message: "started skill: " + s.Name}, nil
 }
 
 // handleSessionSkills lists the skills the user may invoke in a session.

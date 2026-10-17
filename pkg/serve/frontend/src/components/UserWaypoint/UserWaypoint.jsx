@@ -77,7 +77,7 @@ export function ImageLightbox({ attachment, sessionId, onClose }) {
 // mark can only target YOUR messages, while the timeline also lists assistant
 // turns and shows which points already have branches. On mobile that link is
 // the only way back to it, since the status line no longer carries Rewind.
-function RewindConfirm({ open, preview, edit, midTurn, onConfirm, onOpenTimeline, onClose }) {
+export function RewindConfirm({ open, preview, edit, midTurn, onConfirm, onOpenTimeline, onClose }) {
   return (
     <Sheet open={open} onClose={onClose} title="Rewind here?" ariaLabel="Confirm rewind">
       <div class="wp-rewind-confirm">

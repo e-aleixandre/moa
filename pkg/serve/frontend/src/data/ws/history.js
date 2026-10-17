@@ -24,6 +24,34 @@ export function skillForkLaunchRow(data) {
   };
 }
 
+// skillRow renders a user-invoked inline skill (/<name> args) as a compact tool
+// row instead of a user turn holding the whole SKILL.md. The model still gets
+// that text; only its presentation changes. Live (user_message / steer) and
+// reload go through this one builder so the transcript keeps its shape. The
+// row is keyed by the message ID, which live and reload both carry.
+export function isSkillInvocation(custom) {
+  // Transcripts from before skills started a run carry only `skill`.
+  return !!custom?.skill && (!custom.source || custom.source === 'skill');
+}
+
+export function skillRow(data, text) {
+  if (!isSkillInvocation(data?.custom)) return null;
+  return {
+    _type: 'tool_start',
+    _msg_id: data.msg_id || undefined,
+    ...(data.timestamp ? { timestamp: data.timestamp } : {}),
+    tool_call_id: 'skill-' + (data.msg_id || data.custom.skill),
+    tool_name: 'skill',
+    args: {
+      name: data.custom.skill,
+      arguments: data.custom.skill_args || '',
+      command: data.custom.skill_command || '',
+    },
+    status: 'done',
+    result: text || '',
+  };
+}
+
 // --- Message normalization ---
 
 export function normalizeHistory(raw, liveSubagents = []) {
@@ -209,6 +237,11 @@ export function normalizeHistory(raw, liveSubagents = []) {
           ...skillForkLaunchRow({ msg_id: msg.msg_id, custom: msg.custom }),
           timestamp: msg.timestamp,
         });
+      } else if (isSkillInvocation(msg.custom)) {
+        result.push(skillRow(
+          { msg_id: msg.msg_id, timestamp: msg.timestamp, custom: msg.custom },
+          (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join(''),
+        ));
       } else if (msg.custom?.source === 'bash_job') {
         const bashText = (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join('');
         result.push({

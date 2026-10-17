@@ -83,6 +83,12 @@ type SendPrompt struct {
 	// asynchronous work continues. Only owner reports opt in; other producers
 	// retain the quiescence requirement.
 	AllowBackgroundWork bool
+	// InterruptVerification admits an idle-only prompt while auto-verify or a
+	// goal verification is running. It is for a human's explicit prompt, which
+	// must behave as a typed message does: the run it starts cancels the
+	// verification through the usual hooks. Owner reports leave it unset and
+	// keep verifiers protected.
+	InterruptVerification bool
 	// InterruptWait lets an idle-only prompt join a run only while its foreground
 	// tool is an interruptible wait. It wakes that wait like a user steer, without
 	// injecting the prompt into a run that is actively reasoning or executing.
