@@ -1,0 +1,96 @@
+/* MentionSuggestions — the @ menu (Owners · Sessions · Files), anchored above
+   the composer. Rows keep the 44px touch floor of the old file picker. */
+
+.mentionsug-list {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: var(--space-2);
+  max-height: min(430px, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-overlay);
+}
+
+.mentionsug-group {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--zl-t4, var(--overlay0));
+}
+
+.mentionsug-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  min-height: 44px; /* comfortable touch target on iOS */
+  border-radius: var(--radius-sm, 9px);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease);
+  font-size: var(--text-base);
+}
+.mentionsug-item.selected { background: var(--surface0); }
+@media (hover: hover) {
+  .mentionsug-item:hover { background: var(--surface0); }
+}
+
+.mentionsug-lead {
+  width: 24px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+}
+
+.mentionsug-icon {
+  color: var(--overlay0);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+.mentionsug-item.is-dir .mentionsug-icon,
+.mentionsug-item.is-dir .mentionsug-path { color: var(--blue); }
+
+.mentionsug-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--text);
+}
+.mentionsug-sub,
+.mentionsug-meta {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--zl-t3, var(--overlay0));
+}
+.mentionsug-name + .mentionsug-sub { margin-left: var(--space-2); }
+.mentionsug-sub + .mentionsug-chip { margin-left: 0; }
+.mentionsug-chip {
+  font-size: 10.5px;
+  line-height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--surface1, var(--surface0));
+  border-radius: 5px;
+  color: var(--zl-t3, var(--overlay0));
+}
+
+.mentionsug-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}

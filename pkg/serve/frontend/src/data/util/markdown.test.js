@@ -255,3 +255,38 @@ test('assistant markdown is unchanged by the user mode', () => {
   expect(parseMarkdown('<b>x</b>')).toContain('<b>x</b>');
   expect(parseMarkdown('*a*')).toContain('<em>a</em>');
 });
+
+// --- @mentions in a user message ---------------------------------------------
+
+test('a mention becomes a span carrying its index; code and look-alikes are left alone', () => {
+  const mentions = [{ label: 'Infra' }, { label: 'Fix login cookie' }];
+  const html = parseUserMarkdownWithMentions('ask @Infra and `@Infra` then @Fix login cookie, not @Infrax', mentions);
+  expect(html).toContain('<span class="md-mention md-mention-0">@Infra</span> and');
+  expect(html).toContain('<code>@Infra</code>');
+  expect(html).toContain('<span class="md-mention md-mention-1">@Fix login cookie</span>, not @Infrax');
+  expect(html.match(/md-mention /g)).toHaveLength(2);
+});
+
+test('without mentions the render is the plain one, and a message never leaks labels into the next', () => {
+  const prev = DOMPurify.sanitize;
+  DOMPurify.sanitize = (html) => html;
+  try {
+    const plain = renderUserMarkdown('ask @Infra');
+    expect(plain).not.toContain('md-mention');
+    expect(renderUserMarkdown('ask @Infra', [])).toBe(plain);
+    expect(renderUserMarkdown('ask @Infra', [{ label: 'Infra' }])).toContain('md-mention-0');
+    expect(renderUserMarkdown('ask @Infra')).not.toContain('md-mention');
+  } finally {
+    DOMPurify.sanitize = prev;
+  }
+});
+
+function parseUserMarkdownWithMentions(text, mentions) {
+  const prev = DOMPurify.sanitize;
+  DOMPurify.sanitize = (html) => html;
+  try {
+    return renderUserMarkdown(text, mentions);
+  } finally {
+    DOMPurify.sanitize = prev;
+  }
+}

@@ -23,7 +23,7 @@ export { BashJobLog } from "./BashJobLog/BashJobLog.jsx";
 export { StreamingSkeleton, TypingDots } from "./StreamingSkeleton/StreamingSkeleton.jsx";
 export { HistoryHydrationTail, historyHydrationTailVisible } from "./HistoryHydrationTail/HistoryHydrationTail.jsx";
 export { QueuedTail } from "./QueuedTail/QueuedTail.jsx";
-export { FileSuggestions } from "./FileSuggestions/FileSuggestions.jsx";
+export { MentionSuggestions } from "./MentionSuggestions/MentionSuggestions.jsx";
 export { CommandPalette } from "./CommandPalette/CommandPalette.jsx";
 export { GlobalSettings } from "./GlobalSettings/GlobalSettings.jsx";
 export { PulsePairingPanel } from "./PulsePairingPanel/PulsePairingPanel.jsx";

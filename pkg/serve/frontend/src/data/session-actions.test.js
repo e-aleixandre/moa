@@ -1894,3 +1894,71 @@ test('files that live only on disk are reported as not coming back, never pasted
   const toast = getToasts().find((t) => /could not come back/i.test(t.title));
   expect(toast?.detail).toContain('shot.png');
 });
+
+// --- @owner / @session mentions -------------------------------------------
+
+test('sendMessage lists the picked sessions only when there are some', async () => {
+  const bodies = [];
+  globalThis.fetch = (path, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    return Promise.resolve(new Response(JSON.stringify({ action: 'send' }), { status: 200 }));
+  };
+  setState({ sessions: { s1: { id: 's1', state: 'idle', subagents: {}, pendingSteers: null, messages: [] } } });
+
+  await sendMessage('s1', 'plain', []);
+  expect(Object.keys(bodies[0]).sort()).toEqual(['attachments', 'msg_id', 'steer_id', 'text']);
+
+  await sendMessage('s1', 'read @Fix', [], { sessionMentions: ['full-id-1'] });
+  expect(bodies[1].session_mentions).toEqual(['full-id-1']);
+});
+
+test('a queued message keeps its text and the mention ids on the steer rail', async () => {
+  const bodies = [];
+  globalThis.fetch = (path, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    return Promise.resolve(new Response(JSON.stringify({ action: 'steer' }), { status: 200 }));
+  };
+  setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] } } });
+  await sendMessage('s1', 'look at @Fix\n\n[Mentions · moa]\n@Fix = session/abc', [], { sessionMentions: ['abc'] });
+  expect(bodies[0].text).toContain('[Mentions · moa]');
+  expect(bodies[0].session_mentions).toEqual(['abc']);
+});
+
+test('a recalled queue comes back as the comment with its owners, never the raw block', async () => {
+  setState({ composerDrops: {} });
+  const queued = 'ask @Infra\n\n[Mentions · moa]\n@Infra = owner/o1 · project infra (/x/infra) · only the project\'s owner can send it tasks';
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    discarded_steer_ids: ['recall-m1'],
+    discarded_steers: [{ id: 'recall-m1', text: queued }],
+  }), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'recall-m1', text: queued }] } } });
+
+  recallQueuedSteers('s1');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const drop = store.get().composerDrops.s1;
+  expect(drop.text).toBe('ask @Infra');
+  expect(drop.mentions.map((m) => [m.label, m.type, m.id])).toEqual([['Infra', 'owner', 'o1']]);
+});
+
+test('rewinding your message restores the comment and mentions, sessions only if the server vouches', async () => {
+  setState({ composerDrops: {} });
+  const sent = 'ask @Infra, read @Bench cache\n\n[Mentions · moa]\n@Infra = owner/o1 · project infra (/x/infra) · x\n@Bench cache = session/s9 · "Bench cache" · saved · read it with read_session session_id=s9';
+  const { rewindBeforeMessage } = await import('./session-actions.js');
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    ok: true, message: { text: sent, attachments: [], session_mentions: ['s9'] },
+  }), { status: 200 }));
+  await rewindBeforeMessage('s1', 'entry');
+  let drop = store.get().composerDrops.s1;
+  expect(drop.text).toBe('ask @Infra, read @Bench cache');
+  expect(drop.mentions.map((m) => m.id)).toEqual(['o1', 's9']);
+
+  setState({ composerDrops: {} });
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    ok: true, message: { text: sent, attachments: [] },
+  }), { status: 200 }));
+  await rewindBeforeMessage('s1', 'entry');
+  drop = store.get().composerDrops.s1;
+  expect(drop.text).toBe('ask @Infra, read @Bench cache');
+  expect(drop.mentions.map((m) => m.id)).toEqual(['o1']);
+});

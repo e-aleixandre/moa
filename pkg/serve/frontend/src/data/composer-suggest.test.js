@@ -144,3 +144,70 @@ test('slash menu still works with no skills', () => {
   expect(slashSuggestions('/comp', 5, [], []).length).toBe(1);
   expect(slashSuggestions('/comp', 5, []).length).toBe(1);
 });
+
+// --- @ menu: owners, sessions, files ------------------------------------------
+
+const {
+  ownerSuggestions, sessionSuggestions, flattenMentionGroups, computeLabelInsertion, pickMention,
+} = await import('./composer-suggest.js');
+
+const roster = [
+  { id: 'o1', name: 'Moa', root: '/dev/moa', session_id: 's-moa', session_state: 'idle' },
+  { id: 'o2', name: 'Infra', root: '/dev/infra', session_id: 's-infra', session_state: 'saved' },
+  { id: 'o3', name: 'iRead', root: '/dev/iread-app', session_id: 's-iread' },
+  { id: 'o4', name: 'Winerim', root: '/dev/winerim' },
+  { id: 'o5', name: 'Winerim Web', root: '/dev/winerim-web' },
+  { id: 'o6', name: 'Inbox', root: '/dev/inbox' },
+];
+
+test('owners: fuzzy by name and by root, name matches first, at most four', () => {
+  expect(ownerSuggestions(roster, '').map((o) => o.label)).toEqual(['Moa', 'Infra', 'iRead', 'Winerim']);
+  expect(ownerSuggestions(roster, 'in').map((o) => o.label)).toEqual(['Infra', 'Inbox', 'Winerim', 'Winerim Web']);
+  expect(ownerSuggestions(roster, 'iread-app').map((o) => o.label)).toEqual(['iRead']);
+  expect(ownerSuggestions(roster, 'zzz')).toEqual([]);
+});
+
+test('owners: shows project and saved, hides the owner whose conversation this is', () => {
+  const [infra] = ownerSuggestions(roster, 'inf');
+  expect(infra).toMatchObject({ kind: 'owner', id: 'o2', project: 'infra', saved: true });
+  expect(ownerSuggestions(roster, 'inf', { excludeSessionId: 's-infra' })).toEqual([]);
+});
+
+test('owners: a folder path is files only', () => {
+  expect(ownerSuggestions(roster, 'src/')).toEqual([]);
+});
+
+test('sessions: shaped from the endpoint, saved wins as the state, max five', () => {
+  const rows = Array.from({ length: 7 }, (_, i) => ({ id: `s${i}`, title: `T${i}`, state: 'idle', updated: 'x', saved: i === 1 }));
+  const out = sessionSuggestions(rows);
+  expect(out).toHaveLength(5);
+  expect(out[1]).toMatchObject({ kind: 'session', id: 's1', label: 'T1', state: 'saved', saved: true });
+  expect(sessionSuggestions({ error: 'x' })).toEqual([]);
+});
+
+test('groups lay out Owners, Sessions, Files; an empty group has no header', () => {
+  const flat = flattenMentionGroups({
+    files: [{ path: 'a.go', is_dir: false }, { path: 'src', is_dir: true }],
+    owners: [{ kind: 'owner', id: 'o2' }],
+    sessions: [],
+  });
+  expect(flat.map((i) => [i.group, i.kind, !!i.first])).toEqual([
+    ['Owners', 'owner', true], ['Files', 'file', true], ['Files', 'file', false],
+  ]);
+  expect(flattenMentionGroups(null)).toEqual([]);
+  expect(flattenMentionGroups({ owners: [], sessions: [], files: [] })).toEqual([]);
+});
+
+test('accepting an owner or session keeps the @ and adds label plus a space', () => {
+  expect(computeLabelInsertion('ask @in', 7, 'Infra')).toEqual({ value: 'ask @Infra ', cursor: 11 });
+  expect(computeLabelInsertion('@in and more', 3, 'Infra')).toEqual({ value: '@Infra  and more', cursor: 7 });
+});
+
+test('pickMention records what the block needs and dedupes the label', () => {
+  const owner = ownerSuggestions(roster, 'inf')[0];
+  expect(pickMention(owner)).toEqual({ label: 'Infra', type: 'owner', id: 'o2', meta: { root: '/dev/infra' } });
+  const session = sessionSuggestions([{ id: 'abcdef123', title: 'Infra', state: 'idle' }])[0];
+  expect(pickMention(session, [pickMention(owner)])).toEqual({
+    label: 'Infra #abcdef', type: 'session', id: 'abcdef123', meta: { title: 'Infra', state: 'idle' },
+  });
+});

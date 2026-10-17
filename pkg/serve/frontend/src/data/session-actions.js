@@ -16,6 +16,7 @@ import { closeSessionPanelForSession } from './session-panel.js';
 import { DAYBREAK_SWITCH_SPEC } from '../components/Daybreak/daybreak-model.js';
 import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.js';
 import { rewoundFiles, placeRewoundMessage } from './rewind-edit.js';
+import { rehydrateMentions } from './util/mentions.js';
 import { deviceZone } from './schedule-model.js';
 import { normalizeErrorDetail, sameErrorDetail } from './provider-error.js';
 import { claimProviderToast, loadProviderStatus } from './providers.js';
@@ -675,7 +676,11 @@ function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, prevRunSt
   updateSession(id, patch);
 }
 
-export async function sendMessage(id, text, attachments = []) {
+// `sessionMentions` are the full ids of the sessions the user picked with @ and
+// still has written in `text`: the server grants a read from this list, never
+// from the text. Absent when there are none, so a plain message's body is the
+// one it has always been.
+export async function sendMessage(id, text, attachments = [], { sessionMentions = [] } = {}) {
   const state = store.get();
   const sess = state.sessions[id];
   if (!sess) return;
@@ -741,6 +746,7 @@ export async function sendMessage(id, text, attachments = []) {
       attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, data: a.data })),
       steer_id: steerId,
       msg_id: msgId,
+      ...(sessionMentions.length > 0 ? { session_mentions: sessionMentions } : {}),
     }, { timeoutMs: 0 });
     // The response is authoritative about WHICH rail took the message: our
     // local prediction can be wrong in both directions (a run started between
@@ -1227,7 +1233,10 @@ export async function rewindBeforeMessage(id, entryId) {
   const { files, missing: lost } = await rewoundFiles(id, message.attachments);
   // `unavailable` are files the server knows it kept only on disk.
   const missing = [...lost, ...(Array.isArray(message.unavailable) ? message.unavailable : [])];
-  placeRewoundMessage(id, { text: message.text, files });
+  // The comment comes back, never the raw block; its mentions come back
+  // highlighted. Sessions only on the server's say-so (session_mentions).
+  const { comment, mentions } = rehydrateMentions(message.text, message.session_mentions);
+  placeRewoundMessage(id, { text: comment, files, mentions });
   if (missing.length > 0) {
     addToast({
       sessionId: id,

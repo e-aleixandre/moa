@@ -13,6 +13,7 @@
 import { setState } from './store.js';
 import { addToast } from './notifications.js';
 import { combineQueueText, droppedImageCount } from './composer-queue.js';
+import { rehydrateMentions } from './util/mentions.js';
 
 const restoredIDs = new Map(); // sessionId → Set of steer IDs already restored
 const ownOperations = new Set(); // operation IDs this client sent and may still hear about
@@ -58,6 +59,10 @@ function restoreSteers(sessionId, steers) {
   const fresh = steers.filter((s) => !s.non_recallable && !seen.has(s.id));
   if (fresh.length === 0) return;
   fresh.forEach((s) => seen.add(s.id));
+  // A queued message carries its mentions block; the composer gets the comment
+  // and the owners highlighted again. Sessions come back as plain text: the
+  // queue's text alone never reactivates a read.
+  const restored = fresh.map((steer) => ({ ...steer, ...rehydrateMentions(steer.text || '') }));
   setState((state) => {
     const prev = state.composerDrops[sessionId];
     return {
@@ -65,8 +70,9 @@ function restoreSteers(sessionId, steers) {
         ...state.composerDrops,
         [sessionId]: {
           id: `restore-${Date.now()}`,
-          text: combineQueueText(prev?.text, fresh),
+          text: combineQueueText(prev?.text, restored.map((r) => ({ ...r, text: r.comment }))),
           files: prev?.files || [],
+          mentions: [...(prev?.mentions || []), ...restored.flatMap((r) => r.mentions)],
           focus: true,
         },
       },
