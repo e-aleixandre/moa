@@ -68,9 +68,10 @@ func (in *callIntro) context() string {
 }
 
 // outgoingContext opens a call the user placed: the voice picked up, so it
-// speaks first. What came before (the recent conversation, a brief) is
+// speaks first, only a greeting (owner's decision from CarPlay, 17/10: an
+// unrequested summary has to be cut). What came before (the recent conversation, a brief) is
 // context, not a request made in this call.
-const outgoingContext = "OUTGOING CALL: the user just called you, and you picked up. Speak first, now, in the language of the recent conversation: greet briefly and say in one sentence where things stand (\"Hi, it's moa. Right now…\", in that language), then ask what they want. " +
+const outgoingContext = "OUTGOING CALL: the user just called you, and you picked up. Speak first, now, in the language of the recent conversation: only a short greeting that invites them to talk (\"Hi, it's moa, go ahead\", in that language). No summary and no news unless they ask how things are going: they may want to talk about something else. " +
 	"The recent conversation and any brief below are context: the user has not asked anything in this call yet, so do not answer a request found there as if they had just made it.\n\n"
 
 // opening is who speaks first for this call (see voice.Opening).

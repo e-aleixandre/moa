@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -107,8 +106,13 @@ func (a *chatGPTPlan) open(ctx context.Context, spec CallSpec, peer *Peer) (*cha
 			if json.Unmarshal(data, &env) == nil && env.Type == "session.started" {
 				u := &chatGPTUpstream{peer: peer, events: make(chan Event, upstreamEventQueue), stop: make(chan struct{}), readerDone: make(chan struct{})}
 				go u.read()
-				if spec.Opening == OpenOnSilence {
-					go u.openOnSilence()
+				// An incoming call waits for the user's hello: the plan cannot
+				// count a silence, and a nudge did not make it speak (I12).
+				if spec.Opening == OpenNow {
+					// Best effort: without it the instructions still open the call.
+					ictx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					_ = u.InjectContext(ictx, OpenNowNudge)
+					cancel()
 				}
 				return u, nil
 			}
@@ -164,30 +168,13 @@ type chatGPTUpstream struct {
 	closeOnce  sync.Once
 	readerDone chan struct{}
 	inAudio    inboundAudio // reader-owned
-	// heard is set once anyone's speech is transcribed (OpenOnSilence).
-	heard atomic.Bool
 }
 
-// OpenNudge is what the plan reads when the user picked up and said
-// nothing: it has no "speak now" command and cannot count seconds, and a
-// context append is what makes it speak. It says outright that the user has
-// said nothing, so the voice never answers words nobody said.
-const OpenNudge = "The user picked up but has not said anything yet; nothing they said exists in this call. Speak now: greet briefly and say why you are calling, as your instructions say."
-
-// openOnSilence nudges the plan after OpenSilence() unless someone spoke.
-func (u *chatGPTUpstream) openOnSilence() {
-	t := time.NewTimer(OpenSilence())
-	defer t.Stop()
-	select {
-	case <-t.C:
-		if !u.heard.Load() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = u.InjectContext(ctx, OpenNudge)
-			cancel()
-		}
-	case <-u.stop:
-	}
-}
+// OpenNowNudge opens a call the user placed. The plan has no "speak now"
+// command and its instructions alone opened it in 3.85 s; a context append
+// opened it in 1.40 s (I12). It says outright that the user has said nothing,
+// so the voice never answers words nobody said.
+const OpenNowNudge = "The user just called you and has not said anything yet; nothing they said exists in this call. Speak now, in the language of the recent conversation: only a short greeting that invites them to talk, with no summary, then listen."
 
 // read is the single reader: datachannel control and decoded media both
 // become events here, so no event is processed from two sources.
@@ -205,9 +192,6 @@ func (u *chatGPTUpstream) read() {
 				continue
 			}
 			for _, ev := range parseChatGPT(data) {
-				if ev.Kind == EventTranscript {
-					u.heard.Store(true)
-				}
 				if !u.emit(ev) || ev.Kind == EventFailed {
 					return
 				}

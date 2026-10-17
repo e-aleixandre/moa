@@ -12,7 +12,7 @@ import (
 
 // Who speaks first is the phone's rule (owner's decision, 17/10, after
 // CarPlay): whoever picks up. Calling an owner, the owner picks up, so the
-// voice greets at once with one line on where things stand. When an owner
+// voice greets at once, only a greeting. When an owner
 // calls the user, the user picks up: the voice waits for their hello and
 // answers it with the reason; if they say nothing for ~2 s it speaks anyway.
 //
@@ -29,11 +29,16 @@ import (
 //     Then the provider is told to speak
 //   Scenario: a test invitation with or without a reason
 //     Then the voice opens with that reason, or says it is a test call
-//   Scenario: the user calls
+//   Scenario: the user calls (owner's change from CarPlay, 17/10)
 //     When the user places a call
-//     Then the voice is told to greet and say where things stand at once
+//     Then the voice is told to greet at once, only a greeting: no summary
+//       unless the user asks how things are going
 //     And that what came before is context: the user has asked nothing yet
-//     And the provider is told to speak before any user audio
+//     And the provider is told to speak before any user audio (the ChatGPT
+//       plan, which has no such command, gets a context nudge saying the
+//       user has said nothing yet)
+//   Scenario: the ChatGPT plan, incoming, user silent
+//     Then nothing nudges it: it waits for the hello like any call
 
 const incomingMarker = "INCOMING CALL"
 
@@ -143,23 +148,35 @@ func TestIncoming_UserHelloIsAnsweredWithoutSpeakingFirst(t *testing.T) {
 	}
 }
 
-func TestIncoming_OutgoingCallGreetsAtOnce(t *testing.T) {
-	// chatgpt-plan gets the same InitialContext inside its session
-	// instructions (chatgpt_plan.go) and opens from them alone (I10); its fake
-	// does not record the session body, so real calls check it.
-	for _, provider := range []string{"grok-plan", "openai-live-api"} {
+func TestIncoming_OutgoingCallOnlyGreetsAtOnce(t *testing.T) {
+	for _, provider := range []string{"grok-plan", "xai-api", "openai-live-api", "chatgpt-plan"} {
 		t.Run(provider, func(t *testing.T) {
 			f := vpNewFixture(t, provider, vpBriefHandlers()...)
 			call := f.call()
 			p := f.up.peer(t, f.provider)
+			if provider == "chatgpt-plan" {
+				// Its session body is not recorded by the fake: the same
+				// context rides in its instructions (chatgpt_plan.go); what
+				// opens it is the nudge.
+				nudge := vpJSON(p.await(t, "open nudge", func(v map[string]any) bool { return strings.Contains(vpJSON(v), "has not said anything yet") }))
+				for _, w := range []string{"only a short greeting", "no summary"} {
+					if !strings.Contains(nudge, w) {
+						t.Errorf("open nudge lacks %q: %s", w, nudge)
+					}
+				}
+				call.hangup()
+				return
+			}
 			cfg := vpJSON(p.await(t, "outgoing context", func(v map[string]any) bool { return strings.Contains(vpJSON(v), outgoingMarker) }))
-			for _, w := range []string{"greet", "where things stand", "has not asked anything"} {
+			for _, w := range []string{"only a short greeting", "No summary", "unless they ask how things are going", "has not asked anything"} {
 				if !strings.Contains(cfg, w) {
 					t.Errorf("outgoing context lacks %q: %s", w, cfg)
 				}
 			}
-			if strings.Contains(cfg, incomingMarker) {
-				t.Errorf("an outgoing call got the incoming opening: %s", cfg)
+			for _, bad := range []string{"where things stand", incomingMarker} {
+				if strings.Contains(cfg, bad) {
+					t.Errorf("outgoing context has %q: %s", bad, cfg)
+				}
 			}
 			p.await(t, "the voice speaks at once", openingTrigger)
 			call.hangup()
@@ -180,38 +197,23 @@ func TestIncoming_BriefIsMarkedAsContextNotTheUser(t *testing.T) {
 	call.hangup()
 }
 
-// The ChatGPT plan has no "speak now" command and cannot count seconds: after
-// ~2 s of silence moa appends a nudge that says the user has said nothing
-// (I11, call 2: instructions alone left it silent). A hello cancels it.
-func TestIncoming_ChatGPTPlanNudgedOnlyAfterSilence(t *testing.T) {
-	shortOpenSilence(t, time.Second)
-	for _, hello := range []bool{false, true} {
-		t.Run(map[bool]string{false: "silent", true: "hello"}[hello], func(t *testing.T) {
-			f := rcNewFixture(t, "chatgpt-plan", "ring")
-			f.ask()
-			req := f.awaitRequest("ringing")
-			var c vpCreated
-			_ = json.Unmarshal(f.mustRequest(http.MethodPost, "/api/voice/calls", map[string]any{"session_id": f.osess.ID, "call_request_id": req.ID}, f.owner(), http.StatusCreated), &c)
-			f.created = true
-			start := time.Now()
-			call := f.dial(c, f.owner(), false)
-			p := f.up.peer(t, c.Provider)
-			nudge := func(v map[string]any) bool { return strings.Contains(vpJSON(v), "has not said anything yet") }
-			if hello {
-				p.user(t, "u1", "hola")
-				time.Sleep(2 * voice.OpenSilence())
-				for _, v := range p.snapshot() {
-					if nudge(v) {
-						t.Fatalf("nudged although the user said hello: %s", vpJSON(v))
-					}
-				}
-			} else {
-				p.await(t, "silence nudge", nudge)
-				if d := time.Since(start); d < voice.OpenSilence() {
-					t.Errorf("nudged %v after pickup, before the silence wait", d)
-				}
-			}
-			call.hangup()
-		})
+// The ChatGPT plan cannot count a silence and a nudge did not make it speak
+// (I12): on an incoming call it waits for the hello like any call.
+func TestIncoming_ChatGPTPlanWaitsForHelloWithoutNudge(t *testing.T) {
+	shortOpenSilence(t, testOpenSilence)
+	f := rcNewFixture(t, "chatgpt-plan", "ring")
+	f.ask()
+	req := f.awaitRequest("ringing")
+	var c vpCreated
+	_ = json.Unmarshal(f.mustRequest(http.MethodPost, "/api/voice/calls", map[string]any{"session_id": f.osess.ID, "call_request_id": req.ID}, f.owner(), http.StatusCreated), &c)
+	f.created = true
+	call := f.dial(c, f.owner(), false)
+	p := f.up.peer(t, c.Provider)
+	time.Sleep(3 * testOpenSilence)
+	for _, v := range p.snapshot() {
+		if strings.Contains(vpJSON(v), "has not said anything yet") {
+			t.Fatalf("an incoming call on the ChatGPT plan was nudged: %s", vpJSON(v))
+		}
 	}
+	call.hangup()
 }
