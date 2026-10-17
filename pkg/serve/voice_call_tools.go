@@ -119,6 +119,7 @@ func (c *voiceCall) executeOnce(_ context.Context, tc voice.ToolCall) voice.Tool
 		if err != nil {
 			return voiceErrorResult(tc.ID, "that book file cannot be read")
 		}
+		c.remember("book", str("path"), string(data))
 		return voiceResult(tc.ID, map[string]any{"path": str("path"), "content": string(data)})
 	case "end_call":
 		decided, ok1 := stringList(args["decided"])
@@ -249,9 +250,26 @@ func (m *Manager) voiceBookOwner(called string) (string, error) {
 // every tool executed by this call's dispatcher. Its last text is the answer.
 // The delegation is often only the owner's last words ("yes, pass it"), so
 // the backend also gets the observed call and the called session.
+//
+// The backend starts from scratch every time, so it also gets what the call
+// already learned (callData). One trace line per handoff, without content,
+// says which context it had, what it ran and how it ended.
 func (c *voiceCall) runHandoff(ctx context.Context, transcript, request string) string {
-	input := c.callContext(transcript) + "\nLatest request from the voice model (it may be only the owner's last words):\n" + request
-	return c.backendLoop(ctx, input, voice.ToolSpecs(), nil)
+	data := c.callData()
+	input := c.callContext(transcript) + data + "\nLatest request from the voice model (it may be only the owner's last words):\n" + request
+	started := time.Now()
+	var trace voiceBackendTrace
+	answer := c.backendLoop(ctx, input, voice.ToolSpecs(), nil, &trace)
+	slog.Info("voice handoff", "call", c.id, "started", started.UTC().Format(time.RFC3339Nano), "duration_ms", time.Since(started).Milliseconds(),
+		"tools", strings.Join(trace.tools, ","), "outcome", trace.outcome, "data_chars", len([]rune(data)), "data_sha", voiceTraceHash(data))
+	return answer
+}
+
+// voiceBackendTrace is what one backend loop ran: tool names (with ":error"
+// when one failed) and how it ended. Never arguments or results.
+type voiceBackendTrace struct {
+	tools   []string
+	outcome string
 }
 
 // backendMinutes asks the backend for the call's minutes through end_call,
@@ -263,7 +281,7 @@ func (c *voiceCall) backendMinutes(ctx context.Context, input string) {
 			tools = append(tools, spec)
 		}
 	}
-	c.backendLoop(ctx, input, tools, c.hasMinutes)
+	c.backendLoop(ctx, input, tools, c.hasMinutes, nil)
 }
 
 // minutesInput is the backend's minutes request: the observed call and the
@@ -304,15 +322,20 @@ func (c *voiceCall) callContext(transcript string) string {
 // backendLoop runs the backend model on input with tools, executing every
 // tool call through this call's dispatcher, until it answers in text or stop
 // reports that it is done.
-func (c *voiceCall) backendLoop(ctx context.Context, input string, tools []core.ToolSpec, stop func() bool) string {
+func (c *voiceCall) backendLoop(ctx context.Context, input string, tools []core.ToolSpec, stop func() bool, trace *voiceBackendTrace) string {
+	if trace == nil {
+		trace = &voiceBackendTrace{}
+	}
 	prov, model, err := c.reg.backendProvider(c.id)
 	if err != nil {
+		trace.outcome = "no_backend"
 		return "moa's backend is not available for this call."
 	}
 	msgs := []core.Message{core.NewUserMessage(input)}
 	for range voiceHandoffSteps {
 		msg, err := streamMessage(ctx, prov, core.Request{Model: model, System: voice.HandoffInstructions, Messages: msgs, Tools: tools})
 		if err != nil {
+			trace.outcome = "backend_error"
 			return "moa's backend failed to answer."
 		}
 		msgs = append(msgs, msg)
@@ -327,17 +350,25 @@ func (c *voiceCall) backendLoop(ctx context.Context, input string, tools []core.
 			}
 		}
 		if len(calls) == 0 {
+			trace.outcome = "answered"
 			return text.String()
 		}
 		for _, call := range calls {
 			args, _ := json.Marshal(call.Arguments)
 			r := c.execute(ctx, voice.ToolCall{ID: call.ToolCallID, Name: call.ToolName, Arguments: args})
+			if r.IsError {
+				trace.tools = append(trace.tools, call.ToolName+":error")
+			} else {
+				trace.tools = append(trace.tools, call.ToolName)
+			}
 			msgs = append(msgs, core.NewToolResultMessage(call.ToolCallID, call.ToolName, []core.Content{core.TextContent(string(r.Output))}, r.IsError))
 		}
 		if stop != nil && stop() {
+			trace.outcome = "stopped"
 			return ""
 		}
 	}
+	trace.outcome = "too_many_steps"
 	return "moa's backend needed too many steps for this request."
 }
 

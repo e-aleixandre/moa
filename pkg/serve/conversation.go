@@ -387,17 +387,19 @@ func (m *Manager) attachmentDTOFromContent(sessionID string, content core.Conten
 // message. Treating any non-empty Custom as an extension silently dropped every
 // post-compaction assistant reply from /messages — so read_session surfaced the
 // user's own turn as the newest message even after the agent had answered.
+// request_cost_usd is the same kind of accounting stamp, on every priced reply.
 func isExtensionMessage(custom map[string]any) bool {
-	if len(custom) == 0 {
-		return false
-	}
 	for key := range custom {
-		if key != "compaction_epoch" {
+		if !accountingCustomKeys[key] {
 			return true
 		}
 	}
 	return false
 }
+
+// accountingCustomKeys are the bookkeeping stamps the agent loop puts on
+// ordinary assistant replies; they never mark a message as injected.
+var accountingCustomKeys = map[string]bool{"compaction_epoch": true, "request_cost_usd": true}
 
 // shouldShowConversationMessage keeps parent and subagent transcript
 // projections consistent when content has no visible text.
