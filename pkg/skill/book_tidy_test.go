@@ -154,7 +154,7 @@ func TestBookTidyRestoreReturnsTheExactBook(t *testing.T) {
 	if diff, err := exec.Command("diff", "-r", filepath.Join(snap, "book"), book).CombinedOutput(); err != nil {
 		t.Fatalf("restored book differs from the snapshot: %v\n%s", err, diff)
 	}
-	kept, _ := filepath.Glob(filepath.Join(cb, "book.before-restore-*"))
+	kept, _ := filepath.Glob(filepath.Join(cb, "book.before-restore.*"))
 	if len(kept) != 1 {
 		t.Fatalf("the replaced book must be kept: %v", kept)
 	}
@@ -199,3 +199,114 @@ func TestBookTidyRequiresTheTapBeforeApplying(t *testing.T) {
 		}
 	}
 }
+
+func readTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.IsDir() {
+			b, _ := os.ReadFile(p)
+			rel, _ := filepath.Rel(root, p)
+			out[rel] = string(b)
+		}
+		return nil
+	})
+	return out
+}
+
+func snapshotFixture(t *testing.T) (cb, snap string) {
+	t.Helper()
+	cb = t.TempDir()
+	book := filepath.Join(cb, "book")
+	putFile(t, book, "PROJECT.md", "# idx\n")
+	putFile(t, book, "work/old.md", "old\n")
+	if out, err := runBlock(t, "snapshot", "CB="+cb); err != nil {
+		t.Fatalf("snapshot: %v\n%s", err, out)
+	}
+	snap = onlySnapshot(t, cb)
+	putFile(t, book, "PROJECT.md", "# live, rewritten\n")
+	return cb, snap
+}
+
+// Names the recipe did not create are never touched: staging and backup are
+// unique by construction, whatever already sits in the codebase directory.
+func TestBookTidyRestoreNeverTouchesWhatItDidNotCreate(t *testing.T) {
+	cb, snap := snapshotFixture(t)
+	putFile(t, cb, "book.restore.AAAAAA/ONLY-COPY.md", "unique\n")
+	putFile(t, cb, "book.before-restore.BBBBBB/PROJECT.md", "older backup\n")
+	if out, err := runBlock(t, "restore", "CB="+cb, "SNAP="+snap); err != nil {
+		t.Fatalf("restore: %v\n%s", err, out)
+	}
+	for _, rel := range []string{"book.restore.AAAAAA/ONLY-COPY.md", "book.before-restore.BBBBBB/PROJECT.md"} {
+		if _, err := os.Stat(filepath.Join(cb, rel)); err != nil {
+			t.Errorf("%s was destroyed: %v", rel, err)
+		}
+	}
+	if got, _ := os.ReadFile(filepath.Join(cb, "book/PROJECT.md")); string(got) != "# idx\n" {
+		t.Errorf("book not restored: %q", got)
+	}
+}
+
+// If installing the restored book fails, the book that was live is back, as
+// the tree itself and not nested, and a pre-existing backup is untouched.
+func TestBookTidyRestoreRollsBackWhenInstallFails(t *testing.T) {
+	cb, snap := snapshotFixture(t)
+	putFile(t, cb, "book.before-restore.BBBBBB/PROJECT.md", "older backup\n")
+	bin := t.TempDir()
+	fake := "#!/bin/bash\nfor a in \"$@\"; do case \"$a\" in */book.restore.*) [ \"${@: -1}\" = \"$CB/book\" ] && exit 1;; esac; done\nexec /usr/bin/mv \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "mv"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runBlock(t, "restore", "CB="+cb, "SNAP="+snap, "PATH="+bin+":"+os.Getenv("PATH"))
+	if err == nil || !strings.Contains(out, "book left as it was") {
+		t.Fatalf("expected a clean failure: %v\n%s", err, out)
+	}
+	if got := readTree(t, filepath.Join(cb, "book")); len(got) != 2 || got["PROJECT.md"] != "# live, rewritten\n" {
+		t.Errorf("live book not back as it was: %v", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(cb, "book.before-restore.BBBBBB/PROJECT.md")); string(got) != "older backup\n" {
+		t.Errorf("pre-existing backup altered: %q", got)
+	}
+	if left, _ := filepath.Glob(filepath.Join(cb, "book.restore.*")); len(left) != 0 {
+		t.Errorf("staging left behind: %v", left)
+	}
+}
+
+// A snapshot that does not match its manifest exactly is not installed.
+func TestBookTidyRestoreRejectsAnIncompleteOrDamagedSnapshot(t *testing.T) {
+	damage := map[string]func(t *testing.T, snap string){
+		"extra file not in the manifest": func(t *testing.T, snap string) { putFile(t, snap, "book/extra.md", "unverified\n") },
+		"truncated manifest": func(t *testing.T, snap string) {
+			m := filepath.Join(snap, "MANIFEST.sha256")
+			b, _ := os.ReadFile(m)
+			_ = os.WriteFile(m, b[:bytesIndexNL(b)+1], 0o600)
+		},
+		"manifest cut mid-entry": func(t *testing.T, snap string) {
+			m := filepath.Join(snap, "MANIFEST.sha256")
+			b, _ := os.ReadFile(m)
+			_ = os.WriteFile(m, b[:len(b)-20], 0o600)
+		},
+		"changed content": func(t *testing.T, snap string) { putFile(t, snap, "book/work/old.md", "tampered\n") },
+		"missing file":    func(t *testing.T, snap string) { _ = os.Remove(filepath.Join(snap, "book/work/old.md")) },
+	}
+	for name, fn := range damage {
+		t.Run(name, func(t *testing.T) {
+			cb, snap := snapshotFixture(t)
+			fn(t, snap)
+			if out, err := runBlock(t, "restore", "CB="+cb, "SNAP="+snap); err == nil {
+				t.Fatalf("damaged snapshot restored:\n%s", out)
+			}
+			if got := readTree(t, filepath.Join(cb, "book")); len(got) != 2 || got["PROJECT.md"] != "# live, rewritten\n" {
+				t.Errorf("live book changed: %v", got)
+			}
+			if left, _ := filepath.Glob(filepath.Join(cb, "book.*")); len(left) != 0 {
+				t.Errorf("leftovers: %v", left)
+			}
+		})
+	}
+}
+
+func bytesIndexNL(b []byte) int { return strings.IndexByte(string(b), '\n') }

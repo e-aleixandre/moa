@@ -65,17 +65,20 @@ Restoring is **replacing the whole book**, not copying over it: copying over lea
 ```bash restore
 set -euo pipefail
 umask 077
-NEW="$CB/book.restore.$$"
-rm -rf "$NEW"; cp -a "$SNAP/book" "$NEW"
-(cd "$NEW" && sha256sum --quiet -c "$SNAP/MANIFEST.sha256")
-diff -r "$SNAP/book" "$NEW" >/dev/null
-OLD="$CB/book.before-restore-$(date -u +%Y%m%dT%H%M%SZ)"
-mv "$CB/book" "$OLD"
-if ! mv "$NEW" "$CB/book"; then mv "$OLD" "$CB/book"; echo "RESTORE FAILED, book left as it was" >&2; exit 1; fi
+NEW=$(mktemp -d "$CB/book.restore.XXXXXX")
+OLD=$(mktemp -d "$CB/book.before-restore.XXXXXX")
+trap 'rm -rf "$NEW"; rmdir "$OLD" 2>/dev/null || true' ERR
+cp -a "$SNAP/book/." "$NEW/"
+[ -z "$(find "$NEW" -type l -print -quit)" ]
+(cd "$NEW" && LC_ALL=C find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum) | cmp - "$SNAP/MANIFEST.sha256"
+mv -T "$CB/book" "$OLD"
+if ! mv -T "$NEW" "$CB/book"; then
+  mv -T "$OLD" "$CB/book"; rm -rf "$NEW"; echo "RESTORE FAILED, book left as it was" >&2; exit 1
+fi
 echo "restored; the book as it was before is kept at $OLD"
 ```
 
-The book as it was is kept next to the restored one (`book.before-restore-*`, outside the book, so not searched); delete it only when the user says so. A snapshot that failed its rehearsal does not count.
+`NEW` and `OLD` are created by this run with `mktemp`, so their names are unique and nothing that was already there is touched or deleted. The staged copy must reproduce the manifest exactly (same files, same bytes, nothing extra, nothing missing, no truncated line); otherwise the recipe stops before touching the book. The book as it was is kept in `$OLD` (`book.before-restore.*`, outside the book, so not searched); delete it only when the user says so. A snapshot that failed its rehearsal does not count.
 
 Retention: always keep the snapshot taken before a cleanup until the user has accepted the cleanup. Beyond that, keep the last 10 and anything younger than 90 days. Before purging any, list what would go (names, dates, sizes) and tell the user; never purge silently, and never purge the only copy of something the book no longer holds. It is the same disk as the book: it protects against a bad edit, not against losing the machine, and you say so if asked.
 
