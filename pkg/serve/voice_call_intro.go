@@ -47,12 +47,20 @@ func (r *callRequest) intro() *callIntro {
 // wrote travels as one JSON value inside a marked block: data the voice
 // reads, never instruction lines next to its rules (JSON escapes newlines and
 // angle brackets, so it cannot close the block either).
-func (in *callIntro) context() string {
+//
+// waitsForHello is true for a provider that cannot open on a silence (the
+// ChatGPT plan): it waits for the hello like any call, so its instructions
+// carry no "speak anyway" rule.
+func (in *callIntro) context(waitsForHello bool) string {
 	if in == nil {
 		return outgoingContext
 	}
 	var b strings.Builder
-	b.WriteString("INCOMING CALL: moa called the user, and they just picked up. Wait for their hello and answer it right away, in their language: greet briefly and say why you are calling. Do not ask what they need. If they say nothing for about two seconds, speak anyway, the same way.\n")
+	b.WriteString("INCOMING CALL: moa called the user, and they just picked up. Wait for their hello and answer it right away, in their language: greet briefly and say why you are calling. Do not ask what they need.")
+	if !waitsForHello {
+		b.WriteString(" If they say nothing for about two seconds, speak anyway, the same way.")
+	}
+	b.WriteString("\n")
 	if in.Test {
 		b.WriteString("This is a test call the user started to try incoming calls: say so, and that there is nothing to decide.\n\n")
 		return b.String()

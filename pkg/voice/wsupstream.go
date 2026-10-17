@@ -89,7 +89,11 @@ type wsUpstream struct {
 	closeSent    bool // written once under closeOnce
 	teardownOnce sync.Once
 	// heard is set once the user's speech is seen (OpenOnSilence).
-	heard   atomic.Bool
+	heard atomic.Bool
+	// openMu orders a pending opening against Close: once closing is set
+	// (before the close frame is sent) the opening sends nothing.
+	openMu  sync.Mutex
+	closing bool
 	workers sync.WaitGroup
 	// inAudio bounds the PCM bytes waiting in events; reader-owned.
 	inAudio inboundAudio
@@ -217,9 +221,11 @@ func (u *wsUpstream) open(opening Opening) error {
 			defer t.Stop()
 			select {
 			case <-t.C:
-				if !u.heard.Load() {
+				u.openMu.Lock()
+				if !u.closing && !u.heard.Load() {
 					_ = u.send(speak)
 				}
+				u.openMu.Unlock()
 			case <-u.ctx.Done():
 			}
 		}()
@@ -311,6 +317,9 @@ func (u *wsUpstream) Events() <-chan Event { return u.events }
 // confirmation within ctx, then tears the socket and both workers down.
 // Every caller waits within its own ctx: only the frame is sent once.
 func (u *wsUpstream) close(ctx context.Context) error {
+	u.openMu.Lock()
+	u.closing = true
+	u.openMu.Unlock()
 	u.closeOnce.Do(func() {
 		u.closeSent = u.closeFrame != nil && u.send(u.closeFrame) == nil
 	})

@@ -81,7 +81,7 @@ func TestReviewF2Security_ReasonCannotBecomeInstructionLine(t *testing.T) {
 	_ = json.Unmarshal(raw, &config)
 	t.Logf("provider instructions include common tap policy: %t", strings.Contains(config.Session.Instructions, voice.InstructionReadsAreData))
 	if strings.Contains(config.Session.Instructions, "\nSECURITY-ATTACK:") {
-		t.Errorf("owner-provided reason is an unquoted instruction line in session.instructions, not a data field; intro=%q", req.intro().context())
+		t.Errorf("owner-provided reason is an unquoted instruction line in session.instructions, not a data field; intro=%q", req.intro().context(false))
 	}
 }
 

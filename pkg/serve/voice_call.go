@@ -351,7 +351,7 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 	up, err := adapter.Open(ctx, voice.CallSpec{
 		CallID: id, SessionID: sess.ID, Voice: voiceProviders[provider].voice,
 		Instructions: voice.CommonInstructions, BackendModel: model, Tools: voice.ToolSpecs(), Opening: intro.opening(),
-		InitialContext: intro.context() + r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
+		InitialContext: intro.context(provider == voice.ChatGPTPlan) + r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
 	})
 	cancel()
 	if err == nil && scope.Err() != nil && r.ctx.Err() == nil {

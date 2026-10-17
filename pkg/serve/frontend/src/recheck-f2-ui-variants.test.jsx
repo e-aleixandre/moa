@@ -59,6 +59,9 @@ const button = (tree, label) => find(tree, n => n.type === 'button' && text(n) =
 const tick = () => new Promise(r => setTimeout(r, 5));
 const real = { fetch: globalThis.fetch, document: globalThis.document, AudioContext: globalThis.AudioContext };
 afterEach(() => {
+  // Close the conversations the New owner flow opened (and their reconnect
+  // timers) before the globals they need are restored.
+  syncConnections([]);
   for (const cells of hooks.values()) for (const cell of cells) cell?.cleanup?.();
   hooks.clear(); runEffects = false; dirty = 0;
   Object.assign(globalThis, real);
@@ -81,6 +84,7 @@ function event(node, name, detail = {}) {
   return node.props[name]?.(detail);
 }
 
+const { syncConnections } = await import('./data/api.js');
 const { loadOwners } = await import('./data/owners.js');
 const { startPolling, stopPolling } = await import('./data/session-actions.js');
 const { openSessionPanel } = await import('./data/session-panel.js');
