@@ -102,6 +102,12 @@ func trustedSessionMentions(msg *core.AgentMessage) []string {
 	return append([]string(nil), ids...)
 }
 
+// steerSessionMentions is the selection a queued steer's own receipt carries,
+// validated like any other receipt. Nothing is read from its text.
+func steerSessionMentions(steer core.SteerItem) []string {
+	return trustedSessionMentions(&core.AgentMessage{Message: core.Message{Role: "user"}, Custom: steer.Custom})
+}
+
 // mentionedSessions is the union of valid receipts over the caller's active
 // branch, in-flight messages included. IDs are copied out inside the visit so
 // nothing is resolved or read while the transcript lock is held.

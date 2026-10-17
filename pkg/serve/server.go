@@ -1327,10 +1327,11 @@ func recallableSteers(discarded []core.SteerItem) []PendingSteerData {
 			continue
 		}
 		steers = append(steers, PendingSteerData{
-			ID:      steer.ID,
-			Text:    steer.Text,
-			Command: steer.IsBarrier(),
-			Images:  countImageContent(steer.Content),
+			ID:              steer.ID,
+			Text:            steer.Text,
+			Command:         steer.IsBarrier(),
+			Images:          countImageContent(steer.Content),
+			SessionMentions: steerSessionMentions(steer),
 		})
 	}
 	return steers

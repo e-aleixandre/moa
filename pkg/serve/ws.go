@@ -831,11 +831,12 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		data.PendingSteers = make([]PendingSteerData, len(pendingSteers))
 		for i, s := range pendingSteers {
 			data.PendingSteers[i] = PendingSteerData{
-				ID:            s.ID,
-				Text:          s.Text,
-				Command:       s.IsBarrier(),
-				Images:        countImageContent(s.Content),
-				NonRecallable: isTaskNotice(s.Custom),
+				ID:              s.ID,
+				Text:            s.Text,
+				Command:         s.IsBarrier(),
+				Images:          countImageContent(s.Content),
+				NonRecallable:   isTaskNotice(s.Custom),
+				SessionMentions: steerSessionMentions(s),
 			}
 		}
 	}
