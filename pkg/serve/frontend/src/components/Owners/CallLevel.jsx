@@ -67,7 +67,7 @@ export function CallLevelField({ owner, status, onProviders, onRejected, label =
           </button>
         ))}
       </div>
-      {hint && <p class="ow-hint">{CALL_LEVEL_HELP}</p>}
+      {hint && <p class="ow-hint">{CALL_LEVEL_HELP[current]}</p>}
       {pending && (
         <div ref={shownRef} class="cl-confirm" role="alertdialog" aria-label="Confirm call cost">
           <p class="cl-confirm-t">{pending.text}</p>
