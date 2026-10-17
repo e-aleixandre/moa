@@ -1962,3 +1962,45 @@ test('rewinding your message restores the comment and mentions, sessions only if
   expect(drop.text).toBe('ask @Infra, read @Bench cache');
   expect(drop.mentions.map((m) => m.id)).toEqual(['o1']);
 });
+
+// --- recalled queue keeps the session selection (server-vouched) ------------
+
+const mentionedQueue = 'ask @Infra, read @Bench cache\n\n[Mentions · moa]\n@Infra = owner/o1 · project infra (/x/infra) · x\n@Bench cache = session/s9 · "Bench cache" · saved · read it with read_session session_id=s9';
+
+async function recalledDrop(steer) {
+  setState({ composerDrops: {} });
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    discarded_steer_ids: [steer.id], discarded_steers: [steer],
+  }), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: steer.id, text: steer.text }] } } });
+  recallQueuedSteers('s1');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return store.get().composerDrops.s1;
+}
+
+test('a recalled queue keeps the sessions the server vouches for, and resending lists them', async () => {
+  const { sessionMentionIds } = await import('./util/mentions.js');
+  const drop = await recalledDrop({ id: 'recall-m2', text: mentionedQueue, session_mentions: ['s9'] });
+  expect(drop.text).toBe('ask @Infra, read @Bench cache');
+  expect(drop.mentions.map((m) => m.id)).toEqual(['o1', 's9']);
+  expect(sessionMentionIds(drop.text, drop.mentions)).toEqual(['s9']);
+});
+
+test('a recalled queue without server-vouched sessions never reactivates one from its text', async () => {
+  const drop = await recalledDrop({ id: 'recall-m3', text: mentionedQueue });
+  expect(drop.mentions.map((m) => m.id)).toEqual(['o1']);
+});
+
+test('a queued steer snapshot keeps its vouched sessions for a recall whose reply is lost', async () => {
+  const { mergeSteers } = await import('./ws/init.js');
+  const merged = mergeSteers([{ id: 'q1', text: 'x', session_mentions: ['s9'] }, { id: 'q2', text: 'y' }], []);
+  expect(merged[0].session_mentions).toEqual(['s9']);
+  expect(merged[1].session_mentions).toBeUndefined();
+});
+
+test('a queued message remembers its picked sessions on its chip', async () => {
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({ action: 'steer' }), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', subagents: {}, pendingSteers: null, messages: [] } } });
+  await sendMessage('s1', 'look at @Fix', [], { sessionMentions: ['abc'] });
+  expect(store.get().sessions.s1.pendingSteers[0].session_mentions).toEqual(['abc']);
+});

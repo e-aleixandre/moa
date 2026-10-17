@@ -1368,7 +1368,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
           ))}
         </div>
       )}
-      <div class="zl-field">
+      <div class="zl-composer-field">
         <MentionMirror text={mirrorText} mentions={draftMentions} mirrorRef={mirrorRef} />
       <textarea
         ref={textareaRef}

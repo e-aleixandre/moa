@@ -60,9 +60,10 @@ function restoreSteers(sessionId, steers) {
   if (fresh.length === 0) return;
   fresh.forEach((s) => seen.add(s.id));
   // A queued message carries its mentions block; the composer gets the comment
-  // and the owners highlighted again. Sessions come back as plain text: the
-  // queue's text alone never reactivates a read.
-  const restored = fresh.map((steer) => ({ ...steer, ...rehydrateMentions(steer.text || '') }));
+  // and its mentions back. Sessions only for the ids the server projected from
+  // that steer's own receipt (`session_mentions`): the text alone never
+  // reactivates a read.
+  const restored = fresh.map((steer) => ({ ...steer, ...rehydrateMentions(steer.text || '', steer.session_mentions) }));
   setState((state) => {
     const prev = state.composerDrops[sessionId];
     return {

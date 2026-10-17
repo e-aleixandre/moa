@@ -735,6 +735,7 @@ export async function sendMessage(id, text, attachments = [], { sessionMentions 
     // cross-device events reconcile by identity, not by text (closes the
     // double-send and cancel-vs-in-flight races).
     optimisticSteer = { id: steerId, text };
+    if (sessionMentions.length > 0) optimisticSteer.session_mentions = sessionMentions;
     const imageCount = attachments.filter((a) => a.isImage).length;
     if (imageCount > 0) optimisticSteer.images = imageCount;
     updateSession(id, { pendingSteers: [...steers, optimisticSteer] });

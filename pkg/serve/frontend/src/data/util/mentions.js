@@ -18,8 +18,10 @@ export const MENTION_LABEL_MAX = 60;
 const SHORT_ID = 6;
 
 // cleanLabel is the text written after the "@": one line, at most 60 chars.
+// A backtick would make the written label read as inline code, which masks the
+// mention, so it is shown as a single quote (the original stays in meta.title).
 export function cleanLabel(text) {
-  return String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, MENTION_LABEL_MAX).trim();
+  return String(text ?? '').replace(/`/g, "'").replace(/\s+/g, ' ').trim().slice(0, MENTION_LABEL_MAX).trim();
 }
 
 // uniqueLabel picks the label for a new mention. Two different targets with

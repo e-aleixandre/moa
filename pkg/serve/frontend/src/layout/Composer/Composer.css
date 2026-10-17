@@ -112,13 +112,13 @@
 /* The field: the textarea plus the mirror that highlights @mentions behind it.
    It takes over the textarea's seat in the slab (full row, first). The mirror
    borrows .zl-ta for font, padding and line-height, so both wrap identically. */
-.zl-field {
+.zl-composer-field {
   position: relative;
   flex: 1 0 100%;
   order: 1;
   min-width: 0;
 }
-.zl-field > .zl-ta:not(.zl-ta-mirror) {
+.zl-composer-field > .zl-ta:not(.zl-ta-mirror) {
   position: relative;
   display: block;
   width: 100%;
@@ -363,7 +363,7 @@
    The clouds are radial gradients, not a blur filter, and they drift on
    keyframes the compositor runs; script only scales and fades their parent.
    Colours are the page aurora's (tokens/shell.css), no peach. */
-.zl-composer.is-voice > :is(.zl-field, .zl-controls, .voice-live, .attach-preview-strip, .cache-warn, .steer-hint) {
+.zl-composer.is-voice > :is(.zl-composer-field, .zl-controls, .voice-live, .attach-preview-strip, .cache-warn, .steer-hint) {
   position: relative;
 }
 .zl-aurora-wash {

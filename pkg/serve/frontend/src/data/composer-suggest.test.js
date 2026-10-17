@@ -150,6 +150,7 @@ test('slash menu still works with no skills', () => {
 const {
   ownerSuggestions, sessionSuggestions, flattenMentionGroups, computeLabelInsertion, pickMention,
 } = await import('./composer-suggest.js');
+const { sessionMentionIds, mentionsBlock, liveMentions } = await import('./util/mentions.js');
 
 const roster = [
   { id: 'o1', name: 'Moa', root: '/dev/moa', session_id: 's-moa', session_state: 'idle' },
@@ -210,4 +211,22 @@ test('pickMention records what the block needs and dedupes the label', () => {
   expect(pickMention(session, [pickMention(owner)])).toEqual({
     label: 'Infra #abcdef', type: 'session', id: 'abcdef123', meta: { title: 'Infra', state: 'idle' },
   });
+});
+
+test('picking a session titled with backticks yields a mention that stays live and is sent', () => {
+  const row = sessionSuggestions([{ id: 'abcdef0123456789abcdef01', title: 'Fix `foo` bug', state: 'saved' }])[0];
+  const m = pickMention(row);
+  expect(m.label).toBe("Fix 'foo' bug");
+  expect(m.meta.title).toBe('Fix `foo` bug');
+  const text = `mira @${m.label}`;
+  expect(sessionMentionIds(text, [m])).toEqual(['abcdef0123456789abcdef01']);
+  expect(mentionsBlock(text, [m])).toContain("@Fix 'foo' bug = session/abcdef0123456789abcdef01");
+  const owner = pickMention(ownerSuggestions([{ id: 'o9', name: 'My `app`', root: '/x' }], 'app')[0]);
+  expect(owner.label).toBe("My 'app'");
+  expect(liveMentions(`ask @${owner.label}`, [owner])).toHaveLength(1);
+});
+
+test('a mention written inside code is still code', () => {
+  const m = pickMention(sessionSuggestions([{ id: 'abcdef0123456789abcdef01', title: 'Bench', state: 'saved' }])[0]);
+  expect(sessionMentionIds('see `@Bench` here', [m])).toEqual([]);
 });
