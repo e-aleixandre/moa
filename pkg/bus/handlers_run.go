@@ -230,7 +230,11 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			if id == "" {
 				id = core.NewSteerID()
 			}
-			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: cmd.Text, Custom: cmd.Custom}); err != nil {
+			custom := cmd.Custom
+			if custom == nil {
+				custom = core.HumanSessionMentionsCustom(cmd.HumanMentions)
+			}
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: cmd.Text, Custom: custom}); err != nil {
 				return err
 			}
 			// Report the identity on the STEER rail: a chip ID must never be
@@ -292,6 +296,9 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 				}
 				return sctx.Agent.SendWithCustom(ctx, cmd.Text, cmd.Custom)
 			}
+			if receipt := core.HumanSessionMentionsCustom(cmd.HumanMentions); receipt != nil {
+				return sctx.Agent.SendWithMsgIDCustom(ctx, cmd.Text, msgID, receipt)
+			}
 			if msgID != "" {
 				return sctx.Agent.SendWithMsgID(ctx, cmd.Text, msgID)
 			}
@@ -324,7 +331,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			// Carry the plain text alongside the content blocks: the Steered
 			// event (and every client rendering it) shows Text, so a queued
 			// send with attachments would otherwise surface as an empty chip.
-			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content}); err != nil {
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content, Custom: core.HumanSessionMentionsCustom(cmd.HumanMentions)}); err != nil {
 				return err
 			}
 			if cmd.AcceptedSteerID != nil {
@@ -363,6 +370,9 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			*cmd.AcceptedMsgID = msgID
 		}
 		if err := startRun(sctx, label, func(ctx context.Context) ([]core.AgentMessage, error) {
+			if receipt := core.HumanSessionMentionsCustom(cmd.HumanMentions); receipt != nil {
+				return sctx.Agent.SendWithContentAnnouncedCustom(ctx, cmd.Content, msgID, receipt)
+			}
 			return sctx.Agent.SendWithContentAnnounced(ctx, cmd.Content, msgID)
 		}); err != nil {
 			sctx.Agent.ReleaseNativeDocBytes(nativeBytes)

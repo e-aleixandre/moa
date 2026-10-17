@@ -686,12 +686,21 @@ func (a *Agent) Send(ctx context.Context, prompt string) ([]core.AgentMessage, e
 // so subscribers only learn about it once it is genuinely in history — see
 // announceUserMessage.
 func (a *Agent) SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error) {
+	return a.SendWithMsgIDCustom(ctx, prompt, msgID, nil)
+}
+
+// SendWithMsgIDCustom is SendWithMsgID for a human message that carries benign
+// metadata (the session mentions receipt). Unlike SendWithCustom it keeps the
+// message a plain announced prompt: the Custom only rides along to the
+// transcript.
+func (a *Agent) SendWithMsgIDCustom(ctx context.Context, prompt, msgID string, custom map[string]any) ([]core.AgentMessage, error) {
 	var appended *core.AgentMessage
 	msgs, err := a.executeAnnounced(ctx, func() {
 		if a.state.Model.ID == "" {
 			a.state.Model = a.config.Model
 		}
 		msg := core.WrapMessage(core.NewUserMessage(prompt))
+		msg.Custom = core.CloneArgs(custom)
 		if msgID != "" {
 			msg.MsgID = msgID
 		} else {
@@ -792,17 +801,23 @@ func (a *Agent) SendWithContent(ctx context.Context, content []core.Content) ([]
 // with the message that lands in state — so clients dedup it against their
 // optimistic echo and against reconnect snapshots. Mirrors SendWithMsgID.
 func (a *Agent) SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
-	return a.sendWithContentMsgID(ctx, content, msgID, false)
+	return a.sendWithContentMsgID(ctx, content, msgID, false, nil)
 }
 
 // SendWithContentAnnounced is SendWithContentMsgID that also announces the
 // prompt (AgentEventUserMessage) from the append point. Only the user-initiated
 // ingress paths announce: internal producers render themselves.
 func (a *Agent) SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error) {
-	return a.sendWithContentMsgID(ctx, content, msgID, true)
+	return a.sendWithContentMsgID(ctx, content, msgID, true, nil)
 }
 
-func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content, msgID string, announce bool) ([]core.AgentMessage, error) {
+// SendWithContentAnnouncedCustom is SendWithContentAnnounced for a human message
+// that carries benign metadata (the session mentions receipt).
+func (a *Agent) SendWithContentAnnouncedCustom(ctx context.Context, content []core.Content, msgID string, custom map[string]any) ([]core.AgentMessage, error) {
+	return a.sendWithContentMsgID(ctx, content, msgID, true, custom)
+}
+
+func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content, msgID string, announce bool, custom map[string]any) ([]core.AgentMessage, error) {
 	cc := core.CloneContent(content)
 	// The SendPromptWithContent handler reserved these native bytes in the
 	// inflight ledger before this run's goroutine started (see
@@ -817,6 +832,7 @@ func (a *Agent) sendWithContentMsgID(ctx context.Context, content []core.Content
 			a.state.Model = a.config.Model
 		}
 		msg := core.WrapMessage(core.NewUserMessageWithContent(cc))
+		msg.Custom = core.CloneArgs(custom)
 		if msgID != "" {
 			msg.MsgID = msgID
 		} else {

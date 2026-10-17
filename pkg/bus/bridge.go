@@ -71,6 +71,9 @@ type AgentController interface {
 	CanStartFresh() bool
 	Send(ctx context.Context, prompt string) ([]core.AgentMessage, error)
 	SendWithMsgID(ctx context.Context, prompt, msgID string) ([]core.AgentMessage, error)
+	// SendWithMsgIDCustom is SendWithMsgID for a human message carrying benign
+	// metadata (the session mentions receipt).
+	SendWithMsgIDCustom(ctx context.Context, prompt, msgID string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithCustomAnnounced(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
@@ -79,6 +82,7 @@ type AgentController interface {
 	// appended user message (core.AgentEventUserMessage) from the append point,
 	// so the announcement can never race a concurrent history snapshot.
 	SendWithContentAnnounced(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error)
+	SendWithContentAnnouncedCustom(ctx context.Context, content []core.Content, msgID string, custom map[string]any) ([]core.AgentMessage, error)
 	AppendMessage(msg core.AgentMessage) error
 	SetPermissionCheck(fn func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision) error
 	LoadState(msgs []core.AgentMessage, compactionEpoch int) error

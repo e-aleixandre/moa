@@ -220,7 +220,29 @@ func conversationPage(messages []ConversationMessage, beforeID string, limit int
 }
 
 func (m *Manager) conversationSnapshot(id string) (conversationSnapshot, error) {
+	return m.conversationSnapshotFor(id, nil)
+}
+
+// readTarget is the identity of the object a read projects: the live runtime
+// or the saved record it is about to load.
+type readTarget struct {
+	kind string
+	cwd  string
+}
+
+// conversationSnapshotFor is conversationSnapshot with an admission check made
+// on the very object that is then projected (the live session, or the saved
+// record loaded from disk), never on a roster that may describe another one.
+func (m *Manager) conversationSnapshotFor(id string, admit func(readTarget) error) (conversationSnapshot, error) {
 	if sess, ok := m.Get(id); ok {
+		if admit != nil {
+			sess.mu.Lock()
+			target := readTarget{kind: sess.Kind, cwd: sess.CWD}
+			sess.mu.Unlock()
+			if err := admit(target); err != nil {
+				return conversationSnapshot{}, err
+			}
+		}
 		msgs, err := bus.QueryTyped[bus.GetDisplayMessages, []core.AgentMessage](sess.runtime.Bus, bus.GetDisplayMessages{})
 		if err != nil {
 			return conversationSnapshot{}, err
@@ -234,6 +256,12 @@ func (m *Manager) conversationSnapshot(id string) (conversationSnapshot, error) 
 	saved, _, err := session.FindSessionReadOnly(m.sessionBaseDir, id)
 	if err != nil {
 		return conversationSnapshot{}, err
+	}
+	if admit != nil {
+		cwd, _ := saved.Metadata["cwd"].(string)
+		if err := admit(readTarget{kind: saved.Kind(), cwd: cwd}); err != nil {
+			return conversationSnapshot{}, err
+		}
 	}
 	projection, leaf, err := m.savedConversationMessages(saved)
 	if err != nil {
@@ -373,7 +401,9 @@ func isExtensionMessage(custom map[string]any) bool {
 		return false
 	}
 	for key := range custom {
-		if key != "compaction_epoch" {
+		// human_session_mentions is the receipt of a message the human typed
+		// (see core.CustomKeyHumanSessionMentions): benign, never an extension.
+		if key != "compaction_epoch" && key != core.CustomKeyHumanSessionMentions {
 			return true
 		}
 	}

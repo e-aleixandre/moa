@@ -219,7 +219,7 @@ func launchQueuedSteers(sctx *SessionContext, items []core.SteerItem) {
 				// made the live frame and the reloaded transcript disagree: a
 				// voice delegate's question arrived looking like a message the
 				// user had typed, and only became a call block on reload.
-				Custom: it.Custom,
+				Custom: withoutHumanMentions(it.Custom),
 			})
 		}
 	}
@@ -332,4 +332,23 @@ func executeQueuedGoal(sctx *SessionContext, rest string) error {
 		TotalBudget:   gc.TotalBudget,
 		WorkDir:       gc.WorkDir,
 	})
+}
+
+// withoutHumanMentions drops the session mentions receipt from the Custom a
+// live event publishes. The receipt is transcript metadata of a message the
+// human typed; subscribers read a non-nil Custom as "not typed by the user".
+func withoutHumanMentions(custom map[string]any) map[string]any {
+	if _, ok := custom[core.CustomKeyHumanSessionMentions]; !ok {
+		return custom
+	}
+	out := make(map[string]any, len(custom))
+	for k, v := range custom {
+		if k != core.CustomKeyHumanSessionMentions {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
