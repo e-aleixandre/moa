@@ -147,6 +147,10 @@ type voiceCall struct {
 	turnLat    []time.Duration // user turn.done → first provider audio, per turn (ChatGPT plan only)
 	costStart  float64         // the session's text spend when the call opened
 	unsubs     []func()        // bus subscriptions binding asks/brief to their run
+	// brief and learned are what the call learned as data; every handoff
+	// gets them again (voice_call_data.go).
+	brief   *voiceDatum
+	learned []voiceDatum
 
 	// journal keeps what the call has accepted on disk until its minutes
 	// are saved; journalErr is why it could not be opened.

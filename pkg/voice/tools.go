@@ -44,7 +44,8 @@ const CommonInstructions = "You are moa's voice delegate for one coding session.
 	InstructionRelayOnRequest + " Relay what they ask in their words; anything you would add or infer is an action and needs the confirmation above.\n" +
 	"Deployments and permissions need the owner's tap on their card: never answer a question that requires a tap. Secrets are only entered on the secure sheet, never by voice.\n" +
 	"When the conversation ends, call end_call with what was decided, what was passed to the session and what is still open. " +
-	"Whatever you passed with pass_to_session goes in passed, never again in decided; if you need to mention it there, write \"already passed: <delivery_id>\"."
+	"Whatever you passed with pass_to_session goes in passed, never again in decided; if you need to mention it there, write \"already passed: <delivery_id>\".\n" +
+	InstructionTopicContext
 
 // HandoffInstructions is the backend prompt of a client delegation: its reply
 // is spoken back by the voice model.
