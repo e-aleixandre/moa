@@ -94,7 +94,7 @@ func (e *rsEnv) send(callerID, text string, mentions any, extra map[string]any) 
 func (e *rsEnv) sendRaw(callerID, body string) (int, string) {
 	e.t.Helper()
 	resp := apiReq(e.t, e.srv, "POST", "/api/sessions/"+callerID+"/send", body)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
 }

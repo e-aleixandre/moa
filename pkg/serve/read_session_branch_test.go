@@ -17,7 +17,7 @@ func (e *rsEnv) rewind(s *ManagedSession, entryID string) map[string]any {
 	e.t.Helper()
 	body := `{"entry_id":"` + entryID + `","before":true}`
 	resp := apiReq(e.t, e.srv, "POST", "/api/sessions/"+s.ID+"/branch", body)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		e.t.Fatalf("branch = %d %s", resp.StatusCode, raw)

@@ -41,7 +41,7 @@ func TestSessionMentionsReceiptKeepsHumanMessageVisibleAndIdentified(t *testing.
 	}
 
 	httpResp := apiReq(t, env.srv, "GET", "/api/sessions/"+caller.ID+"/messages", "")
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 	b, _ := io.ReadAll(httpResp.Body)
 	if !strings.Contains(string(b), "VISIBLE_SENT") {
 		t.Errorf("/messages hid the human message: %s", b)

@@ -11,7 +11,6 @@ import (
 )
 
 type rsToolOutcome struct {
-	offered bool
 	isError bool
 	text    string
 }
@@ -127,7 +126,7 @@ func TestReadSessionQueuedSteerGrantsOnlyOnDelivery(t *testing.T) {
 
 			if cancelSteer {
 				r := apiReq(t, env.srv, "POST", "/api/sessions/"+caller.ID+"/steers/cancel", `{}`)
-				r.Body.Close()
+				_ = r.Body.Close()
 			}
 			release()
 			rsSettle(t, caller)

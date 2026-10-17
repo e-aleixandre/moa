@@ -17,7 +17,7 @@ import (
 func (e *rsEnv) mentionRows(callerID, query string) (int, []mentionSessionRow, string) {
 	e.t.Helper()
 	resp := apiReq(e.t, e.srv, "GET", "/api/sessions/"+callerID+"/mention-sessions"+query, "")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	var rows []mentionSessionRow
 	if resp.StatusCode == http.StatusOK {
