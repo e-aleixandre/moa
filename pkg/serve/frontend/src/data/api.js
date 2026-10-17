@@ -112,6 +112,8 @@ export function attachStructuredError(error, body) {
   try { parsed = JSON.parse(body); } catch { return error; }
   if (!parsed || typeof parsed !== 'object') return error;
   if (typeof parsed.error === 'string' && parsed.error) error.userMessage = parsed.error;
+  if (typeof parsed.code === 'string' && parsed.code) error.code = parsed.code;
+  if (typeof parsed.provider === 'string') error.provider = parsed.provider;
   const detail = parsed.error_detail;
   if (detail && typeof detail === 'object' && typeof detail.class === 'string') {
     error.detail = {

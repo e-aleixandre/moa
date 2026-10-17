@@ -11,7 +11,7 @@ import "./CallLevel.css";
    per-minute cost, in place — no modal over the owner's panel — and only
    Confirm sends it; Cancel leaves the level as it was. */
 
-export function CallLevelField({ owner, status, onProviders, label = true, hint = true }) {
+export function CallLevelField({ owner, status, onProviders, onRejected, label = true, hint = true }) {
   const current = ownerCallLevel(owner);
   const [pending, setPending] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -32,6 +32,9 @@ export function CallLevelField({ owner, status, onProviders, label = true, hint 
     } catch (error) {
       setPending(null);
       setFailure(callLevelFailure(error));
+      // A rejection can mean the paid provider changed elsewhere: reread it
+      // so the next choice confirms the current cost.
+      if (error?.status === 400) onRejected?.();
     } finally {
       setBusy(false);
     }
@@ -92,15 +95,17 @@ export function CallLevelField({ owner, status, onProviders, label = true, hint 
 // itself: it names the paid provider and its price when no plan is signed in.
 export function OwnerCallLevel({ owner }) {
   const [status, setStatus] = useState(null);
+  const [reads, setReads] = useState(0);
   useEffect(() => {
     let live = true;
     api("GET", "/api/voice/status").then((s) => { if (live) setStatus(s); }).catch(() => {});
     return () => { live = false; };
-  }, [owner.id]);
+  }, [owner.id, reads]);
   return (
     <CallLevelField
       owner={owner}
       status={status}
+      onRejected={() => setReads((n) => n + 1)}
       onProviders={() => openProviderSettings(status?.owner_calls_paid_provider || "")}
     />
   );

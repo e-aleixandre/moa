@@ -14,7 +14,9 @@ import "./OwnerCallsSettings.css";
    own level (Never / Ask first / Ring) is chosen on its page, so here it is a
    read-only list whose rows open that page. Every control reports ONE change
    to saveCalls, which writes them in turn from the confirmed block; when a
-   write ends the control shows what the server holds. No daily cap: hours and
+   write ends the control shows what the server holds. A control waits,
+   disabled, while its own write is pending: a change made then would be
+   compared with a block about to be replaced. No daily cap: hours and
    a pause are the only limits. */
 
 function Hours({ calls, saveCalls, loaded }) {
@@ -23,13 +25,17 @@ function Hours({ calls, saveCalls, loaded }) {
   const [from, setFrom] = useState(saved?.from || "08:00");
   const [until, setUntil] = useState(saved?.until || "22:00");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(0);
   const tz = saved?.tz || deviceTimeZone();
-  const send = (hours) => saveCalls({ hours }).then((r) => {
-    // Show what the server holds, whether the write worked or not.
-    const held = r.calls?.hours || null;
-    setBetween(!!held);
-    if (held) { setFrom(held.from); setUntil(held.until); }
-  });
+  const send = (hours) => {
+    setBusy((n) => n + 1);
+    return saveCalls({ hours }).then((r) => {
+      // Show what the server holds, whether the write worked or not.
+      const held = r.calls?.hours || null;
+      setBetween(!!held);
+      if (held) { setFrom(held.from); setUntil(held.until); }
+    }).finally(() => setBusy((n) => n - 1));
+  };
   const commit = (nextFrom, nextUntil) => {
     const r = hoursBlock({ from: nextFrom, until: nextUntil });
     if (r.error) { setError(r.error); return; }
@@ -40,12 +46,12 @@ function Hours({ calls, saveCalls, loaded }) {
     <>
       <span class="zl-set-k is-page">Allowed hours</span>
       <div class="oc-seg" role="radiogroup" aria-label="Allowed hours">
-        <button type="button" role="radio" aria-checked={!between} class={`oc-opt${!between ? " is-on" : ""}`} disabled={!loaded}
-          onClick={() => { setBetween(false); setError(""); if (saved) send(null); }}>
+        <button type="button" role="radio" aria-checked={!between} class={`oc-opt${!between ? " is-on" : ""}`} disabled={!loaded || busy > 0}
+          onClick={() => { if (busy) return; setBetween(false); setError(""); if (saved) send(null); }}>
           Any time
         </button>
-        <button type="button" role="radio" aria-checked={between} class={`oc-opt${between ? " is-on" : ""}`} disabled={!loaded}
-          onClick={() => { setBetween(true); commit(from, until); }}>
+        <button type="button" role="radio" aria-checked={between} class={`oc-opt${between ? " is-on" : ""}`} disabled={!loaded || busy > 0}
+          onClick={() => { if (busy) return; setBetween(true); commit(from, until); }}>
           From – Until
         </button>
       </div>
@@ -97,19 +103,24 @@ function RingFor({ calls, saveCalls, loaded }) {
   const saved = calls.ring_seconds || RING_DEFAULT;
   const [draft, setDraft] = useState(String(saved));
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const commit = () => {
+    if (busy) return;
     const r = ringSecondsValue(draft);
     if (r.error) { setError(r.error); return; }
     setError("");
     if (r.seconds !== saved) {
-      saveCalls({ ring_seconds: r.seconds }).then((res) => setDraft(String(res.calls?.ring_seconds || RING_DEFAULT)));
+      setBusy(true);
+      saveCalls({ ring_seconds: r.seconds })
+        .then((res) => setDraft(String(res.calls?.ring_seconds || RING_DEFAULT)))
+        .finally(() => setBusy(false));
     }
   };
   return (
     <>
       <span class="zl-set-k is-page">Ring for</span>
       <label class="oc-ring">
-        <Field variant="box" class="oc-ring-f" type="number" inputmode="numeric" min={RING_MIN} max={RING_MAX} value={draft} disabled={!loaded}
+        <Field variant="box" class="oc-ring-f" type="number" inputmode="numeric" min={RING_MIN} max={RING_MAX} value={draft} disabled={!loaded || busy}
           aria-label="Ring for, in seconds"
           onInput={(e) => setDraft(e.currentTarget.value)} onBlur={commit}
           onKeyDown={(e) => { if (e.key === "Enter") commit(); }} />

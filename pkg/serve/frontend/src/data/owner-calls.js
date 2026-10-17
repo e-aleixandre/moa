@@ -4,7 +4,6 @@
 // GET /api/voice/status; nothing here prices a call on its own.
 
 import { api } from './api.js';
-import { loadOwners } from './owners.js';
 import { setState } from './store.js';
 import { PROVIDER_NAMES } from './voice-call.js';
 
@@ -70,13 +69,19 @@ export async function setOwnerCallLevel(ownerId, level, ack = '') {
   setState((s) => ({
     owners: { ...s.owners, list: (s.owners?.list || []).map((o) => (o.id === ownerId ? { ...o, ...saved } : o)) },
   }));
-  void loadOwners();
   return info;
 }
 
+// callLevelFailure maps the server's rejection code to the next action.
 export function callLevelFailure(error) {
   if (error?.status !== 400) return 'Could not save. Try again.';
-  return /API key/i.test(error.message || '') ? 'Add an API key under Providers' : NO_PLAN_COPY;
+  const name = PROVIDER_NAMES[error.provider] || 'the paid API';
+  switch (error.code) {
+    case 'cost_ack_required': return `Confirm the cost of ${name}`;
+    case 'api_key_required': return `Add an API key for ${name} under Providers`;
+    case 'no_plan': return NO_PLAN_COPY;
+    default: return 'Could not save. Try again.';
+  }
 }
 
 // ── Calls settings ────────────────────────────────────────────────────────

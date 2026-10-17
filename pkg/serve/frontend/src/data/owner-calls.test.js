@@ -38,7 +38,9 @@ test("without a plan the cost is confirmed, naming provider and price", () => {
 test("no plan and no paid key says where to sign in", () => {
   const plan = callLevelPlan({ default: "", providers }, infra, "ring");
   expect(plan).toEqual({ kind: "blocked", text: "Sign in to a voice plan under Providers" });
-  expect(callLevelFailure({ status: 400 })).toBe(NO_PLAN_COPY);
+  expect(callLevelFailure({ status: 400, code: "no_plan" })).toBe(NO_PLAN_COPY);
+  expect(callLevelFailure({ status: 400, code: "cost_ack_required", provider: "openai-live-api" })).toMatch(/^Confirm the cost of /);
+  expect(callLevelFailure({ status: 400, code: "api_key_required", provider: "xai-api" })).toBe("Add an API key for Grok API under Providers");
 });
 
 const realFetch = globalThis.fetch;
