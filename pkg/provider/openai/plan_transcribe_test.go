@@ -102,3 +102,42 @@ func TestPlanThenAPIKeyEndToEnd(t *testing.T) {
 		t.Fatalf("%q %v", got, err)
 	}
 }
+
+func TestPlanRejectsAudioWith400DoesNotSpendTheKey(t *testing.T) {
+	plan := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "bad audio", 400) }))
+	defer plan.Close()
+	apiCalls := 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		apiCalls++
+		_, _ = w.Write([]byte(`{"text":"x"}`))
+	}))
+	defer api.Close()
+	p := NewPlanTranscriber(planCreds("tok", "acct"))
+	p.url = plan.URL
+	k := New("sk-test")
+	k.baseURL = api.URL
+	_, err := (&core.FallbackTranscriber{Primary: p, Fallback: k}).Transcribe(context.Background(), strings.NewReader("a"), "a.webm", core.TranscribeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "400") {
+		t.Fatalf("want the plan's 400 error, got %v", err)
+	}
+	if apiCalls != 0 {
+		t.Fatalf("API key used %d times after a 400", apiCalls)
+	}
+}
+
+func TestPlanOtherFailuresStillFallBack(t *testing.T) {
+	for _, code := range []int{401, 403, 429, 500, 503} {
+		plan := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "x", code) }))
+		api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"text":"key"}`)) }))
+		p := NewPlanTranscriber(planCreds("tok", "acct"))
+		p.url = plan.URL
+		k := New("sk-test")
+		k.baseURL = api.URL
+		got, err := (&core.FallbackTranscriber{Primary: p, Fallback: k}).Transcribe(context.Background(), strings.NewReader("a"), "a.webm", core.TranscribeOptions{})
+		plan.Close()
+		api.Close()
+		if err != nil || got != "key" {
+			t.Fatalf("%d: %q %v", code, got, err)
+		}
+	}
+}

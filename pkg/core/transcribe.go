@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 )
@@ -23,6 +24,13 @@ type TranscribeOptions struct {
 // (e.g. OpenAI) implement this interface.
 type Transcriber interface {
 	Transcribe(ctx context.Context, audio io.Reader, filename string, opts TranscribeOptions) (string, error)
+}
+
+// NoFallbackError marks a Primary failure that the Fallback must not retry,
+// e.g. the service rejected the audio itself, so a paid retry would fail too.
+type NoFallbackError interface {
+	error
+	NoFallback() bool
 }
 
 // FallbackTranscriber tries Primary and, only if it fails, Fallback. It exists
@@ -54,6 +62,11 @@ func (f *FallbackTranscriber) Transcribe(ctx context.Context, audio io.Reader, f
 	}
 	// The caller went away: do not spend the paid key on a dead request.
 	if ctx.Err() != nil {
+		return "", err
+	}
+	var nf NoFallbackError
+	if errors.As(err, &nf) && nf.NoFallback() {
+		slog.Warn("dictation: plan rejected the audio, not falling back", "reason", err.Error())
 		return "", err
 	}
 	slog.Warn("dictation: plan failed, falling back to API key", "reason", err.Error())

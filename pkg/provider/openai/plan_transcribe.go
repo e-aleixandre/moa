@@ -97,6 +97,9 @@ func (p *PlanTranscriber) Transcribe(ctx context.Context, audio io.Reader, filen
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		if resp.StatusCode == http.StatusBadRequest {
+			return "", &planRejectedError{}
+		}
 		return "", fmt.Errorf("plan transcribe: HTTP %d", resp.StatusCode)
 	}
 	var out struct {
@@ -107,3 +110,10 @@ func (p *PlanTranscriber) Transcribe(ctx context.Context, audio io.Reader, filen
 	}
 	return *out.Text, nil
 }
+
+// planRejectedError is the service refusing the audio (HTTP 400). The API key
+// would refuse it too, so the caller gets the error instead of a paid retry.
+type planRejectedError struct{}
+
+func (*planRejectedError) Error() string    { return "plan transcribe: HTTP 400 (audio rejected)" }
+func (*planRejectedError) NoFallback() bool { return true }
