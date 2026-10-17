@@ -15,6 +15,7 @@ import (
 const (
 	voiceCallDataItems    = 6      // answers and book files kept, newest first
 	voiceCallDataBookChar = 6_000  // one book file, its beginning kept
+	voiceCallDataBrief    = 8_000  // the brief, its beginning kept
 	voiceCallDataChars    = 20_000 // the whole block, brief included
 )
 
@@ -31,8 +32,12 @@ func (c *voiceCall) remember(kind, label, text string) {
 	if text == "" {
 		return
 	}
-	if kind == "book" {
-		text = string([]rune(text)[:min(len([]rune(text)), voiceCallDataBookChar)])
+	limit := voiceCallDataBookChar
+	if kind == "brief" {
+		limit = voiceCallDataBrief
+	}
+	if r := []rune(text); kind != "answer" && len(r) > limit {
+		text = string(r[:limit])
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -356,11 +356,14 @@ func (c *voiceCall) backendLoop(ctx context.Context, input string, tools []core.
 		for _, call := range calls {
 			args, _ := json.Marshal(call.Arguments)
 			r := c.execute(ctx, voice.ToolCall{ID: call.ToolCallID, Name: call.ToolName, Arguments: args})
-			if r.IsError {
-				trace.tools = append(trace.tools, call.ToolName+":error")
-			} else {
-				trace.tools = append(trace.tools, call.ToolName)
+			name := call.ToolName
+			if !voice.Allowed(name) {
+				name = "unknown" // a provider-minted name is not ours to log
 			}
+			if r.IsError {
+				name += ":error"
+			}
+			trace.tools = append(trace.tools, name)
 			msgs = append(msgs, core.NewToolResultMessage(call.ToolCallID, call.ToolName, []core.Content{core.TextContent(string(r.Output))}, r.IsError))
 		}
 		if stop != nil && stop() {
