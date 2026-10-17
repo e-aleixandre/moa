@@ -319,7 +319,26 @@ func (s *Store) ProjectIndex(key string) string {
 	if err != nil {
 		return ""
 	}
-	return truncateUTF8(string(data), MaxProjectBytes)
+	return capProjectIndex(string(data))
+}
+
+// capProjectIndex bounds the index to MaxProjectBytes. A cut is never silent:
+// the sessions must know the index goes on, or they act as if what they were
+// given were the whole book. The mark's room is reserved inside the budget (its
+// digits are at most those of the limit and of the original size), and N counts
+// the index bytes actually kept. The mark does not promise that reading
+// PROJECT.md recovers the rest: the read tool cuts at its own, larger limit.
+func capProjectIndex(full string) string {
+	if len(full) <= MaxProjectBytes {
+		return full
+	}
+	reserved := len(indexCutMark(MaxProjectBytes, len(full)))
+	kept := truncateUTF8(full, MaxProjectBytes-reserved)
+	return kept + indexCutMark(len(kept), len(full))
+}
+
+func indexCutMark(kept, total int) string {
+	return fmt.Sprintf("\n\n[Index cut: %d of %d bytes shown. Search the book for the topic and read its sheet before acting.]\n", kept, total)
 }
 
 // MaxOwnerPrefsBytes caps what OWNER.md contributes to the owner's prompt. It

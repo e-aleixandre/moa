@@ -287,3 +287,93 @@ func TestWriteFileReplacesAndRefusesOversize(t *testing.T) {
 		t.Fatalf("oversize write = %v, want ErrTooLarge", err)
 	}
 }
+
+func writeSized(t *testing.T, dir, rel string, size int) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, rel), []byte(strings.Repeat("a", size)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSizeWarningOnIndexAndDocuments(t *testing.T) {
+	const kib = 1024
+	tests := []struct {
+		name      string
+		path      string
+		size      int
+		wantIndex bool
+		wantDoc   bool
+	}{
+		{"index at 7KiB", "PROJECT.md", 7 * kib, false, false},
+		{"index at 7KiB+1", "PROJECT.md", 7*kib + 1, true, false},
+		{"doc at 48KiB", "work/x.md", 48 * kib, false, false},
+		{"doc at 48KiB+1", "work/x.md", 48*kib + 1, false, true},
+		{"index past both", "PROJECT.md", 48*kib + 1, true, true},
+		{"normal file", "people.md", 3 * kib, false, false},
+		{"big non-index is not an index warning", "work/y.md", 10 * kib, false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := newBook(t)
+			tool := NewTool(dir, true)
+			res := run(t, tool, map[string]any{"action": "write", "path": tc.path, "content": strings.Repeat("a", tc.size)})
+			if res.IsError {
+				t.Fatalf("write failed: %s", resultText(res))
+			}
+			text := resultText(res)
+			if got := strings.Contains(text, "PROJECT.md is now"); got != tc.wantIndex {
+				t.Errorf("index warning = %v, want %v: %q", got, tc.wantIndex, text)
+			}
+			if got := strings.Contains(text, "search skips"); got != tc.wantDoc {
+				t.Errorf("doc warning = %v, want %v: %q", got, tc.wantDoc, text)
+			}
+			if (tc.wantIndex || tc.wantDoc) && !strings.Contains(text, "book-tidy") {
+				t.Errorf("warning does not say how to continue: %q", text)
+			}
+			if !strings.HasPrefix(text, "Wrote "+tc.path+" in the book.") {
+				t.Errorf("success message lost: %q", text)
+			}
+		})
+	}
+}
+
+// The warning measures the final file, not the appended chunk, and also fires
+// when the file was already over the line.
+func TestSizeWarningUsesFinalSizeOnAppend(t *testing.T) {
+	dir := newBook(t)
+	tool := NewTool(dir, true)
+	writeSized(t, dir, "PROJECT.md", 7*1024-10)
+
+	res := run(t, tool, map[string]any{"action": "append", "path": "PROJECT.md", "content": "0123456789ab"})
+	text := resultText(res)
+	if !strings.Contains(text, "PROJECT.md is now 7171 bytes") { // 7158 + newline separator + 12
+		t.Fatalf("append crossing the line: %q", text)
+	}
+	res = run(t, tool, map[string]any{"action": "append", "path": "PROJECT.md", "content": "x"})
+	if !strings.Contains(resultText(res), "PROJECT.md is now") {
+		t.Fatalf("append to a file already over: %q", resultText(res))
+	}
+}
+
+func TestSizeWarningCountsBytesNotRunes(t *testing.T) {
+	dir := newBook(t)
+	tool := NewTool(dir, true)
+	// 3500 runes of 2 bytes: 7000 bytes is fine, 3600 runes is 7200 bytes.
+	res := run(t, tool, map[string]any{"action": "write", "path": "PROJECT.md", "content": strings.Repeat("á", 3500)})
+	if strings.Contains(resultText(res), "Warning") {
+		t.Fatalf("7000 bytes warned: %q", resultText(res))
+	}
+	res = run(t, tool, map[string]any{"action": "write", "path": "PROJECT.md", "content": strings.Repeat("á", 3600)})
+	if !strings.Contains(resultText(res), "7200 bytes") {
+		t.Fatalf("7200 bytes did not warn in bytes: %q", resultText(res))
+	}
+}
+
+func TestFailedWriteDoesNotClaimSuccessOrWarn(t *testing.T) {
+	dir := newBook(t)
+	tool := NewTool(dir, true)
+	res := run(t, tool, map[string]any{"action": "write", "path": "../escape.md", "content": strings.Repeat("a", 60*1024)})
+	if !res.IsError || strings.Contains(resultText(res), "Wrote") || strings.Contains(resultText(res), "Warning") {
+		t.Fatalf("failed write: %v %q", res.IsError, resultText(res))
+	}
+}

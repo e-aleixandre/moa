@@ -2,6 +2,7 @@ package owner
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -232,5 +233,71 @@ func TestConcurrentCreateYieldsOneOwner(t *testing.T) {
 	}
 	if len(owners) != 1 {
 		t.Fatalf("owners on disk = %d, want 1", len(owners))
+	}
+}
+
+func writeIndex(t *testing.T, content string) (*Store, string) {
+	t.Helper()
+	store := NewStore(t.TempDir())
+	own, err := store.Create(t.TempDir(), "Winerim", "", "", true, Avatar{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.BookDir(own.CodebaseKey), ProjectFile), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return store, own.CodebaseKey
+}
+
+func TestProjectIndexMarksTheCut(t *testing.T) {
+	for _, size := range []int{MaxProjectBytes - 1, MaxProjectBytes} {
+		store, key := writeIndex(t, strings.Repeat("a", size))
+		if got := store.ProjectIndex(key); got != strings.Repeat("a", size) || strings.Contains(got, "Index cut") {
+			t.Fatalf("%d B index was altered", size)
+		}
+	}
+	for _, size := range []int{MaxProjectBytes + 1, 3 * MaxProjectBytes, 100000} {
+		store, key := writeIndex(t, strings.Repeat("a", size))
+		got := store.ProjectIndex(key)
+		if len(got) > MaxProjectBytes {
+			t.Fatalf("%d B index injects %d bytes", size, len(got))
+		}
+		kept := strings.Index(got, "\n\n[Index cut")
+		want := fmt.Sprintf("[Index cut: %d of %d bytes shown.", kept, size)
+		if !strings.Contains(got, want) {
+			t.Fatalf("mark %q missing from tail %q", want, got[len(got)-150:])
+		}
+		if !strings.HasPrefix(got, strings.Repeat("a", kept)) {
+			t.Fatal("kept bytes are not a prefix of the index")
+		}
+		if strings.Contains(got, "read PROJECT.md") {
+			t.Fatal("mark promises that reading PROJECT.md recovers the tail")
+		}
+	}
+}
+
+func TestProjectIndexCutNeverSplitsARune(t *testing.T) {
+	// Shift the multibyte boundary across every alignment at the edge.
+	for pad := 0; pad < 4; pad++ {
+		store, key := writeIndex(t, strings.Repeat("a", pad)+strings.Repeat("€", MaxProjectBytes))
+		got := store.ProjectIndex(key)
+		if !utf8Valid(got) || len(got) > MaxProjectBytes {
+			t.Fatalf("pad %d: valid=%v len=%d", pad, utf8Valid(got), len(got))
+		}
+		kept := strings.Index(got, "\n\n[Index cut")
+		if !strings.Contains(got, fmt.Sprintf("Index cut: %d of %d", kept, pad+3*MaxProjectBytes)) {
+			t.Fatalf("pad %d: N does not count kept bytes: %q", pad, got[len(got)-150:])
+		}
+	}
+}
+
+func TestBookSectionCarriesTheCutMarkWithinBudget(t *testing.T) {
+	store, key := writeIndex(t, strings.Repeat("line of the index\n", 2000))
+	index := store.ProjectIndex(key)
+	if len(index) > MaxProjectBytes {
+		t.Fatalf("index = %d bytes", len(index))
+	}
+	if section := BookSection("Winerim", index); !strings.Contains(section, "[Index cut: ") {
+		t.Fatal("the mark does not reach the session prompt")
 	}
 }
