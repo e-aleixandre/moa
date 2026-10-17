@@ -1,8 +1,10 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 )
 
 // TranscribeOptions tunes a speech-to-text request.
@@ -21,4 +23,43 @@ type TranscribeOptions struct {
 // (e.g. OpenAI) implement this interface.
 type Transcriber interface {
 	Transcribe(ctx context.Context, audio io.Reader, filename string, opts TranscribeOptions) (string, error)
+}
+
+// FallbackTranscriber tries Primary and, only if it fails, Fallback. It exists
+// so dictation can ride the subscription and fall back to a billed API key.
+// Either side may be nil.
+type FallbackTranscriber struct {
+	Primary  Transcriber
+	Fallback Transcriber
+}
+
+var _ Transcriber = (*FallbackTranscriber)(nil)
+
+func (f *FallbackTranscriber) Transcribe(ctx context.Context, audio io.Reader, filename string, opts TranscribeOptions) (string, error) {
+	if f.Primary == nil {
+		return f.Fallback.Transcribe(ctx, audio, filename, opts)
+	}
+	if f.Fallback == nil {
+		return f.Primary.Transcribe(ctx, audio, filename, opts)
+	}
+	// The audio must be replayable for the second attempt.
+	data, err := io.ReadAll(audio)
+	if err != nil {
+		return "", err
+	}
+	text, err := f.Primary.Transcribe(ctx, bytes.NewReader(data), filename, opts)
+	if err == nil {
+		slog.Info("dictation transcribed", "route", "plan")
+		return text, nil
+	}
+	// The caller went away: do not spend the paid key on a dead request.
+	if ctx.Err() != nil {
+		return "", err
+	}
+	slog.Warn("dictation: plan failed, falling back to API key", "reason", err.Error())
+	text, err = f.Fallback.Transcribe(ctx, bytes.NewReader(data), filename, opts)
+	if err == nil {
+		slog.Info("dictation transcribed", "route", "api_key")
+	}
+	return text, err
 }
