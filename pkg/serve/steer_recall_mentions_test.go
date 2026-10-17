@@ -75,7 +75,7 @@ func recallReply(t *testing.T, env *rsEnv, path string, header bool) []recalledS
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	var out struct {
 		Discarded []recalledSteer `json:"discarded_steers"`
