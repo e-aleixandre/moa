@@ -77,11 +77,9 @@ func (a *liveWS) Open(ctx context.Context, spec CallSpec) (Upstream, error) {
 	up.closeFrame = map[string]any{"type": "session.close"}
 	up.closedType = "session.closed"
 	up.start()
-	if spec.SpeakFirst {
-		if err := up.send(map[string]any{"type": "response.create"}); err != nil {
-			_ = up.close(ctx)
-			return nil, err
-		}
+	if err := up.open(spec.Opening); err != nil {
+		_ = up.close(ctx)
+		return nil, err
 	}
 	return up, nil
 }

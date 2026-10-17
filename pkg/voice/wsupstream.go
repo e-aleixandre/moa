@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -87,7 +88,9 @@ type wsUpstream struct {
 	closeOnce    sync.Once
 	closeSent    bool // written once under closeOnce
 	teardownOnce sync.Once
-	workers      sync.WaitGroup
+	// heard is set once the user's speech is seen (OpenOnSilence).
+	heard   atomic.Bool
+	workers sync.WaitGroup
 	// inAudio bounds the PCM bytes waiting in events; reader-owned.
 	inAudio inboundAudio
 	// usage is the latest usage the provider reported. It is kept outside
@@ -201,7 +204,33 @@ func (u *wsUpstream) Usage() *Usage {
 	return u.usage
 }
 
+// open starts the call as opening says. Both dialects ask for a response
+// with the same frame.
+func (u *wsUpstream) open(opening Opening) error {
+	speak := map[string]any{"type": "response.create"}
+	switch opening {
+	case OpenNow:
+		return u.send(speak)
+	case OpenOnSilence:
+		go func() {
+			t := time.NewTimer(OpenSilence)
+			defer t.Stop()
+			select {
+			case <-t.C:
+				if !u.heard.Load() {
+					_ = u.send(speak)
+				}
+			case <-u.ctx.Done():
+			}
+		}()
+	}
+	return nil
+}
+
 func (u *wsUpstream) emit(ev Event) bool {
+	if ev.Kind == EventSpeechStarted || (ev.Kind == EventTranscript && ev.Role == "user") {
+		u.heard.Store(true)
+	}
 	select {
 	case u.events <- ev:
 		return true

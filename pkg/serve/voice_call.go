@@ -350,7 +350,7 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 	ctx, cancel := context.WithTimeout(scope, voiceOpenTimeout)
 	up, err := adapter.Open(ctx, voice.CallSpec{
 		CallID: id, SessionID: sess.ID, Voice: voiceProviders[provider].voice,
-		Instructions: voice.CommonInstructions, BackendModel: model, Tools: voice.ToolSpecs(), SpeakFirst: intro != nil,
+		Instructions: voice.CommonInstructions, BackendModel: model, Tools: voice.ToolSpecs(), Opening: intro.opening(),
 		InitialContext: intro.context() + r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
 	})
 	cancel()

@@ -8,42 +8,52 @@ import (
 	"time"
 )
 
-// Incoming calls open with the reason (owner's decision, 16/10, after his
-// first real incoming call): when moa calls, the voice speaks first and says
-// why; when the user calls, nothing changes.
+// Who speaks first is the phone's rule (owner's decision, 17/10, after
+// CarPlay): whoever picks up. Calling an owner, the owner picks up, so the
+// voice greets at once with one line on where things stand. When an owner
+// calls the user, the user picks up: the voice waits for their hello and
+// answers it with the reason; if they say nothing for ~2 s it speaks anyway.
 //
 // # language: en
-// Feature: an incoming call says why it rings
-//   Scenario: an owner's request_call is answered
+// Feature: whoever picks up speaks first
+//   Scenario: an owner's request_call is answered and the user says hello
 //     Given "Infra" is at Ring and asks to call with a reason, an urgency and a written question
-//     When the user answers
-//     Then the voice's initial context says it is an incoming call and to speak first
-//     And it carries the reason, the urgency and the question
-//     And the provider is told to respond before any user audio
-//   Scenario: a test invitation with a reason
-//     When the user rings themselves with reason "RC-TEST-REASON" and answers
-//     Then the voice opens with that reason
-//   Scenario: a test invitation without a reason
-//     When the user rings themselves without a reason and answers
-//     Then the voice says it is a test call
+//     When the user answers and says hello within 2 seconds
+//     Then the voice's initial context carries the reason, the urgency and the question
+//     And says to wait for the user's hello and answer it with the reason
+//     And the provider is not told to speak before the user
+//   Scenario: the user answers and says nothing
+//     When the user answers and stays silent for 2 seconds
+//     Then the provider is told to speak
+//   Scenario: a test invitation with or without a reason
+//     Then the voice opens with that reason, or says it is a test call
 //   Scenario: the user calls
 //     When the user places a call
-//     Then the voice gets no incoming-call opening and waits for the user
+//     Then the voice is told to greet and say where things stand at once
+//     And that what came before is context: the user has asked nothing yet
+//     And the provider is told to speak before any user audio
 
 const incomingMarker = "INCOMING CALL"
+const outgoingMarker = "OUTGOING CALL"
 
 // openingTrigger: the provider was asked to speak before the user's audio.
 func openingTrigger(v map[string]any) bool { return v["type"] == "response.create" }
 
+// awaitOpening checks the incoming context and that, with the user silent,
+// the voice speaks after the short wait (not at once).
 func awaitOpening(t *testing.T, p *vpPeer, wants ...string) {
 	t.Helper()
+	start := time.Now()
 	cfg := vpJSON(p.await(t, "incoming context", func(v map[string]any) bool { return strings.Contains(vpJSON(v), incomingMarker) }))
 	for _, w := range wants {
 		if !strings.Contains(cfg, w) {
 			t.Errorf("incoming context lacks %q: %s", w, cfg)
 		}
 	}
-	p.await(t, "the voice speaks first", openingTrigger)
+	p.await(t, "the voice speaks after the user's silence", openingTrigger)
+	if d := time.Since(start); d < 1500*time.Millisecond {
+		t.Errorf("the voice spoke %v after pickup, before the user had ~2 s to say hello", d)
+	}
 }
 
 func TestIncoming_RequestCallOpensWithReason(t *testing.T) {
@@ -61,7 +71,7 @@ func TestIncoming_RequestCallOpensWithReason(t *testing.T) {
 			_ = json.Unmarshal(f.mustRequest(http.MethodPost, "/api/voice/calls", map[string]any{"session_id": f.osess.ID, "call_request_id": req.ID}, f.owner(), http.StatusCreated), &c)
 			f.created = true
 			call := f.dial(c, f.owner(), false)
-			awaitOpening(t, f.up.peer(t, c.Provider), "RC-REASON-SENTINEL", "RC-QUESTION-SENTINEL", "urgent", "Speak first")
+			awaitOpening(t, f.up.peer(t, c.Provider), "RC-REASON-SENTINEL", "RC-QUESTION-SENTINEL", "urgent", "hello")
 			call.hangup()
 		})
 	}
@@ -91,20 +101,68 @@ func TestIncoming_TestInviteOpensWithReasonOrSaysTest(t *testing.T) {
 	}
 }
 
-func TestIncoming_OutgoingCallWaitsForTheUser(t *testing.T) {
+func TestIncoming_UserHelloIsAnsweredWithoutSpeakingFirst(t *testing.T) {
+	for _, provider := range []string{"grok-plan", "openai-live-api"} {
+		t.Run(provider, func(t *testing.T) {
+			f := rcNewFixture(t, "grok-plan", "ring")
+			if provider != "grok-plan" {
+				f = rcNewFixture(t, provider, "")
+				f.mustRequest(http.MethodPatch, "/api/voice/settings", map[string]any{"paid_provider": provider}, f.owner(), http.StatusOK)
+				f.mustRequest(http.MethodPatch, "/api/owners/"+f.own.ID, map[string]any{"call_level": "ring", "cost_ack_provider": provider}, f.owner(), http.StatusOK)
+			}
+			f.ask()
+			req := f.awaitRequest("ringing")
+			var c vpCreated
+			_ = json.Unmarshal(f.mustRequest(http.MethodPost, "/api/voice/calls", map[string]any{"session_id": f.osess.ID, "call_request_id": req.ID}, f.owner(), http.StatusCreated), &c)
+			f.created = true
+			call := f.dial(c, f.owner(), false)
+			p := f.up.peer(t, c.Provider)
+			p.await(t, "incoming context", func(v map[string]any) bool { return strings.Contains(vpJSON(v), incomingMarker) })
+			p.user(t, "u1", "hola")
+			time.Sleep(2500 * time.Millisecond)
+			for _, v := range p.snapshot() {
+				if openingTrigger(v) {
+					t.Fatalf("the voice was told to speak although the user said hello: %s", vpJSON(v))
+				}
+			}
+			call.hangup()
+		})
+	}
+}
+
+func TestIncoming_OutgoingCallGreetsAtOnce(t *testing.T) {
+	// chatgpt-plan gets the same InitialContext inside its session
+	// instructions (chatgpt_plan.go) and opens from them alone (I10); its fake
+	// does not record the session body, so real calls check it.
+	for _, provider := range []string{"grok-plan", "openai-live-api"} {
+		t.Run(provider, func(t *testing.T) {
+			f := vpNewFixture(t, provider, vpBriefHandlers()...)
+			call := f.call()
+			p := f.up.peer(t, f.provider)
+			cfg := vpJSON(p.await(t, "outgoing context", func(v map[string]any) bool { return strings.Contains(vpJSON(v), outgoingMarker) }))
+			for _, w := range []string{"greet", "where things stand", "has not asked anything"} {
+				if !strings.Contains(cfg, w) {
+					t.Errorf("outgoing context lacks %q: %s", w, cfg)
+				}
+			}
+			if strings.Contains(cfg, incomingMarker) {
+				t.Errorf("an outgoing call got the incoming opening: %s", cfg)
+			}
+			p.await(t, "the voice speaks at once", openingTrigger)
+			call.hangup()
+		})
+	}
+}
+
+// A brief that arrives mid-call is context, never something the user said
+// (call B2Lrf50d0v9Yr: the plan answered "lo nuevo que me has dicho" to it).
+func TestIncoming_BriefIsMarkedAsContextNotTheUser(t *testing.T) {
 	f := vpNewFixture(t, "grok-plan", vpBriefHandlers()...)
 	call := f.call()
 	p := f.up.peer(t, f.provider)
-	p.await(t, "initial configuration", func(v map[string]any) bool { return v["type"] == "session.update" })
-	vpAwaitBrief(t, f, p)
-	time.Sleep(200 * time.Millisecond)
-	for _, v := range p.snapshot() {
-		if strings.Contains(vpJSON(v), incomingMarker) {
-			t.Fatalf("an outgoing call got the incoming opening: %s", vpJSON(v))
-		}
-		if openingTrigger(v) {
-			t.Fatalf("an outgoing call spoke before the user: %s", vpJSON(v))
-		}
+	brief := vpJSON(p.await(t, "brief", func(v map[string]any) bool { return strings.Contains(vpJSON(v), "BRIEF-READY") }))
+	if !strings.Contains(brief, "not something the user said") || !strings.Contains(brief, "do not answer it") {
+		t.Errorf("brief not marked as context: %s", brief)
 	}
 	call.hangup()
 }

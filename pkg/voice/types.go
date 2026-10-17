@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -84,10 +85,25 @@ type CallSpec struct {
 	InitialContext string
 	BackendModel   core.Model
 	Tools          []core.ToolSpec
-	// SpeakFirst asks the provider for a response before any user audio:
-	// moa placed this call, so the voice opens it (InitialContext says why).
-	SpeakFirst bool
+	// Opening is who speaks first: whoever picks up, as on a phone.
+	Opening Opening
 }
+
+// Opening is how the voice opens a call.
+type Opening int
+
+const (
+	// OpenWait waits for the user.
+	OpenWait Opening = iota
+	// OpenNow speaks at once: the user called and the voice picked up.
+	OpenNow
+	// OpenOnSilence waits for the user's hello, and speaks anyway if none
+	// comes within OpenSilence: moa called and the user picked up.
+	OpenOnSilence
+)
+
+// OpenSilence is how long OpenOnSilence waits for the user's hello.
+var OpenSilence = 2 * time.Second
 
 // Adapter opens upstream calls for one provider.
 type Adapter interface {
