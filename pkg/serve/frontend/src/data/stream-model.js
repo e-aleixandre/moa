@@ -344,6 +344,26 @@ export function projectStream(session) {
       continue;
     }
 
+    // A skill the user invoked with /<name> starts its own turn, as the message
+    // they typed would have: the previous document closes (keeping its foot)
+    // and the compact row stands alone above the response it started.
+    if (msg && msg._type === 'tool_start' && msg.tool_name === 'skill') {
+      currentDoc = null;
+      currentLedger = null;
+      closeDelegation();
+      currentVoiceCall = null;
+      const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
+      blocks.push({
+        kind: 'skill',
+        id: blockID('skill', msg, i),
+        msgId: msg._msg_id || msg.msg_id || undefined,
+        row: toLedgerRow(msg),
+        // What the user typed, which is what a rewind puts back.
+        command: args?.command || ('/' + (args?.name || '') + (args?.arguments ? ' ' + args.arguments : '')),
+      });
+      continue;
+    }
+
     if (msg && msg._type === 'tool_start') {
       // subagent_wait is pure mechanism (launch + wait are two tool calls); it
       // only feeds the "parent is blocked waiting" state, never a row

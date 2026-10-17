@@ -413,3 +413,45 @@ func TestQuery_GetBranchPoints_CarriesSourceOfInjectedMessages(t *testing.T) {
 		t.Fatalf("sources = %v", got)
 	}
 }
+
+// A rewind on an invoked skill hands back what the user typed, never the
+// SKILL.md, and the timeline labels it the same way. Legacy skill messages
+// (custom.skill and nothing else) behave identically.
+func TestRewind_SkillInvocationReturnsTheTypedCommand(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	tree := session.NewTree()
+	body := core.TextContent("# Deploy\n\nShip it.")
+	modern := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{
+		Message: core.Message{Role: "user", Content: []core.Content{body}},
+		Custom:  map[string]any{"source": "skill", "skill": "deploy", "skill_args": "staging --fast", "skill_command": "/skill:deploy staging --fast"},
+	}})
+	legacy := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{
+		Message: core.Message{Role: "user", Content: []core.Content{body}},
+		Custom:  map[string]any{"skill": "deploy"},
+	}})
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	for id, want := range map[string]string{modern: "/skill:deploy staging --fast", legacy: "/deploy"} {
+		msg, err := QueryTyped[GetBranchMessage, core.Message](b, GetBranchMessage{EntryID: id})
+		if err != nil || len(msg.Content) != 1 || msg.Content[0].Text != want {
+			t.Fatalf("rewind message = %+v err=%v, want %q", msg.Content, err, want)
+		}
+	}
+	points, err := QueryTyped[GetBranchPoints, []BranchPoint](b, GetBranchPoints{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := map[string]BranchPoint{}
+	for _, p := range points {
+		labels[p.EntryID] = p
+	}
+	if got := labels[modern]; got.Label != "/skill:deploy staging --fast" || got.Source != "skill" {
+		t.Fatalf("modern point = %+v", got)
+	}
+	if got := labels[legacy]; got.Label != "/deploy" || got.Source != "skill" {
+		t.Fatalf("legacy point = %+v", got)
+	}
+}

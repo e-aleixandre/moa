@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -124,11 +125,27 @@ func runSkillCommand(sess *ManagedSession, s skill.Skill, args []string) (*Comma
 	if err != nil {
 		return &CommandResult{OK: false, Message: "could not read skill " + s.Name + ": " + err.Error()}, nil
 	}
+	typed, _ := invocableAs(s)
+	command := "/" + typed
+	if len(args) > 0 {
+		command += " " + strings.Join(args, " ")
+	}
+	// IdleOnly makes the bus decide idleness under the lock that admits the
+	// prompt: a skill that lost a race must be refused, not queued behind a
+	// "started". Background work (async subagents, bash jobs) does not make the
+	// session busy for a typed message, so it must not for this one either.
 	err = sess.runtime.Bus.Execute(bus.SendPrompt{
-		SessionID: sess.ID,
-		Text:      skill.RenderBody(body, args),
-		Custom:    map[string]any{"source": "skill", "skill": s.Name, "skill_args": strings.Join(args, " ")},
+		SessionID:           sess.ID,
+		Text:                skill.RenderBody(body, args),
+		IdleOnly:            true,
+		AllowBackgroundWork: true,
+		Custom: map[string]any{
+			"source": "skill", "skill": s.Name, "skill_args": strings.Join(args, " "), "skill_command": command,
+		},
 	})
+	if errors.Is(err, bus.ErrNotIdle) {
+		return nil, ErrBusy
+	}
 	if err != nil {
 		return nil, err
 	}

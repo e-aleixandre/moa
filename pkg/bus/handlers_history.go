@@ -597,6 +597,13 @@ func registerTreeHandlers(sctx *SessionContext) {
 		if !ok || e.Type != session.EntryMessage || e.Message.Role != "user" {
 			return core.Message{}, fmt.Errorf("entry %s is not a user message", q.EntryID)
 		}
+		// What goes back to the composer is what the user typed. For an invoked
+		// skill that is the slash command, never the SKILL.md it expanded to.
+		if command, ok := core.SkillInvocation(e.Message.Custom); ok {
+			msg := e.Message.Message
+			msg.Content = []core.Content{core.TextContent(command)}
+			return msg, nil
+		}
 		return e.Message.Message, nil
 	})
 
@@ -671,6 +678,9 @@ func registerTreeHandlers(sctx *SessionContext) {
 			}
 			source, _ := e.Message.Custom["source"].(string)
 			label := firstLine(messageText(e.Message))
+			if command, ok := core.SkillInvocation(e.Message.Custom); ok {
+				source, label = "skill", command
+			}
 			children := sctx.Tree.Children(e.ID)
 			points = append(points, BranchPoint{
 				EntryID:       e.ID,

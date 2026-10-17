@@ -18,10 +18,11 @@ export function normalizeBranchPoint(raw) {
     label: raw.label || '',
     role,
     source,
-    // Only what the user typed comes back to the composer; a message the owner
+    // Only what the user typed comes back to the composer (an invoked skill
+    // comes back as the /command they typed); a message the owner
     // or the parent agent injected keeps the inclusive branch, as in the
     // transcript.
-    editable: role === 'user' && source === '',
+    editable: role === 'user' && (source === '' || source === 'skill'),
     timestampMs,
     branchCount: raw.branch_count || 0,
     isCurrentPath: !!raw.is_current_path,

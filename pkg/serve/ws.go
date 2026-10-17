@@ -515,6 +515,10 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 	jobID, _ := custom["subagent_job_id"].(string)
 	source, _ := custom["source"].(string)
 	if source == "" {
+		// A skill invoked before skills started a run: custom.skill alone.
+		if _, ok := core.SkillInvocation(custom); ok {
+			return map[string]any{"source": "skill", "skill": custom["skill"]}
+		}
 		if jobID == "" {
 			return nil
 		}
@@ -539,6 +543,9 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 		}
 		if args, ok := custom["skill_args"].(string); ok && args != "" {
 			projected["skill_args"] = args
+		}
+		if command, ok := custom["skill_command"].(string); ok && command != "" {
+			projected["skill_command"] = command
 		}
 	}
 	if source == "secret_batch" {

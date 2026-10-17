@@ -241,6 +241,49 @@ func TestRunSkillCommand_InlineWhileBusyIsRefused(t *testing.T) {
 	}
 }
 
+// The idle check and the admission are one decision in the bus: a prompt that
+// would have joined the queue must be refused, not queued behind a "started".
+func TestRunSkillCommand_InlineRefusesWhenTheQueueIsNotEmpty(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	writeTestSkill(t, dir, "deploy", "# Deploy\n\nShip it.\n")
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(simpleResponseHandler("ok")), dir, core.MoaConfig{
+		DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off",
+	})
+	sess, err := mgr.CreateSession(CreateOpts{CWD: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := sess.runtime.Context().Agent
+	if !agent.Steer(core.SteerItem{ID: "pending", Text: "queued first"}) {
+		t.Fatal("could not queue a steer")
+	}
+	if _, err := mgr.ExecCommand(sess.ID, "/deploy", ""); !errors.Is(err, ErrBusy) {
+		t.Fatalf("err = %v, want ErrBusy", err)
+	}
+	if agent.QueueLen() != 1 {
+		t.Fatalf("queue = %d, the refused skill changed it", agent.QueueLen())
+	}
+	if conversationContains(sess, "Ship it.") {
+		t.Fatal("a refused skill entered the conversation")
+	}
+}
+
+// Transcripts written before skills started a run carry only custom.skill.
+// The history projection must keep that mark so the client can still show them
+// as the compact row.
+func TestProjectWSMessageCustom_LegacySkillMessage(t *testing.T) {
+	got := projectWSMessageCustom(map[string]any{"skill": "deploy"})
+	if got["source"] != "skill" || got["skill"] != "deploy" {
+		t.Fatalf("got %+v", got)
+	}
+	if got := projectWSMessageCustom(map[string]any{"source": "skill_fork", "skill": "learn", "subagent_job_id": "j"}); got["source"] != "skill_fork" {
+		t.Fatalf("fork changed: %+v", got)
+	}
+}
+
 func TestRunSkillCommand_ForkDoesNotLoadIntoParent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

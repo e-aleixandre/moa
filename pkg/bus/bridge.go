@@ -1731,6 +1731,9 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 		if args, ok := custom["skill_args"].(string); ok && args != "" {
 			projected["skill_args"] = args
 		}
+		if command, ok := custom["skill_command"].(string); ok && command != "" {
+			projected["skill_command"] = command
+		}
 	}
 	if source == "secret_batch" {
 		switch aliases := custom["secret_aliases"].(type) {

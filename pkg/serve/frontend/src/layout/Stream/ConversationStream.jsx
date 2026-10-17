@@ -17,6 +17,7 @@ import {
 } from "../../components/index.js";
 import { Prose } from "../../components/AssistantDocument/AssistantDocument.jsx";
 import { TurnFoot } from "../../components/AssistantDocument/TurnFoot.jsx";
+import { SkillInvocation } from "../../components/SkillInvocation/SkillInvocation.jsx";
 import { SecretBatchCard } from "../../components/SecretBatchCard/SecretBatchCard.jsx";
 import { ProviderErrorAction } from "../../components/ProviderErrorAction/ProviderErrorAction.jsx";
 import { turnFinalResponse } from "../../data/stream-model.js";
@@ -163,6 +164,16 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
     // between two agents — never as the owner's own messages.
     case "voice_call":
       return <VoiceCallBlock exchanges={block.exchanges} time={block.time} />;
+    case "skill":
+      return (
+        <SkillInvocation
+          rows={fuseLedgerDetails([block.row], [], sessionId)}
+          command={block.command}
+          onRewind={rewind && block.msgId ? () => rewind.to(block.msgId, { edit: true }) : undefined}
+          rewindDisabled={rewind?.disabled}
+          onOpenTimeline={rewind?.openTimeline}
+        />
+      );
     case "waypoint": {
       // A message sent from the Live Preview carries the feedback block the
       // agent needs verbatim; the transcript paints it as a reference tied to

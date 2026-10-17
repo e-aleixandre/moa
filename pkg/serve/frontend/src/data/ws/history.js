@@ -29,15 +29,24 @@ export function skillForkLaunchRow(data) {
 // that text; only its presentation changes. Live (user_message / steer) and
 // reload go through this one builder so the transcript keeps its shape. The
 // row is keyed by the message ID, which live and reload both carry.
+export function isSkillInvocation(custom) {
+  // Transcripts from before skills started a run carry only `skill`.
+  return !!custom?.skill && (!custom.source || custom.source === 'skill');
+}
+
 export function skillRow(data, text) {
-  if (data?.custom?.source !== 'skill' || !data.custom.skill) return null;
+  if (!isSkillInvocation(data?.custom)) return null;
   return {
     _type: 'tool_start',
     _msg_id: data.msg_id || undefined,
     ...(data.timestamp ? { timestamp: data.timestamp } : {}),
     tool_call_id: 'skill-' + (data.msg_id || data.custom.skill),
     tool_name: 'skill',
-    args: { name: data.custom.skill, arguments: data.custom.skill_args || '' },
+    args: {
+      name: data.custom.skill,
+      arguments: data.custom.skill_args || '',
+      command: data.custom.skill_command || '',
+    },
     status: 'done',
     result: text || '',
   };
@@ -213,7 +222,7 @@ export function normalizeHistory(raw, liveSubagents = []) {
           ...skillForkLaunchRow({ msg_id: msg.msg_id, custom: msg.custom }),
           timestamp: msg.timestamp,
         });
-      } else if (msg.custom?.source === 'skill' && msg.custom.skill) {
+      } else if (isSkillInvocation(msg.custom)) {
         result.push(skillRow(
           { msg_id: msg.msg_id, timestamp: msg.timestamp, custom: msg.custom },
           (msg.content || []).filter(x => x.type === 'text').map(x => x.text).join(''),

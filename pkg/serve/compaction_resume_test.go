@@ -267,8 +267,14 @@ func TestCompactionResume_LifecycleDoesNotPersistRebuiltSummary(t *testing.T) {
 				if err != nil || !result.OK {
 					t.Fatalf("skill: result=%+v err=%v", result, err)
 				}
+				// The skill now starts a run: the user message and the reply.
+				settle, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if !s.runtime.WaitSettled(settle) {
+					t.Fatal("skill run did not settle")
+				}
 				s.runtime.Bus.Drain(3 * time.Second)
-				added = 1
+				added = 2
 			case "run":
 				f.run(t, s)
 				added = 2
