@@ -10,7 +10,7 @@ Four rules hold it up.
 
 **An average hides a loss.** One fact that no longer has a reachable home is a loss, however good the rest looks. Reject any single regression.
 
-**You never approve your own deletion.** Whatever would be deleted or summarized is *proposed* by you and confirmed by the user with one tap, as a concrete plan. The tap covers that plan on that version of the book, not the next one. Approval of a reorganization does not authorize a later prune. Without that tap, nothing is removed.
+**You never approve your own change.** Before any reorganization is applied to the live book, and before anything is deleted or summarized, you *propose* a concrete plan and the user confirms it with one tap. The tap covers that plan on that version of the book, not the next one. Approval of a reorganization does not authorize a later prune. Without that tap, nothing is written and nothing is removed.
 
 **Decisions are never pruned.** Each keeps its date and its why. If a date or reason is missing in the source, write "unknown"; do not infer it.
 
@@ -29,11 +29,17 @@ They live inside moa's own config directory, next to the book and not inside it 
 ```bash snapshot
 set -euo pipefail
 umask 077
+if [ -n "$(find "$CB/book" -type l -print -quit)" ]; then
+  echo "ABORT: the book contains symlinks, which this recipe does not snapshot; list them with: find \"$CB/book\" -type l" >&2; exit 1
+fi
+if [ -z "$(find "$CB/book" -type f -print -quit)" ]; then
+  echo "ABORT: the book has no files; there is nothing to snapshot" >&2; exit 1
+fi
 SNAPS="$CB/snapshots"
 mkdir -p "$SNAPS"; chmod 700 "$SNAPS"
 TMP=$(mktemp -d "$SNAPS/.tmp.XXXXXX")
 cp -a "$CB/book" "$TMP/book"
-(cd "$TMP/book" && LC_ALL=C find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$TMP/MANIFEST.sha256"
+(cd "$TMP/book" && LC_ALL=C find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum) > "$TMP/MANIFEST.sha256"
 DIGEST=$(sha256sum "$TMP/MANIFEST.sha256" | cut -c1-12)
 DEST="$SNAPS/$(date -u +%Y%m%dT%H%M%SZ)-$DIGEST"
 find "$TMP" -type d -exec chmod 700 {} +
@@ -42,14 +48,34 @@ mv "$TMP" "$DEST"
 R=$(mktemp -d)
 cp -a "$DEST/book/." "$R/"
 if (cd "$R" && sha256sum --quiet -c "$DEST/MANIFEST.sha256") \
-  && [ "$(cd "$R" && find . -type f | wc -l)" = "$(wc -l < "$DEST/MANIFEST.sha256")" ]; then
+  && [ "$(cd "$R" && find . -type f -printf x | wc -c)" = "$(wc -l < "$DEST/MANIFEST.sha256")" ] \
+  && [ -z "$(find "$R" -type l -print -quit)" ]; then
   rm -rf "$R"; echo "snapshot OK: $DEST"
 else
   rm -rf "$R"; echo "RESTORE REHEARSAL FAILED: $DEST" >&2; exit 1
 fi
 ```
 
-Restoring is copying `<snapshot>/book/.` over the book after checking `MANIFEST.sha256` the same way. A snapshot that failed its rehearsal does not count.
+The recipe stops if the book has symlinks (it neither follows nor converts them: take them out of the book or snapshot by hand) or no files.
+
+### Restoring
+
+Restoring is **replacing the whole book**, not copying over it: copying over leaves behind the files the reorganization added, and they would keep showing up in `search`. Stop every writer first (no session on the book). Set `CB` and `SNAP` (the snapshot directory) and run:
+
+```bash restore
+set -euo pipefail
+umask 077
+NEW="$CB/book.restore.$$"
+rm -rf "$NEW"; cp -a "$SNAP/book" "$NEW"
+(cd "$NEW" && sha256sum --quiet -c "$SNAP/MANIFEST.sha256")
+diff -r "$SNAP/book" "$NEW" >/dev/null
+OLD="$CB/book.before-restore-$(date -u +%Y%m%dT%H%M%SZ)"
+mv "$CB/book" "$OLD"
+if ! mv "$NEW" "$CB/book"; then mv "$OLD" "$CB/book"; echo "RESTORE FAILED, book left as it was" >&2; exit 1; fi
+echo "restored; the book as it was before is kept at $OLD"
+```
+
+The book as it was is kept next to the restored one (`book.before-restore-*`, outside the book, so not searched); delete it only when the user says so. A snapshot that failed its rehearsal does not count.
 
 Retention: always keep the snapshot taken before a cleanup until the user has accepted the cleanup. Beyond that, keep the last 10 and anything younger than 90 days. Before purging any, list what would go (names, dates, sizes) and tell the user; never purge silently, and never purge the only copy of something the book no longer holds. It is the same disk as the book: it protects against a bad edit, not against losing the machine, and you say so if asked.
 
@@ -74,7 +100,7 @@ Where the source contradicts itself on what is current, do not invent the curren
 
 ## 5. Propose, then apply
 
-1. Show the user the diff and the movement map. Applying a reorganization means replacing book files through the `book` tool (or a plain copy of the checked tree) after re-checking that the book still matches the snapshot's hashes; if it changed, start again from section 1.
+1. **Before writing anything to the live book, even if nothing is deleted:** show the user the plan (diff, movement map, evaluation results), name the version of the book it applies to (the snapshot digest) and the hashes of the plan, and **wait for the user's tap**. Agreeing the scope at the start is not that approval; each concrete application gets its own plan and its own tap. Only then re-check that the book still matches the snapshot's hashes (if it changed, start again from section 1) and apply it through the `book` tool or a plain copy of the checked tree.
 2. If you want to remove or summarize anything, give a list: file, range, bytes, why, and where any fact mixed into it will live. Nothing is selected by pattern; no id, refusal, exception or risk counts as disposable on its own. The user confirms with one tap that exact plan.
 3. After the change, run the questions again against the live book and compare with the snapshot. Record in `work/limpieza-del-libro.md` what was done, the snapshot path, and what was not verified.
 
