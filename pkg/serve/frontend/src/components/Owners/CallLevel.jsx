@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../../data/api.js";
 import { openProviderSettings } from "../../data/providers.js";
 import { ownerCallLevel, callLevelPlan, setOwnerCallLevel, callLevelFailure, CALL_LEVELS, CALL_LEVEL_HELP } from "../../data/owner-calls.js";
@@ -16,6 +16,12 @@ export function CallLevelField({ owner, status, onProviders, label = true, hint 
   const [pending, setPending] = useState(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
+  // The confirmation and the failure appear under the selector, which on
+  // Edit owner sits at the bottom of a scrolled panel: bring them into view.
+  const shownRef = useRef(null);
+  useEffect(() => {
+    shownRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [pending, failure]);
 
   const apply = async (level, ack = "") => {
     setBusy(true);
@@ -60,7 +66,7 @@ export function CallLevelField({ owner, status, onProviders, label = true, hint 
       </div>
       {hint && <p class="ow-hint">{CALL_LEVEL_HELP}</p>}
       {pending && (
-        <div class="cl-confirm" role="alertdialog" aria-label="Confirm call cost">
+        <div ref={shownRef} class="cl-confirm" role="alertdialog" aria-label="Confirm call cost">
           <p class="cl-confirm-t">{pending.text}</p>
           <div class="cl-confirm-acts">
             <button type="button" class="cl-yes" disabled={busy} onClick={() => apply(pending.level, pending.provider)}>
@@ -71,7 +77,7 @@ export function CallLevelField({ owner, status, onProviders, label = true, hint 
         </div>
       )}
       {failure && (
-        <p class="ow-fail cl-fail" role="alert">
+        <p ref={pending ? undefined : shownRef} class="ow-fail cl-fail" role="alert">
           {failure}
           {onProviders && failure.includes("Providers") && (
             <> <button type="button" class="cl-link" onClick={onProviders}>Open Providers</button></>
