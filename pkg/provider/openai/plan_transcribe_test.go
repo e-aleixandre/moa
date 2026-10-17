@@ -52,9 +52,11 @@ func TestPlanTranscribeSendsPlanRequest(t *testing.T) {
 
 func TestPlanTranscribeFailuresCarryNoBody(t *testing.T) {
 	cases := map[string]http.HandlerFunc{
-		"500":    func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "secret-body tok", 500) },
-		"403":    func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "secret-body tok", 403) },
-		"429":    func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "secret-body tok", 429) },
+		"500": func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "secret-body tok", 500) },
+		"403": func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "secret-body tok", http.StatusForbidden) },
+		"429": func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "secret-body tok", http.StatusTooManyRequests)
+		},
 		"format": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"nope":1}`)) },
 		"html":   func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`<html>`)) },
 	}
@@ -84,7 +86,7 @@ func TestPlanTranscribeNoLogin(t *testing.T) {
 }
 
 func TestPlanThenAPIKeyEndToEnd(t *testing.T) {
-	plan := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "no", 429) }))
+	plan := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "no", http.StatusTooManyRequests) }))
 	defer plan.Close()
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer sk-test" || r.URL.Path != "/v1/audio/transcriptions" {

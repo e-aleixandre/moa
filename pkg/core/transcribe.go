@@ -66,13 +66,24 @@ func (f *FallbackTranscriber) Transcribe(ctx context.Context, audio io.Reader, f
 	}
 	var nf NoFallbackError
 	if errors.As(err, &nf) && nf.NoFallback() {
-		slog.Warn("dictation: plan rejected the audio, not falling back", "reason", err.Error())
+		slog.Warn("dictation: plan rejected the audio, not falling back", "reason", logReason(err))
 		return "", err
 	}
-	slog.Warn("dictation: plan failed, falling back to API key", "reason", err.Error())
+	slog.Warn("dictation: plan failed, falling back to API key", "reason", logReason(err))
 	text, err = f.Fallback.Transcribe(ctx, bytes.NewReader(data), filename, opts)
 	if err == nil {
 		slog.Info("dictation transcribed", "route", "api_key")
 	}
 	return text, err
+}
+
+// logReason returns the category an error declares safe to log. An arbitrary
+// transcriber error may carry request or response content, so it is never
+// logged as text.
+func logReason(err error) string {
+	var r interface{ LogReason() string }
+	if errors.As(err, &r) {
+		return r.LogReason()
+	}
+	return "error"
 }

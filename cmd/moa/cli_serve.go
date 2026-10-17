@@ -82,7 +82,7 @@ func runServe(args []string) {
 	} else if apiKey, isOAuth, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" && !isOAuth {
 		apiKeyTranscriber = openai.New(apiKey)
 	}
-	var transcriber core.Transcriber = apiKeyTranscriber
+	transcriber := apiKeyTranscriber
 	if authStore.CredentialKind("openai") == "oauth" {
 		// ResolveSnapshot refreshes through the auth store, which serialises
 		// rotation with every other user of the credential.
