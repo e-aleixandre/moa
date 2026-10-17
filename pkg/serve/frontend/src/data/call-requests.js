@@ -7,6 +7,7 @@
 import { api } from './api.js';
 import { store, setState } from './store.js';
 import { openOwnerConversation, ownersSlice } from './owners.js';
+import { addToast } from './notifications.js';
 import { startVoiceCall, hangupVoiceCall } from './voice-call-session.js';
 
 const EMPTY = Object.freeze({ list: [], loaded: false });
@@ -19,9 +20,14 @@ export function setCallRequests(list) {
   setState({ callRequests: { list: Array.isArray(list) ? list : [], loaded: true } });
 }
 
+// feedSeq counts the snapshots the socket has delivered. A GET that started
+// before the latest one is older than what is on screen, and is dropped.
+let feedSeq = 0;
+
 export function loadCallRequests() {
+  const seq = feedSeq;
   return api('GET', '/api/voice/requests')
-    .then((res) => setCallRequests(res?.requests))
+    .then((res) => { if (seq === feedSeq) setCallRequests(res?.requests); })
     .catch(() => {});
 }
 
@@ -35,9 +41,17 @@ export function answerCallRequest(request) {
 }
 
 // writeCallRequest is Write it instead on a ringing request and Cancel on a
-// held one. A 409 means it was already gone, which is the same outcome.
-export function writeCallRequest(id) {
-  return api('POST', `/api/voice/requests/${encodeURIComponent(id)}/write`).catch(() => {});
+// held one. A 409 means it was already gone, which is the same outcome; any
+// other failure leaves the request where it is and says so.
+export async function writeCallRequest(id) {
+  try {
+    await api('POST', `/api/voice/requests/${encodeURIComponent(id)}/write`);
+    return true;
+  } catch (error) {
+    if (error?.status === 409) return true;
+    addToast({ title: 'Could not write it instead', detail: 'Try again.', type: 'error' });
+    return false;
+  }
 }
 
 // callHeldRequest is Call on a held request: the server keeps it for the
@@ -45,11 +59,22 @@ export function writeCallRequest(id) {
 export async function callHeldRequest(request) {
   try {
     await api('POST', `/api/voice/requests/${encodeURIComponent(request.id)}/accept`);
-  } catch {
+  } catch (error) {
+    // 409: it is already gone. Anything else leaves the current call alone.
+    if (error?.status !== 409) {
+      addToast({ title: `Could not call ${request.owner_name || 'the owner'}`, detail: 'Try again.', type: 'error' });
+    }
     return false;
   }
   await hangupVoiceCall();
-  return startVoiceCall(request.session_id, { callRequestId: request.id });
+  const started = startVoiceCall(request.session_id, { callRequestId: request.id });
+  // The call must open where its controls are: on a phone that is the call
+  // screen, elsewhere the owner's conversation.
+  if (started && !store.get().isMobile) {
+    const owner = (ownersSlice(store.get()).list || []).find((o) => o.id === request.owner_id);
+    openOwnerConversation(owner || { session_id: request.session_id });
+  }
+  return started;
 }
 
 // ── The socket ────────────────────────────────────────────────────────────
@@ -76,7 +101,10 @@ function connect() {
     backoff = 1000;
     let evt = null;
     try { evt = JSON.parse(e.data); } catch { return; }
-    if (evt?.type === 'call_requests') setCallRequests(evt.requests);
+    if (evt?.type === 'call_requests') {
+      feedSeq += 1;
+      setCallRequests(evt.requests);
+    }
   };
   ws.onclose = () => {
     if (socket !== ws) return;

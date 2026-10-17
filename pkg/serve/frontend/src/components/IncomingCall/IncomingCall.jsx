@@ -8,8 +8,8 @@ import { useEffect, useState } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { Phone, PenLine, MessageCircle } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
-import { incomingRequest, incomingTitle, heldRequests, heldTitle } from "../../data/call-requests-model.js";
-import { answerCallRequest, writeCallRequest, callHeldRequest } from "../../data/call-requests.js";
+import { incomingRequest, incomingTitle, msUntilExpiry, heldRequests, heldTitle } from "../../data/call-requests-model.js";
+import { answerCallRequest, writeCallRequest, callHeldRequest, loadCallRequests } from "../../data/call-requests.js";
 import { shouldRing, startRingTone } from "../../data/ring-tone.js";
 import { openOwnerConversation } from "../../data/owners.js";
 import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
@@ -57,8 +57,25 @@ export function IncomingCallView({ request, owner, phone, onAnswer, onWrite }) {
   );
 }
 
+// useRingLimit re-renders when the ringing request lapses, so a lost feed
+// cannot leave the card and the tone up; the list is then reconciled.
+function useRingLimit(list) {
+  const [, setTick] = useState(0);
+  const first = incomingRequest(list);
+  const id = first?.id;
+  const at = first?.expires_at;
+  const wait = msUntilExpiry(first);
+  useEffect(() => {
+    if (wait == null) return undefined;
+    const timer = setTimeout(() => { setTick((n) => n + 1); loadCallRequests(); }, wait + 50);
+    return () => clearTimeout(timer);
+  }, [id, at]);
+}
+
 export function IncomingCall() {
-  const request = useStore((s) => incomingRequest(s.callRequests?.list));
+  const list = useStore((s) => s.callRequests?.list);
+  useRingLimit(list);
+  const request = incomingRequest(list);
   const owners = useStore((s) => s.owners.list);
   const phone = useStore((s) => s.isMobile);
   const visible = useVisible();

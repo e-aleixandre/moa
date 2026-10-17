@@ -2,9 +2,11 @@
 // ships no asset. Best effort: a browser that has not had a tap yet keeps the
 // context suspended and the call simply rings in silence on screen.
 
+import { ringExpired } from './call-requests-model.js';
+
 // Only a Ring call sounds, and only while the app is on screen.
-export function shouldRing(request, visible) {
-  return request?.level === 'ring' && request?.state === 'ringing' && !!visible;
+export function shouldRing(request, visible, now = Date.now()) {
+  return request?.level === 'ring' && request?.state === 'ringing' && !!visible && !ringExpired(request, now);
 }
 
 // startRingTone plays a two-note ring every 2.4 s and returns stop().

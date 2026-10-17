@@ -6,8 +6,8 @@ import {
 
 const infra = { id: "own_infra", name: "Infra" };
 const providers = [
-  { id: "xai-api", billing: { kind: "per_minute", usd_per_minute: 0.08 } },
-  { id: "openai-live-api", billing: { kind: "per_minute", usd_per_minute: 0.05 } },
+  { id: "xai-api", state: "ready", billing: { kind: "per_minute", usd_per_minute: 0.08 } },
+  { id: "openai-live-api", state: "ready", billing: { kind: "per_minute", usd_per_minute: 0.05 } },
 ];
 
 test("an owner without call_level is Never", () => {

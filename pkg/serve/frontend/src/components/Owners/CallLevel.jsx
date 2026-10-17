@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../../data/api.js";
+import { openProviderSettings } from "../../data/providers.js";
 import { ownerCallLevel, callLevelPlan, setOwnerCallLevel, callLevelFailure, CALL_LEVELS, CALL_LEVEL_HELP } from "../../data/owner-calls.js";
 import "./CallLevel.css";
 
@@ -90,5 +91,11 @@ export function OwnerCallLevel({ owner }) {
     api("GET", "/api/voice/status").then((s) => { if (live) setStatus(s); }).catch(() => {});
     return () => { live = false; };
   }, [owner.id]);
-  return <CallLevelField owner={owner} status={status} />;
+  return (
+    <CallLevelField
+      owner={owner}
+      status={status}
+      onProviders={() => openProviderSettings(status?.owner_calls_paid_provider || "")}
+    />
+  );
 }

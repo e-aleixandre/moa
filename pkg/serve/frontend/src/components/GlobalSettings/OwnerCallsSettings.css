@@ -1,8 +1,14 @@
-.oc-owners { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-.oc-owner { display: flex; flex-direction: column; gap: 6px; }
-.oc-owner-h { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.oc-owners { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.oc-owner-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 10px;
+  border: 1px solid var(--zl-line); border-radius: var(--zl-r-md); background: transparent;
+  color: var(--zl-t3); font: inherit; text-align: left; cursor: pointer;
+}
+.oc-owner-row:hover { background: var(--zl-hi); }
+.oc-owner-n { flex: 1; }
+.oc-owner-l { color: var(--zl-t2); }
+.oc-owner-l.is-ring { color: var(--zl-accent); }
 .oc-owner-n { font-weight: 500; color: var(--zl-t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oc-owner .cl-field { gap: 4px; }
 .oc-seg {
   display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; padding: 3px;
   border-radius: var(--zl-r-md); background: var(--zl-hi); border: 1px solid var(--zl-line);

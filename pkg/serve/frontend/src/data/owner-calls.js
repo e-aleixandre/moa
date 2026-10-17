@@ -5,6 +5,7 @@
 
 import { api } from './api.js';
 import { loadOwners } from './owners.js';
+import { setState } from './store.js';
 import { PROVIDER_NAMES } from './voice-call.js';
 
 export const CALL_LEVELS = [
@@ -15,6 +16,10 @@ export const CALL_LEVELS = [
 
 export const CALL_LEVEL_HELP = 'Ask first: urgent notification, no ring. Ring: it rings.';
 export const NO_PLAN_COPY = 'Sign in to a voice plan under Providers';
+
+export function addKeyCopy(provider) {
+  return `Add an API key for ${PROVIDER_NAMES[provider] || 'the paid API'} under Providers`;
+}
 
 export const RING_MIN = 10;
 export const RING_MAX = 120;
@@ -38,6 +43,8 @@ export function callLevelPlan(status, owner, level) {
   const provider = status.owner_calls_paid_provider || '';
   if (!provider) return { kind: 'blocked', text: NO_PLAN_COPY };
   const entry = (status.providers || []).find((p) => p.id === provider);
+  // The server refuses the level without the key, so do not offer Confirm.
+  if (entry?.state !== 'ready') return { kind: 'blocked', text: addKeyCopy(provider) };
   const usd = entry?.billing?.kind === 'per_minute' ? entry.billing.usd_per_minute : 0;
   const name = PROVIDER_NAMES[provider] || 'the paid API';
   const price = usd ? ` at $${Number(usd).toFixed(2)}/min` : '';
@@ -50,17 +57,26 @@ export function callLevelPlan(status, owner, level) {
 
 // setOwnerCallLevel saves the level; ack is the provider whose cost the user
 // just accepted. Rejects with the server's error (400 when the cost or the
-// plan is missing — the level stays as it was).
+// plan is missing — the level stays as it was). The owner the PATCH returns
+// is projected into the roster at once: the refresh that follows is only a
+// refresh, so a failed GET can neither hide the saved level nor stop it
+// being revoked.
 export async function setOwnerCallLevel(ownerId, level, ack = '') {
   const body = { call_level: level };
   if (ack) body.cost_ack_provider = ack;
   const info = await api('PATCH', `/api/owners/${ownerId}`, body);
-  await loadOwners();
+  const saved = { ...(info && typeof info === 'object' ? info : {}), id: ownerId };
+  if (!saved.call_level) saved.call_level = level;
+  setState((s) => ({
+    owners: { ...s.owners, list: (s.owners?.list || []).map((o) => (o.id === ownerId ? { ...o, ...saved } : o)) },
+  }));
+  void loadOwners();
   return info;
 }
 
 export function callLevelFailure(error) {
-  return error?.status === 400 ? NO_PLAN_COPY : 'Could not save. Try again.';
+  if (error?.status !== 400) return 'Could not save. Try again.';
+  return /API key/i.test(error.message || '') ? 'Add an API key under Providers' : NO_PLAN_COPY;
 }
 
 // ── Calls settings ────────────────────────────────────────────────────────
@@ -123,4 +139,37 @@ export function callsPatch(calls, change) {
   if (next.paused_until) out.paused_until = next.paused_until;
   if (next.hours) out.hours = next.hours;
   return { calls: out };
+}
+
+// createCallsWriter serialises the writes of the calls block. The server
+// replaces the block whole, so each write is built when its turn comes, from
+// the block the previous write left confirmed — never from the snapshot the
+// control was drawn with. It resolves { ok, calls }: the confirmed block after
+// this write, which is what the controls reconcile to (success or failure).
+export function createCallsWriter({ getCalls, send, onStatus, onError }) {
+  let queue = Promise.resolve();
+  const run = async (change) => {
+    try {
+      const next = await send(callsPatch(getCalls(), change));
+      onStatus?.(next);
+      return { ok: true, calls: next?.calls || {} };
+    } catch (error) {
+      onError?.(error);
+      return { ok: false, calls: getCalls() || {} };
+    }
+  };
+  return {
+    write(change) {
+      const result = queue.then(() => run(change));
+      queue = result;
+      return result;
+    },
+  };
+}
+
+// ownerCallsRow is one line of the read-only list in Settings: who, and the
+// level they hold. The level is changed on the owner's own page.
+export function ownerCallsRow(owner) {
+  const level = ownerCallLevel(owner);
+  return { name: owner?.name || 'Owner', level, label: CALL_LEVELS.find((l) => l.id === level)?.label || 'Never' };
 }

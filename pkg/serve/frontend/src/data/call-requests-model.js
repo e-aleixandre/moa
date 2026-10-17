@@ -5,9 +5,25 @@ export function liveRequests(requests) {
   return Array.isArray(requests) ? requests : [];
 }
 
+// A ringing request past expires_at has ended whether or not the feed has
+// said so yet. Held and accepted requests carry no such limit.
+export function ringExpired(request, now = Date.now()) {
+  if (request?.state !== 'ringing') return false;
+  const at = Date.parse(request.expires_at || '');
+  return Number.isFinite(at) && at <= now;
+}
+
+// msUntilExpiry: how long until the oldest live ringing request lapses; null
+// when none can.
+export function msUntilExpiry(request, now = Date.now()) {
+  if (request?.state !== 'ringing') return null;
+  const at = Date.parse(request.expires_at || '');
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
+}
+
 // incoming is the request to show as ringing: the oldest still ringing.
-export function incomingRequest(requests) {
-  return liveRequests(requests).find((r) => r.state === 'ringing') || null;
+export function incomingRequest(requests, now = Date.now()) {
+  return liveRequests(requests).find((r) => r.state === 'ringing' && !ringExpired(r, now)) || null;
 }
 
 // heldRequests wait behind the call in progress.
