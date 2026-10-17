@@ -44,10 +44,31 @@ export function ownersHealth(state) {
   return { status: 'ready' };
 }
 
+// A level PATCH is confirmed with its own answer; a GET that started before
+// that confirmation may carry the old level and must not replace it. Each
+// confirmation gets a generation; a GET keeps the projected level of every
+// owner confirmed after it started.
+let levelGeneration = 0;
+const levelConfirmedAt = new Map();
+
+export function noteCallLevelConfirmed(ownerId) {
+  levelConfirmedAt.set(ownerId, ++levelGeneration);
+}
+
+function keepConfirmedLevels(list, started) {
+  const current = new Map((ownersSlice(store.get()).list || []).map((o) => [o.id, o]));
+  return list.map((o) => {
+    const mine = current.get(o.id);
+    if (!mine || (levelConfirmedAt.get(o.id) || 0) <= started) return o;
+    return { ...o, call_level: mine.call_level, call_cost_ack_provider: mine.call_cost_ack_provider };
+  });
+}
+
 export async function loadOwners() {
+  const started = levelGeneration;
   try {
     const list = await api('GET', '/api/owners');
-    patch({ list: Array.isArray(list) ? list : [], loaded: true, error: null, retrying: false });
+    patch({ list: keepConfirmedLevels(Array.isArray(list) ? list : [], started), loaded: true, error: null, retrying: false });
   } catch (e) {
     // The previous list keeps saying what is still true; only the health moves.
     patch({ error: String(e.message || e), retrying: false });

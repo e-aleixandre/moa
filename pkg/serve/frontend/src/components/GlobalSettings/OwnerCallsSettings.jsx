@@ -59,12 +59,12 @@ function Hours({ calls, saveCalls, loaded }) {
         <div class="oc-hours">
           <label class="oc-time">
             <span>From</span>
-            <Field variant="box" type="time" value={from} aria-label="Calls allowed from"
+            <Field variant="box" type="time" value={from} aria-label="Calls allowed from" disabled={busy > 0}
               onInput={(e) => { setFrom(e.currentTarget.value); commit(e.currentTarget.value, until); }} />
           </label>
           <label class="oc-time">
             <span>Until</span>
-            <Field variant="box" type="time" value={until} aria-label="Calls allowed until"
+            <Field variant="box" type="time" value={until} aria-label="Calls allowed until" disabled={busy > 0}
               onInput={(e) => { setUntil(e.currentTarget.value); commit(from, e.currentTarget.value); }} />
           </label>
           <span class="oc-tz zl-data">{tz}</span>

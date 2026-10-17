@@ -6,6 +6,7 @@
 import { api } from './api.js';
 import { setState } from './store.js';
 import { PROVIDER_NAMES } from './voice-call.js';
+import { noteCallLevelConfirmed } from './owners.js';
 
 export const CALL_LEVELS = [
   { id: 'never', label: 'Never' },
@@ -69,6 +70,7 @@ export async function setOwnerCallLevel(ownerId, level, ack = '') {
   setState((s) => ({
     owners: { ...s.owners, list: (s.owners?.list || []).map((o) => (o.id === ownerId ? { ...o, ...saved } : o)) },
   }));
+  noteCallLevelConfirmed(ownerId);
   return info;
 }
 
