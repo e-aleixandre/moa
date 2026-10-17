@@ -52,3 +52,9 @@ test("call level: three radios, Never by default", () => {
   expect(radios.map((n) => n.props["aria-checked"])).toEqual([true, false, false]);
   expect(find(tree, (n) => n.type === "p").map(text)).toContain("Ask first: urgent notification, no ring. Ring: it rings.");
 });
+
+test("incoming: a failed Write shows a recoverable message on the card", () => {
+  const tree = IncomingCallView({ request: req, owner: null, phone: true, onAnswer() {}, onWrite() {}, failure: "Could not write it instead. Try again." });
+  expect(find(tree, (n) => n.props?.class === "icall-fail").map(text)).toEqual(["Could not write it instead. Try again."]);
+  expect(find(tree, (n) => n.type === "button").map(text)).toEqual(["Answer", "Write it instead"]);
+});

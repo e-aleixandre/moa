@@ -2,7 +2,6 @@ import { test, expect, afterAll } from 'bun:test';
 import { startCallRequestsSync, currentCallRequests, setCallRequests, writeCallRequest, callHeldRequest } from './data/call-requests.js';
 import { incomingRequest } from './data/call-requests-model.js';
 import { shouldRing } from './data/ring-tone.js';
-import { getToasts } from './data/notifications.js';
 
 const original = { fetch: globalThis.fetch, WebSocket: globalThis.WebSocket, location: Object.getOwnPropertyDescriptor(globalThis, 'location') };
 afterAll(() => {
@@ -20,7 +19,7 @@ class WS {
 
 // One lifecycle mirrors bootstrap (GET and WS simultaneously), followed by
 // foreground return, with only transport delivery order under test control.
-test('F08/F11 UI3: an older GET must not resurrect a request removed by a newer WS snapshot', async () => {
+test('F08 UI3: an older GET must not resurrect a request removed by a newer WS snapshot', async () => {
   let finishGET;
   globalThis.location = { protocol: 'https:', host: 'moa.test' };
   globalThis.WebSocket = WS;
@@ -35,7 +34,7 @@ test('F08/F11 UI3: an older GET must not resurrect a request removed by a newer 
   expect(incomingRequest(currentCallRequests())).toBeNull();
 });
 
-test('F08/F11 UI4: an expired incoming request must stop ringing while the feed is disconnected', async () => {
+test('F08 UI4: an expired incoming request must stop ringing while the feed is disconnected', async () => {
   const past = { ...req, expires_at: new Date(Date.now() - 1000).toISOString() };
   setCallRequests([past]); // cached last valid feed snapshot, no network now
   const incoming = incomingRequest(currentCallRequests());
@@ -43,39 +42,31 @@ test('F08/F11 UI4: an expired incoming request must stop ringing while the feed 
   expect(shouldRing(incoming, true)).toBe(false);
 });
 
-test('F08/F11 UI5: network failure while cancelling held must not be acknowledged as success', async () => {
+test('F11: a network failure cancelling a held request rejects and keeps the request', async () => {
   const held = { ...req, state: 'held' };
   setCallRequests([held]);
   globalThis.fetch = async () => { throw new TypeError('offline'); };
-  const beforeToasts = getToasts();
-  let rejected = false;
-  try { await writeCallRequest(held.id); } catch { rejected = true; }
-  expect(rejected).toBe(false);
-  const unchanged = currentCallRequests()[0]?.state === 'held';
-  const notified = getToasts() !== beforeToasts;
-  console.log('UI5 write resolved silently', { rejected, unchanged, notified });
-  expect(rejected || notified).toBe(true);
+  await expect(writeCallRequest(held.id)).rejects.toThrow('offline');
+  expect(currentCallRequests()[0]?.state).toBe('held');
 });
 
-test('F08/F11 UI5b: network failure choosing held Call must give recoverable feedback', async () => {
-  globalThis.fetch = async () => { throw new TypeError('offline'); };
-  const beforeToasts = getToasts();
-  const result = await callHeldRequest({ ...req, state: 'held' });
-  console.log('UI5b held Call', { result, notified: getToasts() !== beforeToasts });
-  expect(getToasts() !== beforeToasts).toBe(true);
+test('F11: a failure choosing held Call rejects before touching the current call', async () => {
+  const calls = [];
+  globalThis.fetch = async (path) => { calls.push(path); throw new TypeError('offline'); };
+  await expect(callHeldRequest({ ...req, state: 'held' })).rejects.toThrow('offline');
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toContain('/accept');
 });
 
 test('F11: only the 409 of an already-resolved request is silent', async () => {
   const held = { ...req, state: 'held' };
   setCallRequests([held]);
   globalThis.fetch = async () => new Response('gone', { status: 409 });
-  const before = getToasts();
   expect(await writeCallRequest(held.id)).toBe(true);
   expect(await callHeldRequest(held)).toBe(false);
-  expect(getToasts()).toBe(before);
   globalThis.fetch = async () => new Response('boom', { status: 500 });
-  expect(await writeCallRequest(held.id)).toBe(false);
-  expect(getToasts()).not.toBe(before);
+  await expect(writeCallRequest(held.id)).rejects.toMatchObject({ status: 500 });
+  await expect(callHeldRequest(held)).rejects.toMatchObject({ status: 500 });
   expect(currentCallRequests()[0]?.state).toBe('held');
 });
 

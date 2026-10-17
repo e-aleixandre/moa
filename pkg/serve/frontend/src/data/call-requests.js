@@ -7,7 +7,6 @@
 import { api } from './api.js';
 import { store, setState } from './store.js';
 import { openOwnerConversation, ownersSlice } from './owners.js';
-import { addToast } from './notifications.js';
 import { startVoiceCall, hangupVoiceCall } from './voice-call-session.js';
 
 const EMPTY = Object.freeze({ list: [], loaded: false });
@@ -42,16 +41,15 @@ export function answerCallRequest(request) {
 
 // writeCallRequest is Write it instead on a ringing request and Cancel on a
 // held one. A 409 means it was already gone, which is the same outcome; any
-// other failure leaves the request where it is and says so.
+// other failure leaves the request where it is and rejects, so the card that
+// asked can say so (a toast would sit under the phone's call screen).
 export async function writeCallRequest(id) {
   try {
     await api('POST', `/api/voice/requests/${encodeURIComponent(id)}/write`);
-    return true;
   } catch (error) {
-    if (error?.status === 409) return true;
-    addToast({ title: 'Could not write it instead', detail: 'Try again.', type: 'error' });
-    return false;
+    if (error?.status !== 409) throw error;
   }
+  return true;
 }
 
 // callHeldRequest is Call on a held request: the server keeps it for the
@@ -60,10 +58,9 @@ export async function callHeldRequest(request) {
   try {
     await api('POST', `/api/voice/requests/${encodeURIComponent(request.id)}/accept`);
   } catch (error) {
-    // 409: it is already gone. Anything else leaves the current call alone.
-    if (error?.status !== 409) {
-      addToast({ title: `Could not call ${request.owner_name || 'the owner'}`, detail: 'Try again.', type: 'error' });
-    }
+    // 409: it is already gone. Anything else leaves the current call alone
+    // and rejects, for the card to show.
+    if (error?.status !== 409) throw error;
     return false;
   }
   await hangupVoiceCall();

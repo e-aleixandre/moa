@@ -25,7 +25,7 @@ function useVisible() {
   return visible;
 }
 
-export function IncomingCallView({ request, owner, phone, onAnswer, onWrite }) {
+export function IncomingCallView({ request, owner, phone, onAnswer, onWrite, failure = "" }) {
   const ring = request.level === "ring";
   return (
     <div
@@ -45,6 +45,7 @@ export function IncomingCallView({ request, owner, phone, onAnswer, onWrite }) {
         </span>
       </div>
       {request.reason && <p class="icall-reason">{request.reason}</p>}
+      {failure && <p class="icall-fail" role="alert">{failure}</p>}
       <div class="icall-acts">
         <button type="button" class="icall-answer" onClick={onAnswer}>
           <Phone size={18} aria-hidden="true" /> Answer
@@ -79,16 +80,21 @@ export function IncomingCall() {
   const owners = useStore((s) => s.owners.list);
   const phone = useStore((s) => s.isMobile);
   const visible = useVisible();
+  const [failure, setFailure] = useState("");
   const id = request?.id;
   const ringing = shouldRing(request, visible);
   useEffect(() => (ringing ? startRingTone() : undefined), [ringing, id]);
   if (!request || typeof document === "undefined") return null;
   const owner = (owners || []).find((o) => o.id === request.owner_id) || null;
+  const write = () => {
+    setFailure("");
+    writeCallRequest(request.id).catch(() => setFailure("Could not write it instead. Try again."));
+  };
   const answer = () => {
     if (answerCallRequest(request) && !phone) openOwnerConversation(owner || { session_id: request.session_id });
   };
   return createPortal(
-    <IncomingCallView request={request} owner={owner} phone={phone} onAnswer={answer} onWrite={() => writeCallRequest(request.id)} />,
+    <IncomingCallView request={request} owner={owner} phone={phone} onAnswer={answer} onWrite={write} failure={failure} />,
     document.body,
   );
 }
@@ -96,15 +102,21 @@ export function IncomingCall() {
 // HeldCallNotice — during a call, an owner that wanted to talk. Call hangs up
 // this call and calls them; Cancel turns their request into a written question.
 export function HeldCallView({ request, compact = false }) {
+  const [failure, setFailure] = useState("");
+  const run = (action, message) => () => {
+    setFailure("");
+    Promise.resolve(action()).catch(() => setFailure(message));
+  };
   return (
     <div class={`hcall${compact ? " is-compact" : ""}`} role="group" aria-label={heldTitle(request)}>
       <div class="hcall-text">
         <span class="hcall-title">{request.owner_name} wanted to talk</span>
         {request.reason && <span class="hcall-reason">{request.reason}</span>}
+        {failure && <span class="hcall-fail" role="alert">{failure}</span>}
       </div>
       <div class="hcall-acts">
-        <button type="button" class="hcall-call" onClick={() => callHeldRequest(request)}>Call</button>
-        <button type="button" class="hcall-cancel" onClick={() => writeCallRequest(request.id)}>Cancel</button>
+        <button type="button" class="hcall-call" onClick={run(() => callHeldRequest(request), `Could not call ${request.owner_name || "the owner"}. Try again.`)}>Call</button>
+        <button type="button" class="hcall-cancel" onClick={run(() => writeCallRequest(request.id), "Could not cancel. Try again.")}>Cancel</button>
       </div>
     </div>
   );

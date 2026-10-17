@@ -30,6 +30,7 @@
 .icall-name { font-weight: 600; font-size: var(--zl-fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .icall-verb { font-size: var(--zl-fs-meta); color: var(--zl-t3); }
 .icall.is-ask .icall-verb { color: var(--zl-yellow); }
+.icall-fail { margin: 0; color: var(--zl-red); font-size: var(--zl-fs-meta); text-align: center; }
 .icall-reason {
   margin: 0;
   font-size: var(--zl-fs-body);
@@ -86,6 +87,7 @@
 }
 .hcall-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .hcall-title { font-weight: 500; color: var(--zl-t1); }
+.hcall-fail { color: var(--zl-red); font-size: var(--zl-fs-meta); }
 .hcall-reason { color: var(--zl-t2); font-size: var(--zl-fs-meta); overflow-wrap: anywhere; }
 .hcall-acts { flex: none; display: flex; gap: 6px; }
 .hcall-call,
