@@ -304,8 +304,15 @@ func TestF1BisREDStopFencesAcceptedAnswerBeforeAdmission(t *testing.T) {
 	if r, ok := askuser.ResponderFromCustom(answers[0].Custom[askuser.CustomKey]); !ok || r.Kind != askuser.ResponderUser {
 		t.Fatalf("event responder = %+v ok=%v, want the user", r, ok)
 	}
-	msgs, _ := json.Marshal(e.prov.lastSession(t, sess.ID).Messages)
-	if n := f1CountIn(string(msgs), "<question_answer"); n != 1 {
+	// Count over the message text itself: json.Marshal escapes '<' as \u003c,
+	// so the literal would never be found in the marshalled request.
+	var read strings.Builder
+	for _, m := range e.prov.lastSession(t, sess.ID).Messages {
+		for _, c := range m.Content {
+			read.WriteString(c.Text)
+		}
+	}
+	if n := f1CountIn(read.String(), "<question_answer"); n != 1 {
 		t.Fatalf("the model read the answer %d time(s) in the next request, want once", n)
 	}
 }
