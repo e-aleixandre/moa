@@ -150,6 +150,7 @@ test('F2: a session that vanishes from the roster takes its toast down', async (
 
 test('F3: a dismissed request stays dismissed, but a new one in its place announces itself', async () => {
   await poll(['sec_a']);
+  secretToasts()[0].onDismiss();
   removeToast(secretToasts()[0].id);
   await poll(['sec_a']);
   expect(secretToasts()).toHaveLength(0);
@@ -164,11 +165,13 @@ test('F3: a second request beside an announced one replaces the toast instead of
   expect(secretToasts()).toHaveLength(1);
 });
 
-test('selected is not shown: behind Tasks the request still announces itself, and the card owes nothing', async () => {
+test('selected is not shown: behind Tasks the request announces itself, and walking to the owner never loses it', () => {
   look({ view: 'tasks' });
   handleWsSecretRequest('c1', REQ, 3);
   expect(secretToasts()).toHaveLength(1);
-  // Walking to the owner without ever showing the card keeps the toast.
+  // The navigation passes through a frame where Tasks has closed and the
+  // hidden conversation is still the selected one, before the owner is.
+  setState({ view: null });
   setState({ activeSession: 'own-session' });
   expect(secretToasts()).toHaveLength(1);
 });
@@ -194,12 +197,24 @@ test('selected is not shown: in a background page the request announces itself',
   }
 });
 
-test('once the card has really been shown, leaving without answering does not announce it again', () => {
+test('a card you saw and left unanswered tells you again: the session is still blocked', () => {
   look();
   handleWsSecretRequest('c1', REQ, 3);
   expect(secretToasts()).toHaveLength(0);
   setState({ activeSession: 'other' });
+  expect(secretToasts()).toHaveLength(1);
+  setState({ activeSession: 'c1' });
   expect(secretToasts()).toHaveLength(0);
+});
+
+test('closing the toast with X hides that request only', async () => {
+  await poll(['sec_a']);
+  secretToasts()[0].onDismiss();
+  removeToast(secretToasts()[0].id);
+  await poll(['sec_a']);
+  expect(secretToasts()).toHaveLength(0);
+  await poll(['sec_b']);
+  expect(secretToasts()).toHaveLength(1);
 });
 
 test('F4: Enter opens the session and closes the drawer that would cover its card', () => {

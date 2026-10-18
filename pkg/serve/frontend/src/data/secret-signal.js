@@ -5,58 +5,63 @@ import { openSession } from './tile-actions.js';
 import { closeDrawer } from './drawer.js';
 
 // secret-signal — the global "this session is stopped until you enter a
-// password" toast, derived from the store and from nothing else.
+// password" toast. It is a pure function of the store:
 //
-// A toast is a function of two things: which requests each session has open
-// (`secretIds`, kept authoritative by the roster poll and by the socket) and
-// which session you are looking at. Deriving it, rather than raising and
-// clearing it from each event, is what gives it one lifecycle: a request that
-// is answered, cancelled or deleted with its session, or a session you walk
-// into by any route, changes the store, and the toast follows.
+//   a session has an open password request, and you are not looking at that
+//   session right now, and you have not closed the toast for that request.
 //
-// Announcing is by request id, not by count: a request replaced by another
-// between two polls is still "one open", but it is a new thing to tell about.
+// There is no "already told" memory. A session blocked on a password stays
+// blocked until the value goes in, so the toast is on whenever that is true and
+// you are elsewhere, including after you saw the card and walked away. Because
+// nothing is consumed, a navigation frame that briefly looks like "you are in
+// it" can at worst make the toast blink; it can never lose it. The one memory
+// is what you closed with X, per request id: a request replaced by another is a
+// new thing to tell about.
 
-const announced = new Map(); // session id -> { ids: Set of announced request ids, toast: toast id }
-
-export function reconcileSecretSignal(state = store.get()) {
-  for (const [sid, entry] of announced) {
-    if (!state.sessions[sid]?.secretIds?.length) {
-      removeToast(entry.toast);
-      announced.delete(sid);
-    }
-  }
-  for (const sess of Object.values(state.sessions)) {
-    const ids = sess.secretIds || [];
-    if (!ids.length) continue;
-    const entry = announced.get(sess.id) || { ids: new Set(), toast: null };
-    const fresh = ids.some((id) => !entry.ids.has(id));
-    entry.ids = new Set(ids);
-    announced.set(sess.id, entry);
-    if (cardShown(state, sess.id)) {
-      // The card has really been in front of you, and what was shown is not
-      // owed again once you leave. Selected is not shown: behind Tasks, under
-      // the phone drawer or in a background page the request still needs telling.
-      removeToast(entry.toast);
-      entry.toast = null;
-    } else if (fresh) {
-      removeToast(entry.toast);
-      const title = sess.title || 'Untitled';
-      entry.toast = addToast({
-        sessionId: sess.id, title, type: 'attention', sticky: true,
-        detail: 'Stopped until you enter the password',
-        action: { label: 'Enter', onClick: () => enterSecretSession(sess.id) },
-      });
-      alertAway(title, 'Needs a password', state.soundEnabled);
-    }
-  }
-}
+const dismissed = new Set(); // request ids closed with X
+const alerted = new Set(); // request ids that already made a sound or a system notification
+const raised = new Map(); // session id -> { key, toast } of the toast on screen
 
 // cardShown is the presence rule the server already trusts for "this client is
 // looking at that conversation" (rendered, history landed, page visible), less
 // the phone drawer, which presence does not know covers the conversation.
 function cardShown(state, id) {
   return isPresent(state, id) && !(state.isMobile && state.drawerOpen);
+}
+
+export function reconcileSecretSignal(state = store.get()) {
+  const pending = new Set();
+  for (const sess of Object.values(state.sessions)) {
+    const ids = (sess.secretIds || []).filter((id) => !dismissed.has(id));
+    for (const id of sess.secretIds || []) pending.add(id);
+    const key = ids.join(',');
+    const on = raised.get(sess.id);
+    if (!ids.length || cardShown(state, sess.id)) {
+      if (on) { removeToast(on.toast); raised.delete(sess.id); }
+      continue;
+    }
+    if (on?.key === key) continue;
+    if (on) removeToast(on.toast);
+    const title = sess.title || 'Untitled';
+    raised.set(sess.id, {
+      key,
+      toast: addToast({
+        sessionId: sess.id, title, type: 'attention', sticky: true,
+        detail: 'Stopped until you enter the password',
+        action: { label: 'Enter', onClick: () => enterSecretSession(sess.id) },
+        onDismiss: () => { for (const id of ids) dismissed.add(id); },
+      }),
+    });
+    if (ids.some((id) => !alerted.has(id))) {
+      for (const id of ids) alerted.add(id);
+      alertAway(title, 'Needs a password', state.soundEnabled);
+    }
+  }
+  // A session that is gone, or whose requests are, owes nothing.
+  for (const [sid, on] of raised) {
+    if (!state.sessions[sid]?.secretIds?.length) { removeToast(on.toast); raised.delete(sid); }
+  }
+  for (const set of [dismissed, alerted]) for (const id of set) if (!pending.has(id)) set.delete(id);
 }
 
 // Enter shows the card: on a phone the drawer that listed the session would
@@ -67,17 +72,8 @@ function enterSecretSession(id) {
 }
 
 export function watchSecretSignal() {
-  let lastSessions = null;
-  let lastView = null;
-  const run = (state) => {
-    const view = [state.activeSession, state.tileTree, state.isMobile, state.view, state.inboxOpen, state.drawerOpen, state.sessionsLoaded, state.focusedTile];
-    if (state.sessions === lastSessions && view.every((v, i) => Object.is(v, lastView[i]))) return;
-    lastSessions = state.sessions;
-    lastView = view;
-    reconcileSecretSignal(state);
-  };
-  run(store.get());
-  const off = store.subscribe(run);
+  reconcileSecretSignal();
+  const off = store.subscribe(reconcileSecretSignal);
   // A page going to or coming from the background changes what is shown
   // without touching the store.
   const doc = globalThis.document;
@@ -86,7 +82,9 @@ export function watchSecretSignal() {
   return () => {
     off();
     doc?.removeEventListener?.('visibilitychange', onVisibility);
-    for (const entry of announced.values()) removeToast(entry.toast);
-    announced.clear();
+    for (const on of raised.values()) removeToast(on.toast);
+    raised.clear();
+    dismissed.clear();
+    alerted.clear();
   };
 }

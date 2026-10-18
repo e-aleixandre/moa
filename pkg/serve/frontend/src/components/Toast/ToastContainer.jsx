@@ -58,7 +58,7 @@ export function ToastContainer() {
               removeToast(t.id);
             },
           } : undefined}
-          onDismiss={() => removeToast(t.id)}
+          onDismiss={() => { t.onDismiss?.(); removeToast(t.id); }}
           onClick={t.sessionId || t.onOpen ? () => handleClick(t) : undefined}
           style={t.sessionId || t.onOpen ? "cursor:pointer" : undefined}
         />
