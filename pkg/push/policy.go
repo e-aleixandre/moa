@@ -251,6 +251,7 @@ func (p *Policy) decide(s Signal) decision {
 		setTitle("moa wants to talk")
 		n.Level = LevelUrgent
 		n.Tag = "req:" + s.SessionID
+		n.RequestID = s.RequestID
 		return decision{send: true, n: n}
 	case KindDone:
 		if s.Watched {

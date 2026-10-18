@@ -645,3 +645,78 @@ func TestCallHoursWindow(t *testing.T) {
 		}
 	}
 }
+
+// W1: the call push names the request, for the deep link ?call_request=<id>.
+func TestRequestCall_PushCarriesRequestID(t *testing.T) {
+	f := rcNewFixture(t, "grok-plan", "ask_first")
+	f.ask()
+	req := f.awaitRequest("ringing")
+	pushes := f.callPushes()
+	if len(pushes) != 1 {
+		t.Fatalf("pushes = %+v", pushes)
+	}
+	raw, _ := json.Marshal(pushes[0])
+	if !strings.Contains(string(raw), `"request_id":"`+req.ID+`"`) {
+		t.Fatalf("payload %s lacks request_id %s", raw, req.ID)
+	}
+	f.mustRequest(http.MethodPost, "/api/voice/requests/"+req.ID+"/write", nil, f.owner(), http.StatusNoContent)
+	f.writtenAnswered("RC-ANSWER")
+}
+
+// W3: any visible client suppresses the call push, not just the owner's
+// conversation. Other kinds keep asking their own session.
+func TestRequestCall_AnyVisibleClientGetsNoPush(t *testing.T) {
+	f := rcNewFixture(t, "grok-plan", "ring")
+	other, err := f.mgr.CreateSession(CreateOpts{Title: "elsewhere"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	watch(other)
+	f.ask()
+	f.awaitRequest("ringing")
+	if n := len(f.callPushes()); n != 0 {
+		t.Fatalf("pushed %d call requests while a client is visible on another conversation", n)
+	}
+}
+
+// W2: a request nobody picked up leaves «Missed call from <owner>» in place
+// of the ringing notification: the written question replaces it on the same
+// tag. It never carries the question text (lock screen).
+func TestRequestCall_MissedReplacesNotificationWithMissedCall(t *testing.T) {
+	f := rcNewFixture(t, "grok-plan", "ring")
+	f.setRing(150 * time.Millisecond)
+	f.ask()
+	ask := waitPendingAsk(f.t, f.osess)
+	var asks []push.Notification
+	pollUntil(t, 5*time.Second, "written question push", func() bool {
+		asks = asks[:0]
+		for _, n := range f.probe.delivered() {
+			if n.Kind == push.KindAsk {
+				asks = append(asks, n)
+			}
+		}
+		return len(asks) == 1
+	})
+	if asks[0].Title != "Missed call from Infra" || asks[0].Tag != "req:"+f.osess.ID {
+		t.Fatalf("replacement push = %+v", asks[0])
+	}
+	if strings.Contains(asks[0].Body, "RC-QUESTION-SENTINEL") {
+		t.Fatalf("question text on the lock screen: %q", asks[0].Body)
+	}
+	f.mustRequest(http.MethodPost, "/api/sessions/"+f.osess.ID+"/ask", map[string]any{"id": ask.ID, "answers": []string{"Yes"}}, f.owner(), http.StatusNoContent)
+	f.result()
+}
+
+// W2: Write it instead is somebody's choice, not a missed call.
+func TestRequestCall_WriteInsteadIsNotMissedCall(t *testing.T) {
+	f := rcNewFixture(t, "grok-plan", "ring")
+	f.ask()
+	req := f.awaitRequest("ringing")
+	f.mustRequest(http.MethodPost, "/api/voice/requests/"+req.ID+"/write", nil, f.owner(), http.StatusNoContent)
+	f.writtenAnswered("RC-ANSWER")
+	for _, n := range f.probe.delivered() {
+		if n.Kind == push.KindAsk && strings.Contains(n.Title, "Missed") {
+			t.Fatalf("a chosen written answer was announced as missed: %+v", n)
+		}
+	}
+}

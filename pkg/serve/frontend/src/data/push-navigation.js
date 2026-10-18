@@ -2,6 +2,7 @@ import { store } from './store.js';
 import { openSession } from './tile-actions.js';
 import { loadSessions } from './session-actions.js';
 import { openInbox } from './events.js';
+import { openCallRequestLink } from './call-requests.js';
 
 export function isPushSessionID(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -16,6 +17,7 @@ export function installOpenSessionNavigation({
   serviceWorker = typeof navigator === 'undefined' ? null : navigator.serviceWorker,
   selectSession = openSession,
   refreshSessions = loadSessions,
+  openCallRequest = openCallRequestLink,
 } = {}) {
   if (!serviceWorker) return () => {};
 
@@ -62,6 +64,23 @@ export function installOpenSessionNavigation({
       if (event.ports?.[0] && typeof event.ports[0].postMessage === 'function') {
         event.ports[0].postMessage({ type: 'open-inbox-ack', requestId: data.requestId });
       }
+      return;
+    }
+    if (data?.type === 'open-call-request' && isPushSessionID(data.callRequestId)) {
+      // The request's card shows by itself while it lives; a request that
+      // already ended opens its owner's conversation, never an error.
+      const port = event.ports?.[0];
+      Promise.resolve()
+        .then(() => openCallRequest(data.callRequestId))
+        .catch(() => false)
+        .then((opened) => {
+          if (!opened && isPushSessionID(data.sessionId)) {
+            try { selectSession(data.sessionId); } catch (_) { /* nothing more to open */ }
+          }
+          if (port && typeof port.postMessage === 'function') {
+            port.postMessage({ type: 'open-call-request-ack', requestId: data.requestId });
+          }
+        });
       return;
     }
     if (!data || data.type !== 'open-session' || !isPushSessionID(data.sessionId)) return;

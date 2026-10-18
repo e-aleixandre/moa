@@ -2,6 +2,8 @@ package push
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -393,5 +395,27 @@ func TestDefaultTitlesAreEnglish(t *testing.T) {
 		if len(got) != 1 || got[0].Title != c.want {
 			t.Errorf("kind %v: sent %+v, want title %q", c.sig.Kind, got, c.want)
 		}
+	}
+}
+
+// W1: the call_request notification names its request so a tap opens that
+// request's card. Additive: other kinds do not carry it.
+func TestCallRequestNotificationCarriesRequestID(t *testing.T) {
+	p, rec, _ := newPolicy(SummariesPassive)
+	p.Handle(Signal{Kind: KindCallRequest, SessionID: "s1", Title: "Infra", Headline: "Infra is calling", RequestID: "cr-9"})
+	got := rec.all()
+	if len(got) != 1 {
+		t.Fatalf("sent %d, want 1", len(got))
+	}
+	raw, _ := json.Marshal(got[0])
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	if m["request_id"] != "cr-9" {
+		t.Fatalf("payload = %s, want request_id cr-9", raw)
+	}
+	p.Handle(Signal{Kind: KindAsk, SessionID: "s2", RequestID: "ask-1"})
+	raw, _ = json.Marshal(rec.all()[1])
+	if strings.Contains(string(raw), "request_id") {
+		t.Fatalf("a question payload changed: %s", raw)
 	}
 }
