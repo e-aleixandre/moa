@@ -327,7 +327,4 @@ func TestQuestionWorkLifecycle(t *testing.T) {
 	if owes, _ := r.SessionOwesWork(bg, "s1"); owes {
 		t.Fatal("a finished answer still owes work")
 	}
-	if err := r.InvalidateSessionQuestions(bg, "s2", "session_deleted"); err != nil {
-		t.Fatal(err)
-	}
 }

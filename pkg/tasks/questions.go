@@ -416,20 +416,58 @@ func (r *Repo) CloseQuestion(ctx context.Context, sessionID, id string, to Quest
 	return out, changed, err
 }
 
-// InvalidateSessionQuestions closes every open question of a session that is
-// being deleted. Their notices need no care here: the dispatcher fails a
-// notice whose session is gone.
-func (r *Repo) InvalidateSessionQuestions(ctx context.Context, sessionID, reason string) error {
-	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
+// settleDeletedQuestions is the question half of SettleSessionDeleted: the
+// session is gone, so its open questions can never be answered, the answers
+// not yet admitted can never be delivered, and no continuation is owed.
+func settleDeletedQuestions(ctx context.Context, tx *sql.Tx, sessionID string, now int64) (bool, error) {
+	changed := false
+	run := func(query string, args ...any) error {
+		res, err := tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		changed = changed || n > 0
+		return nil
+	}
+	if err := run(`UPDATE questions SET state = 'invalidated', reason = ?, closed_at = ?, updated_at = ?
+		WHERE session_id = ? AND state = 'open'`, ReasonSessionDeleted, now, now, sessionID); err != nil {
+		return false, err
+	}
+	if err := run(`UPDATE task_notifications SET state = 'failed', reason = ?, updated_at = ?
+		WHERE kind = 'question_answer' AND recipient_session_id = ? AND state IN ('pending','held','sent')`,
+		ReasonSessionDeleted, now, sessionID); err != nil {
+		return false, err
+	}
+	if err := run(`UPDATE questions SET work = 'stopped', updated_at = ? WHERE session_id = ? AND work = 'due'`,
+		now, sessionID); err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
+// AbandonQuestionAnswer ends an answer whose conversation branch was left
+// before it was admitted: the event fails (reason) and the run it would have
+// caused is stopped, in one transaction. An answer already admitted is left
+// alone; it reports false.
+func (r *Repo) AbandonQuestionAnswer(ctx context.Context, eventID, reason string) (bool, error) {
+	var abandoned bool
+	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		now := r.now().UnixMilli()
-		res, err := tx.ExecContext(ctx, `UPDATE questions SET state = 'invalidated', reason = ?, closed_at = ?, updated_at = ?
-			WHERE session_id = ? AND state = 'open'`, reason, now, now, sessionID)
+		res, err := tx.ExecContext(ctx, `UPDATE task_notifications SET state = 'failed', reason = ?, updated_at = ?
+			WHERE id = ? AND kind = 'question_answer' AND state IN ('pending','held','sent')`, reason, now, eventID)
 		if err != nil {
 			return false, err
 		}
 		n, _ := res.RowsAffected()
-		return n > 0, nil
+		abandoned = n > 0
+		if _, err := tx.ExecContext(ctx, `UPDATE questions SET work = 'stopped', updated_at = ? WHERE event_id = ? AND work = 'due'`,
+			now, eventID); err != nil {
+			return false, err
+		}
+		return abandoned, nil
 	})
+	return abandoned, err
 }
 
 // FenceQuestionAnswers commits, before a Stop or a recall is confirmed, what

@@ -1405,7 +1405,11 @@ func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string) (int,
 		if _, err := tx.ExecContext(ctx, "DELETE FROM session_discards WHERE session_id = ?", sessionID); err != nil {
 			return false, err
 		}
-		return n > 0, nil
+		questions, err := settleDeletedQuestions(ctx, tx, sessionID, now)
+		if err != nil {
+			return false, err
+		}
+		return n > 0 || questions, nil
 	})
 	return n, err
 }

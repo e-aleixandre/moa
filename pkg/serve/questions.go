@@ -58,6 +58,9 @@ type questionHooks struct {
 	// afterCommit runs once the question is committed, before it is announced
 	// and acknowledged.
 	afterCommit func()
+	// afterBranchSnapshot runs once a rewound branch is on disk, before the
+	// questions it left behind are invalidated.
+	afterBranchSnapshot func()
 }
 
 func newQuestionService(m *Manager) *questionService {
@@ -83,6 +86,9 @@ func (q *questionService) lock(sessionID string) func() {
 func (q *questionService) Answer(ctx context.Context, sessionID, id string, answers []string, responder askuser.Responder) error {
 	unlock := q.lock(sessionID)
 	defer unlock()
+	if err := q.checkOrigin(ctx, sessionID, id); err != nil {
+		return err
+	}
 	res, err := q.repo.AnswerQuestion(ctx, sessionID, id, answers, responder, renderQuestionAnswer)
 	if err != nil {
 		return err
@@ -171,36 +177,169 @@ func (q *questionService) inventory(enabled bool, session func() *ManagedSession
 	}
 }
 
-// reconcileOrigins retires the open questions whose posting message is no
-// longer on the session's current branch: a rewind before the call that asked
-// takes the question with it, so a later answer with its old ID is refused
-// instead of waking a conversation that never asked.
-//
-// TODO(phase 2): only the branch endpoint calls it; the other ways of moving
-// the leaf (undo, compaction, start fresh keeps the origin) should as well.
-func (q *questionService) reconcileOrigins(ctx context.Context, sess *ManagedSession) {
-	if q == nil {
-		return
+// originOnPath reports whether the call that posted q is on the branch: the
+// assistant message, with that tool call in it. The three parts of the
+// invocation's identity have to agree, so a message that merely shares an ID
+// does not stand in for the origin.
+func originOnPath(path []session.Entry, q tasks.Question) bool {
+	if q.OriginMsgID == "" {
+		return true
 	}
-	open, err := q.repo.OpenQuestions(ctx, sess.ID)
-	if err != nil || len(open) == 0 {
-		if err != nil {
-			slog.Warn("questions: reading open questions after a rewind failed", "session", sess.ID, "error", err)
-		}
-		return
-	}
-	onBranch := map[string]bool{}
-	for _, entry := range sess.runtime.Context().Tree.Path() {
-		onBranch[entry.Message.MsgID] = true
-	}
-	for _, question := range open {
-		if question.OriginMsgID == "" || onBranch[question.OriginMsgID] {
+	for _, entry := range path {
+		if entry.Type != session.EntryMessage || entry.Message.MsgID != q.OriginMsgID {
 			continue
 		}
-		if _, err := q.close(ctx, sess.ID, question.ID, tasks.QuestionInvalidated, "rewound"); err != nil {
-			slog.Warn("questions: invalidating a rewound question failed", "session", sess.ID, "question", question.ID, "error", err)
+		for _, c := range entry.Message.Content {
+			if c.Type == "tool_call" && c.ToolCallID == q.OriginToolCallID {
+				return true
+			}
 		}
 	}
+	return false
+}
+
+func entriesHaveNotice(entries []session.Entry, id string) bool {
+	for _, entry := range entries {
+		if isAdmissionReceipt(entry.Message.Custom) && entry.Message.Custom["id"] == id {
+			return true
+		}
+	}
+	return false
+}
+
+// reconcileLocked settles the session's questions against the branch its tree
+// is on. It must run when the tree is quiescent and be called under the
+// session's lock: after a move of the leaf (once the new branch is on disk),
+// and when a session is loaded, where the tree is the saved one.
+//
+//   - an open question whose origin left the branch is invalidated: the
+//     conversation that asked is gone, and a late answer would wake one that
+//     never did;
+//   - an answer consumed on a branch that was left stays where it is (no
+//     re-injection: the dedup looks at every branch) and owes no run;
+//   - an answer not yet admitted whose origin left the branch fails.
+//
+// Terminal questions are never reopened by coming back to an older branch.
+func (q *questionService) reconcileLocked(ctx context.Context, sessionID string, tree *session.Tree) {
+	questions, err := q.repo.SessionQuestions(ctx, sessionID)
+	if err != nil {
+		slog.Warn("questions: reading a session's questions to reconcile them failed", "session", sessionID, "error", err)
+		return
+	}
+	if len(questions) == 0 {
+		return
+	}
+	path, all := tree.Path(), tree.Entries()
+	for _, question := range questions {
+		switch {
+		case question.State == tasks.QuestionOpen:
+			if originOnPath(path, question) {
+				continue
+			}
+			if _, changed, err := q.repo.CloseQuestion(ctx, sessionID, question.ID, tasks.QuestionInvalidated, tasks.ReasonRewound); err != nil {
+				slog.Warn("questions: invalidating a rewound question failed", "session", sessionID, "question", question.ID, "error", err)
+			} else if changed {
+				q.retire(sessionID, question.ID)
+			}
+		case question.State == tasks.QuestionAnswered && question.Work == tasks.WorkDue:
+			var err error
+			switch {
+			case entriesHaveNotice(path, question.EventID):
+				// Read on this branch: its run is still owed.
+			case entriesHaveNotice(all, question.EventID):
+				_, err = q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkStopped)
+			case !originOnPath(path, question):
+				_, err = q.repo.AbandonQuestionAnswer(ctx, question.EventID, tasks.ReasonRewound)
+			}
+			if err != nil {
+				slog.Warn("questions: settling a rewound answer failed", "session", sessionID, "question", question.ID, "error", err)
+			}
+		}
+	}
+}
+
+// branch moves the session's leaf and settles its questions in the order the
+// durable record needs: under the session's lock (no post, answer or
+// admission interleaves), the new branch is on disk before anything is
+// invalidated, so a crash in between reloads a session that settles itself
+// from the snapshot. If the snapshot cannot be written nothing is
+// invalidated: disk and database keep agreeing, and an answer's own check
+// still refuses a question whose origin the live tree has left.
+func (q *questionService) branch(sess *ManagedSession, cmd bus.BranchTo) error {
+	if q == nil {
+		return sess.runtime.Bus.Execute(cmd)
+	}
+	unlock := q.lock(sess.ID)
+	defer unlock()
+	if err := sess.runtime.Bus.Execute(cmd); err != nil {
+		return err
+	}
+	q.settleLeafLocked(sess)
+	return nil
+}
+
+// settleLeafLocked is the second half of every move of the leaf: save the new
+// branch, then settle the questions against it.
+func (q *questionService) settleLeafLocked(sess *ManagedSession) {
+	if err := sess.runtime.CheckpointAcknowledged(q.m.baseCtx); err != nil {
+		slog.Warn("questions: saving the rewound branch failed; its questions are settled later", "session", sess.ID, "error", err)
+		return
+	}
+	if q.hooks.afterBranchSnapshot != nil {
+		q.hooks.afterBranchSnapshot()
+	}
+	q.reconcileLocked(q.m.baseCtx, sess.ID, sess.runtime.Context().Tree)
+}
+
+// cleared settles the questions of a session whose conversation was emptied
+// (/clear run from the queue): nothing is left for an origin to be on.
+func (q *questionService) cleared(sess *ManagedSession) {
+	unlock := q.lock(sess.ID)
+	defer unlock()
+	q.settleLeafLocked(sess)
+}
+
+// checkOrigin refuses to answer a question whose origin is not on the branch
+// the session is on (the live tree, or the saved snapshot of a session that is
+// not loaded), closing it as invalidated. It is what keeps a stale card from
+// waking a conversation after any rewind, whichever path moved the leaf.
+func (q *questionService) checkOrigin(ctx context.Context, sessionID, id string) error {
+	question, err := q.repo.GetQuestion(ctx, id)
+	if err != nil || question.SessionID != sessionID || question.State != tasks.QuestionOpen {
+		return nil // AnswerQuestion reports it
+	}
+	tree, err := q.currentTree(sessionID)
+	if err != nil {
+		return err
+	}
+	if tree == nil || originOnPath(tree.Path(), question) {
+		return nil
+	}
+	if _, changed, err := q.repo.CloseQuestion(ctx, sessionID, id, tasks.QuestionInvalidated, tasks.ReasonRewound); err != nil {
+		return err
+	} else if changed {
+		q.retire(sessionID, id)
+	}
+	return &tasks.ErrQuestionConflict{State: tasks.QuestionInvalidated}
+}
+
+// currentTree is the session's branch as it stands: the live tree, or the
+// saved snapshot read without loading the session. nil when there is none to
+// judge by.
+func (q *questionService) currentTree(sessionID string) (*session.Tree, error) {
+	if sess, ok := q.m.Get(sessionID); ok {
+		return sess.runtime.Context().Tree, nil
+	}
+	saved, _, err := session.FindSessionReadOnly(q.m.sessionBaseDir, sessionID)
+	switch {
+	case errors.Is(err, session.ErrNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("reading the saved session: %w", err)
+	case len(saved.Entries) == 0:
+		return nil, nil
+	}
+	return session.NewTreeFromEntries(saved.Entries, saved.LeafID)
 }
 
 // retire removes the projection of a question that is no longer open and tells
@@ -258,6 +397,11 @@ func (q *questionService) attach(sess *ManagedSession) {
 	})
 	q.seed(sess)
 	sess.runtime.Bus.Subscribe(func(e bus.RunEnded) { q.runEnded(sess, e) })
+	sess.runtime.Bus.Subscribe(func(e bus.CommandExecuted) {
+		if e.Command == "clear" {
+			q.cleared(sess)
+		}
+	})
 }
 
 // runEnded settles the continuation an admitted answer owed: the run that
@@ -275,8 +419,14 @@ func (q *questionService) runEnded(sess *ManagedSession, e bus.RunEnded) {
 		slog.Warn("questions: reading owed work failed", "session", sess.ID, "error", err)
 		return
 	}
+	// History is the projection the model reads, which a compaction may have
+	// cut the answer out of; the tree keeps every entry.
+	onPath := func(id string) bool {
+		tree := sess.runtime.Context().Tree
+		return tree != nil && entriesHaveNotice(tree.Path(), id)
+	}
 	for _, question := range due {
-		if question.SessionID != sess.ID || !hasNotice(sess.History(), question.EventID) {
+		if question.SessionID != sess.ID || !(hasNotice(sess.History(), question.EventID) || onPath(question.EventID)) {
 			continue
 		}
 		if _, err := q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkDone); err != nil {
@@ -290,8 +440,12 @@ func (q *questionService) runEnded(sess *ManagedSession, e bus.RunEnded) {
 // ended) gets that run now, over the conversation as saved, with no new
 // message. Stop's fence decides under the same lock, so a stopped answer
 // owes nothing, and the work stays due until its own run ends.
-func (q *questionService) continueDue(sess *ManagedSession, saved *session.Session) {
+func (q *questionService) continueDue(sess *ManagedSession) {
 	if q == nil {
+		return
+	}
+	tree := sess.runtime.Context().Tree
+	if tree == nil {
 		return
 	}
 	ctx := q.m.baseCtx
@@ -302,9 +456,10 @@ func (q *questionService) continueDue(sess *ManagedSession, saved *session.Sessi
 		slog.Warn("questions: reading owed work failed", "session", sess.ID, "error", err)
 		return
 	}
+	path := tree.Path()
 	var owed []tasks.Question
 	for _, question := range due {
-		if question.SessionID != sess.ID || !transcriptHasNotice(saved, question.EventID) {
+		if question.SessionID != sess.ID || !entriesHaveNotice(path, question.EventID) {
 			continue
 		}
 		n, err := q.repo.Notice(ctx, question.EventID)
@@ -335,7 +490,14 @@ func (q *questionService) continueDue(sess *ManagedSession, saved *session.Sessi
 
 // seed loads the open questions of a session being built or resumed into its
 // projection, so a restart keeps them visible without announcing them again.
+// The tree it is built from is the saved snapshot, so what a rewind left
+// undone (a crash between the snapshot and the invalidation) is settled first.
 func (q *questionService) seed(sess *ManagedSession) {
+	unlock := q.lock(sess.ID)
+	defer unlock()
+	if tree := sess.runtime.Context().Tree; tree != nil {
+		q.reconcileLocked(q.m.baseCtx, sess.ID, tree)
+	}
 	open, err := q.repo.OpenQuestions(q.m.baseCtx, sess.ID)
 	if err != nil {
 		slog.Warn("questions: loading a session's open questions failed", "session", sess.ID, "error", err)

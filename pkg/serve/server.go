@@ -1732,11 +1732,10 @@ func handleBranch(mgr *Manager) http.HandlerFunc {
 			rewound = newRewoundMessage(msg.Message)
 			rewound.SessionMentions = trustedSessionMentions(&msg)
 		}
-		if err := sess.runtime.Bus.Execute(bus.BranchTo{EntryID: body.EntryID, Before: body.Before}); err != nil {
+		if err := mgr.questions.branch(sess, bus.BranchTo{EntryID: body.EntryID, Before: body.Before}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		mgr.questions.reconcileOrigins(r.Context(), sess)
 
 		// The bounded branch snapshot is delivered by CommandExecuted over the
 		// session WebSocket. Do not duplicate an unbounded history in this REST

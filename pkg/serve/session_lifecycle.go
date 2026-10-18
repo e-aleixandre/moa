@@ -1447,7 +1447,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 	// Every way of opening a saved session ends here, so this is where held
 	// task notices learn that their session is back.
 	m.notices.sessionOpened(id)
-	m.questions.continueDue(sess, saved)
+	m.questions.continueDue(sess)
 	return sess, nil
 }
 
