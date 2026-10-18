@@ -41,6 +41,9 @@ final class VoipRegistration {
 
         // The relay and the paired server over HTTPS, no redirects, no cookies.
         NativeHttp.Response send(String method, String url, Map<String, String> headers, String body) throws IOException;
+
+        // Runs `task` once after the delay, off the main thread.
+        default void retryLater(long delayMillis, Runnable task) {}
     }
 
     // The last registered token, origin and env (not secret).

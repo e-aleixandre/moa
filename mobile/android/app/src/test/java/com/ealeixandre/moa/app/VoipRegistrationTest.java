@@ -109,6 +109,15 @@ public class VoipRegistrationTest {
         boolean deliverChallenge = true;
         Runnable beforeChallenge;
         Runnable duringServerPost;
+        // What the registration asked to be run again, and when.
+        final List<Long> retryDelays = new ArrayList<>();
+        final List<Runnable> retryTasks = new ArrayList<>();
+
+        @Override
+        public void retryLater(long delayMillis, Runnable task) {
+            retryDelays.add(delayMillis);
+            retryTasks.add(task);
+        }
 
         @Override
         public boolean foreground() {
@@ -465,6 +474,95 @@ public class VoipRegistrationTest {
         assertNull(memory.get("token"));
         // The secret stays: the next attempt reuses it.
         assertNotNull(secrets.load());
+    }
+
+    // ---- a registration that failed is redone without reopening the app (B1)
+
+    // QA B1: the first pairing's token was refused twice by the relay (FCM
+    // answered 404/400, relay 410) and the destination stayed unregistered
+    // until the app was killed and reopened.
+    @Test
+    public void aTokenFcmRefusedIsRegisteredAgainByItselfWhenItIsAccepted() {
+        host.registerCode = 410;
+        // The foreground refresh and the one onNewToken queued behind it.
+        registration.refresh(false);
+        registration.refresh(true);
+        assertEquals(2, count("POST relay/v1/register"));
+        assertNull(host.find("POST", ORIGIN + "/api/push/voip"));
+        // Two failed runs ask for one retry, not two.
+        assertEquals(1, host.retryTasks.size());
+        assertEquals(15_000L, (long) host.retryDelays.get(0));
+
+        host.registerCode = 202;
+        host.retryTasks.remove(0).run();
+        assertNotNull(host.find("POST", ORIGIN + "/api/push/voip"));
+        assertEquals(TOKEN, memory.get("token"));
+        assertTrue(host.retryTasks.isEmpty());
+    }
+
+    @Test
+    public void aFailedRegistrationDoesNotBlockTheNextForegroundForAnHour() {
+        host.registerCode = 410;
+        registration.refresh(false);
+        assertNull(host.find("POST", ORIGIN + "/api/push/voip"));
+        host.registerCode = 202;
+        host.now += 60_000;
+        registration.refresh(false);
+        assertNotNull(host.find("POST", ORIGIN + "/api/push/voip"));
+    }
+
+    @Test
+    public void anOfflinePhoneOrAServerThatRefusesAlsoTriesAgain() {
+        host.postCode = 503;
+        registration.refresh(false);
+        assertEquals(1, host.retryTasks.size());
+        host.postCode = 204;
+        host.retryTasks.remove(0).run();
+        assertEquals(TOKEN, memory.get("token"));
+    }
+
+    @Test
+    public void retriesBackOffAndStopAfterThree() {
+        host.registerCode = 410;
+        registration.refresh(false);
+        for (int i = 0; i < 5 && !host.retryTasks.isEmpty(); i++) host.retryTasks.remove(0).run();
+        assertEquals(Arrays.asList(15_000L, 60_000L, 300_000L), host.retryDelays);
+        assertTrue(host.retryTasks.isEmpty());
+    }
+
+    @Test
+    public void aSuccessLeavesNothingToRetry() {
+        registration.refresh(false);
+        assertTrue(host.retryTasks.isEmpty());
+        registration.refresh(true);
+        assertTrue(host.retryTasks.isEmpty());
+    }
+
+    @Test
+    public void nothingToRetryWhenTheServerCannotUseCalls() {
+        host.statusCode = 404;
+        registration.refresh(false);
+        assertTrue(host.retryTasks.isEmpty());
+    }
+
+    // A token FCM rotated while the app was in the background cannot be
+    // registered then (a challenge must not ring a locked phone); it is due at
+    // the next foreground, not an hour later.
+    @Test
+    public void aTokenRotatedInTheBackgroundIsRegisteredAtTheNextForeground() {
+        registration.refresh(false);
+        host.sent.clear();
+        host.statusBody = "{\"registered\":true,\"relay_url\":\"" + RELAY + "\",\"expires_at\":" + (NOW / 1000 + 60L * 86400) + "}";
+        host.token = "e".repeat(152);
+        host.confirmToken = host.token;
+        host.foreground = false;
+        registration.refresh(true);
+        assertTrue(host.sent.isEmpty());
+        host.foreground = true;
+        host.now += 600_000;
+        registration.refresh(false);
+        assertEquals(1, count("POST /api/push/voip"));
+        assertEquals(host.token, memory.get("token"));
     }
 
     // ---- forgetting
