@@ -76,6 +76,7 @@ final class VoipRegistration {
     // After a failed registration (the relay refused the token, offline, the
     // server refused): when to try again without waiting for the app to be
     // reopened. Three tries, then the next foreground is the next chance.
+    private static final int ANY_GENERATION = -1;
     private static final long[] RETRY_DELAYS_MILLIS = {15_000, 60_000, 300_000};
 
     private final Host host;
@@ -102,6 +103,13 @@ final class VoipRegistration {
 
     // On every foreground, and when FCM issues a new token (force).
     void refresh(boolean force) {
+        refresh(force, ANY_GENERATION);
+    }
+
+    // `expected` is the pairing generation a retry was scheduled by: checked
+    // where the registration is admitted, so a forget after the snapshot of the
+    // pairing below cannot register the old one under the new generation.
+    private void refresh(boolean force, int expected) {
         DeviceCredentialStore.Stored paired = host.paired();
         if (!host.foreground()) {
             // A token FCM rotated while the app was away is due at the next
@@ -119,6 +127,7 @@ final class VoipRegistration {
         int current;
         synchronized (this) {
             long now = host.now();
+            if (expected != ANY_GENERATION && generation != expected) return;
             if (registering) return;
             if (!force && lastRefresh != 0 && now - lastRefresh < REFRESH_INTERVAL_MILLIS) return;
             lastRefresh = now;
@@ -162,7 +171,7 @@ final class VoipRegistration {
             if (generation != scheduledBy) return;
             retryScheduled = false;
         }
-        refresh(true);
+        refresh(true, scheduledBy);
     }
 
     // False when the registration was attempted and did not happen; true when
