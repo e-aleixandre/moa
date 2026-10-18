@@ -29,14 +29,14 @@ function cardShown(state, id) {
   return isPresent(state, id) && !(state.isMobile && state.drawerOpen);
 }
 
-let baselined = false;
-
 export function reconcileSecretSignal(state = store.get()) {
   const pending = new Set();
   // Requests already open when the list first loads (a reload, a reconnect)
   // are not news: they show, but make no sound and no vibration.
-  if (!baselined && state.sessionsLoaded !== false) {
-    baselined = true;
+  // The base is a matter of data, not of time or taps: whatever the first
+  // roster brings, until the list is marked loaded, is the base.
+  const loading = state.sessionsLoaded === false;
+  if (loading) {
     for (const sess of Object.values(state.sessions)) for (const id of sess.secretIds || []) alerted.add(id);
   }
   for (const sess of Object.values(state.sessions)) {
@@ -98,6 +98,5 @@ export function watchSecretSignal() {
     raised.clear();
     dismissed.clear();
     alerted.clear();
-    baselined = false;
   };
 }

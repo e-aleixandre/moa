@@ -5,7 +5,7 @@
 // the user is already in that session.
 import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { store, setState, updateSession } from './store.js';
-import { getToasts, removeToast } from './notifications.js';
+import { getToasts, removeToast, addToast } from './notifications.js';
 import { watchSecretSignal } from './secret-signal.js';
 import { handleWsSecretRequest, handleWsSecretResolved } from './ws-handlers.js';
 import { readFileSync } from 'node:fs';
@@ -264,17 +264,32 @@ test('tapping the toast body does what Enter does: closes the drawer, opens the 
   expect(store.get().activeSession).toBe('c1');
 });
 
-test('a request already open at load makes no vibration; a new one does', () => {
+test('a request already in the first roster makes no vibration, even after a tap and before the list is marked loaded; a later one does', () => {
   stopWatching();
   let buzzes = 0;
-  globalThis.navigator = { vibrate: () => { buzzes += 1; } };
+  globalThis.navigator = { vibrate: () => { buzzes += 1; }, userActivation: { hasBeenActive: true } };
   globalThis.window = {};
   try {
-    setState({ sessions: { c1: child({ secretIds: ['sec_old'] }) }, sessionsLoaded: true });
+    setState({ sessions: {}, sessionsLoaded: false });
     stopWatching = watchSecretSignal();
+    // The roster lands (sessions with their open requests), and only after it the list is marked loaded.
+    setState({ sessions: { c1: child({ secretIds: ['sec_old'] }) } });
+    setState({ sessionsLoaded: true });
     expect(secretToasts()).toHaveLength(1);
     expect(buzzes).toBe(0);
     updateSession('c1', { secretIds: ['sec_old', 'sec_new'] });
     expect(buzzes).toBe(1);
   } finally { delete globalThis.window; }
+});
+
+test('a toast raised without an id never replaces another toast', () => {
+  const a = addToast({ title: 'a', sticky: true });
+  const b = addToast({ title: 'b', sticky: true });
+  expect(a).not.toBe(b);
+  expect(getToasts().filter((x) => x.sticky && (x.id === a || x.id === b))).toHaveLength(2);
+  const real = Math.random; Math.random = () => 0.5;
+  try {
+    const ids = [addToast({ title: 'c', sticky: true }), addToast({ title: 'd', sticky: true })];
+    expect(getToasts().filter((x) => ids.includes(x.id))).toHaveLength(2);
+  } finally { Math.random = real; }
 });

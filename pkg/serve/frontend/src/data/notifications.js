@@ -17,10 +17,12 @@ function notifyToastListeners() {
 // toast (wake-on-event coalesces a burst of arrivals into a single count) can
 // remove the previous one instead of stacking a second.
 export function addToast(toast) {
-  // A caller that owns a toast by identity passes a stable id: the same toast
-  // raised again replaces itself instead of standing twice.
-  const id = toast.id ?? Date.now() + Math.random();
-  toasts = [...toasts.filter((t) => t.id !== id), { ...toast, id }];
+  // A caller that owns a toast by identity passes its own id and the same toast
+  // raised again replaces itself. Anyone else gets a generated one that never
+  // replaces anything, as before.
+  const own = toast.id !== undefined;
+  const id = own ? toast.id : Date.now() + Math.random();
+  toasts = [...(own ? toasts.filter((t) => t.id !== id) : toasts), { ...toast, id }];
   notifyToastListeners();
   if (!toast.sticky) setTimeout(() => removeToast(id), toast.duration ?? 5000);
   return id;
