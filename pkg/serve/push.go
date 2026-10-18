@@ -80,8 +80,8 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 		s := signal(kind)
 		s.RequestID = id
 		if kind == push.KindAsk {
-			if from := sess.missedCallFrom.Swap(nil); from != nil {
-				s.Headline = "Missed call from " + *from
+			if mc := sess.missedCallFrom.Load(); mc != nil && (mc.askID == "" || mc.askID == id) && sess.missedCallFrom.CompareAndSwap(mc, nil) {
+				s.Headline = "Missed call from " + mc.from
 			}
 		}
 		s.StillPending = func() bool {

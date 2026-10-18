@@ -78,8 +78,10 @@ type ManagedSession struct {
 	// missedCallFrom is the owner whose call request went unanswered, set
 	// while its written question is open: that question's push then reads
 	// «Missed call from <owner>» in place of the ringing notification it
-	// replaces (same tag). Empty otherwise.
-	missedCallFrom atomic.Pointer[string]
+	// replaces (same tag). Empty otherwise. An asynchronous written question
+	// returns before its push is sent, so it names its question (askID) and
+	// only that push takes it; a blocking one leaves askID empty.
+	missedCallFrom atomic.Pointer[missedCall]
 	// ownerDetachMu linearizes detach with report admission: a report that has
 	// not entered the coordinator before detach returns cannot enter afterward.
 	ownerDetachMu sync.Mutex
@@ -1716,4 +1718,11 @@ type CommandResult struct {
 	// follow. Either way the result arrives as WS events, never here.
 	Queued bool   `json:"queued,omitempty"`
 	ID     string `json:"id,omitempty"`
+}
+
+// missedCall is what the written question of an unanswered call request
+// carries into its push (see ManagedSession.missedCallFrom).
+type missedCall struct {
+	askID string
+	from  string
 }

@@ -107,8 +107,14 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge, a
 				}
 				why = w
 			}
+			missed := req != nil && why == whyMissed
 			if sess, ok := m.Get(sessionID); ok && sess.askAsync && m.questions != nil {
 				ackFor := func(qid string) tasks.QuestionAck {
+					// Called before the question is announced, so its push
+					// finds the missed call bound to this very question.
+					if missed {
+						sess.missedCallFrom.Store(&missedCall{askID: qid, from: req.OwnerName})
+					}
 					ack := openAck(qid)
 					ack.Text = "No call: " + whyText[why] + ". Your written_fallback was asked in writing instead; " + ack.Text
 					ack.Custom["call_request"] = map[string]any{"id": id, "outcome": crWritten, "why": why, "reason": reason, "question_id": qid}
@@ -119,10 +125,9 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge, a
 			if bridge == nil {
 				return core.ErrorResult("No call (" + whyText[why] + ") and this session cannot ask in writing."), nil
 			}
-			if req != nil && why == whyMissed {
+			if missed {
 				if sess, ok := m.Get(sessionID); ok {
-					from := req.OwnerName
-					sess.missedCallFrom.Store(&from)
+					sess.missedCallFrom.Store(&missedCall{from: req.OwnerName})
 					defer sess.missedCallFrom.Store(nil)
 				}
 			}
