@@ -7,6 +7,7 @@
 import { api } from './api.js';
 import { store, setState } from './store.js';
 import { openOwnerConversation, ownersSlice } from './owners.js';
+import { closeEndedCallNotificationsNow } from './call-notifications.js';
 import { startVoiceCall, hangupVoiceCall } from './voice-call-session.js';
 
 const EMPTY = Object.freeze({ list: [], loaded: false });
@@ -17,6 +18,7 @@ export function callRequestsSlice(state) {
 
 export function setCallRequests(list) {
   setState({ callRequests: { list: Array.isArray(list) ? list : [], loaded: true } });
+  closeEndedCallNotificationsNow(list);
 }
 
 // feedSeq counts the snapshots the socket has delivered. A GET that started

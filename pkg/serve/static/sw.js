@@ -191,7 +191,10 @@ function requestOpenShare(client, shareId) {
   });
 }
 
-// Payload shape mirrors pkg/push.Notification: { title, body, session_id, tag }.
+const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+// Payload shape mirrors pkg/push.Notification: { title, body, session_id, tag,
+// kind, request_id }.
 self.addEventListener('push', (event) => {
   let data = {};
   try {
@@ -209,8 +212,16 @@ self.addEventListener('push', (event) => {
     body: data.body || '',
     icon: '/icon-192.png',
     silent: passive,
-    data: { session_id: data.session_id || '', inbox: !!data.inbox },
+    data: {
+      session_id: data.session_id || '',
+      inbox: !!data.inbox,
+      kind: data.kind || '',
+      request_id: SAFE_ID.test(data.request_id || '') ? data.request_id : '',
+    },
   };
+  // A call request is a ring: it must not dismiss itself. There is no timbre
+  // in the background (browsers do not allow one); the tap opens its card.
+  if (data.kind === 'call_request') options.requireInteraction = true;
   if (data.tag) {
     options.tag = data.tag; // replaces the previous notification of the same group
     options.renotify = !passive; // renotify without a tag throws
@@ -223,7 +234,14 @@ self.addEventListener('notificationclick', (event) => {
   const rawSessionId = event.notification.data && event.notification.data.session_id;
   const sessionId = typeof rawSessionId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(rawSessionId) ? rawSessionId : '';
   const inbox = !sessionId && !!(event.notification.data && event.notification.data.inbox);
-  const url = sessionId ? `/?session=${encodeURIComponent(sessionId)}` : inbox ? '/?inbox=1' : '/';
+  const rawRequestId = event.notification.data && event.notification.data.request_id;
+  const callRequestId = event.notification.data && event.notification.data.kind === 'call_request'
+    && typeof rawRequestId === 'string' && SAFE_ID.test(rawRequestId) ? rawRequestId : '';
+  // A call notification opens that request's card; if it already ended the app
+  // falls back to the owner's conversation (?session=), never to an error.
+  const url = callRequestId
+    ? `/?call_request=${encodeURIComponent(callRequestId)}${sessionId ? `&session=${encodeURIComponent(sessionId)}` : ''}`
+    : sessionId ? `/?session=${encodeURIComponent(sessionId)}` : inbox ? '/?inbox=1' : '/';
 
   event.waitUntil((async () => {
     const clients = await self.clients.matchAll({ type: 'window' });
@@ -236,7 +254,9 @@ self.addEventListener('notificationclick', (event) => {
       if (!sameOrigin) continue;
       try {
         await client.focus();
-        if (sessionId) {
+        if (callRequestId) {
+          if (await requestOpenCallRequest(client, callRequestId, sessionId)) return;
+        } else if (sessionId) {
           if (await requestOpenSession(client, sessionId)) return;
         } else if (inbox) {
           if (await requestOpenInbox(client)) return;
@@ -277,6 +297,26 @@ function requestOpenInbox(client) {
       finish(!!data && data.type === 'open-inbox-ack' && data.requestId === requestId);
     };
     client.postMessage({ type: 'open-inbox', requestId }, [channel.port2]);
+  });
+}
+
+function requestOpenCallRequest(client, callRequestId, sessionId) {
+  if (typeof MessageChannel === 'undefined') return Promise.resolve(false);
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const channel = new MessageChannel();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => finish(false), 1200);
+    const finish = (acknowledged) => {
+      clearTimeout(timeout);
+      channel.port1.onmessage = null;
+      channel.port1.close();
+      resolve(acknowledged);
+    };
+    channel.port1.onmessage = (event) => {
+      const data = event.data;
+      finish(!!data && data.type === 'open-call-request-ack' && data.requestId === requestId);
+    };
+    client.postMessage({ type: 'open-call-request', callRequestId, sessionId, requestId }, [channel.port2]);
   });
 }
 
