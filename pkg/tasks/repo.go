@@ -422,8 +422,12 @@ CREATE INDEX task_notifications_open ON task_notifications(state, created_at);`,
 	// Rollback limit: a binary from before this migration opens the database
 	// and ignores the questions table, but it would deliver an open
 	// question_answer notice again as a Tasks notice (it does not know the
-	// receipt in the transcript). Going back is therefore safe only if the
-	// pilot never ran or no such notice is pending, held or sent.
+	// receipt in the transcript), and it cannot present an open question or
+	// run a continuation that is due. Going back is therefore safe only once
+	// the pilot never ran, or with activity quiescent (no runs, no
+	// publications) and all three counts at zero: questions in state 'open',
+	// questions with work 'due', and question_answer notices in state
+	// pending, held or sent. The notice count alone does not prove it.
 	`CREATE TABLE questions (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
