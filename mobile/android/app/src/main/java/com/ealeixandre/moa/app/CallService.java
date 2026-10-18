@@ -30,6 +30,7 @@ public class CallService extends Service {
     private static final String ACTION_START = "com.ealeixandre.moa.app.CALL_START";
     private static final String ACTION_HANGUP = "com.ealeixandre.moa.app.CALL_HANGUP";
     private static final String EXTRA_NAME = "name";
+    private static final String EXTRA_TOKEN = "token";
     private static final long UP_WAIT_MILLIS = 2000;
 
     private static volatile CallService instance;
@@ -41,11 +42,11 @@ public class CallService extends Service {
 
     // False when the system refused to start it (the app was not allowed to):
     // the call then runs only while the app is on screen.
-    static boolean start(Context context, String name) {
+    static boolean start(Context context, String name, int token) {
         stopRequested = false;
         try {
             ContextCompat.startForegroundService(context, new Intent(context, CallService.class)
-                .setAction(ACTION_START).putExtra(EXTRA_NAME, name));
+                .setAction(ACTION_START).putExtra(EXTRA_NAME, name).putExtra(EXTRA_TOKEN, token));
             return true;
         } catch (RuntimeException e) {
             return false;
@@ -76,7 +77,7 @@ public class CallService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
         if (ACTION_HANGUP.equals(action)) {
-            NativeCalls.requestHangUp();
+            NativeCalls.requestHangUp(intent.getIntExtra(EXTRA_TOKEN, -1));
             return START_NOT_STICKY;
         }
         if (!ACTION_START.equals(action)) {
@@ -85,7 +86,7 @@ public class CallService extends Service {
         }
         try {
             ensureChannel(this);
-            Notification built = build(intent.getStringExtra(EXTRA_NAME));
+            Notification built = build(intent.getStringExtra(EXTRA_NAME), intent.getIntExtra(EXTRA_TOKEN, -1));
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, built, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL);
             } else {
@@ -110,9 +111,9 @@ public class CallService extends Service {
         }
     }
 
-    private Notification build(String name) {
+    private Notification build(String name, int token) {
         Person caller = new Person.Builder().setName(name == null || name.isEmpty() ? getString(R.string.app_name) : name).build();
-        Intent hangUp = new Intent(this, CallService.class).setAction(ACTION_HANGUP);
+        Intent hangUp = new Intent(this, CallService.class).setAction(ACTION_HANGUP).putExtra(EXTRA_TOKEN, token);
         PendingIntent hangUpIntent = PendingIntent.getService(this, 0, hangUp, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent openIntent = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);

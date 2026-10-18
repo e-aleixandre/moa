@@ -48,6 +48,9 @@ final class CallSystem implements NativeCallManager.SystemCall {
     }
 
     static final String EXTRA_INVITE = "moa_invite";
+    // Names the call a Telecom request was placed for, so an answer that
+    // arrives after that call is over cannot be taken for the next one's.
+    static final String EXTRA_CALL = "moa_call";
     private static final String ACCOUNT_ID = "moa-call";
     private static final long TELECOM_WAIT_MILLIS = 4000;
 
@@ -64,6 +67,11 @@ final class CallSystem implements NativeCallManager.SystemCall {
     private int lastRoute;
     private boolean lastMuted;
     private boolean serviceUp;
+    // The current call's identity: moves on with every call, and travels in
+    // the Telecom request and the service's notification actions. -1: none yet.
+    private volatile int callToken = -1;
+    // The socket opened before Telecom answered.
+    private boolean socketOpen;
     private RingingListener ringingListener;
     private CallConnection ringingConnection;
     private String ringingInvite;
@@ -81,7 +89,9 @@ final class CallSystem implements NativeCallManager.SystemCall {
         this.name = name;
         this.lastRoute = 0;
         this.lastMuted = false;
-        serviceUp = CallService.start(context, name);
+        this.socketOpen = false;
+        int token = ++callToken;
+        serviceUp = CallService.start(context, name, token);
         TelecomManager telecom = context.getSystemService(TelecomManager.class);
         if (telecom == null) {
             useFallback();
@@ -94,6 +104,9 @@ final class CallSystem implements NativeCallManager.SystemCall {
             telecomTimeout = host.schedule(() -> telecomFailedOnCallThread("timeout"), TELECOM_WAIT_MILLIS);
             Bundle extras = new Bundle();
             extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle);
+            Bundle outgoing = new Bundle();
+            outgoing.putInt(EXTRA_CALL, token);
+            extras.putBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS, outgoing);
             telecom.placeCall(Uri.fromParts(PhoneAccount.SCHEME_SIP, "moa", null), extras);
         } catch (RuntimeException e) {
             telecomFailedOnCallThread("refused");
@@ -141,7 +154,8 @@ final class CallSystem implements NativeCallManager.SystemCall {
         this.name = name;
         this.lastRoute = 0;
         this.lastMuted = false;
-        serviceUp = CallService.start(context, name);
+        this.socketOpen = false;
+        serviceUp = CallService.start(context, name, ++callToken);
         CallConnection ringingNow = ringingConnection;
         ringingConnection = null;
         ringingInvite = null;
@@ -160,6 +174,7 @@ final class CallSystem implements NativeCallManager.SystemCall {
 
     @Override
     public void connected() {
+        socketOpen = true;
         if (connection != null) connection.setActive();
     }
 
@@ -187,8 +202,8 @@ final class CallSystem implements NativeCallManager.SystemCall {
 
     void connectionCreated(CallConnection created) {
         poster.post(() -> {
-            if (mode != Mode.PENDING) {
-                // Late, or the call is already over.
+            if (mode != Mode.PENDING || created.token() != callToken) {
+                // Late, for a call that is already over, or the call is over.
                 created.end(false);
                 return;
             }
@@ -197,14 +212,20 @@ final class CallSystem implements NativeCallManager.SystemCall {
             connection = created;
             mode = Mode.TELECOM;
             created.describe(name);
-            created.setDialing();
+            if (socketOpen) {
+                created.setActive();
+            } else {
+                created.setDialing();
+            }
             requestFocus();
             if (listener != null) listener.ready();
         });
     }
 
-    void telecomFailed(String code) {
-        poster.post(() -> telecomFailedOnCallThread(code));
+    void telecomFailed(String code, int token) {
+        poster.post(() -> {
+            if (token == callToken) telecomFailedOnCallThread(code);
+        });
     }
 
     void incomingConnectionCreated(CallConnection created, String invite) {
@@ -241,11 +262,16 @@ final class CallSystem implements NativeCallManager.SystemCall {
         });
     }
 
-    // The ongoing-call notification's Hang up.
-    void requestHangUp() {
+    // The ongoing-call notification's Hang up, for the call whose
+    // notification it was: one that outlived its call hangs up nothing.
+    void requestHangUp(int token) {
         poster.post(() -> {
-            if (mode != Mode.NONE && listener != null) listener.hangUp();
+            if (token == callToken && mode != Mode.NONE && listener != null) listener.hangUp();
         });
+    }
+
+    void requestHangUp() {
+        requestHangUp(callToken);
     }
 
     void audioState(CallConnection from, int route, int supportedMask, boolean muted) {
@@ -281,7 +307,11 @@ final class CallSystem implements NativeCallManager.SystemCall {
             audio.setMode(AudioManager.MODE_IN_COMMUNICATION);
             speaker(audio, true);
         }
-        requestFocus();
+        // Audio the system did not grant is not audio the call may start on.
+        if (!requestFocus()) {
+            if (listener != null) listener.failed("audio_focus");
+            return;
+        }
         if (listener != null) listener.ready();
     }
 
@@ -310,9 +340,9 @@ final class CallSystem implements NativeCallManager.SystemCall {
         audio.setMode(AudioManager.MODE_NORMAL);
     }
 
-    private void requestFocus() {
+    private boolean requestFocus() {
         AudioManager audio = context.getSystemService(AudioManager.class);
-        if (audio == null) return;
+        if (audio == null) return true;
         focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
@@ -327,7 +357,7 @@ final class CallSystem implements NativeCallManager.SystemCall {
                 });
             }, main)
             .build();
-        audio.requestAudioFocus(focus);
+        return audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
     }
 
     private void abandonFocus() {

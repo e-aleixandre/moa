@@ -81,13 +81,13 @@ final class NativeCalls {
         calls.host.post(calls.incoming::forgetLocal);
     }
 
-    // The ongoing-call notification's Hang up.
-    static void requestHangUp() {
+    // The ongoing-call notification's Hang up, for the call it was built for.
+    static void requestHangUp(int token) {
         NativeCalls calls;
         synchronized (NativeCalls.class) {
             calls = shared;
         }
-        if (calls != null) calls.host.system().requestHangUp();
+        if (calls != null) calls.host.system().requestHangUp(token);
     }
 
     private NativeCalls(Context context) {
