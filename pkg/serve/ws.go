@@ -464,9 +464,16 @@ func wsEventFromBus(event any) (Event, bool) {
 // plus the keys only reconnect history carries: bus events project live user
 // and steer messages, this one also projects tool results.
 func projectWSMessageCustom(custom map[string]any) map[string]any {
+	// The acknowledgement of an asynchronous ask_user: the client must tell a
+	// posted question from an answered one.
+	if custom["question_state"] == "open" {
+		if id, ok := custom["question_id"].(string); ok && id != "" {
+			return map[string]any{"question_id": id, "question_state": "open"}
+		}
+	}
 	// Who answered an ask_user labels its card; it is the record, so the
 	// client never has to guess it from the answer's text.
-	if r, ok := askuser.ResponderFromCustom(custom[askuser.CustomKey]); ok {
+	if r, ok := askuser.ResponderFromCustom(custom[askuser.CustomKey]); ok && custom["source"] != "question_answer" {
 		return map[string]any{askuser.CustomKey: r}
 	}
 	// An apply_patch's per-file diffs are what its card shows; the tool bounds
@@ -566,6 +573,16 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 			}
 			projected["secret_aliases"] = values
 		}
+	}
+	// The late answer to an asynchronous question: who answered and what is
+	// metadata, so the client never parses the provider-facing XML.
+	if source == "question_answer" {
+		for _, key := range []string{"question_id", "event_id", "asked_at", "answered_at"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+		projectQuestionAnswer(custom, projected)
 	}
 	if source == "event" {
 		for _, key := range []string{"id", "source_name", "title"} {
@@ -673,6 +690,25 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 		}
 	}
 	return projected
+}
+
+// projectQuestionAnswer copies the recorded answers and responder of a
+// question_answer message; they are []string live and []any after a reload.
+func projectQuestionAnswer(custom, projected map[string]any) {
+	switch answers := custom["answers"].(type) {
+	case []string:
+		projected["answers"] = append([]string(nil), answers...)
+	case []any:
+		out := make([]string, 0, len(answers))
+		for _, a := range answers {
+			s, _ := a.(string)
+			out = append(out, s)
+		}
+		projected["answers"] = out
+	}
+	if r, ok := askuser.ResponderFromCustom(custom[askuser.CustomKey]); ok {
+		projected[askuser.CustomKey] = r
+	}
 }
 
 // wsLossyEventTypes are streaming deltas that may be dropped under backpressure

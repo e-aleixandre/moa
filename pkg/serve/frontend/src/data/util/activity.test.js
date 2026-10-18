@@ -267,3 +267,10 @@ test('a hard background-summary wait is its own in-progress phase; a working sum
   expect(activityPhase({ state: 'idle', backgroundCompaction: { active: true, waiting: false } })).toBe(null);
   expect(activityPhase({ ...hard, compacting: true })).toBe('compacting');
 });
+
+test('an open async question does not park the run: it stays working and stoppable', () => {
+  const ask = { id: 'a', async: true };
+  expect(activityPhase({ state: 'running', pendingAsk: ask })).toBe('working');
+  expect(activityPhase({ state: 'idle', pendingAsk: ask })).toBe(null);
+  expect(activityPhase({ state: 'running', pendingAsk: { id: 'a' } })).toBe('waiting');
+});

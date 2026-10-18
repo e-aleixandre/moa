@@ -26,3 +26,26 @@ func TestAskAsyncWireFlag(t *testing.T) {
 		t.Fatalf("live ask_user event lacks the flag: %+v", ev.Data)
 	}
 }
+
+// A reloaded transcript must still say that an acknowledgement is not an answer
+// and who gave a late answer, from the record and not from the XML text.
+func TestAskAsyncCustomCrossesTheHistoryBoundary(t *testing.T) {
+	ack := projectWSMessageCustom(map[string]any{"question_contract": "async-v1", "question_id": "q1", "question_state": "open"})
+	if ack["question_id"] != "q1" || ack["question_state"] != "open" {
+		t.Fatalf("acknowledgement lost its question: %v", ack)
+	}
+	answer := projectWSMessageCustom(map[string]any{
+		"source": "question_answer", "question_id": "q1", "event_id": "e1", "id": "e1",
+		"answers":       []any{"staging"},
+		"ask_responder": map[string]any{"kind": "owner", "name": "Serena"},
+	})
+	if answer["source"] != "question_answer" || answer["question_id"] != "q1" {
+		t.Fatalf("answer lost its identity: %v", answer)
+	}
+	if got, _ := answer["answers"].([]string); len(got) != 1 || got[0] != "staging" {
+		t.Fatalf("answers = %v", answer["answers"])
+	}
+	if _, ok := answer["ask_responder"]; !ok {
+		t.Fatalf("answer lost its responder: %v", answer)
+	}
+}

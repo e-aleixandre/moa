@@ -58,7 +58,7 @@ test('question_answer renders as an event row naming who answered, not as a user
   const blocks = projectStream({ messages }).flatMap((b) => (b.kind ? [b] : b.blocks || []));
   expect(blocks.some((b) => b.kind === 'waypoint')).toBe(false);
   const ev = blocks.find((b) => b.kind === 'event');
-  expect(ev.title).toBe('Answered by Serena (owner)');
+  expect(ev.title).toBe('Answered by Serena (owner): Yes');
   expect(ev.body).toBe('Deploy now?\n→ Yes');
   expect(ev.body).not.toContain('<question_answer');
 });

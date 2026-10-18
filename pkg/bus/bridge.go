@@ -1828,6 +1828,12 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 				projected[key] = value
 			}
 		}
+		if answers, ok := custom["answers"].([]string); ok {
+			projected["answers"] = append([]string(nil), answers...)
+		}
+		if r, ok := askuser.ResponderFromCustom(custom[askuser.CustomKey]); ok {
+			projected[askuser.CustomKey] = r
+		}
 	}
 	// A heartbeat carries its beat id and how many facts woke the owner; the
 	// facts themselves are in the message body, so nothing else crosses.

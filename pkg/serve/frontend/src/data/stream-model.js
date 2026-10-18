@@ -631,7 +631,7 @@ export function projectStream(session) {
           kind: 'event',
           id: blockID('answer', msg, i),
           source: 'answer',
-          title: `Answered by ${answererLabel(msg.custom.ask_responder)}`,
+          title: answerTitle(answererLabel(msg.custom.ask_responder), answers),
           body: answers
             .map((a, n) => (questions[n] ? `${questions[n]}\n→ ${a}` : String(a)))
             .join('\n\n'),
@@ -1134,6 +1134,17 @@ function askedQuestions(messages, questionId) {
     return Array.isArray(args?.questions) ? args.questions.map((q) => String(q?.question || '')) : [];
   }
   return [];
+}
+
+// answerTitle is the row's one line: who answered and, when there is a single
+// answer, what it was; the full text is in the body.
+function answerTitle(who, answers) {
+  const by = `Answered by ${who}`;
+  if (answers.length === 1) {
+    const one = String(answers[0]).replace(/\s+/g, ' ').trim();
+    return one ? `${by}: ${one.length > 100 ? one.slice(0, 99) + '…' : one}` : by;
+  }
+  return answers.length > 1 ? `${by} · ${answers.length} answers` : by;
 }
 
 function toLedgerRow(msg) {

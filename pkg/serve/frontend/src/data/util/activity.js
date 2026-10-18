@@ -274,7 +274,9 @@ export function activityPhase(session) {
   // session state to 'permission'; ask_user keeps the run 'running' but sets
   // pendingAsk. Either way the agent is waiting on a human, so both map to the
   // same phase for parity with the TUI's "Waiting for you".
-  if (session.state === 'permission' || session.pendingAsk || session.pendingSecrets?.length) return 'waiting';
+  // An async question does not park the run: it keeps working (and can be
+  // stopped) while the question stays open, so it is not this phase.
+  if (session.state === 'permission' || (session.pendingAsk && !session.pendingAsk.async) || session.pendingSecrets?.length) return 'waiting';
   if (session.state !== 'running') return null;
   if (session.providerExecution?.phase === 'provider_wait') return 'provider_wait';
   if (session.providerExecution?.phase === 'awaiting_provider') return 'awaiting_provider';
