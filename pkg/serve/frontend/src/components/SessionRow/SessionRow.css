@@ -229,3 +229,5 @@
   .zl-row-slot:hover .zl-row-x { opacity: 1; }
   .zl-row-x:hover { color: var(--zl-red); }
 }
+
+.zl-row-lock { display: inline-block; margin-right: 4px; vertical-align: -1px; }

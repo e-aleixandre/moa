@@ -32,15 +32,15 @@ export function ToastContainer() {
   const stackRef = useFlip([shown.map((s) => `${s.item.id}${s.leaving ? "-" : ""}`).join("\n")]);
 
   const handleClick = useCallback((toast) => {
-    if (toast.sessionId) openSession(toast.sessionId);
-    else toast.onOpen?.();
+    if (toast.onOpen) toast.onOpen();
+    else if (toast.sessionId) openSession(toast.sessionId);
     removeToast(toast.id);
   }, []);
 
   if (shown.length === 0) return null;
 
   return (
-    <div class="toast-stack" ref={stackRef}>
+    <div class={`toast-stack${shown.some((s) => s.item.sticky) ? " has-sticky" : ""}`} ref={stackRef}>
       {shown.map(({ item: t, leaving }) => (
         <Toast
           key={t.id}
@@ -58,7 +58,7 @@ export function ToastContainer() {
               removeToast(t.id);
             },
           } : undefined}
-          onDismiss={() => removeToast(t.id)}
+          onDismiss={() => { t.onDismiss?.(); removeToast(t.id); }}
           onClick={t.sessionId || t.onOpen ? () => handleClick(t) : undefined}
           style={t.sessionId || t.onOpen ? "cursor:pointer" : undefined}
         />

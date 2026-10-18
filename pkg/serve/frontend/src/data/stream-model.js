@@ -1005,9 +1005,11 @@ export function liveTrayAgents(session, sessions = {}, owners = []) {
       kind: 'session',
       name: child.title || child.id,
       action: child.state === 'error' ? 'Stopped with an error'
+        : child.state === 'permission' && child.secretIds?.length > 0 ? 'Needs password'
         : (child.briefProgress || child.briefAttempting || '').trim() ||
           (child.state === 'permission' ? 'Waiting for permission' : 'Running'),
       state: child.state,
+      lock: child.state === 'permission' && child.secretIds?.length > 0,
     };
     if (child.state !== 'error' && child.runStartedAtMs > 0) {
       chip.time = formatElapsed(Math.max(0, Date.now() - child.runStartedAtMs));

@@ -46,6 +46,11 @@ function runningFor(sess, now) {
 export function sessionRowReason(sess, now = Date.now()) {
   if (!sess) return null;
   const kind = attentionKind(sess);
+  // A session blocked only on a password says so: it will not move until it is
+  // entered, which "Needs your answer" does not tell. Same row, same tone.
+  if (kind === "permission" && sess.secretIds?.length > 0 && !sess.pendingPerm && !sess.pendingAsk) {
+    return { text: "Needs password", tone: REASON_TONE.permission, lock: true };
+  }
   if (kind === "permission") return { text: "Needs your answer", tone: REASON_TONE.permission };
   if (kind === "error") return { text: "Stopped with an error", tone: REASON_TONE.error };
   if (kind === "unseen") return { text: "Answered · not read yet", tone: REASON_TONE.unseen };
@@ -70,6 +75,7 @@ function toSpineRow(s, extra = {}) {
     when: relAge(s.updated),
     brief: reason?.text || "",
     briefTone: reason?.tone || "",
+    briefLock: !!reason?.lock,
     path: reason ? "" : (shortPath(s.cwd) || s.cwd || ""),
     origin: s.origin || undefined,
     cwd: s.cwd || "",
@@ -123,7 +129,7 @@ export function focusedTileSessionId(state) {
 
 function spineRowSig(row) {
   return [
-    row.id, row.title, row.state, row.unseen ? 1 : 0, row.when, row.brief,
+    row.id, row.title, row.state, row.unseen ? 1 : 0, row.when, row.brief, row.briefLock ? 1 : 0,
     row.path, row.origin || "", row.pane || "", row.saved ? 1 : 0,
   ].join("\0");
 }
