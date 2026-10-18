@@ -22,7 +22,7 @@ func TestAuthorityReviewSendDoesNotAnswerAnAsyncQuestion(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			info.Owner.AnswerAsks = false
+			info.AnswerAsks = false
 			if err := store.Save(info.Owner); err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +53,6 @@ func TestAuthorityReviewSendToHumanAsyncSessionIsNotBlockedByOpenQuestion(t *tes
 		t.Errorf("send consumed question: %+v", q)
 	}
 }
-
 
 func TestAuthorityReviewCallbackDoneWaitsForTheAcceptedAnswer(t *testing.T) {
 	f1Isolate(t)
@@ -96,4 +95,3 @@ func TestAuthorityReviewCallbackDoneWaitsForTheAcceptedAnswer(t *testing.T) {
 	}
 	once.Do(func() { close(release) })
 }
-

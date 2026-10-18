@@ -272,8 +272,8 @@ func (q *questionService) reconcileLocked(ctx context.Context, sessionID string,
 	}
 	path, all := tree.Path(), tree.Entries()
 	for _, question := range questions {
-		switch {
-		case question.State == tasks.QuestionOpen:
+		switch question.State {
+		case tasks.QuestionOpen:
 			if originOnPath(path, question) {
 				continue
 			}
@@ -282,7 +282,7 @@ func (q *questionService) reconcileLocked(ctx context.Context, sessionID string,
 			} else if changed {
 				q.retire(sessionID, question.ID)
 			}
-		case question.State == tasks.QuestionAnswered:
+		case tasks.QuestionAnswered:
 			// Whatever a Stop decided about its run, an answer that was never
 			// admitted is only deliverable to the branch that asked: Stop removes
 			// the autorun, it does not make the answer valid anywhere.

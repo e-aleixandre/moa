@@ -50,7 +50,7 @@ func TestAuthorityReviewHTTPCallbackOriginalRunCannotFinishUnreadAnswer(t *testi
 	}
 	rc.waitForCallbacks(t, 1)
 	response := automationReq(t, e.srv, "/api/automation/sessions/"+id+"/ask-response", testAutomationToken, `{"id":"`+qid+`","answers":["main"]}`, false)
-	response.Body.Close()
+	_ = response.Body.Close()
 	if response.StatusCode != 204 {
 		t.Fatalf("answer=%d", response.StatusCode)
 	}
@@ -92,7 +92,7 @@ func TestAuthorityReviewHTTPCallbackDoesNotFinishAnUnreadAnswer(t *testing.T) {
 	sess.runtime.WaitQuiescent(context.Background())
 	body := `{"id":"` + qid + `","answers":["main"]}`
 	response := automationReq(t, e.srv, "/api/automation/sessions/"+id+"/ask-response", testAutomationToken, body, false)
-	response.Body.Close()
+	_ = response.Body.Close()
 	if response.StatusCode != 204 {
 		t.Fatalf("answer = %d", response.StatusCode)
 	}

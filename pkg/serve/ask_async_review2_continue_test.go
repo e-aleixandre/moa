@@ -55,10 +55,8 @@ func TestReviewCrashAfterUnfinishedAssistantStillOwesWork(t *testing.T) {
 		if code, body := f1PostAsk(t, e, s.ID, qid, "yes"); code != 204 {
 			t.Fatalf("answer=%d %s", code, body)
 		}
-		select {
-		case <-time.After(30 * time.Second):
-			t.Fatal("did not reach crash")
-		}
+		<-time.After(30 * time.Second)
+		t.Fatal("did not reach crash")
 		return
 	}
 	for _, reason := range []string{"pause_turn", "continue"} {

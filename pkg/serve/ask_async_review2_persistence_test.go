@@ -88,7 +88,7 @@ func TestPersistenceReviewStopDoesNotSucceedWithoutDurableFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if _, err = db.Exec(`CREATE TRIGGER review_no_fence BEFORE UPDATE OF method ON task_notifications WHEN NEW.kind = 'question_answer' AND NEW.method = 'append' BEGIN SELECT RAISE(ABORT, 'review fence write failed'); END`); err != nil {
 		t.Fatal(err)
 	}
