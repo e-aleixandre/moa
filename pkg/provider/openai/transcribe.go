@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	"github.com/e-aleixandre/moa/pkg/core"
-	"github.com/e-aleixandre/moa/pkg/provider/retry"
 )
 
 const transcribeEndpoint = "/v1/audio/transcriptions"
@@ -77,20 +76,21 @@ func (o *OpenAI) Transcribe(ctx context.Context, audio io.Reader, filename strin
 
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("openai transcribe: http: %w", err)
+		return "", transportError("openai transcribe", ctx, err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		_, text := retry.ErrorBody(resp.Body)
-		return "", fmt.Errorf("openai transcribe: HTTP %d: %s", resp.StatusCode, text)
+		// The body may echo the audio or its text: report the status only.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		return "", &transcribeError{msg: fmt.Sprintf("openai transcribe: HTTP %d", resp.StatusCode), reason: fmt.Sprintf("http_%d", resp.StatusCode)}
 	}
 
 	var result struct {
 		Text string `json:"text"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("openai transcribe: decoding response: %w", err)
+		return "", &transcribeError{msg: "openai transcribe: unexpected response format", reason: "format"}
 	}
 
 	return result.Text, nil

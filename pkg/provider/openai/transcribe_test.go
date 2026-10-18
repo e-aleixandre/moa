@@ -87,9 +87,9 @@ func TestTranscribe_EmptyModelFallsBackToDefault(t *testing.T) {
 	}
 }
 
-// The API's own message is the actual finding when a model rejects the request,
-// so it must survive into the error.
-func TestTranscribe_SurfacesAPIError(t *testing.T) {
+// The provider body can echo the audio or its text, and the error is logged and
+// returned to clients: only the status survives.
+func TestTranscribe_ErrorCarriesStatusNotBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -102,7 +102,7 @@ func TestTranscribe_SurfacesAPIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if !strings.Contains(err.Error(), "corrupted or unsupported") {
-		t.Errorf("error lost the API message: %v", err)
+	if !strings.Contains(err.Error(), "400") || strings.Contains(err.Error(), "corrupted") {
+		t.Errorf("want the status without the body: %v", err)
 	}
 }

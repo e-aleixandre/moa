@@ -73,14 +73,30 @@ func runServe(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// Build transcriber from OpenAI API key.
-	// Priority: 1) "openai-transcribe" credential in auth store
-	//           2) OpenAI credential if it's an API key (not OAuth)
-	var transcriber core.Transcriber
+	// Dictation: the ChatGPT plan first (OAuth "openai" login), the billed API
+	// key only as a fallback. The key is "openai-transcribe" or an "openai"
+	// API key; without an OAuth login the key is used directly, as before.
+	var apiKeyTranscriber core.Transcriber
 	if cred, ok := authStore.Get("openai-transcribe"); ok && cred.Key != "" {
-		transcriber = openai.New(cred.Key)
+		apiKeyTranscriber = openai.New(cred.Key)
 	} else if apiKey, isOAuth, err := authStore.GetAPIKey("openai"); err == nil && apiKey != "" && !isOAuth {
-		transcriber = openai.New(apiKey)
+		apiKeyTranscriber = openai.New(apiKey)
+	}
+	transcriber := apiKeyTranscriber
+	if authStore.CredentialKind("openai") == "oauth" {
+		// ResolveSnapshot refreshes through the auth store, which serialises
+		// rotation with every other user of the credential.
+		plan := openai.NewPlanTranscriber(func(ctx context.Context) (string, string, error) {
+			snap, err := authStore.ResolveSnapshot(ctx, "openai")
+			if err != nil {
+				return "", "", err
+			}
+			if snap.Kind != "oauth" {
+				return "", "", fmt.Errorf("openai login is not a ChatGPT plan")
+			}
+			return snap.Token, snap.AccountID, nil
+		})
+		transcriber = &core.FallbackTranscriber{Primary: plan, Fallback: apiKeyTranscriber}
 	}
 
 	// Web Push (optional): VAPID keys + subscription store live in the moa
