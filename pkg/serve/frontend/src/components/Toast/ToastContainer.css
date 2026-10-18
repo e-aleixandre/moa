@@ -42,4 +42,11 @@
   .toast-stack .toast {
     max-width: none;
   }
+
+  /* A toast that stays until it is dealt with (a password request) must not sit
+     on the session and + buttons that let you deal with anything: it docks
+     under the phone chrome (MobileChrome: 14px + 44px controls). */
+  .toast-stack.has-sticky {
+    top: calc(var(--shell-top) + 64px);
+  }
 }

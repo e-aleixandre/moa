@@ -17,10 +17,14 @@ function notifyToastListeners() {
 // toast (wake-on-event coalesces a burst of arrivals into a single count) can
 // remove the previous one instead of stacking a second.
 export function addToast(toast) {
-  const id = Date.now() + Math.random();
-  toasts = [...toasts, { ...toast, id }];
+  // A caller that owns a toast by identity passes its own id and the same toast
+  // raised again replaces itself. Anyone else gets a generated one that never
+  // replaces anything, as before.
+  const own = toast.id !== undefined;
+  const id = own ? toast.id : Date.now() + Math.random();
+  toasts = [...(own ? toasts.filter((t) => t.id !== id) : toasts), { ...toast, id }];
   notifyToastListeners();
-  setTimeout(() => removeToast(id), toast.duration ?? 5000);
+  if (!toast.sticky) setTimeout(() => removeToast(id), toast.duration ?? 5000);
   return id;
 }
 
@@ -76,10 +80,11 @@ function browserNotify(title, body) {
 // alertAway adds what a toast alone does not: a session the user is not
 // looking at reached a point that matters. Toasts that answer the user's own
 // action never come through here.
-function alertAway(title, body, soundEnabled) {
+export function alertAway(title, body, soundEnabled) {
   if (soundEnabled) initAudio().then(playBeep);
   browserNotify(title, body);
-  if (navigator.vibrate) navigator.vibrate(200);
+  // Chromium blocks vibration until the page has had a tap; skip rather than log.
+  if (navigator.vibrate && navigator.userActivation?.hasBeenActive !== false) navigator.vibrate(200);
 }
 
 // Question/permission — called for non-visible sessions. `detail` says what

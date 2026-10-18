@@ -5,7 +5,7 @@ import { attentionNamespaceTransition, normalizeConversationProjection, normaliz
 import { triggerAttention, triggerFailed, addToast } from './notifications.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import {
-  assignToTile, setActiveSession, afterVisibilityChange, autoFillTiles,
+  assignToTile, setActiveSession, afterVisibilityChange, autoFillTiles, openSession,
   autoSelectMobile,
 } from './tile-actions.js';
 import { allSessionIds, clearSession } from './tileTree.js';
@@ -21,7 +21,7 @@ import { deviceZone } from './schedule-model.js';
 import { normalizeErrorDetail, sameErrorDetail } from './provider-error.js';
 import { claimProviderToast, loadProviderStatus } from './providers.js';
 import { newerProviderExecution } from './provider-wait.js';
-import { withoutSecret } from './secret-action.js';
+import { secretIdsOf, withoutSecret } from './secret-action.js';
 
 let pollTimer = null;
 let nextRosterRequest = 0;
@@ -56,6 +56,13 @@ function cacheExpiresAtMs(iso) {
 function rosterErrorDetail(raw, existing) {
   const detail = normalizeErrorDetail(raw);
   return detail && sameErrorDetail(existing?.errorDetail, detail) ? existing.errorDetail : detail;
+}
+
+// sameIds keeps the array a poll that changed nothing would rebuild, so an
+// unchanged session still compares equal and the roster does not re-render.
+function sameIds(prev, next) {
+  const ids = next || [];
+  return prev && prev.length === ids.length && prev.every((id, i) => id === ids[i]) ? prev : ids;
 }
 
 function samePolledSession(existing, next) {
@@ -264,6 +271,9 @@ function normalizeSessionInfo(info, existing, visible) {
     // progress prose + freshness stamp. No WS event tracks it, so the poll
     // is the source of truth. Preserve the prior value when the poll omits
     // it (omitempty) so a not-yet-generated brief doesn't flicker.
+    // Open password requests as the server names them: the only word on them
+    // for a session no socket watches.
+    secretIds: sameIds(existing?.secretIds, info.pending_secret_ids),
     briefAttempting: info.brief_attempting ?? (existing ? existing.briefAttempting : ''),
     briefProgress: info.brief_progress ?? (existing ? existing.briefProgress : ''),
     briefUpdated: info.brief_updated ? Date.parse(info.brief_updated) : (existing ? existing.briefUpdated : 0),
@@ -313,7 +323,7 @@ export async function loadSessions() {
       const prevSess = prev[id];
       if (prevSess && prevSess.state !== sess.state) {
         if (sess.state === 'permission' || sess.state === 'error') {
-          if (!visible.has(id)) {
+          if (!visible.has(id) && !(sess.secretIds?.length > 0)) {
             if (sess.state === 'error') {
               if (claimProviderToast(sess.errorDetail)) triggerFailed(sess, sess.error, state.soundEnabled);
             }
@@ -1052,7 +1062,10 @@ export async function addPermissionRule(sessionId, permId, rule) {
 export async function resolveSecretAction(sessionId, reqId, body) {
   await api('POST', `/api/sessions/${sessionId}/secret-requests/${encodeURIComponent(reqId)}`, body);
   const pending = store.get().sessions[sessionId]?.pendingSecrets;
-  if (pending) updateSession(sessionId, { pendingSecrets: withoutSecret(pending, reqId) });
+  if (pending) {
+    const next = withoutSecret(pending, reqId);
+    updateSession(sessionId, { pendingSecrets: next, secretIds: secretIdsOf(next) });
+  }
 }
 
 export async function resolveAskUser(sessionId, askId, answers) {

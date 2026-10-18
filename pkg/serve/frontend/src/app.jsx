@@ -28,6 +28,7 @@ import { loadModelCatalog, ensureModelCatalog } from "./data/model-catalog.js";
 import { afterPendingInits, getVersion, reconnectAll, syncConnections } from "./data/api.js";
 import { adoptBuild } from "./data/stale-build.js";
 import { addToast } from "./data/notifications.js";
+import { watchSecretSignal } from "./data/secret-signal.js";
 import { refreshPushState, watchNativeVisibleSession } from "./data/push-client.js";
 import { installOpenSessionNavigation, installNativeNavigation } from "./data/push-navigation.js";
 import { installNativeBack } from "./data/native-back.js";
@@ -74,6 +75,7 @@ function useBootstrap() {
   useEffect(() => installNativeNavigation(), []);
   // The Android app asks the page what its Back button should do.
   useEffect(() => installNativeBack(), []);
+  useEffect(() => watchSecretSignal(), []);
 
   // Something shared into moa from another app arrives twice by design: the
   // service worker messages a live window, and its 303 redirect navigates to

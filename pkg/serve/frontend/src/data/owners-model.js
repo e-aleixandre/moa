@@ -67,7 +67,9 @@ export function childrenSummary(children = []) {
   // folds running+unseen into "unseen", so the row carries `running` apart.
   const working = children.filter((c) =>
     childGroup(c) !== "waiting" && (c.running ?? (c.state || "idle") === "running"));
+  const locked = waiting.filter((c) => c.lock);
   return {
+    locked: locked.length,
     live: live.length,
     working: working.length,
     waiting: waiting.length,
@@ -166,7 +168,11 @@ export function ownerLine(owner) {
             : summary.working > 0 ? { tone: "blue", text: `${summary.working} working` }
               : null;
   const stated = state === "asks" || state === "working" || state === "unread" || !!owner?.wantsToTalk;
-  return { lead, tail: summary.waiting > 0 ? `${summary.waiting} waiting on you` : "", stated };
+  // Everything that waits is a password: say so, it is what blocks them.
+  const tail = summary.waiting === 0 ? ""
+    : summary.locked === summary.waiting ? `${summary.locked} needs a password`
+      : `${summary.waiting} waiting on you`;
+  return { lead, tail, stated };
 }
 
 // worstOwnerState — what a COLLAPSED Owners heading shows beside its count.
@@ -252,6 +258,7 @@ export function ownerChildRow(sess, now = Date.now()) {
     when: relAge(sess.updated, now),
     brief: reason?.text || "",
     briefTone: reason?.tone || "",
+    lock: !!reason?.lock,
     updated: sess.updated || 0,
   };
 }

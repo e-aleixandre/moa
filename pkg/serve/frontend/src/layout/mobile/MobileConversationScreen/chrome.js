@@ -51,6 +51,7 @@ export function drawerSessions(sessions, activeId) {
       // printed the path.
       brief: reason?.text || "",
       briefTone: reason?.tone || "",
+      briefLock: !!reason?.lock,
       path: reason ? "" : (shortPath(s.cwd) || s.cwd || ""),
       unseen: !!s.unseen,
       active: s.id === activeId,
@@ -140,7 +141,7 @@ function recentOwnersSig(list) {
 
 function cardSig(row) {
   return [
-    row.id, row.title, row.state, row.when, row.brief, row.briefTone || "",
+    row.id, row.title, row.state, row.when, row.brief, row.briefTone || "", row.briefLock ? 1 : 0,
     row.path, row.unseen ? 1 : 0, row.active ? 1 : 0, row.saved ? 1 : 0,
     row.origin || "",
   ].join("\0");

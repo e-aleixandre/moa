@@ -8,6 +8,7 @@ import { store, setState } from './store.js';
 import { getToasts, removeToast } from './notifications.js';
 import { handleWsInit, handleWsSecretRequest, handleWsSecretResolved } from './ws-handlers.js';
 import { resolveSecretAction } from './session-actions.js';
+import { watchSecretSignal } from './secret-signal.js';
 import { __resetAttentionArrivalsForTests } from './attention-arrivals.js';
 import {
   DENY_BODY, buildAllowBody, browserMapping, fieldAutocomplete, normalizeSecretRequest,
@@ -120,14 +121,16 @@ beforeEach(() => {
 });
 
 test('secret_request queues the card, flips the session to permission and toasts a generic line', () => {
+  const stop = watchSecretSignal();
   handleWsSecretRequest('s1', COMMAND, 5);
   const s = store.get().sessions.s1;
   expect(s.state).toBe('permission');
   expect(s.pendingSecrets.map((r) => r.id)).toEqual(['sec_1']);
   expect(sessionDisplayDotState(s)).toBe('permission');
   const [toast] = getToasts().filter((t) => t.sessionId === 's1');
-  expect(toast.detail).toBe('Needs a password');
+  expect(toast.detail).toBe('Stopped until you enter the password');
   expect(JSON.stringify(toast)).not.toContain('unlock-keychain');
+  stop();
 });
 
 test('several requests queue oldest first, once each', () => {
