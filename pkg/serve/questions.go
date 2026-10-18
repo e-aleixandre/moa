@@ -126,6 +126,38 @@ func (q *questionService) close(ctx context.Context, sessionID, id string, to ta
 	return question, nil
 }
 
+// reconcileOrigins retires the open questions whose posting message is no
+// longer on the session's current branch: a rewind before the call that asked
+// takes the question with it, so a later answer with its old ID is refused
+// instead of waking a conversation that never asked.
+//
+// TODO(phase 2): only the branch endpoint calls it; the other ways of moving
+// the leaf (undo, compaction, start fresh keeps the origin) should as well.
+func (q *questionService) reconcileOrigins(ctx context.Context, sess *ManagedSession) {
+	if q == nil {
+		return
+	}
+	open, err := q.repo.OpenQuestions(ctx, sess.ID)
+	if err != nil || len(open) == 0 {
+		if err != nil {
+			slog.Warn("questions: reading open questions after a rewind failed", "session", sess.ID, "error", err)
+		}
+		return
+	}
+	onBranch := map[string]bool{}
+	for _, entry := range sess.runtime.Context().Tree.Path() {
+		onBranch[entry.Message.MsgID] = true
+	}
+	for _, question := range open {
+		if question.OriginMsgID == "" || onBranch[question.OriginMsgID] {
+			continue
+		}
+		if _, err := q.close(ctx, sess.ID, question.ID, tasks.QuestionInvalidated, "rewound"); err != nil {
+			slog.Warn("questions: invalidating a rewound question failed", "session", sess.ID, "question", question.ID, "error", err)
+		}
+	}
+}
+
 // retire removes the projection of a question that is no longer open and tells
 // the clients. The durable state is already committed.
 func (q *questionService) retire(sessionID, id string) {

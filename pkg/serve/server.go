@@ -1736,6 +1736,7 @@ func handleBranch(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		mgr.questions.reconcileOrigins(r.Context(), sess)
 
 		// The bounded branch snapshot is delivered by CommandExecuted over the
 		// session WebSocket. Do not duplicate an unbounded history in this REST
