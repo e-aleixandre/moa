@@ -373,6 +373,7 @@ func TestSessionsToolSendSelectsAnAuthorizedDuplicateWithoutTouchingForeignData(
 }
 
 func TestSessionsToolAnswerResolvesAnAskOnce(t *testing.T) {
+	pinSyncAskUser(t)
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	provider := newMockProvider(toolCallHandlerFor("tc-ask", "ask_user", map[string]any{
 		"questions": []any{map[string]any{"question": "which one?", "options": []any{"first", "second"}}},
@@ -570,6 +571,7 @@ func (s *ManagedSession) ownerOfTest(t *testing.T) owner.Owner {
 // A send to a session blocked on ask_user skips the question exactly as the
 // user's Skip does, and the message reaches the session's next model turn once.
 func TestSessionsToolSendSkipsAPendingQuestion(t *testing.T) {
+	pinSyncAskUser(t)
 	ctx := context.Background()
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	nextTurn := make(chan []core.Message, 1)

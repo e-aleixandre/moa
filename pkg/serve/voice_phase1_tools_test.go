@@ -373,6 +373,7 @@ func TestVoiceTools_ReadScopeCalledSessionOnly(t *testing.T) {
 	}
 }
 func TestVoiceTools_AnswerRejectedForRequiresTap(t *testing.T) {
+	pinSyncAskUser(t)
 	for _, provider := range vpAllProviders {
 		t.Run(provider, func(t *testing.T) {
 			f := vpNewFixture(t, provider, toolCallHandlerFor("deploy-ask", "ask_user", map[string]any{"requires_tap": true, "questions": []any{map[string]any{"question": "Confirm deploy"}}}), simpleResponseHandler("resolved"))
@@ -401,6 +402,7 @@ func TestVoiceTools_AnswerRejectedForRequiresTap(t *testing.T) {
 	}
 }
 func TestVoiceTools_NormalQuestionModelAnswerWithoutTranscript(t *testing.T) {
+	pinSyncAskUser(t)
 	for _, provider := range vpAllProviders {
 		t.Run(provider, func(t *testing.T) {
 			f := vpNewFixture(t, provider, askOneQuestion(), simpleResponseHandler("resolved"))
@@ -423,6 +425,7 @@ func TestVoiceTools_NormalQuestionModelAnswerWithoutTranscript(t *testing.T) {
 	}
 }
 func TestVoiceTools_NormalQuestionVoiceAndTapSingleWinner(t *testing.T) {
+	pinSyncAskUser(t)
 	f := vpNewFixture(t, "grok-plan", askOneQuestion(), simpleResponseHandler("resolved"))
 	if _, _, _, e := f.mgr.Send(f.sess.ID, "ask normally", nil, "", ""); e != nil {
 		t.Fatal(e)
@@ -457,6 +460,7 @@ func TestVoiceTools_NormalQuestionVoiceAndTapSingleWinner(t *testing.T) {
 	}
 }
 func TestVoiceTools_RequestTapOnlyExistingOwnPendingItems(t *testing.T) {
+	pinSyncAskUser(t)
 	askTap := func() mockHandler {
 		return toolCallHandlerFor("tap-question", "ask_user", map[string]any{"requires_tap": true, "questions": []any{map[string]any{"question": "Tap required"}}})
 	}

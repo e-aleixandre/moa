@@ -13,6 +13,7 @@ import (
 // fields it carries, the answer is recorded as the user and the request flag
 // is surfaced through the pending snapshot.
 func TestAskPublicBodyCannotForgeVoiceResponder(t *testing.T) {
+	pinSyncAskUser(t)
 	handler := toolCallHandlerFor("tc-ask", "ask_user", map[string]any{
 		"requires_tap": true,
 		"questions":    []any{map[string]any{"question": "Deploy?"}},

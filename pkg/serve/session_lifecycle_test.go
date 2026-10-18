@@ -12,6 +12,7 @@ import (
 )
 
 func TestAskUserAsyncSubagentTimeoutKeepsRunState(t *testing.T) {
+	pinSyncAskUser(t)
 	childStarted := make(chan struct{})
 	parentResumed := make(chan struct{})
 	releaseParent := make(chan struct{})
@@ -125,6 +126,7 @@ func TestAskUserAsyncSubagentTimeoutKeepsRunState(t *testing.T) {
 }
 
 func TestAskUserRootBashCompletionKeepsRunState(t *testing.T) {
+	pinSyncAskUser(t)
 	for _, tc := range []struct {
 		name    string
 		command string

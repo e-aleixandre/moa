@@ -237,6 +237,7 @@ func TestNativePushDropsRegistrationsOfUnknownDevicesAtStartup(t *testing.T) {
 // pairing, native registration, a real ask_user in a session, the policy, the
 // sender, and a relay that opens the envelope as the NSE would.
 func TestNativePushDeliversAQuestionEndToEnd(t *testing.T) {
+	pinSyncAskUser(t)
 	f := newNativeFixture(t, newMockProvider(
 		toolCallHandlerFor("tc-ask", "ask_user", map[string]any{
 			"questions": []any{map[string]any{"question": "Continue?", "options": []any{"yes", "no"}}},

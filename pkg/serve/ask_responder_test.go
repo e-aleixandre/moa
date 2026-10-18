@@ -60,6 +60,7 @@ func askOneQuestion() mockHandler {
 // The user's answer from the web UI (or the app, which posts to the same
 // endpoint) is recorded as the user's and reaches the model unchanged.
 func TestAskAnsweredFromTheUIIsRecordedAsTheUser(t *testing.T) {
+	pinSyncAskUser(t)
 	srv, mgr := automationInteractServer(t, core.MoaConfig{DisableSandbox: true}, askOneQuestion(), simpleResponseHandler("ok"))
 	id := startAutomationRun(t, mgr, "ask me")
 	sess, _ := mgr.Get(id)
@@ -77,6 +78,7 @@ func TestAskAnsweredFromTheUIIsRecordedAsTheUser(t *testing.T) {
 }
 
 func TestAskAnsweredByTheAutomationAPIIsRecordedAsAutomation(t *testing.T) {
+	pinSyncAskUser(t)
 	srv, mgr := automationInteractServer(t, core.MoaConfig{DisableSandbox: true}, askOneQuestion(), simpleResponseHandler("ok"))
 	id := startAutomationRun(t, mgr, "ask me")
 	sess, _ := mgr.Get(id)
@@ -97,6 +99,7 @@ func TestAskAnsweredByTheAutomationAPIIsRecordedAsAutomation(t *testing.T) {
 // the live tool_end. A user's answer that happens to read like the label line
 // stays the user's.
 func TestAskResponderReachesTheClientAsRecorded(t *testing.T) {
+	pinSyncAskUser(t)
 	srv, mgr := automationInteractServer(t, core.MoaConfig{DisableSandbox: true}, askOneQuestion(), simpleResponseHandler("ok"))
 	id := startAutomationRun(t, mgr, "ask me")
 	sess, _ := mgr.Get(id)

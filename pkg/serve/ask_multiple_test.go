@@ -15,6 +15,7 @@ import (
 // reads the same pending state), and the one-string answer a machine caller
 // sends reaches the model unchanged.
 func TestAskUserMultipleReachesClientsAndTheModelGetsTheJoinedAnswer(t *testing.T) {
+	pinSyncAskUser(t)
 	toolResult := make(chan string, 1)
 	followUp := func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 		for _, m := range req.Messages {

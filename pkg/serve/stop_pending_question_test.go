@@ -11,6 +11,7 @@ import (
 )
 
 func TestStopPendingQuestionDoesNotCallProvider(t *testing.T) {
+	pinSyncAskUser(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	nextRequests := make(chan core.Request, 1)
