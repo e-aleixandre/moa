@@ -43,9 +43,13 @@ final class DeviceAuthBridge implements WebBridges.MethodHandler {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
 
-    DeviceAuthBridge(Context context, DeviceCredentialStore store) {
+    // Runs after a claim saved its credential and forgot the previous pairing.
+    private final Runnable onPaired;
+
+    DeviceAuthBridge(Context context, DeviceCredentialStore store, Runnable onPaired) {
         this.context = context.getApplicationContext();
         this.store = store;
+        this.onPaired = onPaired;
     }
 
     @Override
@@ -133,6 +137,7 @@ final class DeviceAuthBridge implements WebBridges.MethodHandler {
         NativePushRegistration.get(context).forgetLocal();
         AndroidVoip.forget(context, null);
         NativeCalls.bindingChanged();
+        onPaired.run();
     }
 
     private void authorize(String origin) throws AuthException {

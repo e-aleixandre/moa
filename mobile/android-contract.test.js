@@ -331,8 +331,10 @@ describe("Android incoming calls", () => {
     expect(notifier).toContain("PushMessages.ACTION_OPEN_MISSED_CALL");
     expect(notifier).toContain("ringing.sessionId");
     const activity = code(java["MainActivity.java"]);
-    expect(activity.match(/PushMessages\.missedCallSession\(/g).length).toBe(2);
-    expect(activity.match(/handleMissedCall\(this, /g).length).toBe(2);
+    expect(activity).toContain("PushMessages.missedCallSession(intent.getAction()");
+    expect(activity).toContain("PushNavigator.get().handleMissedCall(this, session)");
+    expect(activity.match(/openMissedCall\(/g).length).toBe(3); // definition, onCreate (cold start), onNewIntent
+
     const navigator = code(java["PushNavigator.java"]);
     expect(navigator).toContain("taps.handleSession(");
   });

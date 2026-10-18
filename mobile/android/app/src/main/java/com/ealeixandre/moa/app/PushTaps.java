@@ -52,6 +52,25 @@ final class PushTaps {
     // Expiry is checked again at tap time: an envelope that is no longer
     // valid leads home, like the fallback it was shown as.
     void handle(Map<String, String> envelope, Source source, Navigation navigation) {
+        run(source, navigation, (keys, unreadable) -> {
+            PushEnvelope.Content content = unreadable ? null : PushEnvelope.open(envelope, keys, System.currentTimeMillis() / 1000);
+            return content == null ? PushEnvelope.Destination.HOME : content.destination;
+        });
+    }
+
+    // A tap whose destination was authenticated when its notification was
+    // built (a missed call): it goes through the same credential, pairing and
+    // generation checks as an envelope's, without opening one.
+    void handleSession(String sessionId, Source source, Navigation navigation) {
+        run(source, navigation, (keys, unreadable) ->
+            unreadable ? PushEnvelope.Destination.HOME : PushEnvelope.Destination.session(sessionId));
+    }
+
+    private interface Destinations {
+        PushEnvelope.Destination of(PushEnvelope.Keys keys, boolean unreadable);
+    }
+
+    private void run(Source source, Navigation navigation, Destinations destinations) {
         background.execute(() -> {
             int generation = source.generation();
             PushEnvelope.Keys keys = source.currentKeys();
@@ -82,8 +101,7 @@ final class PushTaps {
                 });
                 return;
             }
-            PushEnvelope.Content content = unreadable ? null : PushEnvelope.open(envelope, keys, System.currentTimeMillis() / 1000);
-            PushEnvelope.Destination destination = content == null ? PushEnvelope.Destination.HOME : content.destination;
+            PushEnvelope.Destination destination = destinations.of(keys, unreadable);
             String origin = source.pairedOrigin();
             main.execute(() -> navigation.open(destination, origin, generation));
         });
