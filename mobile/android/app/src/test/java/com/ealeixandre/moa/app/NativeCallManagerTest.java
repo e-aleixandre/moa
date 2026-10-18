@@ -283,7 +283,7 @@ public class NativeCallManagerTest {
         opened(id);
         host.system.listener.ready();
         manager.startAudio(id);
-        return host.audio();
+        return host.audios.isEmpty() ? null : host.audio();
     }
 
     private static byte[] pcm(int n) {
