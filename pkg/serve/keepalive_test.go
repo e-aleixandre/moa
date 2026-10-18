@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -136,7 +137,7 @@ type kaServeHarness struct {
 
 // newKAServe builds a manager whose global config is cfg and runs one prompt
 // on an Opus 5.5 session, so the keep-alive timer is armed on a fake clock.
-func newKAServe(t *testing.T, ka *core.CacheKeepAliveConfig, start ...time.Time) *kaServeHarness {
+func newKAServe(t *testing.T, ka *core.CacheKeepAliveConfig) *kaServeHarness {
 	t.Helper()
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	moaCfg := core.MoaConfig{DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off", CacheKeepAlive: ka}
@@ -167,9 +168,6 @@ func newKAServe(t *testing.T, ka *core.CacheKeepAliveConfig, start ...time.Time)
 		mgr.Shutdown()
 	})
 	h := &kaServeHarness{t: t, mgr: mgr, prov: prov, clock: newKAClock(), dir: base}
-	if len(start) > 0 {
-		h.clock.now = start[0]
-	}
 	mgr.keepAlive.clock = h.clock
 	sess, err := mgr.CreateSession(CreateOpts{CWD: t.TempDir()})
 	if err != nil {
@@ -218,12 +216,11 @@ func (h *kaServeHarness) kindCount(kind string) int {
 	return n
 }
 
-func allKA(budget float64) *core.CacheKeepAliveConfig {
+func allKA() *core.CacheKeepAliveConfig {
 	return &core.CacheKeepAliveConfig{
-		DailyBudgetUSD: budget,
-		Owner:          &core.KeepAliveHorizons{Enabled: true},
-		Session:        &core.KeepAliveHorizons{Enabled: true},
-		Subagent:       &core.KeepAliveHorizons{Enabled: true},
+		Owner:    &core.KeepAliveHorizons{Enabled: true},
+		Session:  &core.KeepAliveHorizons{Enabled: true},
+		Subagent: &core.KeepAliveHorizons{Enabled: true},
 	}
 }
 
@@ -249,7 +246,7 @@ func TestKeepAlive_OffByDefaultChangesNothing(t *testing.T) {
 }
 
 func TestKeepAlive_SessionPingIsCountedAndCharged(t *testing.T) {
-	h := newKAServe(t, allKA(0))
+	h := newKAServe(t, allKA())
 	before := sessionCostOf(t, h.sess)
 	expiry0 := h.sess.info().CacheExpiresAt
 	if expiry0.IsZero() {
@@ -281,8 +278,8 @@ func TestKeepAlive_SessionPingIsCountedAndCharged(t *testing.T) {
 	if n := h.kindCount("ping"); n != 1 {
 		t.Errorf("ping trace lines = %d, want 1", n)
 	}
-	if h.mgr.keepAlive.spentToday() <= 0 {
-		t.Error("spentToday() = 0 after a ping")
+	if spent, _ := h.mgr.keepAlive.today(); math.Abs(spent-info.KeepAlive.CostUSD) > 1e-9 {
+		t.Errorf("spent today = %v, want the ping's %v", spent, info.KeepAlive.CostUSD)
 	}
 }
 
@@ -297,22 +294,48 @@ func TestKeepAlive_OnlySubagentDoesNotPingTheSession(t *testing.T) {
 	}
 }
 
-func TestKeepAlive_DailyCapStopsPings(t *testing.T) {
-	// A 250K-token ping costs about $0.05 (large context: kept warm 3h), so
-	// an $0.08 cap admits exactly one.
-	// Early in the day, so the hours advanced here never roll the budget over.
-	now := time.Now()
-	h := newKAServe(t, allKA(0.08), time.Date(now.Year(), now.Month(), now.Day(), 0, 5, 0, 0, now.Location()))
-	h.advance(56 * time.Minute)
-	pollUntil(t, 2*time.Second, "first ping", func() bool { return h.kindCount("ping") == 1 })
-	h.advance(56 * time.Minute)
-	pollUntil(t, 2*time.Second, "cap record", func() bool { return h.kindCount("budget_reached") >= 1 })
-	if n := h.prov.pingCount(); n != 1 {
-		t.Errorf("pings = %d after the cap, want 1", n)
+// A wake that slept past the TTL and found the cache warm thanks to the
+// pings is credited with the cold write it did not pay.
+func TestKeepAlive_WarmWakeIsCreditedWithTheSaving(t *testing.T) {
+	h := newKAServe(t, allKA())
+	h.advance(2 * time.Hour) // pings at 55 and 110 min
+	pollUntil(t, 2*time.Second, "two pings", func() bool { return h.kindCount("ping") == 2 })
+	sendAndWaitIdle(t, h.mgr, h.sess, "back", "")
+	pollUntil(t, 2*time.Second, "wake accounted", func() bool {
+		ka := h.sess.info().KeepAlive
+		return ka != nil && ka.WarmWakes == 1
+	})
+	ka := h.sess.info().KeepAlive
+	model, _ := core.ResolveModel("claude-opus-5-5")
+	n := kaContextTokens - 10
+	want := model.Pricing.Cost(core.Usage{CacheWrite: n, CacheWrite1h: n}) - model.Pricing.Cost(core.Usage{CacheRead: n})
+	if math.Abs(ka.SavedUSD-want) > 1e-9 || want <= 0 {
+		t.Errorf("SavedUSD = %v, want %v", ka.SavedUSD, want)
 	}
-	h.advance(2 * time.Hour)
-	if n := h.prov.pingCount(); n != 1 {
-		t.Errorf("pings kept going past the cap: %d", n)
+	if spent, saved := h.mgr.keepAlive.today(); math.Abs(saved-want) > 1e-9 || spent <= 0 || spent >= saved {
+		t.Errorf("today spent=%v saved=%v, want saved %v above spent", spent, saved, want)
+	}
+	var wake map[string]any
+	for _, l := range h.logLines() {
+		if l["kind"] == "wake" {
+			wake = l
+		}
+	}
+	if wake == nil || wake["warm"] != true || wake["saved_usd"] == nil {
+		t.Errorf("wake trace = %v", wake)
+	}
+}
+
+func TestKeepAliveSavingNeedsASleepPastTheTTL(t *testing.T) {
+	model, _ := core.ResolveModel("claude-opus-5-5")
+	e := agent.KeepAliveEvent{Model: model, Usage: core.Usage{CacheRead: 200_000}, Slept: 58 * time.Minute}
+	if got := keepAliveSaving(e, time.Hour); got != 0 {
+		t.Errorf("a wake within the TTL saved %v", got)
+	}
+	e.Slept = 6 * time.Minute
+	want := model.Pricing.Cost(core.Usage{CacheWrite: 200_000}) - model.Pricing.Cost(core.Usage{CacheRead: 200_000})
+	if got := keepAliveSaving(e, 5*time.Minute); math.Abs(got-want) > 1e-9 {
+		t.Errorf("5m saving = %v, want %v (base write rate)", got, want)
 	}
 }
 
@@ -322,7 +345,7 @@ func TestKeepAlive_SettingChangeAppliesToLiveSession(t *testing.T) {
 	if n := h.prov.pingCount(); n != 0 {
 		t.Fatalf("pings while off = %d", n)
 	}
-	h.mgr.keepAlive.set(allKA(0))
+	h.mgr.keepAlive.set(allKA())
 	// The next request snapshots the conversation; the same session, not
 	// a new one.
 	sendAndWaitIdle(t, h.mgr, h.sess, "again", "")

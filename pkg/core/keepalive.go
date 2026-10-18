@@ -54,10 +54,6 @@ const (
 // off with a "0" horizon. Every other field is optional and falls back to the
 // preset (DefaultCacheKeepAlive).
 type CacheKeepAliveConfig struct {
-	// DailyBudgetUSD caps what pings may cost per day, across every session,
-	// in catalog-equivalent dollars. At the cap no more pings are sent until
-	// the next day.
-	DailyBudgetUSD float64 `json:"daily_budget_usd,omitempty"`
 	// LargeContextTokens splits the "_large" horizons from the others.
 	LargeContextTokens int `json:"large_context_tokens,omitempty"`
 	// PingEvery1h and PingEvery5m are the ping periods for each cache TTL,
@@ -85,7 +81,6 @@ type KeepAliveHorizons struct {
 
 // KeepAlivePolicy is a resolved cache_keepalive setting.
 type KeepAlivePolicy struct {
-	DailyBudgetUSD     float64
 	LargeContextTokens int
 	PingEvery1h        time.Duration
 	PingEvery5m        time.Duration
@@ -103,7 +98,6 @@ type KeepAliveRolePolicy struct {
 // DefaultCacheKeepAlive is the preset: the per-case policy of 18/10/2026
 // (warm while the chance of a wake in the next hour pays for the ping).
 var DefaultCacheKeepAlive = KeepAlivePolicy{
-	DailyBudgetUSD:     10,
 	LargeContextTokens: 200_000,
 	PingEvery1h:        55 * time.Minute,
 	PingEvery5m:        4*time.Minute + 30*time.Second,
@@ -141,9 +135,6 @@ func GetCacheKeepAlive(cfg MoaConfig) (KeepAlivePolicy, bool) {
 	p.Roles = make(map[string]KeepAliveRolePolicy, len(DefaultCacheKeepAlive.Roles))
 	for k, v := range DefaultCacheKeepAlive.Roles {
 		p.Roles[k] = v
-	}
-	if c.DailyBudgetUSD > 0 {
-		p.DailyBudgetUSD = c.DailyBudgetUSD
 	}
 	if c.LargeContextTokens > 0 {
 		p.LargeContextTokens = c.LargeContextTokens

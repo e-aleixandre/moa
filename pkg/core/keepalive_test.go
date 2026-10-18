@@ -11,7 +11,7 @@ func TestCacheKeepAliveIsOffByDefault(t *testing.T) {
 		t.Fatal("keep-alive on without a setting")
 	}
 	var cfg MoaConfig
-	if err := json.Unmarshal([]byte(`{"cache_keepalive":{"daily_budget_usd":3,"owner":{"idle":"1h"}}}`), &cfg); err != nil {
+	if err := json.Unmarshal([]byte(`{"cache_keepalive":{"owner":{"idle":"1h"}}}`), &cfg); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := GetCacheKeepAlive(cfg); ok {
@@ -31,9 +31,6 @@ func TestCacheKeepAliveRolesAreSwitchedOnApart(t *testing.T) {
 	}
 	if p.Horizon(KeepAliveRoleOwner, KeepAliveIdle, 300_000) != 0 || p.Horizon(KeepAliveRoleSubagent, KeepAliveWaiting, 50_000) != time.Hour {
 		t.Fatal("a disabled role keeps a horizon, or the enabled one lost it")
-	}
-	if p.DailyBudgetUSD != 10 {
-		t.Fatalf("daily budget preset = %v", p.DailyBudgetUSD)
 	}
 }
 
@@ -78,7 +75,7 @@ func TestCacheKeepAlivePresetIsThePolicy(t *testing.T) {
 
 func TestCacheKeepAliveOverrides(t *testing.T) {
 	var cfg MoaConfig
-	raw := `{"cache_keepalive":{"daily_budget_usd":2.5,"large_context_tokens":150000,"ping_every_1h":"50m","ping_every_5m":"6m",
+	raw := `{"cache_keepalive":{"large_context_tokens":150000,"ping_every_1h":"50m","ping_every_5m":"6m",
 		"session":{"enabled":true,"min_context_tokens":0,"idle":"0","idle_large":"bogus"}}}`
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		t.Fatal(err)
@@ -86,9 +83,6 @@ func TestCacheKeepAliveOverrides(t *testing.T) {
 	p, ok := GetCacheKeepAlive(cfg)
 	if !ok {
 		t.Fatal("off")
-	}
-	if p.DailyBudgetUSD != 2.5 {
-		t.Errorf("daily_budget_usd = %v", p.DailyBudgetUSD)
 	}
 	if p.PingEvery1h != 50*time.Minute {
 		t.Errorf("ping_every_1h = %v", p.PingEvery1h)
@@ -111,7 +105,7 @@ func TestCacheKeepAliveOverrides(t *testing.T) {
 }
 
 func TestCacheKeepAliveIsGlobalOnly(t *testing.T) {
-	global := MoaConfig{CacheKeepAlive: &CacheKeepAliveConfig{DailyBudgetUSD: 1}}
+	global := MoaConfig{CacheKeepAlive: &CacheKeepAliveConfig{LargeContextTokens: 1}}
 	project := MoaConfig{CacheKeepAlive: allRoles()}
 	if merged := mergeConfigs(global, project); merged.CacheKeepAlive == nil || merged.CacheKeepAlive.Owner != nil {
 		t.Fatalf("a project config turned keep-alive on: %+v", merged.CacheKeepAlive)

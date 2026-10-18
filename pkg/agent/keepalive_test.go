@@ -605,46 +605,6 @@ func TestKeepAliveDisabledRoleIsNotPinged(t *testing.T) {
 	}
 }
 
-// Scenario: Tope diario de gasto en pings.
-func TestKeepAliveDailyBudgetStopsPingsUntilTheNextDay(t *testing.T) {
-	h := newKAHarness(t, core.KeepAliveRoleOwner, 250_000, "1h")
-	// One ping reads 250K at $0.5/M: $0.125. The cap lets two through.
-	exhausted := make(chan string, 4)
-	h.cfg.Budget = NewKeepAliveBudget(0.3, h.clock.Now, func(day string, spent, capUSD float64) { exhausted <- day })
-	h.agent.SetKeepAlive(&h.cfg)
-	h.send("hello")
-	h.advance(5 * time.Hour)
-	if n := h.prov.pingCount(); n != 2 {
-		t.Fatalf("pings under a $0.30 cap = %d, want 2", n)
-	}
-	select {
-	case day := <-exhausted:
-		if day != "2026-10-18" {
-			t.Fatalf("exhausted day = %q", day)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the cap was not recorded")
-	}
-	if _, spent := h.cfg.Budget.Spent(); spent < 0.24 || spent > 0.26 {
-		t.Fatalf("spent = %v, want the two pings' real cost", spent)
-	}
-	// Same day, new request: still capped, and recorded only once.
-	h.send("again")
-	h.advance(2 * time.Hour)
-	if n := h.prov.pingCount(); n != 2 {
-		t.Fatalf("pinged past the cap: %d", n)
-	}
-	if len(exhausted) != 0 {
-		t.Fatal("the cap was recorded twice in a day")
-	}
-	// The next day the count starts over.
-	h.advance(16 * time.Hour)
-	h.send("tomorrow")
-	h.advance(55 * time.Minute)
-	if n := h.prov.pingCount(); n != 3 {
-		t.Fatalf("pings the next day = %d, want 3", n)
-	}
-}
 
 // Settings apply at once: a role switched off mid-sleep stops being pinged,
 // and switched on again it is warmed from its next request.

@@ -62,8 +62,6 @@ type KeepAliveConfig struct {
 	// keep-alive's goroutines, never with a lock held.
 	OnEvent func(KeepAliveEvent)
 	Clock   KeepAliveClock // nil = the system clock
-	// Budget caps the day's ping spend, shared across agents; nil = no cap.
-	Budget *KeepAliveBudget
 }
 
 // Keep-alive event kinds.
@@ -355,26 +353,10 @@ func (ka *keepAlive) evaluate() {
 		ka.suspendLocked()
 		return
 	}
-	settle := func(float64) {}
-	if b := ka.cfg.Budget; b != nil {
-		// A model with no catalog price cannot be held to the cap.
-		p := s.req.Model.Pricing
-		if p == nil {
-			ka.suspendLocked()
-			return
-		}
-		var ok bool
-		if settle, ok = b.admit(p.Cost(core.Usage{CacheRead: s.contextTokens})); !ok {
-			// The day's cap: nothing more for this request, and the next
-			// request finds the cap again until the day turns.
-			ka.suspendLocked()
-			return
-		}
-	}
 	ctx, cancel := context.WithTimeout(ka.ctx, pingTimeout)
 	ka.pingCancel = cancel
 	ka.stopTimerLocked()
-	go ka.ping(ctx, cancel, s, gen, now, state, settle)
+	go ka.ping(ctx, cancel, s, gen, now, state)
 }
 
 // state classifies an agent not calling the model. ok is false while a run
@@ -396,25 +378,10 @@ func (ka *keepAlive) state(toolsBusy, askUser bool) (string, bool) {
 	return core.KeepAliveIdle, true
 }
 
-func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *keepAliveSnapshot, gen uint64, sentAt time.Time, state string, settle func(float64)) {
+func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *keepAliveSnapshot, gen uint64, sentAt time.Time, state string) {
 	usage, err := s.pw.Prewarm(ctx, s.req)
 	cancelled := ctx.Err() != nil && errors.Is(err, context.Canceled)
 	cancel()
-	switch {
-	case err == nil:
-		if p := s.req.Model.Pricing; p != nil {
-			settle(p.Cost(usage))
-		} else {
-			settle(0)
-		}
-	case cancelled:
-		// It may have been served before the cancel: keep the reservation.
-		if p := s.req.Model.Pricing; p != nil {
-			settle(p.Cost(core.Usage{CacheRead: s.contextTokens}))
-		}
-	default:
-		settle(0)
-	}
 	ev := &KeepAliveEvent{At: sentAt, Role: ka.cfg.Role, State: state, Model: s.req.Model, ContextTokens: s.contextTokens}
 
 	ka.mu.Lock()
@@ -480,74 +447,4 @@ func cacheTTL(retention string) time.Duration {
 		return 5 * time.Minute
 	}
 	return 0 // core.CacheOff
-}
-
-// KeepAliveBudget caps what pings may cost per calendar day (the clock's
-// local date), shared by every agent it is handed to. It lives in memory: a
-// restart starts the day's count over, and no ping survives a restart.
-type KeepAliveBudget struct {
-	mu        sync.Mutex
-	capUSD    float64
-	now       func() time.Time
-	day       string
-	spent     float64 // settled plus reserved
-	exhausted bool
-	// onExhausted is told once per day, in its own goroutine, when a ping is
-	// refused for the cap.
-	onExhausted func(day string, spentUSD, capUSD float64)
-}
-
-// NewKeepAliveBudget caps pings at capUSD a day. now nil = time.Now.
-func NewKeepAliveBudget(capUSD float64, now func() time.Time, onExhausted func(day string, spentUSD, capUSD float64)) *KeepAliveBudget {
-	if now == nil {
-		now = time.Now
-	}
-	return &KeepAliveBudget{capUSD: capUSD, now: now, onExhausted: onExhausted}
-}
-
-// SetCap changes the cap from now on.
-func (b *KeepAliveBudget) SetCap(capUSD float64) {
-	b.mu.Lock()
-	b.capUSD = capUSD
-	b.mu.Unlock()
-}
-
-// Spent is today's spend, reservations included.
-func (b *KeepAliveBudget) Spent() (day string, spentUSD float64) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.rollLocked()
-	return b.day, b.spent
-}
-
-func (b *KeepAliveBudget) rollLocked() {
-	if day := b.now().Format("2006-01-02"); day != b.day {
-		b.day, b.spent, b.exhausted = day, 0, false
-	}
-}
-
-// admit reserves estimateUSD for one ping. settle replaces the reservation
-// with what the ping really cost; it must be called exactly once.
-func (b *KeepAliveBudget) admit(estimateUSD float64) (settle func(actualUSD float64), ok bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.rollLocked()
-	if b.spent+estimateUSD > b.capUSD {
-		if !b.exhausted {
-			b.exhausted = true
-			if b.onExhausted != nil {
-				go b.onExhausted(b.day, b.spent, b.capUSD)
-			}
-		}
-		return nil, false
-	}
-	b.spent += estimateUSD
-	day := b.day
-	return func(actualUSD float64) {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		if b.day == day {
-			b.spent += actualUSD - estimateUSD
-		}
-	}, true
 }

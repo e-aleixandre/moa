@@ -183,7 +183,7 @@ function subagentPayload(sessions, sessionId, jobId) {
 // The pins are the one preference the lab keeps between requests: the picker
 // writes them one model at a time, as core.UpdatePinnedModels does, and a
 // reopened picker has to show what was just pinned.
-let catalogKeepAlive = { owner: false, session: false, subagent: false, daily_budget_usd: 10, spent_today_usd: 0.42 };
+let catalogKeepAlive = { owner: false, session: false, subagent: false, spent_today_usd: 0.42, saved_today_usd: 6.3 };
 let catalogPinned = ["claude-opus-4-8", "gpt-5-sol"];
 
 function updatePinned(ids, id, pinned) {

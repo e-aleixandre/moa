@@ -23,6 +23,9 @@ type KeepAliveInfo struct {
 	Errors    int     `json:"errors,omitempty"`
 	Wakes     int     `json:"wakes"`
 	WarmWakes int     `json:"warm_wakes"`
+	// SavedUSD estimates what the warm wakes did not pay: writing the prefix
+	// they read cold, minus reading it (see keepAliveSaving).
+	SavedUSD float64 `json:"saved_usd"`
 }
 
 // warmWakeShare is how much of the kept prefix a wake must read from the
@@ -30,7 +33,7 @@ type KeepAliveInfo struct {
 const warmWakeShare = 0.95
 
 // keepAliveRecord is one line of keepalive.jsonl, the durable trace the net
-// saving is measured from: every ping, failed ping, wake and daily cap.
+// saving is measured from: every ping, failed ping and wake.
 type keepAliveRecord struct {
 	At            time.Time `json:"at"`
 	Kind          string    `json:"kind"`
@@ -49,12 +52,12 @@ type keepAliveRecord struct {
 	PingCostUSD   float64   `json:"ping_cost_usd,omitempty"`
 	SleptSeconds  int64     `json:"slept_s,omitempty"`
 	Warm          bool      `json:"warm,omitempty"`
+	SavedUSD      float64   `json:"saved_usd,omitempty"`
 	Error         string    `json:"error,omitempty"`
-	BudgetUSD     float64   `json:"budget_usd,omitempty"`
 }
 
-// keepAliveService is the server-wide part of keep-alive: the daily budget
-// every agent shares and the trace file.
+// keepAliveService is the server-wide part of keep-alive: the setting in
+// force, today's totals and the trace file.
 type keepAliveService struct {
 	// setting is the global cache_keepalive setting in force, replaced
 	// when Settings saves it (nil = everything off).
@@ -62,7 +65,11 @@ type keepAliveService struct {
 	logPath string
 	clock   agent.KeepAliveClock // nil = system; tests only
 	mu      sync.Mutex
-	budget  *agent.KeepAliveBudget
+	// Today's totals across every session, for Settings. In memory: a
+	// restart starts the day over, and no ping survives a restart anyway.
+	day        string
+	spentToday float64
+	savedToday float64
 }
 
 func (k *keepAliveService) now() time.Time {
@@ -75,9 +82,6 @@ func (k *keepAliveService) now() time.Time {
 // policy is the setting in force, resolved; every role off when unset.
 func (k *keepAliveService) policy() core.KeepAlivePolicy {
 	p, _ := core.GetCacheKeepAlive(core.MoaConfig{CacheKeepAlive: k.setting.Load()})
-	if p.DailyBudgetUSD > 0 {
-		k.budgetFor(p.DailyBudgetUSD)
-	}
 	return p
 }
 
@@ -91,31 +95,47 @@ func (k *keepAliveService) set(c *core.CacheKeepAliveConfig) {
 	k.setting.Store(c)
 }
 
-// spentToday is what pings have cost today, across every session.
-func (k *keepAliveService) spentToday() float64 {
-	k.mu.Lock()
-	b := k.budget
-	k.mu.Unlock()
-	if b == nil {
-		return 0
-	}
-	_, spent := b.Spent()
-	return spent
-}
-
-// budgetFor returns the shared budget, following the configured cap.
-func (k *keepAliveService) budgetFor(capUSD float64) *agent.KeepAliveBudget {
+// today returns what pings cost today and the estimated saving of the
+// warm wakes they bought, across every session.
+func (k *keepAliveService) today() (spentUSD, savedUSD float64) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if k.budget == nil {
-		k.budget = agent.NewKeepAliveBudget(capUSD, k.now, func(day string, spent, capUSD float64) {
-			slog.Warn("cache keep-alive: daily budget reached, no pings until tomorrow", "day", day, "spent_usd", spent, "budget_usd", capUSD)
-			k.record(keepAliveRecord{At: k.now(), Kind: "budget_reached", CostUSD: spent, BudgetUSD: capUSD})
-		})
-	} else {
-		k.budget.SetCap(capUSD)
+	k.rollLocked()
+	return k.spentToday, k.savedToday
+}
+
+func (k *keepAliveService) add(spentUSD, savedUSD float64) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.rollLocked()
+	k.spentToday += spentUSD
+	k.savedToday += savedUSD
+}
+
+func (k *keepAliveService) rollLocked() {
+	if day := k.now().Format("2006-01-02"); day != k.day {
+		k.day, k.spentToday, k.savedToday = day, 0, 0
 	}
-	return k.budget
+}
+
+// keepAliveSaving estimates what a warm wake after pings did not pay: the
+// prefix it read from the cache, written cold at the window's rate, minus
+// reading it. Only a wake that slept past the TTL counts: a shorter sleep
+// would have found the cache warm without any ping.
+func keepAliveSaving(e agent.KeepAliveEvent, ttl time.Duration) float64 {
+	p := e.Model.Pricing
+	if p == nil || ttl <= 0 || e.Slept < ttl || e.Usage.CacheRead <= 0 {
+		return 0
+	}
+	n := e.Usage.CacheRead
+	cold := core.Usage{CacheWrite: n}
+	if ttl >= time.Hour {
+		cold.CacheWrite1h = n
+	}
+	if saved := p.Cost(cold) - p.Cost(core.Usage{CacheRead: n}); saved > 0 {
+		return saved
+	}
+	return 0
 }
 
 func (k *keepAliveService) record(r keepAliveRecord) {
@@ -171,7 +191,6 @@ func (m *Manager) keepAliveConfig(sess *ManagedSession, role, jobID string) *age
 	cfg := &agent.KeepAliveConfig{
 		Policy: k.policy,
 		Role:   role,
-		Budget: k.budgetFor(core.DefaultCacheKeepAlive.DailyBudgetUSD),
 		Clock:  m.keepAlive.clock,
 		OnEvent: func(e agent.KeepAliveEvent) {
 			m.onKeepAliveEvent(sess, jobID, e)
@@ -227,9 +246,23 @@ func (m *Manager) onKeepAliveEvent(sess *ManagedSession, jobID string, e agent.K
 		rec.Warm = e.ContextTokens > 0 && float64(e.Usage.CacheRead) >= warmWakeShare*float64(e.ContextTokens)
 		if rec.Warm {
 			sess.keepAlive.WarmWakes++
+			// A child runs on the provider's 5-minute cache; the session's
+			// own agent on the configured window.
+			ttl := sess.cacheTTL
+			if jobID != "" {
+				ttl = 5 * time.Minute
+			}
+			rec.SavedUSD = keepAliveSaving(e, ttl)
+			sess.keepAlive.SavedUSD += rec.SavedUSD
 		}
 	}
 	sess.mu.Unlock()
+	switch e.Kind {
+	case agent.KeepAlivePing:
+		m.keepAlive.add(e.CostUSD, 0)
+	case agent.KeepAliveWake:
+		m.keepAlive.add(0, rec.SavedUSD)
+	}
 	if e.Kind == agent.KeepAlivePing && e.CostUSD > 0 {
 		sess.runtime.Bus.Publish(bus.KeepAliveUsage{SessionID: sess.ID, JobID: jobID, Usage: e.Usage, CostUSD: e.CostUSD})
 	}

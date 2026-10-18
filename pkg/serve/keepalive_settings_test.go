@@ -35,8 +35,8 @@ func TestKeepAliveSettings_RoundTripAndPersistence(t *testing.T) {
 	defer srv.Close()
 
 	got := kaSettingsReq(t, srv, http.MethodGet, "", http.StatusOK)
-	if got.Owner || got.Session || got.Subagent || got.DailyBudgetUSD != 10 || got.SpentTodayUSD != 0 {
-		t.Errorf("defaults = %+v, want all off, limit 10, nothing spent", got)
+	if got.Owner || got.Session || got.Subagent || got.SpentTodayUSD != 0 || got.SavedTodayUSD != 0 {
+		t.Errorf("defaults = %+v, want all off, nothing spent or saved", got)
 	}
 
 	// A hand-written horizon override must survive a save from Settings.
@@ -46,13 +46,13 @@ func TestKeepAliveSettings_RoundTripAndPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got = kaSettingsReq(t, srv, http.MethodPatch, `{"owner":true,"daily_budget_usd":2.5}`, http.StatusOK)
-	if !got.Owner || got.Session || got.Subagent || got.DailyBudgetUSD != 2.5 {
+	got = kaSettingsReq(t, srv, http.MethodPatch, `{"owner":true}`, http.StatusOK)
+	if !got.Owner || got.Session || got.Subagent {
 		t.Errorf("after patch = %+v", got)
 	}
 	// A partial patch leaves the other fields alone.
 	got = kaSettingsReq(t, srv, http.MethodPatch, `{"session":true}`, http.StatusOK)
-	if !got.Owner || !got.Session || got.DailyBudgetUSD != 2.5 {
+	if !got.Owner || !got.Session {
 		t.Errorf("partial patch changed other fields: %+v", got)
 	}
 	if again := kaSettingsReq(t, srv, http.MethodGet, "", http.StatusOK); again != got {
@@ -63,7 +63,7 @@ func TestKeepAliveSettings_RoundTripAndPersistence(t *testing.T) {
 	if saved == nil || saved.Owner == nil || !saved.Owner.Enabled || saved.Session == nil || !saved.Session.Enabled || saved.Subagent != nil {
 		t.Fatalf("persisted = %+v", saved)
 	}
-	if saved.DailyBudgetUSD != 2.5 || saved.PingEvery1h != "50m" || saved.Owner.Idle != "2h" {
+	if saved.PingEvery1h != "50m" || saved.Owner.Idle != "2h" {
 		t.Errorf("persisted lost values: %+v owner=%+v", saved, saved.Owner)
 	}
 	// Written to the global file, and nowhere else.
@@ -88,15 +88,13 @@ func TestKeepAliveSettings_Validation(t *testing.T) {
 	defer srv.Close()
 
 	for _, body := range []string{
-		`{}`, `not json`, `{"daily_budget_usd":0}`, `{"daily_budget_usd":-1}`,
-		`{"daily_budget_usd":1000.01}`, `{"daily_budget_usd":1e999}`, `{"daily_budget_usd":"5"}`,
+		`{}`, `not json`, `{"owner":"yes"}`, `{"daily_budget_usd":5}`,
 	} {
 		kaSettingsReq(t, srv, http.MethodPatch, body, http.StatusBadRequest)
 	}
 	if c := core.LoadGlobalConfig().CacheKeepAlive; c != nil {
 		t.Errorf("a rejected request wrote %+v", c)
 	}
-	kaSettingsReq(t, srv, http.MethodPatch, `{"daily_budget_usd":1000}`, http.StatusOK)
 }
 
 func TestKeepAliveSettings_AppliesToLiveSessionWithoutRestart(t *testing.T) {

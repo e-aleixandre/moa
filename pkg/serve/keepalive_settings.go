@@ -2,39 +2,34 @@ package serve
 
 import (
 	"encoding/json"
-	"math"
 	"net/http"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
-// maxKeepAliveDailyBudgetUSD is the highest daily limit Settings accepts: a
-// guard against a typo, not a product statement.
-const maxKeepAliveDailyBudgetUSD = 1000
-
 // keepAliveSettings is the wire shape of the cache keep-alive switches in
 // Settings. Horizon overrides edited by hand in the config file are not part
 // of it and survive a save untouched.
 type keepAliveSettings struct {
-	Owner          bool    `json:"owner"`
-	Session        bool    `json:"session"`
-	Subagent       bool    `json:"subagent"`
-	DailyBudgetUSD float64 `json:"daily_budget_usd"`
-	SpentTodayUSD  float64 `json:"spent_today_usd"`
+	Owner    bool `json:"owner"`
+	Session  bool `json:"session"`
+	Subagent bool `json:"subagent"`
+	// Today, across every session: what pings cost, and the estimated cold
+	// writes the warm wakes they bought did not pay. Informative only.
+	SpentTodayUSD float64 `json:"spent_today_usd"`
+	SavedTodayUSD float64 `json:"saved_today_usd"`
 }
 
 func (k *keepAliveService) settings() keepAliveSettings {
 	c := k.setting.Load()
-	out := keepAliveSettings{DailyBudgetUSD: core.DefaultCacheKeepAlive.DailyBudgetUSD, SpentTodayUSD: k.spentToday()}
+	var out keepAliveSettings
+	out.SpentTodayUSD, out.SavedTodayUSD = k.today()
 	if c == nil {
 		return out
 	}
 	out.Owner = c.Owner != nil && c.Owner.Enabled
 	out.Session = c.Session != nil && c.Session.Enabled
 	out.Subagent = c.Subagent != nil && c.Subagent.Enabled
-	if c.DailyBudgetUSD > 0 {
-		out.DailyBudgetUSD = c.DailyBudgetUSD
-	}
 	return out
 }
 
@@ -54,21 +49,16 @@ func handleCacheKeepAlive(mgr *Manager) http.HandlerFunc {
 func handleCacheKeepAlivePatch(w http.ResponseWriter, r *http.Request, mgr *Manager) {
 	limitBody(w, r, maxJSONBodySize)
 	var body struct {
-		Owner          *bool    `json:"owner"`
-		Session        *bool    `json:"session"`
-		Subagent       *bool    `json:"subagent"`
-		DailyBudgetUSD *float64 `json:"daily_budget_usd"`
+		Owner    *bool `json:"owner"`
+		Session  *bool `json:"session"`
+		Subagent *bool `json:"subagent"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	if body.Owner == nil && body.Session == nil && body.Subagent == nil && body.DailyBudgetUSD == nil {
+	if body.Owner == nil && body.Session == nil && body.Subagent == nil {
 		http.Error(w, "nothing to change", http.StatusBadRequest)
-		return
-	}
-	if b := body.DailyBudgetUSD; b != nil && (math.IsNaN(*b) || math.IsInf(*b, 0) || *b <= 0 || *b > maxKeepAliveDailyBudgetUSD) {
-		http.Error(w, "daily limit must be above 0 and at most 1000", http.StatusBadRequest)
 		return
 	}
 
@@ -92,9 +82,6 @@ func handleCacheKeepAlivePatch(w http.ResponseWriter, r *http.Request, mgr *Mana
 				*s.dst = &core.KeepAliveHorizons{}
 			}
 			(*s.dst).Enabled = *s.on
-		}
-		if body.DailyBudgetUSD != nil {
-			c.DailyBudgetUSD = *body.DailyBudgetUSD
 		}
 		cfg.CacheKeepAlive = c
 		saved = c
