@@ -152,3 +152,4 @@ export async function openCallRequestLink(id) {
   const owner = (ownersSlice(store.get()).list || []).find((o) => o.id === request.owner_id);
   return openOwnerConversation(owner || { session_id: request.session_id });
 }
+export function startFeedPresence() { return () => {}; }
