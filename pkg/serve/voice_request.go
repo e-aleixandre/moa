@@ -291,9 +291,11 @@ func (r *callRequestRegistry) announce(ctx context.Context, req *callRequest) {
 	}
 	r.m.pushPolicy.Handle(push.Signal{
 		Kind: push.KindCallRequest, SessionID: req.SessionID, Title: sess.title(), Headline: headline,
-		// Any visible client rings itself from the requests feed, whatever
-		// conversation it shows: a system notification would only duplicate it.
-		RequestID: id, Watched: r.m.anyViewerVisible(),
+		// Any visible client rings itself from its incoming card, whatever it
+		// shows (a conversation, Tasks, the inbox): a system notification would
+		// only duplicate it. Feed presence covers current clients; the
+		// conversation presence covers a page still running an older bundle.
+		RequestID: id, Watched: r.clients.watched() || r.m.anyViewerVisible(),
 		StillPending: func() bool { return r.isState(id, crRinging) },
 	})
 }
