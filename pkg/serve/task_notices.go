@@ -141,6 +141,12 @@ func (d *noticeDispatcher) sessionIdle(id string) {
 	}
 }
 
+// slotFreed is called when a loaded session goes away: a full house may have
+// held back an accepted answer (see pass), and there is room for it now.
+func (d *noticeDispatcher) slotFreed() {
+	d.trigger(func() { d.retryWaiting = true })
+}
+
 // transcriptSaved looks for sent notices after the session's transcript
 // reached disk: that is when a notice counts as delivered.
 func (d *noticeDispatcher) transcriptSaved(id string) {

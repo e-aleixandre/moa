@@ -77,7 +77,9 @@ func TestAskAsyncRecallKeepsAcceptedAnswerAsAppend(t *testing.T) {
 	if !f1Eventually(f1Guard, func() bool { return len(f1Answers(s.sess.History())) == 1 }) {
 		t.Fatal("the recalled answer never reached the transcript")
 	}
-	if !f1Stable(500*time.Millisecond, func() bool { return s.e.prov.countSession(t, s.sess.ID) == before && !s.sess.runtime.Context().Agent.IsRunning() }) {
+	if !f1Stable(500*time.Millisecond, func() bool {
+		return s.e.prov.countSession(t, s.sess.ID) == before && !s.sess.runtime.Context().Agent.IsRunning()
+	}) {
 		t.Fatalf("the recalled answer started a run (+%d call(s))", s.e.prov.countSession(t, s.sess.ID)-before)
 	}
 	f1AssertFenced(t, s.e, s.qid)

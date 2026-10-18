@@ -976,6 +976,7 @@ func (m *Manager) deleteSession(id string) (err error) {
 	delete(m.sessions, id)
 	m.deactivateAttentionRuntime(sess)
 	m.mu.Unlock()
+	m.notices.slotFreed()
 	sess.deleted.Store(true)
 	// An explicit delete is the user saying this conversation is gone: its
 	// unreported turns go with it, rather than arriving as a report pointing at
@@ -1201,6 +1202,7 @@ func (m *Manager) CloseSession(id string) error {
 		m.mu.Lock()
 		delete(m.resuming, id)
 		m.mu.Unlock()
+		m.notices.slotFreed()
 	}()
 
 	// Flush before tearing anything down: the final turn must be on disk before
