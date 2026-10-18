@@ -361,6 +361,7 @@ func TestRequestCall_AskFirstPushesWantsToTalk(t *testing.T) {
 
 // F2-7: unanswered for ring time → missed → the written question.
 func TestRequestCall_MissedBecomesWrittenQuestion(t *testing.T) {
+	pinSyncAskUser(t)
 	f := rcNewFixture(t, "grok-plan", "ring")
 	f.setRing(150 * time.Millisecond)
 	f.ask()

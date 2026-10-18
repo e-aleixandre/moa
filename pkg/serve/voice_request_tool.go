@@ -12,14 +12,17 @@ import (
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
 var requestCallDescription = "Ask to talk to the user by voice.\n\n" + owner.CallCriterion + "\n\n" +
 	"It rings once. If the user answers, you are told they are on a call with you: end your turn; what you agree arrives as call minutes and relayed tasks. " +
-	"If no call happens (not answered, they prefer writing, calls are off, paused or outside hours, or the plan fails), written_fallback is asked in writing instead and you get the answer. Do not call again about the same thing."
+	"If no call happens (not answered, they prefer writing, calls are off, paused or outside hours, or the plan fails), written_fallback is asked in writing instead and you get the answer (if the question is asynchronous, as an acknowledgement now and the answer later). Do not call again about the same thing."
 
 // newRequestCallTool is the owner's request_call. bridge is the owner
-// session's ask_user bridge: the written fallback is an ordinary question.
+// session's ask_user bridge: the written fallback is an ordinary question. In
+// a session that asks asynchronously the fallback is a durable question and the
+// call returns an acknowledgement at once.
 func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge) core.Tool {
 	return core.Tool{
 		Name:        "request_call",
@@ -95,6 +98,15 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge) c
 					return res, nil
 				}
 				why = w
+			}
+			if sess, ok := m.Get(sessionID); ok && sess.askAsync && m.questions != nil {
+				ackFor := func(qid string) tasks.QuestionAck {
+					ack := openAck(qid)
+					ack.Text = "No call: " + whyText[why] + ". Your written_fallback was asked in writing instead; " + ack.Text
+					ack.Custom["call_request"] = map[string]any{"id": id, "outcome": crWritten, "why": why, "reason": reason, "question_id": qid}
+					return ack
+				}
+				return m.questions.postQuestions(ctx, sess, []askuser.Question{question}, requiresTap, tasks.OriginRequestCall, ackFor), nil
 			}
 			if bridge == nil {
 				return core.ErrorResult("No call (" + whyText[why] + ") and this session cannot ask in writing."), nil

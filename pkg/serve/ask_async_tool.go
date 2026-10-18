@@ -100,6 +100,13 @@ func (q *questionService) post(ctx context.Context, sess *ManagedSession, params
 		return core.ErrorResult(err.Error())
 	}
 	requiresTap, _ := params["requires_tap"].(bool)
+	return q.postQuestions(ctx, sess, questions, requiresTap, tasks.OriginAskUser, openAck)
+}
+
+// postQuestions is the durable post shared by ask_user and request_call's
+// written fallback; tool names the origin and ack builds what the call
+// returns, stored with the row so a recovered call returns the same thing.
+func (q *questionService) postQuestions(ctx context.Context, sess *ManagedSession, questions []askuser.Question, requiresTap bool, tool string, ack func(id string) tasks.QuestionAck) core.Result {
 	callID := core.ToolCallIDFromContext(ctx)
 	if callID == "" {
 		callID = newInvocationID()
@@ -123,8 +130,8 @@ func (q *questionService) post(ctx context.Context, sess *ManagedSession, params
 	}
 	id := tasks.NewQuestionID()
 	stored, existed, err := q.repo.InsertQuestion(ctx, tasks.Question{
-		ID: id, SessionID: sess.ID, OriginMsgID: msgID, OriginToolCallID: callID, OriginTool: tasks.OriginAskUser,
-		Questions: questions, RequiresTap: requiresTap, Ack: openAck(id),
+		ID: id, SessionID: sess.ID, OriginMsgID: msgID, OriginToolCallID: callID, OriginTool: tool,
+		Questions: questions, RequiresTap: requiresTap, Ack: ack(id),
 	})
 	var open *tasks.ErrQuestionOpen
 	switch {
