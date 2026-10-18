@@ -4,6 +4,8 @@
     <string name="channel_urgent">Preguntas y permisos</string>
     <string name="channel_active">Terminadas</string>
     <string name="channel_passive">Resúmenes</string>
+    <string name="channel_call">Llamadas</string>
+    <string name="call_ongoing">Llamada en curso</string>
 
     <!-- Shown for a notification moa could not decrypt. -->
     <string name="push_fallback_title">moa</string>

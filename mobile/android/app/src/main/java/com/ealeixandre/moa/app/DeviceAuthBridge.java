@@ -131,6 +131,7 @@ final class DeviceAuthBridge implements WebBridges.MethodHandler {
         // A new pairing never inherits the previous push secret (iOS review
         // C3). After the save, so push work for the old credential is fenced.
         NativePushRegistration.get(context).forgetLocal();
+        NativeCalls.bindingChanged();
     }
 
     private void authorize(String origin) throws AuthException {
@@ -153,6 +154,7 @@ final class DeviceAuthBridge implements WebBridges.MethodHandler {
                 // The origin is already forgotten in memory; the next launch retries.
             }
             setCookie(origin, SessionCookie.expired());
+            NativeCalls.bindingChanged();
             throw new AuthException("not_paired");
         }
         if (response.status != 204) throw new AuthException("unavailable");
@@ -179,6 +181,7 @@ final class DeviceAuthBridge implements WebBridges.MethodHandler {
             deleteError = new AuthException("keychain");
         }
         if (origin != null) setCookie(origin, SessionCookie.expired());
+        NativeCalls.bindingChanged();
         if (deleteError != null) throw deleteError;
         if (!pushSecretRemoved) throw new AuthException("keychain");
     }

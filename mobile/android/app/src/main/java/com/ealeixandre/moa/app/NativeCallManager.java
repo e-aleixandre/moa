@@ -54,6 +54,10 @@ final class NativeCallManager {
         void interrupt();
 
         void setMuted(boolean muted);
+
+        // The sound moved to another device (headset, car, loudspeaker):
+        // rebuild input and output on it. Anything queued to play is dropped.
+        void rebuild() throws Exception;
     }
 
     interface AudioEvents {
@@ -81,6 +85,13 @@ final class NativeCallManager {
 
         // Muted from outside the app.
         void muted(boolean muted);
+
+        // The sound moved to another device.
+        void routeChanged();
+
+        // Another app took the audio and there is no system call to share it
+        // with: the call ends instead of hanging silent.
+        void interrupted();
     }
 
     interface SystemCall {
@@ -478,6 +489,21 @@ final class NativeCallManager {
         @Override
         public void muted(boolean muted) {
             if (live() && c.muted != muted) applyMute(c, muted, true);
+        }
+
+        @Override
+        public void routeChanged() {
+            if (!live() || c.audio == null) return;
+            try {
+                c.audio.rebuild();
+            } catch (Exception e) {
+                finish(c, false, "route_rebuild");
+            }
+        }
+
+        @Override
+        public void interrupted() {
+            if (live()) finish(c, false, "interrupted");
         }
     }
 }

@@ -104,11 +104,14 @@ dependencies {
     implementation "androidx.activity:activity:$androidxActivityVersion"
     implementation platform("com.google.firebase:firebase-bom:$firebaseBomVersion")
     implementation "com.google.firebase:firebase-messaging"
+    // The voice call's WebSocket: the platform has no client for it.
+    implementation "com.squareup.okhttp3:okhttp:$okhttpVersion"
     // Pairing QR scanner: ZXing, decoded on the device, no Google services.
     implementation "com.journeyapps:zxing-android-embedded:$zxingAndroidEmbeddedVersion"
     testImplementation "junit:junit:$junitVersion"
     // android.jar's org.json is a stub in JVM tests; the real one parses.
     testImplementation "org.json:json:$orgJsonVersion"
+    testImplementation "com.squareup.okhttp3:mockwebserver:$okhttpVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

@@ -9,6 +9,10 @@
     <string name="channel_urgent">Questions and permissions</string>
     <string name="channel_active">Finished</string>
     <string name="channel_passive">Summaries</string>
+    <string name="channel_call">Calls</string>
+
+    <!-- The ongoing-call notification, under the other party's name. -->
+    <string name="call_ongoing">Ongoing call</string>
 
     <!-- Shown for a notification moa could not decrypt. -->
     <string name="push_fallback_title">moa</string>

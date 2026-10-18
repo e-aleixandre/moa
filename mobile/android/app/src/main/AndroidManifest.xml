@@ -82,6 +82,28 @@
             </intent-filter>
         </service>
 
+        <!--
+          Keeps a voice call alive with the screen locked or the app minimized.
+          The microphone type is only taken once the call's audio starts.
+        -->
+        <service
+            android:name=".CallService"
+            android:exported="false"
+            android:foregroundServiceType="phoneCall|microphone" />
+
+        <!--
+          The calls the app registers with Telecom (self-managed). Only the
+          system may bind it.
+        -->
+        <service
+            android:name=".CallConnectionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
+
         <!-- Nothing talks to Firebase until notifications are turned on. -->
         <meta-data
             android:name="firebase_messaging_auto_init_enabled"
@@ -124,6 +146,12 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- Asked for when notifications are turned on (Android 13+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Voice calls that go on with the screen locked: a foreground service of
+         type phoneCall that also holds the microphone, registered with Telecom. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <!-- Haptics. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 </manifest>

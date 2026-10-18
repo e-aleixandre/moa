@@ -46,4 +46,32 @@ final class NativeCallMessage {
         if (!(op instanceof String) || !(id instanceof String)) return null;
         return new NativeCallMessage(body, (String) op, (String) id);
     }
+
+    // The same switch as the iOS handler's ops.
+    void applyTo(NativeCallManager manager) {
+        switch (op) {
+            case "open":
+                manager.open(id, url, name, sessionId);
+                break;
+            case "active":
+                manager.reportActive();
+                break;
+            case "send":
+                if (text != null) manager.send(id, text);
+                break;
+            case "close":
+                manager.closeFromPage(id);
+                break;
+            case "startAudio":
+                manager.startAudio(id);
+                break;
+            case "stopAudio":
+                manager.stopAudio(id);
+                break;
+            case "setMuted":
+                manager.setMutedFromPage(id, muted);
+                break;
+            default:
+        }
+    }
 }
