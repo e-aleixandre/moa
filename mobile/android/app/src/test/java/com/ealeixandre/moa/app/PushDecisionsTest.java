@@ -206,4 +206,13 @@ public class PushDecisionsTest {
         String inbox = PushMessages.openInPlaceScript(PushEnvelope.Destination.INBOX, 8);
         assertTrue(inbox.contains("nav.openInbox()"));
     }
+
+    @Test
+    public void aMissedCallIntentNamesItsConversationOnlyWhenWellFormed() {
+        assertEquals("sess_1", PushMessages.missedCallSession(PushMessages.ACTION_OPEN_MISSED_CALL, "sess_1"));
+        assertNull(PushMessages.missedCallSession(PushMessages.ACTION_OPEN_MISSED_CALL, "../x?y"));
+        assertNull(PushMessages.missedCallSession(PushMessages.ACTION_OPEN_MISSED_CALL, null));
+        assertNull(PushMessages.missedCallSession("android.intent.action.MAIN", "sess_1"));
+        assertNull(PushMessages.missedCallSession(null, "sess_1"));
+    }
 }

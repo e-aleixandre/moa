@@ -326,6 +326,29 @@ describe("Android incoming calls", () => {
     expect(activity).toContain("AndroidVoip.get(this).refresh(false)");
   });
 
+  it("opens the missed call's conversation through the navigation gate, on a cold start and on a running app", () => {
+    const notifier = code(java["IncomingCallNotifier.java"]);
+    expect(notifier).toContain("PushMessages.ACTION_OPEN_MISSED_CALL");
+    expect(notifier).toContain("ringing.sessionId");
+    const activity = code(java["MainActivity.java"]);
+    expect(activity.match(/PushMessages\.missedCallSession\(/g).length).toBe(2);
+    expect(activity.match(/handleMissedCall\(this, /g).length).toBe(2);
+    const navigator = code(java["PushNavigator.java"]);
+    expect(navigator).toContain("taps.handleSession(");
+  });
+
+  it("completes the call setup when a pairing finishes inside the running activity, not at the next resume", () => {
+    const auth = code(java["DeviceAuthBridge.java"]);
+    const claim = auth.slice(auth.indexOf("private void claim("), auth.indexOf("private void authorize("));
+    expect(claim.indexOf("store.save(")).toBeLessThan(claim.indexOf("onPaired.run()"));
+    expect(claim.indexOf("AndroidVoip.forget(context, null)")).toBeLessThan(claim.indexOf("onPaired.run()"));
+    const activity = code(java["MainActivity.java"]);
+    expect(activity).toContain("new DeviceAuthBridge(this, credentials, this::pairingCompleted)");
+    const done = activity.slice(activity.indexOf("void pairingCompleted()"));
+    expect(done).toContain("AndroidVoip.get(this).refresh(false)");
+    expect(done).toContain("askCallPermissions()");
+  });
+
   it("tells a call from an alert by the key id, and a challenge by the type waiting for it", () => {
     const service = code(java["MoaMessagingService.java"]);
     expect(service.indexOf("AndroidVoip.get(this).receive(data)")).toBeLessThan(service.indexOf("PushNotifier.show(this, data)"));
