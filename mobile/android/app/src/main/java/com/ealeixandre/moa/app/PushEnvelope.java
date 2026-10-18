@@ -101,14 +101,28 @@ public final class PushEnvelope {
         public final String thread;
         public final String title;
         public final String body;
+        // What the notification is about ("ask", "call", ...); null on an
+        // envelope from a server that sends none.
+        public final String kind;
+        // The invitation of a "call" envelope, and when the envelope expires.
+        public final String invite;
+        public final long expiresAt;
 
         Content(String id, Destination destination, Level level, String thread, String title, String body) {
+            this(id, destination, level, thread, title, body, null, null, 0);
+        }
+
+        Content(String id, Destination destination, Level level, String thread, String title, String body,
+            String kind, String invite, long expiresAt) {
             this.id = id;
             this.destination = destination;
             this.level = level;
             this.thread = thread;
             this.title = title;
             this.body = body;
+            this.kind = kind;
+            this.invite = invite;
+            this.expiresAt = expiresAt;
         }
     }
 
@@ -211,7 +225,8 @@ public final class PushEnvelope {
             default:
                 destination = Destination.HOME;
         }
-        return new Content(stringField(plaintext, "id"), destination, level(lvl), th, t, b);
+        return new Content(stringField(plaintext, "id"), destination, level(lvl), th, t, b,
+            stringField(plaintext, "k"), stringField(plaintext, "inv"), ((Number) exp).longValue());
     }
 
     // An unknown level from a newer server still sounds rather than being
