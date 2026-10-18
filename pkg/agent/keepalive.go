@@ -462,10 +462,10 @@ func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *kee
 		return nil
 	}
 	usage, err := s.pw.Prewarm(ctx, req)
-	// Cancelled, out of time before it left, or stale at the gate: nothing
-	// known was spent.
-	cancelled := (ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))) ||
-		errors.Is(err, errPingStale)
+	// Cancelled or stale at the gate: nothing was sent. Out of time is not
+	// silent: it may have hit after the POST left, with its usage lost, so it
+	// is reported as a failed ping and leaves a trace.
+	cancelled := (ctx.Err() != nil && errors.Is(err, context.Canceled)) || errors.Is(err, errPingStale)
 	cancel()
 	ev := &KeepAliveEvent{At: sentAt, Role: ka.cfg.Role, State: state, Model: s.req.Model, ContextTokens: s.contextTokens}
 

@@ -643,3 +643,18 @@ func TestKeepAlivePolicyChangesApplyAtOnce(t *testing.T) {
 		t.Fatalf("pings after switching on = %d, want 2", n)
 	}
 }
+
+// A ping that runs out of time is reported, not dropped silently: it may
+// have been sent with its answer cut off.
+func TestKeepAlivePingDeadlineIsReported(t *testing.T) {
+	h := newKAHarness(t, core.KeepAliveRoleOwner, 250_000, "1h")
+	h.prov.pingErr = context.DeadlineExceeded
+	h.send("hello")
+	h.advance(3 * time.Hour)
+	if errs := h.eventsOf(KeepAlivePingError); len(errs) != 1 || !errors.Is(errs[0].Err, context.DeadlineExceeded) {
+		t.Fatalf("ping errors = %+v", errs)
+	}
+	if n := h.prov.pingCount(); n != 1 {
+		t.Fatalf("pings = %d, want 1 and no retry", n)
+	}
+}
