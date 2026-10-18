@@ -662,6 +662,9 @@ func (p askingProvider) Stream(ctx context.Context, req core.Request) (<-chan co
 }
 
 func TestSessionsToolSendRefusesAQuestionInTheUsersSession(t *testing.T) {
+	// A blocking question: an asynchronous one does not refuse the send
+	// (TestAuthorityReviewSendToHumanAsyncSessionIsNotBlockedByOpenQuestion).
+	pinSyncAskUser(t)
 	ctx := context.Background()
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	nextTurn := make(chan []core.Message, 1)

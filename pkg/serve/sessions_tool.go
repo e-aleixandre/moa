@@ -93,7 +93,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 				"action": {
 					"type": "string",
 					"enum": ["list", "read", "send", "new", "answer"],
-					"description": "list, read, send, new or answer. send skips a pending question in the owner's own sessions and is refused in the user's; to answer it, use answer."
+					"description": "list, read, send, new or answer. send skips a blocking question in the owner's own sessions and is refused in the user's; an open (asynchronous) question is neither skipped nor in the way. To answer a question, use answer."
 				},
 				"session_id": {"type": "string", "description": "Target session (read, send, answer)."},
 				"text": {"type": "string", "description": "Message to send (send), or the prompt for a new session (new)."},
@@ -408,11 +408,17 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 	// the ask resolves, so a steer queued after it could miss that step, while
 	// one queued before is drained right after the skipped answer. Target
 	// validation runs inside the send, so a refused send skips nothing.
+	//
+	// An asynchronous question blocks nothing: the session reads the message
+	// and the question stays open for whoever may answer it, so send neither
+	// skips nor refuses for it.
 	var ask *bus.PendingAskInfo
 	sess, loaded := m.Get(id)
 	if loaded {
 		pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
-		ask = pending.Ask
+		if pending.Ask != nil && !pending.Ask.Async {
+			ask = pending.Ask
+		}
 	}
 	// In the user's sessions the owner may not answer for them (the same
 	// Origin gate as answer), so skipping is refused too, before anything is
