@@ -8,6 +8,7 @@ import { api } from './api.js';
 import { store, setState } from './store.js';
 import { openOwnerConversation, ownersSlice } from './owners.js';
 import { closeEndedCallNotificationsNow } from './call-notifications.js';
+import { presenceFrame, PRESENCE_RENEW_MS } from './presence.js';
 import { startVoiceCall, hangupVoiceCall } from './voice-call-session.js';
 
 const EMPTY = Object.freeze({ list: [], loaded: false });
@@ -78,7 +79,29 @@ export async function callHeldRequest(request) {
 
 // ── The socket ────────────────────────────────────────────────────────────
 
+// startFeedPresence tells the server whether this document is visible, on the
+// requests feed: a client showing Tasks, the inbox or a detail still rings from
+// its incoming card, which the conversation presence cannot say. Same frame and
+// renewal as that presence; the server lets a report lapse after ~45 s.
+export function startFeedPresence(ws, doc = globalThis.document, timers = globalThis) {
+  if (!doc) return () => {};
+  const report = (renew) => {
+    const visible = doc.visibilityState === 'visible';
+    if (ws.readyState !== 1 || (renew && !visible)) return;
+    ws.send(presenceFrame(visible));
+  };
+  report(false);
+  const timer = timers.setInterval(() => report(true), PRESENCE_RENEW_MS);
+  const onVisibility = () => report(false);
+  doc.addEventListener('visibilitychange', onVisibility);
+  return () => {
+    timers.clearInterval(timer);
+    doc.removeEventListener('visibilitychange', onVisibility);
+  };
+}
+
 let socket = null;
+let stopPresence = () => {};
 let backoff = 1000;
 let retry = null;
 let started = false;
@@ -95,6 +118,11 @@ function connect() {
     return;
   }
   socket = ws;
+  ws.onopen = () => {
+    if (socket !== ws) return;
+    stopPresence();
+    stopPresence = startFeedPresence(ws);
+  };
   ws.onmessage = (e) => {
     if (socket !== ws) return;
     backoff = 1000;
@@ -108,6 +136,8 @@ function connect() {
   ws.onclose = () => {
     if (socket !== ws) return;
     socket = null;
+    stopPresence();
+    stopPresence = () => {};
     schedule();
   };
 }

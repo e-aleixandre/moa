@@ -74,10 +74,14 @@ export function installOpenSessionNavigation({
         .then(() => openCallRequest(data.callRequestId))
         .catch(() => false)
         .then((opened) => {
-          if (!opened && isPushSessionID(data.sessionId)) {
-            try { selectSession(data.sessionId); } catch (_) { /* nothing more to open */ }
-          }
-          if (port && typeof port.postMessage === 'function') {
+          // The owner's conversation may not be in the roster yet: the same
+          // in-place opening as a native tap loads it. Nothing opened, no ACK:
+          // the service worker then navigates to the deep link itself.
+          if (opened || !isPushSessionID(data.sessionId)) return opened;
+          return openSessionInPlace(data.sessionId, { selectSession, refreshSessions, timeoutMs: 1000 });
+        })
+        .then((opened) => {
+          if (opened && port && typeof port.postMessage === 'function') {
             port.postMessage({ type: 'open-call-request-ack', requestId: data.requestId });
           }
         });

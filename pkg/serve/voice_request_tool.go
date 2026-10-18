@@ -178,8 +178,27 @@ func handleCallRequestsWS(m *Manager) http.HandlerFunc {
 			defer lease.release()
 			leaseDone = lease.Done()
 		}
-		ctx := conn.CloseRead(r.Context())
 		reg := m.callRequests()
+		// The client reports on this socket whether its document is visible
+		// (same frame and 45 s expiry as conversation presence). Reading is also
+		// what answers the keepalive pings, as CloseRead did.
+		viewer := reg.clients.join()
+		defer reg.clients.leave(viewer)
+		ctx, stopReading := context.WithCancel(r.Context())
+		defer stopReading()
+		conn.SetReadLimit(presenceMaxMessage)
+		go func() {
+			defer stopReading()
+			for {
+				kind, data, err := conn.Read(ctx)
+				if err != nil {
+					return
+				}
+				if kind == websocket.MessageText {
+					viewer.apply(data)
+				}
+			}
+		}()
 		changes, cancel := reg.subscribe()
 		defer cancel()
 		send := func() bool {

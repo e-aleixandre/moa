@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/push"
@@ -718,5 +719,73 @@ func TestRequestCall_WriteInsteadIsNotMissedCall(t *testing.T) {
 		if n.Kind == push.KindAsk && strings.Contains(n.Title, "Missed") {
 			t.Fatalf("a chosen written answer was announced as missed: %+v", n)
 		}
+	}
+}
+
+// feedClient opens the requests feed as a client would and reports its
+// document visibility on it, which is what W3 reads: a client showing Tasks,
+// the inbox or a detail still rings from its incoming card.
+func (f *rcFix) feedClient(visible bool) *websocket.Conn {
+	f.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	f.t.Cleanup(cancel)
+	conn, _, err := websocket.Dial(ctx, f.srv.URL+"/api/voice/requests/ws", &websocket.DialOptions{HTTPHeader: f.owner()})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.t.Cleanup(func() { _ = conn.CloseNow() })
+	// The snapshot comes first; reading it also keeps the socket serviced.
+	if _, _, err := conn.Read(ctx); err != nil {
+		f.t.Fatal(err)
+	}
+	frame := `{"type":"presence","visible":` + map[bool]string{true: "true", false: "false"}[visible] + `}`
+	if err := conn.Write(ctx, websocket.MessageText, []byte(frame)); err != nil {
+		f.t.Fatal(err)
+	}
+	return conn
+}
+
+// askAndSettle runs one request_call at Ring that nobody answers and waits for
+// its written fallback, so "no push" is observed after the announcement.
+func (f *rcFix) askAndSettle() {
+	f.t.Helper()
+	f.setRing(200 * time.Millisecond)
+	f.ask()
+	waitPendingAsk(f.t, f.osess)
+	f.osess.runtime.Bus.Drain(5 * time.Second)
+}
+
+// R1 / W3: a client visible on its requests feed suppresses the call push
+// whatever view it shows.
+func TestRequestCall_VisibleFeedClientGetsNoPush(t *testing.T) {
+	f := rcNewFixture(t, "grok-plan", "ring")
+	f.feedClient(true)
+	pollUntil(t, 3*time.Second, "feed presence", f.mgr.callRequests().clients.watched)
+	f.askAndSettle()
+	if n := len(f.callPushes()); n != 0 {
+		t.Fatalf("visible Tasks/Inbox client still got %d call push", n)
+	}
+}
+
+// A hidden feed client, or one whose report lapsed, does not silence it.
+func TestRequestCall_HiddenOrLapsedFeedClientStillPushes(t *testing.T) {
+	f := rcNewFixture(t, "grok-plan", "ring")
+	f.feedClient(false)
+	f.askAndSettle()
+	if n := len(f.callPushes()); n != 1 {
+		t.Fatalf("hidden feed client: %d call pushes, want 1", n)
+	}
+}
+
+func TestRequestCall_LapsedFeedPresenceStillPushes(t *testing.T) {
+	f := rcNewFixture(t, "grok-plan", "ring")
+	v := f.mgr.callRequests().clients.join()
+	v.apply([]byte(`{"type":"presence","visible":true}`))
+	v.mu.Lock()
+	v.visibleUntil = time.Now().Add(-time.Nanosecond)
+	v.mu.Unlock()
+	f.askAndSettle()
+	if n := len(f.callPushes()); n != 1 {
+		t.Fatalf("lapsed feed presence: %d call pushes, want 1", n)
 	}
 }
