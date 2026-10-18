@@ -138,6 +138,12 @@ public class NativeCallManagerTest {
         }
 
         @Override
+        public void startIncoming(String name, NativeCallManager.SystemListener l) {
+            log.add("startIncoming " + name);
+            listener = l;
+        }
+
+        @Override
         public void connected() {
             log.add("connected");
         }
@@ -177,6 +183,7 @@ public class NativeCallManagerTest {
         final List<FakeAudio> audios = new ArrayList<>();
         final FakeSystem system = new FakeSystem();
         final List<Task> tasks = new ArrayList<>();
+        final List<String> hangups = new ArrayList<>();
         Exception audioStartFailure;
 
         @Override
@@ -207,6 +214,11 @@ public class NativeCallManagerTest {
         @Override
         public NativeCallManager.SystemCall systemCall() {
             return system;
+        }
+
+        @Override
+        public void hangupCall(String forOrigin, String callId, String authorization) {
+            hangups.add(forOrigin + " " + callId + " " + authorization);
         }
 
         @Override
