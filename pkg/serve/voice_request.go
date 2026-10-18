@@ -90,6 +90,10 @@ type callRequestRegistry struct {
 	// ringOverride replaces the configured ring time (tests).
 	ringOverride time.Duration
 
+	// clients is the presence of the clients on the requests feed: whether a
+	// document that can show the incoming card is visible (see handleCallRequestsWS).
+	clients presenceSet
+
 	mu   sync.Mutex
 	live map[string]*callRequest
 	subs map[chan struct{}]struct{}
