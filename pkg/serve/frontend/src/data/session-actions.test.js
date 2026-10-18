@@ -1412,6 +1412,21 @@ test('stopRun restores only the discarded steers, as a focused composer drop', a
   expect(getToasts().some((t) => t.title === 'Queued images dropped')).toBe(true);
 });
 
+test('stopRun tells the user when the stop could not be saved, and still restores the discards', async () => {
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    discarded_steer_ids: ['q2'],
+    fence_error: 'answers accepted before Stop were not saved as stopped',
+  }), { status: 200 }));
+  setState({ composerDrops: {}, sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'q2', text: 'still queued' }] } } });
+
+  await stopRun('s1');
+
+  expect(getToasts().filter((t) => t.type === 'error').map((t) => t.title)).toEqual([
+    'Stopped, but answers already given could not be saved as stopped. Retry Stop.',
+  ]);
+  expect(store.get().composerDrops.s1).toMatchObject({ text: 'still queued' });
+});
+
 test('stopRun with nothing discarded leaves the composer alone', async () => {
   setState({ composerDrops: {} });
   globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));

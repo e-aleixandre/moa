@@ -872,6 +872,15 @@ export async function stopRun(id) {
   }
   endOperation(stopId);
   applyDiscardReply(id, result);
+  // The run stopped and the discards are restored, but the server could not
+  // save the answers given before Stop as stopped: say so, or it is silent.
+  if (result?.fence_error) {
+    addToast({
+      sessionId: id,
+      title: 'Stopped, but answers already given could not be saved as stopped. Retry Stop.',
+      type: 'error',
+    });
+  }
   return result;
 }
 
