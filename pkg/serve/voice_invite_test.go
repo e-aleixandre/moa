@@ -169,6 +169,38 @@ func TestVoiceInviteRingsEveryDeviceAndOneAnswerWins(t *testing.T) {
 	}
 }
 
+// An Android phone registers its call destination through FCM. The server
+// rings it like any other destination and its answer can win.
+func TestVoiceInviteRingsAnFCMDestinationAndItsAnswerWins(t *testing.T) {
+	f := newInviteFixture(t, 2)
+	body := fmt.Sprintf(`{"relay_url":%q,"handle":%q,"expires_at":%d,"secret":%q,"env":"production","provider":"fcm"}`,
+		f.mgr.pushVoIP.RelayURL(), strings.Repeat("F", 80), time.Now().Add(90*24*time.Hour).Unix(), base64.RawURLEncoding.EncodeToString(f.secret))
+	if rec := pairingRequest(f.handler, http.MethodPost, "/api/push/voip", body, nil, f.devices[1].Credential); rec.Code != http.StatusNoContent {
+		t.Fatalf("register fcm voip = %d: %s", rec.Code, rec.Body)
+	}
+	if reg, _ := f.mgr.pushVoIP.Store().Get(f.devices[1].DeviceID); reg.ProviderName() != "fcm" {
+		t.Fatalf("stored provider = %q, want fcm", reg.ProviderName())
+	}
+	inv := f.ring()
+	id := inv["id"].(string)
+	got, _ := f.relay.delivered()
+	if len(got) != 2 {
+		t.Fatalf("relay got %d pushes, want one per destination, FCM included", len(got))
+	}
+	for _, c := range got {
+		if c.Kind != push.KindCall || c.Invite != id {
+			t.Fatalf("envelope = %+v", c)
+		}
+	}
+	var call vpCreated
+	_ = json.Unmarshal(f.mustRequest("POST", "/api/voice/invites/"+id+"/answer", map[string]any{}, f.voice(1), http.StatusCreated), &call)
+	f.created = true
+	if call.ID == "" {
+		t.Fatalf("answer = %+v", call)
+	}
+	f.mustRequest("POST", "/api/voice/invites/"+id+"/answer", map[string]any{}, f.voice(0), http.StatusConflict)
+}
+
 func TestVoiceInviteDeclineAndExpiry(t *testing.T) {
 	f := newInviteFixture(t, 1)
 	f.harnessOnly = true

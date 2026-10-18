@@ -103,6 +103,12 @@ func newNativeFixture(t *testing.T, provider core.Provider) *nativeFixture {
 		t.Fatal(err)
 	}
 	mgr.pushNative = push.NewNativeSender(store, relayURL)
+	voipStore, err := push.NewNativeStore(filepath.Join(t.TempDir(), "push_voip.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Decided at construction: the voip routes need it before NewServer.
+	mgr.pushVoIP = push.NewNativeSender(voipStore, relayURL)
 	mgr.pushPolicy = push.NewPolicy(mgr.pushNative, push.PolicyConfig{Inline: true})
 	handler := NewServer(mgr, WithAuthToken("owner", false), WithDeviceStorePath(filepath.Join(t.TempDir(), "devices.json")))
 	return &nativeFixture{mgr: mgr, handler: handler, owner: &http.Cookie{Name: authCookieName, Value: "owner"}, relay: relay, relayURL: relayURL, secret: secret, store: storePath}
@@ -287,34 +293,44 @@ func TestNativePushRegistrationProvider(t *testing.T) {
 	cases := []struct {
 		name         string
 		body         string
+		voip         bool
 		code         int
 		wantProvider string
 	}{
-		{"absent is apns", good, http.StatusNoContent, "apns"},
-		{"explicit apns", withProvider(`"apns"`, "sandbox"), http.StatusNoContent, "apns"},
-		{"fcm", withProvider(`"fcm"`, "production"), http.StatusNoContent, "fcm"},
-		{"fcm has no sandbox", withProvider(`"fcm"`, "sandbox"), http.StatusBadRequest, ""},
-		{"unknown provider", withProvider(`"webpush"`, "production"), http.StatusBadRequest, ""},
-		{"empty provider", withProvider(`""`, "production"), http.StatusBadRequest, ""},
-		{"wrong type", withProvider(`["fcm"]`, "production"), http.StatusBadRequest, ""},
-		{"case matters", withProvider(`"FCM"`, "production"), http.StatusBadRequest, ""},
+		{"absent is apns", good, false, http.StatusNoContent, "apns"},
+		{"explicit apns", withProvider(`"apns"`, "sandbox"), false, http.StatusNoContent, "apns"},
+		{"fcm", withProvider(`"fcm"`, "production"), false, http.StatusNoContent, "fcm"},
+		{"fcm has no sandbox", withProvider(`"fcm"`, "sandbox"), false, http.StatusBadRequest, ""},
+		{"unknown provider", withProvider(`"webpush"`, "production"), false, http.StatusBadRequest, ""},
+		{"empty provider", withProvider(`""`, "production"), false, http.StatusBadRequest, ""},
+		{"wrong type", withProvider(`["fcm"]`, "production"), false, http.StatusBadRequest, ""},
+		{"case matters", withProvider(`"FCM"`, "production"), false, http.StatusBadRequest, ""},
+		{"voip absent is apns", good, true, http.StatusNoContent, "apns"},
+		{"voip apns", withProvider(`"apns"`, "sandbox"), true, http.StatusNoContent, "apns"},
+		{"voip fcm", withProvider(`"fcm"`, "production"), true, http.StatusNoContent, "fcm"},
+		{"voip fcm has no sandbox", withProvider(`"fcm"`, "sandbox"), true, http.StatusBadRequest, ""},
+		{"voip unknown provider", withProvider(`"webpush"`, "production"), true, http.StatusBadRequest, ""},
 	}
 	for _, c := range cases {
-		if err := f.mgr.pushNative.Forget(device.DeviceID); err != nil {
+		path, sender := "/api/push/native", f.mgr.pushNative
+		if c.voip {
+			path, sender = "/api/push/voip", f.mgr.pushVoIP
+		}
+		if err := sender.Forget(device.DeviceID); err != nil {
 			t.Fatal(err)
 		}
-		rec := pairingRequest(f.handler, http.MethodPost, "/api/push/native", c.body, nil, device.Credential)
+		rec := pairingRequest(f.handler, http.MethodPost, path, c.body, nil, device.Credential)
 		if rec.Code != c.code {
 			t.Errorf("%s: register = %d, want %d: %s", c.name, rec.Code, c.code, rec.Body.String())
 			continue
 		}
 		if c.code != http.StatusNoContent {
-			if _, ok := f.mgr.pushNative.Store().Get(device.DeviceID); ok {
+			if _, ok := sender.Store().Get(device.DeviceID); ok {
 				t.Errorf("%s: a rejected registration was stored", c.name)
 			}
 			continue
 		}
-		status := pairingRequest(f.handler, http.MethodGet, "/api/push/native/status", "", nil, device.Credential)
+		status := pairingRequest(f.handler, http.MethodGet, path+"/status", "", nil, device.Credential)
 		var got map[string]any
 		_ = json.Unmarshal(status.Body.Bytes(), &got)
 		if got["provider"] != c.wantProvider || got["registered"] != true {
