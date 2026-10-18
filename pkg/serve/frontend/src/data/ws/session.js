@@ -158,6 +158,17 @@ export function handleWsSessionCost(id, data) {
   }
 }
 
+// handleWsKeepAlive refreshes the session's keep-alive totals as pings land,
+// so the Usage breakdown moves with the spend instead of with the poll.
+export function handleWsKeepAlive(id, data) {
+  if (!data) return;
+  updateSession(id, {
+    keepAlivePings: Number(data.pings) || 0,
+    keepAliveCostUSD: Number(data.cost_usd) || 0,
+    keepAliveSavedUSD: Number(data.saved_usd) || 0,
+  });
+}
+
 // handleWsCacheUsage reflects the session's prompt-cache summary after a turn
 // closes. The server computes it over the WHOLE display history, so this is a
 // replacement rather than an accumulation: the client never derives the ratio

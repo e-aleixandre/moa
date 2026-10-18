@@ -229,6 +229,15 @@ type KeepAliveUsage struct {
 	CostUSD   float64
 }
 
+// KeepAliveUpdated carries a session's keep-alive totals after a ping or a
+// wake changed them, for the Usage breakdown.
+type KeepAliveUpdated struct {
+	SessionID string
+	Pings     int
+	CostUSD   float64
+	SavedUSD  float64
+}
+
 // ContextTrimmed is published when old tool results were elided from the
 // model's context instead of compacting.
 type ContextTrimmed struct {

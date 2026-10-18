@@ -276,7 +276,11 @@ func (m *Manager) onKeepAliveEvent(sess *ManagedSession, jobID string, e agent.K
 			sess.keepAlive.SavedUSD += rec.SavedUSD
 		}
 	}
+	totals := bus.KeepAliveUpdated{SessionID: sess.ID, Pings: sess.keepAlive.Pings, CostUSD: sess.keepAlive.CostUSD, SavedUSD: sess.keepAlive.SavedUSD}
 	sess.mu.Unlock()
+	if e.Kind == agent.KeepAlivePing || totals.SavedUSD > 0 {
+		sess.runtime.Bus.Publish(totals)
+	}
 	switch e.Kind {
 	case agent.KeepAlivePing:
 		m.keepAlive.add(e.CostUSD, 0)

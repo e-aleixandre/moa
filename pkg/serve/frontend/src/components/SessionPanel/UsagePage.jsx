@@ -8,6 +8,7 @@ import {
 import { copyToClipboard, fmtTokens } from "../../data/util/format.js";
 import { cacheAdvice, cacheMissCause, cacheUsage } from "../../data/cache-usage.js";
 import { configureSession } from "../../data/session-actions.js";
+import { keepAliveLine } from "./keepalive-line.js";
 import { addToast } from "../../data/notifications.js";
 
 // UsagePage — the dossier's Usage page. Markup is the catalogue's
@@ -191,6 +192,7 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
   const busy = session?.state === "running" || session?.state === "permission";
 
   const hasCost = typeof costUSD === "number" && costUSD > 0;
+  const keepAlive = keepAliveLine(session);
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
   const note = hasCtx ? contextNote(session, ctxPercent) : "";
 
@@ -220,6 +222,16 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
           <div class="zl-kv-row">
             <span class="zl-kv-k">Spend</span>
             <span class="zl-kv-v zl-data">{fmtCost(costUSD)}</span>
+          </div>
+        )}
+        {keepAlive && (
+          <div class="zl-kv-row is-keepalive">
+            <span class="zl-kv-k">Keep-alive</span>
+            <span class="zl-kv-v zl-data">
+              {keepAlive.value}
+              <span class="zl-kv-dim"> · {keepAlive.detail}</span>
+            </span>
+            {keepAlive.note && <span class="zl-kv-note is-prose">{keepAlive.note}</span>}
           </div>
         )}
         {hasCtx && (

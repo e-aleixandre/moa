@@ -19,7 +19,7 @@ import {
   handleWsUserMessage,
   handleWsMcpChange,
   handleWsCommandQueued, handleWsCommandDequeued,
-  handleWsSessionCost, handleWsCacheUsage,
+  handleWsSessionCost, handleWsCacheUsage, handleWsKeepAlive,
   handleWsRunTokens,
   handleWsAutoVerifyStart, handleWsAutoVerifyEnd, handleWsRateLimit,
   handleWsCompactionStart, handleWsCompactionEnd, handleWsBackgroundCompactionState, handleWsContextTrim,
@@ -652,6 +652,9 @@ function routeEvent(sessionId, evt) {
       break;
     case 'cache_usage':
       handleWsCacheUsage(sessionId, evt.data);
+      break;
+    case 'keepalive':
+      handleWsKeepAlive(sessionId, evt.data);
       break;
     case 'ratelimit':
       handleWsRateLimit(sessionId, evt.data);

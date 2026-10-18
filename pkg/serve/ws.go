@@ -256,6 +256,8 @@ func wsEventFromBus(event any) (Event, bool) {
 		}}, true
 	case bus.RunTokensUpdated:
 		return Event{Type: "run_tokens", Data: RunTokensData{Up: e.Up, Down: e.Down}}, true
+	case bus.KeepAliveUpdated:
+		return Event{Type: "keepalive", Data: KeepAliveData{Pings: e.Pings, CostUSD: e.CostUSD, SavedUSD: e.SavedUSD}}, true
 	case bus.SessionCostUpdated:
 		return Event{Type: "session_cost", Data: SessionCostData{CostUSD: e.TotalUSD}}, true
 	case bus.CacheUsageUpdated:

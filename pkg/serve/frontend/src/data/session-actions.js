@@ -123,6 +123,10 @@ function normalizeSessionInfo(info, existing, visible) {
     created: info.created ? Date.parse(info.created) : (existing ? existing.created : 0),
     updated: info.updated ? Date.parse(info.updated) : (existing ? existing.updated : 0),
     cacheExpiresAt: cacheExpiresAtMs(info.cache_expires_at),
+    // Cache keep-alive, apart from the rest of the spend (already inside it).
+    keepAlivePings: Number(info.keepalive?.pings) || 0,
+    keepAliveCostUSD: Number(info.keepalive?.cost_usd) || 0,
+    keepAliveSavedUSD: Number(info.keepalive?.saved_usd) || 0,
     // Server-decided: a cut would drop something (see SessionInfo.CanStartFresh).
     canStartFresh: !!info.can_start_fresh,
     error: wsOwns ? existing.error : (info.error || null),

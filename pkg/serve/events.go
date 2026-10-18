@@ -379,6 +379,13 @@ func cacheUsageData(s core.CacheUsageSummary) CacheUsageData {
 }
 
 // SessionCostData carries the accumulated session spend (main run + subagents).
+// KeepAliveData is a session's keep-alive totals (see KeepAliveInfo).
+type KeepAliveData struct {
+	Pings    int     `json:"pings"`
+	CostUSD  float64 `json:"cost_usd"`
+	SavedUSD float64 `json:"saved_usd"`
+}
+
 type SessionCostData struct {
 	CostUSD float64 `json:"cost_usd"`
 }
