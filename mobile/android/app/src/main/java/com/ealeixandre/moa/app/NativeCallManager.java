@@ -209,7 +209,7 @@ final class NativeCallManager {
         }
         Call c = new Call(id, CallProtocol.prefix(name, 80), CallProtocol.prefix(sessionId, 128), url.callId, origin,
             "Moa-Device " + credential);
-        c.deviceId = VoiceAuth.deviceId(credential);
+        c.deviceId = deviceIdOf(c.authorization);
         try {
             c.socket = host.connect(url.url, "Moa-Device " + credential, new Sockets(c));
         } catch (RuntimeException e) {
@@ -232,7 +232,7 @@ final class NativeCallManager {
         Call c = new Call("i" + callId, CallProtocol.prefix(name, 80), CallProtocol.prefix(sessionId, 128), callId, origin,
             authorization);
         c.incoming = true;
-        c.deviceId = VoiceAuth.deviceId(host.credential(origin));
+        c.deviceId = deviceIdOf(authorization);
         c.audioWanted = true;
         // It cannot be asked for on a locked screen: a phone that never
         // allowed it hangs up, and says why.
@@ -320,13 +320,21 @@ final class NativeCallManager {
         if (c == null) return;
         if (c.origin.equals(host.pairedOrigin())) {
             String now = VoiceAuth.deviceId(host.credential(c.origin));
-            if (now != null && (c.deviceId == null || now.equals(c.deviceId))) return;
+            if (now != null && now.equals(c.deviceId)) return;
         }
         c.pageClosed = true;
         finish(c, false, "unpaired");
     }
 
     // ---- Internals
+
+    // The device a call authenticates as, from its own header
+    // ("Moa-Device <id>.<secret>" or "Moa-Voice <id>.<key>"), never from a
+    // later read of the stored credential. Null when it names none.
+    private static String deviceIdOf(String authorization) {
+        if (authorization == null) return null;
+        return VoiceAuth.deviceId(authorization.substring(authorization.indexOf(' ') + 1));
+    }
 
     // The live call, if this id names it and the app is still paired with
     // the server that call belongs to.
