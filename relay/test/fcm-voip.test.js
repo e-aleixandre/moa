@@ -131,12 +131,16 @@ test('openBlob accepts only canonical forms of the fcm voip handle', async () =>
 
 test('fcm voip has its own rate-limit namespace', async () => {
   const env = env0();
-  await register(env, deps0(), body({ type: 'alert' }));
-  await register(env, deps0(), body());
+  assert.equal((await register(env, deps0(), body({ type: 'alert' }))).status, 202);
+  assert.equal((await register(env, deps0(), body())).status, 202);
+  assert.equal(env.REGISTER_LIMITER.keys.length, 2);
   const [a, v] = env.REGISTER_LIMITER.keys;
   assert.notEqual(a, v);
-  await handle((await signedSend({ h: await handleFor(env) })).req(), env, deps0());
-  await handle((await signedSend({ h: await handleFor(env, TOKEN, { p: 'fcm' }) })).req(), env, deps0());
+  const r1 = await handle((await signedSend({ h: await handleFor(env) })).req(), env, deps0());
+  const r2 = await handle((await signedSend({ h: await handleFor(env, TOKEN, { p: 'fcm' }) })).req(), env, deps0());
+  assert.equal(r1.status, 200);
+  assert.equal(r2.status, 200);
+  assert.equal(env.SEND_LIMITER.keys.length, 2);
   const [s1, s2] = env.SEND_LIMITER.keys;
   assert.notEqual(s1, s2);
 });
