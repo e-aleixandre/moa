@@ -47,7 +47,7 @@ func (c *voiceCall) remember(kind, label, text string) {
 	}
 	kept := c.learned[:0]
 	for _, d := range c.learned {
-		if !(kind == "book" && d.kind == "book" && d.label == label) {
+		if kind != "book" || d.kind != "book" || d.label != label {
 			kept = append(kept, d)
 		}
 	}

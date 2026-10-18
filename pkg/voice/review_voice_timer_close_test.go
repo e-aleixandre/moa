@@ -51,7 +51,7 @@ func TestReviewVoice_CausalIncomingCloseNeverStartsAnotherResponse(t *testing.T)
 		t.Fatal(err)
 	}
 	c := <-remote
-	defer c.CloseNow()
+	defer func() { _ = c.CloseNow() }()
 	closeCtx, closeCancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer closeCancel()
 	closed := make(chan error, 1)
