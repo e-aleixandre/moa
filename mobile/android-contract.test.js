@@ -153,11 +153,114 @@ describe("Android notifications", () => {
   });
 });
 
+describe("Android native voice call", () => {
+  const callJava = ["CallAudio", "CallConnection", "CallConnectionService", "CallService", "CallSocket", "CallSystem",
+    "AndroidCallHost", "NativeCallBridge", "NativeCallManager", "NativeCalls"];
+
+  // The frontend (voice-call-native.js) feature-detects this object and is the
+  // same on iOS and Android: the surface below is NativeVoiceCall.swift's.
+  it("exposes the iOS MoaNativeCall v1 surface to the paired origin only", () => {
+    const bridges = code(java["WebBridges.java"]);
+    const ios = readFileSync("ios/App/App/NativeVoiceCall.swift", "utf8");
+    const script = bridges.slice(bridges.indexOf("static String callScript()"));
+    expect(bridges).toContain("WebViewCompat.addWebMessageListener(webView, CALL_PORT, rules, callListener())");
+    expect(bridges).toContain("WebViewCompat.addDocumentStartJavaScript(webView, callScript(), rules)");
+    // Not in the local pairing page's registrations.
+    expect(bridges.split("CALL_PORT, local").length).toBe(1);
+    for (const member of ["version: 1", "onevent: null", "open(url, opts)", "send(id, text)", "close(id)", "active()",
+      "startAudio(id)", "stopAudio(id)", "setMuted(id, muted)", "__event(ev)"]) {
+      expect(script).toContain(member);
+      expect(ios).toContain(member);
+    }
+    for (const op of ["open", "send", "close", "active", "startAudio", "stopAudio", "setMuted"]) {
+      expect(script).toContain(`op: \\"${op}\\"`);
+      expect(ios).toContain(`op: "${op}"`);
+    }
+    expect(script).toContain("window.top !== window");
+    expect(code(java["NativeCallBridge.java"])).toContain('OriginPolicy.mayCall("call", message.op, caller)');
+  });
+
+  it("opens only the validated call socket, with the device credential, without redirects", () => {
+    const manager = code(java["NativeCallManager.java"]);
+    const socket = code(java["CallSocket.java"]);
+    expect(manager).toContain("CallUrl.validate(rawUrl, origin)");
+    expect(manager).toContain('"Moa-Device " + credential');
+    expect(socket).toContain("followRedirects(false)");
+    expect(socket).toContain("followSslRedirects(false)");
+    expect(socket).toContain('header("Authorization", authorization)');
+    expect(socket).not.toContain('"Origin"');
+    expect(code(java["CallUrl.java"])).toContain('"wss".equalsIgnoreCase(uri.getScheme())');
+    // The credential is not logged, kept or put in an intent by the call code.
+    for (const name of callJava) {
+      const source = code(java[`${name}.java`]);
+      expect(`${name}: ${/\bLog\.|System\.out|printStackTrace|putExtra\([^)]*credential/.test(source)}`).toBe(`${name}: false`);
+    }
+  });
+
+  it("keeps a call alive with a phoneCall foreground service and registers it with Telecom", () => {
+    const service = manifest.slice(manifest.indexOf('android:name=".CallService"'), manifest.indexOf("/>", manifest.indexOf('android:name=".CallService"')));
+    expect(service).toContain('android:exported="false"');
+    expect(service).toContain('android:foregroundServiceType="phoneCall|microphone"');
+    const telecom = manifest.slice(manifest.indexOf('android:name=".CallConnectionService"'), manifest.indexOf("</service>", manifest.indexOf('android:name=".CallConnectionService"')));
+    expect(telecom).toContain('android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE"');
+    expect(telecom).toContain('<action android:name="android.telecom.ConnectionService" />');
+    const system = code(java["CallSystem.java"]);
+    expect(system).toContain("PhoneAccount.CAPABILITY_SELF_MANAGED");
+    expect(system).toContain("telecom.placeCall(");
+    const callService = code(java["CallService.java"]);
+    expect(callService).toContain("FOREGROUND_SERVICE_TYPE_PHONE_CALL");
+    expect(callService).toContain("FOREGROUND_SERVICE_TYPE_MICROPHONE");
+    expect(callService).toContain("NotificationCompat.CallStyle.forOngoingCall(");
+  });
+
+  // Google: Telecom routes audio; a call must not also drive Bluetooth SCO.
+  it("never mixes Telecom routing with Bluetooth SCO", () => {
+    for (const name of callJava) {
+      expect(`${name}: ${/startBluetoothSco|stopBluetoothSco/.test(code(java[`${name}.java`]))}`).toBe(`${name}: false`);
+    }
+  });
+
+  it("captures the voice-communication source as 24 kHz mono and plays 24 kHz", () => {
+    const audio = code(java["CallAudio.java"]);
+    expect(audio).toContain("MediaRecorder.AudioSource.VOICE_COMMUNICATION");
+    expect(audio).toContain("AudioAttributes.USAGE_VOICE_COMMUNICATION");
+    expect(audio).toContain("AcousticEchoCanceler");
+    expect(audio).toContain("NoiseSuppressor");
+    expect(code(java["CallProtocol.java"])).toContain("SAMPLE_RATE = 24000");
+    expect(code(java["CallProtocol.java"])).toContain("FRAME_BYTES = 480 * 2");
+  });
+
+  it("names its notification channel in Spanish with an English fallback", () => {
+    const es = readFileSync("android/app/src/main/res/values-es/strings.xml", "utf8");
+    const en = readFileSync("android/app/src/main/res/values/strings.xml", "utf8");
+    for (const name of ["channel_call", "call_ongoing"]) {
+      expect(en).toContain(`<string name="${name}">`);
+      expect(es).toContain(`<string name="${name}">`);
+    }
+  });
+
+  it("ends the call when the pairing changes", () => {
+    const auth = code(java["DeviceAuthBridge.java"]);
+    expect(auth.split("NativeCalls.bindingChanged()").length - 1).toBe(3);
+  });
+});
+
 describe("Android permissions and navigation", () => {
   it("declares what the pairing scanner, voice and notifications request at runtime", () => {
-    for (const permission of ["INTERNET", "CAMERA", "RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS", "POST_NOTIFICATIONS", "VIBRATE"]) {
-      expect(manifest).toContain(`<uses-permission android:name="android.permission.${permission}" />`);
-    }
+    const declared = [...manifest.matchAll(/<uses-permission android:name="android\.permission\.([A-Z_]+)" \/>/g)].map((m) => m[1]).sort();
+    expect(declared).toEqual([
+      "ACCESS_NETWORK_STATE",
+      "CAMERA",
+      "FOREGROUND_SERVICE",
+      "FOREGROUND_SERVICE_MICROPHONE",
+      "FOREGROUND_SERVICE_PHONE_CALL",
+      "INTERNET",
+      "MANAGE_OWN_CALLS",
+      "MODIFY_AUDIO_SETTINGS",
+      "POST_NOTIFICATIONS",
+      "RECORD_AUDIO",
+      "VIBRATE",
+    ]);
   });
 
   // The pairing scanner is ZXing (QRScannerPlugin), as iOS uses AVFoundation:
