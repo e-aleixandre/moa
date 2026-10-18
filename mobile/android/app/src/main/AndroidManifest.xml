@@ -104,6 +104,25 @@
             </intent-filter>
         </service>
 
+        <!--
+          The call screen over the lock screen while an invitation rings. Its
+          own task, never in Recents, and only the app starts it.
+        -->
+        <activity
+            android:name=".IncomingCallActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Moa.Call"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance" />
+
+        <!-- Answer and Decline on the incoming-call notification. -->
+        <receiver
+            android:name=".CallActionReceiver"
+            android:exported="false" />
+
         <!-- Nothing talks to Firebase until notifications are turned on. -->
         <meta-data
             android:name="firebase_messaging_auto_init_enabled"
@@ -152,6 +171,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <!-- An incoming call over the lock screen (Android 14+ makes it a setting). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Haptics. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 </manifest>

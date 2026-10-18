@@ -131,6 +131,7 @@ final class DeviceAuthBridge implements WebBridges.MethodHandler {
         // A new pairing never inherits the previous push secret (iOS review
         // C3). After the save, so push work for the old credential is fenced.
         NativePushRegistration.get(context).forgetLocal();
+        AndroidVoip.forget(context, null);
         NativeCalls.bindingChanged();
     }
 
@@ -148,6 +149,7 @@ final class DeviceAuthBridge implements WebBridges.MethodHandler {
         }
         if (response.status == 401 || response.status == 403) {
             NativePushRegistration.get(context).forgetLocal();
+            AndroidVoip.forget(context, null);
             try {
                 store.delete();
             } catch (DeviceCredentialStore.StoreException ignored) {
@@ -168,12 +170,16 @@ final class DeviceAuthBridge implements WebBridges.MethodHandler {
         // credential delete below: unpairing must stop decryption offline.
         boolean pushSecretRemoved = NativePushRegistration.get(context).forgetLocal();
         String origin = null;
+        DeviceCredentialStore.Stored paired = null;
         try {
-            DeviceCredentialStore.Stored stored = store.load();
-            if (stored != null) origin = stored.origin;
+            paired = store.load();
+            if (paired != null) origin = paired.origin;
         } catch (DeviceCredentialStore.StoreException ignored) {
             // Deleting below is still the right thing.
         }
+        // The call destination too, and the server is told while the
+        // credential can still say it.
+        AndroidVoip.forget(context, paired);
         AuthException deleteError = null;
         try {
             store.delete();

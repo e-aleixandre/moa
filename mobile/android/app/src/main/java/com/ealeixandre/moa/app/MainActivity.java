@@ -1,14 +1,23 @@
 package com.ealeixandre.moa.app;
 
 import android.Manifest;
+import android.app.NotificationManager;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AlertDialog;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import com.getcapacitor.BridgeActivity;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -116,6 +125,8 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         PushNavigator.get().setForeground(true);
         NativePushRegistration.get(this).refreshIfNeeded(false);
+        AndroidVoip.get(this).refresh(false);
+        askCallPermissions();
         if (webViewClient != null) webViewClient.onForeground();
     }
 
@@ -130,6 +141,47 @@ public class MainActivity extends BridgeActivity {
         // The call outlives the activity; it must not hold on to it.
         NativeCalls.get(this).setMicRequester(null);
         super.onDestroy();
+    }
+
+    // Once, the first time a paired phone is opened with something missing:
+    // a locked phone cannot ask when a call comes in. What was asked is not
+    // asked again at every launch; the settings stay where they are.
+    private void askCallPermissions() {
+        if (credentials.pairedOrigin() == null || !credentials.knownValid()) return;
+        SharedPreferences prefs = getSharedPreferences("moa_call_permissions", MODE_PRIVATE);
+        List<CallPermissions.Step> missing = CallPermissions.missing(Build.VERSION.SDK_INT,
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+            NotificationManagerCompat.from(this).areNotificationsEnabled(), canUseFullScreen());
+        if (!CallPermissions.shouldAsk(true, prefs.getBoolean("asked", false), missing)) return;
+        prefs.edit().putBoolean("asked", true).apply();
+        new AlertDialog.Builder(this)
+            .setMessage(R.string.calls_permission_message)
+            .setPositiveButton(R.string.calls_permission_continue, (dialog, which) -> askCallStep(missing, 0))
+            .setNegativeButton(R.string.calls_permission_not_now, null)
+            .show();
+    }
+
+    private boolean canUseFullScreen() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return true;
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        return manager == null || manager.canUseFullScreenIntent();
+    }
+
+    private void askCallStep(List<CallPermissions.Step> steps, int index) {
+        if (index >= steps.size()) return;
+        Runnable next = () -> runOnUiThread(() -> askCallStep(steps, index + 1));
+        switch (steps.get(index)) {
+            case MICROPHONE:
+                requestMicrophone(granted -> next.run());
+                break;
+            case NOTIFICATIONS:
+                requestNotificationPermission().thenAccept(granted -> next.run());
+                break;
+            default:
+                // The last step: the system's own screen for this app.
+                startActivity(new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                    Uri.parse("package:" + getPackageName())));
+        }
     }
 
     private void requestMicrophone(Consumer<Boolean> answer) {

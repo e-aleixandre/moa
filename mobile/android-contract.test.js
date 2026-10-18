@@ -155,7 +155,9 @@ describe("Android notifications", () => {
 
 describe("Android native voice call", () => {
   const callJava = ["CallAudio", "CallConnection", "CallConnectionService", "CallService", "CallSocket", "CallSystem",
-    "AndroidCallHost", "NativeCallBridge", "NativeCallManager", "NativeCalls"];
+    "AndroidCallHost", "NativeCallBridge", "NativeCallManager", "NativeCalls", "AndroidIncomingHost", "IncomingCalls",
+    "IncomingCallNotifier", "IncomingCallActivity", "CallActionReceiver", "InviteApi", "VoipRegistration", "AndroidVoip",
+    "CallSecretStore"];
 
   // The frontend (voice-call-native.js) feature-detects this object and is the
   // same on iOS and Android: the surface below is NativeVoiceCall.swift's.
@@ -245,6 +247,109 @@ describe("Android native voice call", () => {
   });
 });
 
+// Incoming calls with the app closed and the phone locked. The wire is iOS's
+// (NativeIncomingCall.swift); these are the properties a refactor could lose.
+describe("Android incoming calls", () => {
+  const ios = () => readFileSync("ios/App/App/NativeIncomingCall.swift", "utf8");
+
+  it("rings with an incoming-call notification and a call screen over the lock screen", () => {
+    const notifier = code(java["IncomingCallNotifier.java"]);
+    expect(notifier).toContain("NotificationCompat.CallStyle.forIncomingCall(");
+    expect(notifier).toContain(".setFullScreenIntent(screen, true)");
+    expect(notifier).toContain("NotificationCompat.CATEGORY_CALL");
+    expect(notifier).toContain("NotificationManager.IMPORTANCE_HIGH");
+    expect(notifier).toContain("AudioAttributes.USAGE_NOTIFICATION_RINGTONE");
+    expect(notifier).toContain("Notification.FLAG_INSISTENT");
+    expect(notifier).toContain(".setTimeoutAfter(");
+    const block = manifest.slice(manifest.indexOf('android:name=".IncomingCallActivity"'), manifest.indexOf("/>", manifest.indexOf('android:name=".IncomingCallActivity"')));
+    expect(block).toContain('android:exported="false"');
+    expect(block).toContain('android:showWhenLocked="true"');
+    expect(block).toContain('android:turnScreenOn="true"');
+    expect(block).toContain('android:excludeFromRecents="true"');
+    const receiver = manifest.slice(manifest.indexOf('android:name=".CallActionReceiver"'), manifest.indexOf("/>", manifest.indexOf('android:name=".CallActionReceiver"')));
+    expect(receiver).toContain('android:exported="false"');
+    expect(code(java["IncomingCallActivity.java"])).toContain("setShowWhenLocked(true)");
+  });
+
+  it("registers the invitation with Telecom and carries on without it", () => {
+    const system = code(java["CallSystem.java"]);
+    expect(system).toContain("telecom.addNewIncomingCall(");
+    expect(system).toContain("TelecomManager.EXTRA_INCOMING_CALL_EXTRAS");
+    const service = code(java["CallConnectionService.java"]);
+    expect(service).toContain("onCreateIncomingConnection(");
+    const connection = code(java["CallConnection.java"]);
+    expect(connection).toContain("public void onAnswer()");
+    expect(connection).toContain("public void onReject()");
+  });
+
+  it("follows and answers the invitation as iOS does, with Moa-Voice and the CSRF header, no redirects", () => {
+    const api = code(java["InviteApi.java"]);
+    expect(api).toContain("?wait=ringing");
+    expect(api).toContain('header("X-Moa-Request", "1")');
+    expect(api).toContain("followRedirects(false)");
+    expect(api).toContain("followSslRedirects(false)");
+    expect(api).not.toContain('"Origin"');
+    expect(ios()).toContain("?wait=ringing");
+    expect(ios()).toContain('"X-Moa-Request"');
+    expect(ios()).toContain("invites/\" + call.invite + \"/answer");
+    const calls = code(java["IncomingCalls.java"]);
+    expect(calls).toContain('"invites/" + r.invite + "/answer"');
+    expect(calls).toContain('"invites/" + r.invite + "/decline"');
+    expect(calls).toContain('"calls/" + callId + "/hangup"');
+    expect(code(java["AndroidVoip.java"])).toContain("secret.authorization()");
+    expect(code(java["NativeCallManager.java"])).toContain("host.hangupCall(");
+    expect(code(java["NativeCallManager.java"])).toContain('"mic_not_granted"');
+  });
+
+  it("keeps S_v apart from the alert secret, in the same kind of box, and forgets it with the pairing", () => {
+    const voip = code(java["AndroidVoip.java"]);
+    expect(voip).toContain('new KeystoreBox(context, "moa-voip-secret-v1", "voip-secret.bin")');
+    expect(code(java["NativePushRegistration.java"])).toContain('"moa-push-secret-v1", "push-secret.bin"');
+    expect(code(java["KeystoreBox.java"])).toContain("getNoBackupFilesDir()");
+    const auth = code(java["DeviceAuthBridge.java"]);
+    expect(auth.split("AndroidVoip.forget(").length - 1).toBe(3);
+    expect(auth.indexOf("AndroidVoip.forget(context, paired)")).toBeLessThan(auth.indexOf("store.delete()", auth.indexOf("private void reset()")));
+  });
+
+  it("registers the call destination as a separate voip FCM handle, only on screen", () => {
+    const registration = code(java["VoipRegistration.java"]);
+    expect(registration).toContain("RelayProtocol.voipRegisterBody(");
+    expect(registration).toContain('"/api/push/voip/status"');
+    expect(registration).toContain('"/api/push/voip"');
+    expect(registration).toContain("host.foreground()");
+    expect(registration).toContain('RelayProtocol.confirms(handle, current.token, RelayProtocol.ENV, "voip")');
+    const relay = code(java["RelayProtocol.java"]);
+    expect(relay).toContain('put("type", "voip")');
+    const activity = code(java["MainActivity.java"]);
+    expect(activity).toContain("AndroidVoip.get(this).refresh(false)");
+  });
+
+  it("tells a call from an alert by the key id, and a challenge by the type waiting for it", () => {
+    const service = code(java["MoaMessagingService.java"]);
+    expect(service.indexOf("AndroidVoip.get(this).receive(data)")).toBeLessThan(service.indexOf("PushNotifier.show(this, data)"));
+    expect(service).toContain("NativePushRegistration.get(this).handleChallenge(");
+    expect(service).toContain("AndroidVoip.get(this).handleChallenge(");
+    expect(service).toContain("AndroidVoip.get(this).refresh(true)");
+    expect(code(java["PushMessages.java"])).toContain("static boolean addressedTo(");
+  });
+
+  it("asks for the call permissions once, with an instruction, and never at every launch", () => {
+    const activity = code(java["MainActivity.java"]);
+    expect(activity).toContain("askCallPermissions();");
+    expect(activity).toContain('prefs.edit().putBoolean("asked", true)');
+    expect(activity).toContain("Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT");
+    expect(activity).toContain("canUseFullScreenIntent()");
+    const en = readFileSync("android/app/src/main/res/values/strings.xml", "utf8");
+    const es = readFileSync("android/app/src/main/res/values-es/strings.xml", "utf8");
+    expect(en).toContain('<string name="calls_permission_message">Allow calls so owners can ring you.</string>');
+    for (const name of ["channel_incoming_call", "call_incoming", "call_answer", "call_decline", "call_missed", "calls_permission_message",
+      "calls_permission_continue", "calls_permission_not_now"]) {
+      expect(en).toContain(`<string name="${name}">`);
+      expect(es).toContain(`<string name="${name}">`);
+    }
+  });
+});
+
 describe("Android permissions and navigation", () => {
   it("declares what the pairing scanner, voice and notifications request at runtime", () => {
     const declared = [...manifest.matchAll(/<uses-permission android:name="android\.permission\.([A-Z_]+)" \/>/g)].map((m) => m[1]).sort();
@@ -259,6 +364,7 @@ describe("Android permissions and navigation", () => {
       "MODIFY_AUDIO_SETTINGS",
       "POST_NOTIFICATIONS",
       "RECORD_AUDIO",
+      "USE_FULL_SCREEN_INTENT",
       "VIBRATE",
     ]);
   });

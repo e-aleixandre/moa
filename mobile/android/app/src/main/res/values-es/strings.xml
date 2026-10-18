@@ -5,6 +5,17 @@
     <string name="channel_active">Terminadas</string>
     <string name="channel_passive">Resúmenes</string>
     <string name="channel_call">Llamadas</string>
+    <string name="channel_incoming_call">Llamadas entrantes</string>
+    <string name="call_incoming">Llamada entrante</string>
+    <string name="call_answer">Contestar</string>
+    <string name="call_decline">Rechazar</string>
+    <string name="call_missed">Llamada perdida</string>
+
+    <!-- Se pide una vez, al abrir por primera vez un móvil emparejado. -->
+    <string name="calls_permission_message">Permite las llamadas para que los owners puedan llamarte.</string>
+    <string name="calls_permission_continue">Continuar</string>
+    <string name="calls_permission_not_now">Ahora no</string>
+
     <string name="call_ongoing">Llamada en curso</string>
 
     <!-- Shown for a notification moa could not decrypt. -->
