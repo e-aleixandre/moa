@@ -826,6 +826,8 @@ type AskUserRequested struct {
 	Questions []AskQuestion
 	// RequiresTap: only a tap or typed answer may resolve this request.
 	RequiresTap bool
+	// Async: a durable question that does not block the session. Additive.
+	Async bool
 }
 
 // AskUserResolved is published when a pending ask-user prompt is answered.

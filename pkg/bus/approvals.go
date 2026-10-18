@@ -2,11 +2,14 @@ package bus
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,6 +54,10 @@ type ApprovalManager struct {
 	// requests so ClearPending(gen) only clears orphans of the ended run and
 	// not a newer run's live approval. Nil in standalone tests → gen 0.
 	runGen *atomic.Uint64
+
+	// asyncResolver accepts the answer to an asynchronous ask. The question
+	// lives in a durable store, not here: this map only projects it.
+	asyncResolver func(id string, answers []string, responder askuser.Responder) error
 }
 
 // currentGen returns the run generation a newly registered request belongs to.
@@ -98,8 +105,12 @@ type PendingAsk struct {
 	RunGen      uint64
 	// RequestedAt is when the question was asked (see PendingPermission).
 	RequestedAt time.Time
-	response    chan<- askuser.Reply
-	resolved    bool
+	// Async marks a projection of a durable question (asynchronous ask_user).
+	// It has no reply channel, blocks no run, and outlives the run that posted
+	// it: only its answer, withdrawal or dismissal removes it.
+	Async    bool
+	response chan<- askuser.Reply
+	resolved bool
 }
 
 // NewApprovalManager creates an ApprovalManager.
@@ -377,7 +388,7 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 				if !ok {
 					return
 				}
-				id := fmt.Sprintf("ask_%d", am.idCounter.Add(1))
+				id := newLegacyAskID()
 				questions := make([]AskQuestion, len(p.Questions))
 				for i, q := range p.Questions {
 					questions[i] = AskQuestion{Text: q.Text, Options: q.Options, Multiple: q.Multiple}
@@ -415,6 +426,83 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 	}()
 }
 
+// newLegacyAskID mints the ID of a blocking ask. It is random so two sessions,
+// or one session before and after a restart, never share an ID.
+func newLegacyAskID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return "ask_" + hex.EncodeToString(b[:])
+}
+
+// SetAsyncAskResolver installs what accepts an answer to an asynchronous ask.
+func (am *ApprovalManager) SetAsyncAskResolver(fn func(id string, answers []string, responder askuser.Responder) error) {
+	am.mu.Lock()
+	am.asyncResolver = fn
+	am.mu.Unlock()
+}
+
+// AddAsync projects an open asynchronous question: visible to the UI, push,
+// voice and the owner like any pending ask, without holding the session in
+// StatePermission. It does not publish; the caller announces it.
+func (am *ApprovalManager) AddAsync(info PendingAskInfo) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.asks[info.ID] = &PendingAsk{
+		ID:          info.ID,
+		Questions:   info.Questions,
+		RequiresTap: info.RequiresTap,
+		RequestedAt: info.RequestedAt,
+		Async:       true,
+	}
+}
+
+// DropAsync removes an asynchronous question's projection and reports whether
+// it was there. The caller publishes AskUserResolved when it was.
+func (am *ApprovalManager) DropAsync(id string) bool {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if a, ok := am.asks[id]; ok && a.Async {
+		delete(am.asks, id)
+		return true
+	}
+	return false
+}
+
+// AsyncAsks lists the open asynchronous questions, oldest first.
+func (am *ApprovalManager) AsyncAsks() []PendingAskInfo {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	var out []PendingAskInfo
+	for _, a := range am.asks {
+		if a.Async && !a.resolved {
+			out = append(out, askInfo(a))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].RequestedAt.Equal(out[j].RequestedAt) {
+			return out[i].RequestedAt.Before(out[j].RequestedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// HasOpenAsync reports whether an asynchronous question is open.
+func (am *ApprovalManager) HasOpenAsync() bool {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	for _, a := range am.asks {
+		if a.Async && !a.resolved {
+			return true
+		}
+	}
+	return false
+}
+
+func askInfo(a *PendingAsk) PendingAskInfo {
+	return PendingAskInfo{ID: a.ID, Questions: a.Questions, RequiresTap: a.RequiresTap, RequestedAt: a.RequestedAt, Async: a.Async}
+}
+
 // ResolveAskUser resolves a pending ask_user request. responder says who
 // answered; it is recorded with the tool result (zero means unknown).
 func (am *ApprovalManager) ResolveAskUser(id string, answers []string, responder askuser.Responder) error {
@@ -428,11 +516,23 @@ func (am *ApprovalManager) ResolveAskUser(id string, answers []string, responder
 		am.mu.Unlock()
 		return nil
 	}
-	// Checked under the same lock that consumes the request, so voice and tap
-	// have a single winner and a rejected voice leaves the request pending.
-	if responder.Kind == askuser.ResponderVoice && p.RequiresTap {
+	// A confirmation is the human's alone: owner, automation, voice and any
+	// kind this code does not know are refused before anything is consumed.
+	// Checked under the same lock that consumes the request, so contenders
+	// have a single winner and a rejected one leaves the request pending.
+	if p.RequiresTap && responder.Kind != askuser.ResponderUser {
 		am.mu.Unlock()
 		return askuser.ErrRequiresTap
+	}
+	if p.Async {
+		resolver := am.asyncResolver
+		am.mu.Unlock()
+		if resolver == nil {
+			return fmt.Errorf("ask request %q cannot be answered here", id)
+		}
+		// The durable acceptance (and the projection drop) belong to the owner
+		// of the store, outside this lock.
+		return resolver(id, answers, responder)
 	}
 	if len(answers) != len(p.Questions) {
 		am.mu.Unlock()
@@ -484,6 +584,9 @@ func (am *ApprovalManager) ClearPending(gen uint64) {
 	}
 	var askIDs []string
 	for id, a := range am.asks {
+		if a.Async {
+			continue // a durable question outlives the run that posted it
+		}
 		if a.RunGen != gen {
 			continue // belongs to another run — leave it live
 		}
@@ -541,6 +644,9 @@ type PendingAskInfo struct {
 	Questions   []AskQuestion `json:"questions"`
 	RequiresTap bool          `json:"requires_tap,omitempty"`
 	RequestedAt time.Time     `json:"requested_at,omitzero"`
+	// Async marks a durable question that does not block the session.
+	// Additive: a client that does not know the field is unaffected.
+	Async bool `json:"async,omitempty"`
 }
 
 // PendingInfo returns the current pending approval state.
@@ -560,16 +666,20 @@ func (am *ApprovalManager) PendingInfo() PendingApprovalInfo {
 			break
 		}
 	}
+	// Deterministic with several: the oldest, so a snapshot does not flicker.
+	var oldest *PendingAsk
 	for _, a := range am.asks {
-		if !a.resolved {
-			info.Ask = &PendingAskInfo{
-				ID:          a.ID,
-				Questions:   a.Questions,
-				RequiresTap: a.RequiresTap,
-				RequestedAt: a.RequestedAt,
-			}
-			break
+		if a.resolved {
+			continue
 		}
+		if oldest == nil || a.RequestedAt.Before(oldest.RequestedAt) ||
+			(a.RequestedAt.Equal(oldest.RequestedAt) && a.ID < oldest.ID) {
+			oldest = a
+		}
+	}
+	if oldest != nil {
+		ai := askInfo(oldest)
+		info.Ask = &ai
 	}
 	return info
 }
