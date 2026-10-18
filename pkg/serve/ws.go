@@ -357,10 +357,14 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.PermissionResolved:
 		return Event{Type: "permission_resolved", Data: PromptResolvedData{ID: e.ID}}, true
 	case bus.AskUserRequested:
-		return Event{Type: "ask_user", Data: map[string]any{
+		data := map[string]any{
 			"id": e.ID, "run_gen": e.RunGen, "questions": e.Questions,
-			"requires_tap": e.RequiresTap, "async": e.Async,
-		}}, true
+			"requires_tap": e.RequiresTap,
+		}
+		if e.Async {
+			data["async"] = true
+		}
+		return Event{Type: "ask_user", Data: data}, true
 	case bus.AskUserResolved:
 		return Event{Type: "ask_resolved", Data: PromptResolvedData{ID: e.ID}}, true
 	case bus.SecretRequested:

@@ -181,6 +181,10 @@ type Repo struct {
 	// hookBeforeQuestionClose, when set by a test, holds a close inside its
 	// transaction, after the question was read as open and before it is closed.
 	hookBeforeQuestionClose func()
+	// questionsEmpty caches that the questions table held no row; questionsSeen
+	// that this process wrote one. See HasQuestions.
+	questionsEmpty atomic.Bool
+	questionsSeen  atomic.Bool
 }
 
 // New returns a repository on path. Nothing touches the disk until first use.

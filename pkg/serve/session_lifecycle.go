@@ -604,8 +604,8 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// conversation: a child directing its siblings has no owner's view to do
 	// it from.
 	if opts != nil && opts.ownerSession {
-		core.RegisterOrLog(bs.ToolReg, newSessionsTool(m, core.CodebaseKey(bs.CWD)))
-		core.RegisterOrLog(bs.ToolReg, m.newRequestCallTool(id, bs.AskBridge))
+		core.RegisterOrLog(bs.ToolReg, newSessionsTool(m, core.CodebaseKey(bs.CWD), askAsync))
+		core.RegisterOrLog(bs.ToolReg, m.newRequestCallTool(id, bs.AskBridge, askAsync))
 	} else {
 		// A normal conversation reads the sessions its user selected with @.
 		// The caller is this session, fixed here; sess is assigned below.
@@ -997,7 +997,7 @@ func (m *Manager) deleteSession(id string) (err error) {
 	sess.drainLifecycleUsers()
 	// A post that committed its question before seeing sess.deleted is
 	// settled now; one after it refuses to commit (questionService.deleted).
-	m.questions.deleted(id)
+	m.questions.deleted(sess)
 	sess.attachmentScope.Revoke()
 	// Mark deleted to prevent persistence from resurrecting.
 	if sess.persister != nil {

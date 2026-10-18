@@ -225,6 +225,38 @@ func (r *Repo) QuestionByInvocation(ctx context.Context, sessionID, msgID, toolC
 	return qs[0], true, nil
 }
 
+// HasQuestions reports whether any question was ever stored. A database no
+// asynchronous ask_user has touched has none, which lets the callers that
+// only matter once there are questions skip their work entirely. It errs on
+// the side of true when the table cannot be read.
+func (r *Repo) HasQuestions(ctx context.Context) bool {
+	if r.questionsSeen.Load() {
+		return true
+	}
+	if r.questionsEmpty.Load() {
+		return false
+	}
+	rd, err := r.reader()
+	if err != nil {
+		return true
+	}
+	if rd == nil {
+		return false // no database yet
+	}
+	var any bool
+	if err := rd.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM questions)").Scan(&any); err != nil {
+		return true
+	}
+	if any {
+		r.questionsSeen.Store(true)
+		return true
+	}
+	// A question inserted since the read is flagged by InsertQuestion, which
+	// is checked first.
+	r.questionsEmpty.Store(true)
+	return false
+}
+
 // InsertQuestion commits a posted question. The invocation that already posted
 // one gets it back (existed), so a retry is idempotent; a session at its bound
 // gets *ErrQuestionOpen. q.ID, q.Ack and the origin are the caller's.
@@ -235,6 +267,7 @@ func (r *Repo) InsertQuestion(ctx context.Context, q Question) (Question, bool, 
 	if q.OriginTool != OriginAskUser && q.OriginTool != OriginRequestCall {
 		return Question{}, false, invalid("unknown origin tool %q", q.OriginTool)
 	}
+	r.questionsSeen.Store(true)
 	qsJSON, err := json.Marshal(q.Questions)
 	if err != nil {
 		return Question{}, false, err

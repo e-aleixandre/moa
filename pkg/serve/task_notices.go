@@ -144,6 +144,9 @@ func (d *noticeDispatcher) sessionIdle(id string) {
 // slotFreed is called when a loaded session goes away: a full house may have
 // held back an accepted answer (see pass), and there is room for it now.
 func (d *noticeDispatcher) slotFreed() {
+	if d == nil || !d.m.questions.engaged() {
+		return // no answer can be waiting for room
+	}
 	d.trigger(func() { d.retryWaiting = true })
 }
 
@@ -251,7 +254,7 @@ func (d *noticeDispatcher) pass(ctx context.Context) {
 // for the next tick. Must run under d.mu.
 func (d *noticeDispatcher) wakeOwed(ctx context.Context) {
 	m := d.m
-	if m.questions == nil {
+	if !m.questions.engaged() {
 		return
 	}
 	due, err := m.tasks.DueQuestionWork(ctx)

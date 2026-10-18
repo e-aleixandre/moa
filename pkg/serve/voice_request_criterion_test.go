@@ -23,7 +23,7 @@ func TestRequestCall_CriterionInDescriptionAndOwnerPrompt(t *testing.T) {
 		"A call never authorizes anything",
 		"deployments and permissions still need the user's tap on screen",
 	}
-	desc := (&Manager{}).newRequestCallTool("s", nil).Description
+	desc := (&Manager{}).newRequestCallTool("s", nil, false).Description
 	prompt := owner.RolePrompt("Infra", "main", "")
 	for _, w := range want {
 		if !strings.Contains(desc, w) {

@@ -186,6 +186,7 @@ func (f1bisTapProvider) Stream(ctx context.Context, req core.Request) (<-chan co
 // the owner may answer for) that is blocked on a requires_tap question.
 func f1bisOwnerTapChild(t *testing.T) (owner, child *ManagedSession, askID string) {
 	t.Helper()
+	pinAsyncAskUser(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
@@ -348,6 +349,7 @@ func f1bisRequestCallHandler() mockHandler {
 // BEFORE the human answers, keep the call_request outcome "written", not claim
 // an answer, and leave the tap question pending for the human.
 func TestF1BisREDRequestCallNeverAcknowledgesWrittenFallbackBeforeAnswer(t *testing.T) {
+	pinAsyncAskUser(t)
 	var hs []mockHandler
 	for range 24 {
 		hs = append(hs, f1bisRequestCallHandler())
@@ -474,6 +476,7 @@ func f1bisPostAsk(t *testing.T, srvURL, sessionID, body string) int {
 
 func f1bisServer(t *testing.T, provider core.Provider, opts ...ServerOption) (*httptest.Server, *Manager) {
 	t.Helper()
+	pinAsyncAskUser(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	mgr := newTestManagerWithConfig(t, ctx, provider, t.TempDir(), core.MoaConfig{DisableSandbox: true})

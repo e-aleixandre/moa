@@ -75,6 +75,15 @@ func newQuestionService(m *Manager) *questionService {
 	return &questionService{m: m, repo: m.tasks, locks: map[string]*sync.Mutex{}}
 }
 
+// engaged reports whether the pilot has ever left a question in the task
+// database. Until it has, nothing here has anything to settle, fence or
+// recover, so the callers that sit on the paths every deployment runs (Stop,
+// rewind, resume, delete, answering a card) skip their work: with the pilot off
+// they behave as they did before it existed.
+func (q *questionService) engaged() bool {
+	return q != nil && q.repo.HasQuestions(q.m.baseCtx)
+}
+
 // lock takes the session's lock and returns its release.
 func (q *questionService) lock(sessionID string) func() {
 	q.mu.Lock()
@@ -279,7 +288,7 @@ func (q *questionService) reconcileLocked(ctx context.Context, sessionID string,
 // invalidated: disk and database keep agreeing, and an answer's own check
 // still refuses a question whose origin the live tree has left.
 func (q *questionService) branch(sess *ManagedSession, cmd bus.BranchTo) error {
-	if q == nil {
+	if !q.engaged() {
 		return sess.runtime.Bus.Execute(cmd)
 	}
 	unlock := q.lock(sess.ID)
@@ -308,10 +317,14 @@ func (q *questionService) settleLeafLocked(sess *ManagedSession) {
 // and once its runtime's users are drained: the first settlement (with the
 // rest of its scheduled work) cannot see a post that was between its
 // checkpoint and its commit. Later posts see gone and refuse.
-func (q *questionService) deleted(sessionID string) {
-	if q == nil {
+func (q *questionService) deleted(sess *ManagedSession) {
+	// A session that cannot post and a database with no question has nothing
+	// to settle (a session that can post marks itself gone either way: its
+	// post may be racing this delete).
+	if q == nil || (!sess.askAsync && !q.engaged()) {
 		return
 	}
+	sessionID := sess.ID
 	unlock := q.lock(sessionID)
 	defer unlock()
 	q.gone.Store(sessionID, struct{}{})
@@ -405,7 +418,7 @@ func (q *questionService) Open(ctx context.Context, sessionID string) ([]tasks.Q
 // in the conversation: it is being read, and the outbox state ("sent") only
 // says what the transport did, not whether the model has it.
 func (q *questionService) Fence(ctx context.Context, sessionID string, stopRun bool) error {
-	if q == nil {
+	if !q.engaged() {
 		return nil
 	}
 	unlock := q.lock(sessionID)
@@ -582,7 +595,7 @@ func (q *questionService) owed(sess *ManagedSession) bool {
 // message. Stop's fence decides under the same lock, so a stopped answer
 // owes nothing, and the work stays due until its own run ends.
 func (q *questionService) continueDue(sess *ManagedSession) {
-	if q == nil {
+	if !q.engaged() {
 		return
 	}
 	tree := sess.runtime.Context().Tree
@@ -670,7 +683,7 @@ func (q *questionService) repairer(sessionID string) session.ToolCallRepair {
 		return nil
 	}
 	return func(originMsgID string, call core.Content) (core.AgentMessage, bool) {
-		if call.ToolName != "ask_user" && call.ToolName != "request_call" {
+		if (call.ToolName != "ask_user" && call.ToolName != "request_call") || !q.engaged() {
 			return core.AgentMessage{}, false
 		}
 		question, ok, err := q.repo.QuestionByInvocation(q.m.baseCtx, sessionID, originMsgID, call.ToolCallID)

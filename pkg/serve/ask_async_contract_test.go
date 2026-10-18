@@ -216,6 +216,7 @@ type f1Env struct {
 // f1Isolate keeps owners and the book in a temp config dir for this test.
 func f1Isolate(t *testing.T) {
 	t.Helper()
+	pinAsyncAskUser(t)
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 }
 
@@ -224,6 +225,7 @@ func f1Isolate(t *testing.T) {
 // installation before and after a restart.
 func f1NewEnv(t *testing.T, base, root string, prov *f1Provider, hooks ...taskSchedulerHooks) *f1Env {
 	t.Helper()
+	pinAsyncAskUser(t)
 	var schedulerHooks taskSchedulerHooks
 	if len(hooks) != 0 {
 		schedulerHooks = hooks[0]

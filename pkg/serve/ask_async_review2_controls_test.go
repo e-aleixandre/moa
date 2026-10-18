@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -128,8 +129,10 @@ func TestAuthorityReviewOffLegacyAuthorityIsDeliberatelyHardened(t *testing.T) {
 			t.Fatal("rejection consumed the legacy ask")
 		}
 	}
-	if qid == "ask_1" {
-		t.Errorf("legacy ID was not randomized: %s", qid)
+	// Owner decision: the flag-off ID is the one main mints (ask_N), not a
+	// random one; only the tap authority is deliberately hardened.
+	if !regexp.MustCompile(`^ask_\d+$`).MatchString(qid) {
+		t.Errorf("legacy ID is not the sequential one main mints: %s", qid)
 	}
 	t.Logf("flag-off legacy ID=%s; nonhuman responders refused before consumption", qid)
 	f1bisAssertHumanThenResolves(t, child, qid)

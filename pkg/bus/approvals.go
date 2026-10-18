@@ -2,10 +2,8 @@ package bus
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -388,7 +386,7 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 				if !ok {
 					return
 				}
-				id := newLegacyAskID()
+				id := fmt.Sprintf("ask_%d", am.idCounter.Add(1))
 				questions := make([]AskQuestion, len(p.Questions))
 				for i, q := range p.Questions {
 					questions[i] = AskQuestion{Text: q.Text, Options: q.Options, Multiple: q.Multiple}
@@ -424,14 +422,6 @@ func (am *ApprovalManager) StartAskBridge(sessionCtx context.Context, bridge *as
 			}
 		}
 	}()
-}
-
-// newLegacyAskID mints the ID of a blocking ask. It is random so two sessions,
-// or one session before and after a restart, never share an ID.
-func newLegacyAskID() string {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return "ask_" + hex.EncodeToString(b[:])
 }
 
 // SetAsyncAskResolver installs what accepts an answer to an asynchronous ask.

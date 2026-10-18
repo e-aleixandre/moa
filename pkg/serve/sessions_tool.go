@@ -57,7 +57,7 @@ const (
 // Every action is scoped to the owner's codebase: a target whose cwd resolves
 // to another key is refused rather than silently ignored, so an owner can
 // never reach into a project that is not its own.
-func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
+func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core.Tool {
 	// The owner is re-read on every call rather than captured: its session ID
 	// is written just after this session is built, and answer_asks can be
 	// turned off while the conversation is open. A captured copy would answer
@@ -76,6 +76,14 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 		}
 		return own, nil
 	}
+	// What send does about a question depends on the session's contract: only
+	// a session whose own ask_user is asynchronous has questions that send
+	// leaves alone, and only it is told so.
+	actionHelp := "list, read, send, new or answer. send skips a pending question in the owner's own sessions and is refused in the user's; to answer it, use answer."
+	if asyncQuestions {
+		actionHelp = "list, read, send, new or answer. send skips a blocking question in the owner's own sessions and is refused in the user's; an open (asynchronous) question is neither skipped nor in the way. To answer a question, use answer."
+	}
+	actionHelpJSON, _ := json.Marshal(actionHelp)
 	return core.Tool{
 		Name:  SessionsToolName,
 		Label: "Sessions",
@@ -93,7 +101,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string) core.Tool {
 				"action": {
 					"type": "string",
 					"enum": ["list", "read", "send", "new", "answer"],
-					"description": "list, read, send, new or answer. send skips a blocking question in the owner's own sessions and is refused in the user's; an open (asynchronous) question is neither skipped nor in the way. To answer a question, use answer."
+					"description": ` + string(actionHelpJSON) + `
 				},
 				"session_id": {"type": "string", "description": "Target session (read, send, answer)."},
 				"text": {"type": "string", "description": "Message to send (send), or the prompt for a new session (new)."},
@@ -342,13 +350,13 @@ func (m *Manager) ownerPendingLine(id string) string {
 		for _, q := range ask.Questions {
 			questions = append(questions, q.Describe())
 		}
+		if !ask.Async {
+			// A blocking ask holds the session: it alone is what it waits for.
+			return fmt.Sprintf("asking (ask_id %s): %s", ask.ID, strings.Join(questions, " | "))
+		}
 		// An asynchronous question does not hold the session: it may be idle or
 		// working, and the answer is what it waits for.
-		label := "asking"
-		if ask.Async {
-			label = "open question"
-		}
-		lines = append(lines, fmt.Sprintf("%s (ask_id %s): %s", label, ask.ID, strings.Join(questions, " | ")))
+		lines = append(lines, fmt.Sprintf("open question (ask_id %s): %s", ask.ID, strings.Join(questions, " | ")))
 	}
 	if pending.Permission != nil {
 		lines = append(lines, fmt.Sprintf("waiting for the user to approve %s", pending.Permission.ToolName))
@@ -360,7 +368,7 @@ func (m *Manager) ownerPendingLine(id string) string {
 // A saved session cannot be blocked, but the owner can still answer its
 // question, so the roster names it.
 func (m *Manager) savedQuestionLine(id string) string {
-	if m.questions == nil {
+	if !m.questions.engaged() {
 		return ""
 	}
 	open, err := m.questions.Open(m.baseCtx, id)
@@ -504,15 +512,19 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 	if err != nil {
 		return core.ErrorResult(err.Error())
 	}
-	if info.Origin != "owner" {
-		return core.ErrorResult("This session is the user's: do not answer for them. Ask the user with ask_user, proposing the answer you would give as the first option.")
-	}
+	const notTheirs = "This session is the user's: do not answer for them. Ask the user with ask_user, proposing the answer you would give as the first option."
 	sess, ok := m.Get(id)
+	if ok && sess.Origin != "owner" {
+		return core.ErrorResult(notTheirs)
+	}
 	if !ok {
 		// A saved session cannot be blocked, but it can hold a durable question:
 		// the store accepts the answer and the session is woken from there.
-		if m.questions == nil {
+		if !m.questions.engaged() {
 			return core.ErrorResult(fmt.Sprintf("session %s is not loaded; it cannot be waiting on a question", id))
+		}
+		if info.Origin != "owner" {
+			return core.ErrorResult(notTheirs)
 		}
 		if err := m.questions.Answer(m.baseCtx, id, askID, answers, ownerResponder(own)); err != nil {
 			if errors.Is(err, tasks.ErrQuestionNotFound) {

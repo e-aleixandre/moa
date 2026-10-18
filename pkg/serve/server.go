@@ -775,7 +775,7 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 		}
 		// A durable question is answered through the store, loaded or not: the
 		// session it names, and only that one, is woken by the answer.
-		if mgr.questions != nil {
+		if mgr.questions.engaged() {
 			_, err := mgr.tasks.GetQuestion(r.Context(), body.ID)
 			switch {
 			case err == nil:
@@ -1322,12 +1322,15 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 				}
 				ids = append(ids, steer.ID)
 			}
-			writeJSON(w, http.StatusOK, map[string]any{
+			resp := map[string]any{
 				"discarded_steer_ids": ids,
 				"discarded_steers":    recallableSteers(discarded),
 				"stop_id":             op.StopID,
-				"fence_error":         fenceErr,
-			})
+			}
+			if fenceErr != "" {
+				resp["fence_error"] = fenceErr
+			}
+			writeJSON(w, http.StatusOK, resp)
 		}
 	}
 }

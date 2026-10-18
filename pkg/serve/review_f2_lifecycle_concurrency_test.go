@@ -230,7 +230,7 @@ func TestReviewF2Lifecycle_StopDuringDeliveryWithdrawsBeforePhoneAnswer(t *testi
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		_, _ = f.mgr.newRequestCallTool(f.osess.ID, nil).Execute(ctx, rcArgs, nil)
+		_, _ = f.mgr.newRequestCallTool(f.osess.ID, nil, true).Execute(ctx, rcArgs, nil)
 	}()
 	env := reviewF2Receive(t, entered)
 	cancel()

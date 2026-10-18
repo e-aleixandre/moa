@@ -49,6 +49,7 @@ type f1CrashDirs struct{ base, workspace, config, manifest, tmp string }
 
 func f1NewCrashDirs(t *testing.T) f1CrashDirs {
 	t.Helper()
+	pinAsyncAskUser(t) // the parent restarts the child's managers
 	root := t.TempDir()
 	d := f1CrashDirs{
 		base:      filepath.Join(root, "sessions"),

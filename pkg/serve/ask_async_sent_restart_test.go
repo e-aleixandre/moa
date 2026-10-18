@@ -57,9 +57,18 @@ func TestAskAsyncSentAnswerAlreadySavedIsDeliveredAfterRestart(t *testing.T) {
 		n, _ := e.mgr.tasks.Notice(ctx, q.EventID)
 		t.Fatalf("notice after the restart = %+v, want delivered", n)
 	}
-	sess, err := e.mgr.ResumeSession(m.SessionID)
-	if err != nil {
-		t.Fatal(err)
+	// The restarted session may already be running the continuation its saved
+	// answer owed (resuming it then reports busy): take it as it is.
+	var sess *ManagedSession
+	if !f1Eventually(f1Guard, func() bool {
+		if s, err := e.mgr.ResumeSession(m.SessionID); err == nil {
+			sess = s
+		} else if s, ok := e.mgr.Get(m.SessionID); ok {
+			sess = s
+		}
+		return sess != nil
+	}) {
+		t.Fatal("the restarted session never became available")
 	}
 	answered := func(r core.Request) bool { return f1LastUserIsAnswer(r) }
 	if !f1Stable(800*time.Millisecond, func() bool {

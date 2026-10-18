@@ -366,3 +366,24 @@ func TestQuestionWorkLifecycle(t *testing.T) {
 		t.Fatal("a finished answer still owes work")
 	}
 }
+
+// A database no question was ever written to reports so, and learns of the
+// first one at once; the callers that skip work until then rely on both.
+func TestHasQuestionsTracksTheFirstQuestion(t *testing.T) {
+	r := newRepo(t)
+	if _, err := r.Revision(bg); err != nil { // opens the database
+		t.Fatal(err)
+	}
+	if r.HasQuestions(bg) {
+		t.Fatal("an empty database has questions")
+	}
+	if r.HasQuestions(bg) { // the negative is cached
+		t.Fatal("an empty database has questions")
+	}
+	if _, _, err := r.InsertQuestion(bg, newQuestion("s1", "tc1")); err != nil {
+		t.Fatal(err)
+	}
+	if !r.HasQuestions(bg) {
+		t.Fatal("a stored question is not seen")
+	}
+}

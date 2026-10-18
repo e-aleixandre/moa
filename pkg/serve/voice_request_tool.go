@@ -17,16 +17,24 @@ import (
 
 var requestCallDescription = "Ask to talk to the user by voice.\n\n" + owner.CallCriterion + "\n\n" +
 	"It rings once. If the user answers, you are told they are on a call with you: end your turn; what you agree arrives as call minutes and relayed tasks. " +
-	"If no call happens (not answered, they prefer writing, calls are off, paused or outside hours, or the plan fails), written_fallback is asked in writing instead and you get the answer (if the question is asynchronous, as an acknowledgement now and the answer later). Do not call again about the same thing."
+	"If no call happens (not answered, they prefer writing, calls are off, paused or outside hours, or the plan fails), written_fallback is asked in writing instead and you get the answer. Do not call again about the same thing."
+
+// requestCallAsyncNote is what a session whose questions are asynchronous is
+// told the fallback does.
+const requestCallAsyncNote = " (if the question is asynchronous, as an acknowledgement now and the answer later)"
 
 // newRequestCallTool is the owner's request_call. bridge is the owner
 // session's ask_user bridge: the written fallback is an ordinary question. In
 // a session that asks asynchronously the fallback is a durable question and the
 // call returns an acknowledgement at once.
-func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge) core.Tool {
+func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge, asyncQuestions bool) core.Tool {
+	description := requestCallDescription
+	if asyncQuestions {
+		description = strings.Replace(description, "and you get the answer.", "and you get the answer"+requestCallAsyncNote+".", 1)
+	}
 	return core.Tool{
 		Name:        "request_call",
-		Description: requestCallDescription,
+		Description: description,
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
