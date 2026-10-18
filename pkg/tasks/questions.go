@@ -404,6 +404,9 @@ func (r *Repo) CloseQuestion(ctx context.Context, sessionID, id string, to Quest
 		case out.State != QuestionOpen:
 			return false, &ErrQuestionConflict{State: out.State}
 		}
+		if r.hookBeforeQuestionClose != nil {
+			r.hookBeforeQuestionClose()
+		}
 		now := r.now().UnixMilli()
 		if _, err := tx.ExecContext(ctx, `UPDATE questions SET state = ?, reason = ?, closed_at = ?, updated_at = ?
 			WHERE id = ? AND state = 'open'`, string(to), reason, now, now, id); err != nil {

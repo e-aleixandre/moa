@@ -178,6 +178,9 @@ type Repo struct {
 	// hookBeforeQuestionEvent, when set by a test, fails an answer inside its
 	// transaction, after the question was read and before the notice is written.
 	hookBeforeQuestionEvent func() error
+	// hookBeforeQuestionClose, when set by a test, holds a close inside its
+	// transaction, after the question was read as open and before it is closed.
+	hookBeforeQuestionClose func()
 }
 
 // New returns a repository on path. Nothing touches the disk until first use.
