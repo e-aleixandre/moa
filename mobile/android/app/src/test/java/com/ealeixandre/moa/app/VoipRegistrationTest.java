@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.junit.Before;
@@ -674,6 +675,42 @@ public class VoipRegistrationTest {
         assertEquals("Moa-Device dev_1.credential", delete.headers.get("Authorization"));
         assertEquals("1", delete.headers.get("X-Moa-Request"));
         assertNull(delete.body);
+    }
+
+    @Test
+    public void aRetryKeepsItsPairingUntilTheRefreshGate() {
+        AtomicBoolean forgetOnPairedRead = new AtomicBoolean();
+        VoipRegistration.Host edge = new VoipRegistration.Host() {
+            public boolean foreground() { return host.foreground(); }
+            public DeviceCredentialStore.Stored paired() {
+                DeviceCredentialStore.Stored snapshot = host.paired();
+                if (forgetOnPairedRead.getAndSet(false)) {
+                    // The timer passed its check; another thread changes pairing
+                    // before refresh takes its registration gate.
+                    assertTrue(registration.forgetLocal());
+                    host.paired = new DeviceCredentialStore.Stored(ORIGIN, "dev_2.fresh", NOW + 86_400_000L);
+                }
+                return snapshot;
+            }
+            public String relayUrl() { return host.relayUrl(); }
+            public String fcmToken() throws IOException { return host.fcmToken(); }
+            public long now() { return host.now(); }
+            public void retryLater(long delay, Runnable task) { host.retryLater(delay, task); }
+            public NativeHttp.Response send(String method, String url, Map<String, String> headers, String body) {
+                return host.send(method, url, headers, body);
+            }
+        };
+        registration = new VoipRegistration(edge, secrets, memory, 300);
+        host.registerCode = 410;
+        registration.refresh(false);
+        Runnable obsolete = host.retryTasks.remove(0);
+        host.registerCode = 202;
+        host.sent.clear();
+        forgetOnPairedRead.set(true);
+        obsolete.run();
+        assertTrue("A retry must keep its generation until the refresh gate: " + host.lines(), host.sent.isEmpty());
+        assertNull(secrets.load());
+        assertNull(memory.get("token"));
     }
 
     // ---- helpers
