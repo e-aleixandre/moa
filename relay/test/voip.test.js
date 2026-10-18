@@ -71,12 +71,12 @@ test('the type is bound to the handle: an alert handle never sends VoIP, nor the
   assert.equal(deps.calls[0].init.headers['apns-push-type'], 'voip');
 });
 
-test('voip register: closed schema, APNs only', async () => {
+test('voip register: closed schema', async () => {
   const bad = [
     { ...VOIP, type: 'VOIP' },
     { ...VOIP, type: ['voip'] },
     { ...VOIP, type: 'silent' },
-    { ...VOIP, provider: 'fcm', env: 'production', token: 'A'.repeat(150) },
+    { ...VOIP, provider: 'fcm', env: 'production' }, // APNs token on FCM
   ];
   for (const body of bad) {
     const deps = makeDeps();
@@ -95,10 +95,10 @@ test('voip has its own rate-limit namespace', async () => {
   assert.notEqual(a, v);
 });
 
-test('a forged 5-field blob with an unknown y is refused', async () => {
+test('a forged fcm voip blob carrying an APNs-shaped token is refused', async () => {
   const env = makeEnv();
   const h = await sealBlob(env, 'handle', { t: TOKEN, e: 'sandbox', k: b64u(K_SEND), x: NOW + 10, y: 'voip' });
-  const fcmVoip = await sealBlob(env, 'handle', { t: 'A'.repeat(150), e: 'production', k: b64u(K_SEND), x: NOW + 10, p: 'fcm', y: 'voip' });
+  const fcmVoip = await sealBlob(env, 'handle', { t: TOKEN, e: 'production', k: b64u(K_SEND), x: NOW + 10, p: 'fcm', y: 'voip' });
   assert.equal((await openBlob(env, 'handle', h)).y, 'voip');
-  await assert.rejects(openBlob(env, 'handle', fcmVoip));
+  await assert.rejects(openBlob(env, 'handle', fcmVoip)); // APNs-shaped token under p:fcm
 });

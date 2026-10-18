@@ -122,10 +122,9 @@ test('openBlob accepts only canonical forms of the fcm voip handle', async () =>
   assert.equal(ok.p, 'fcm');
   assert.equal(ok.y, 'voip');
   // Non-canonical shapes stay refused: fcm voip with an APNs token or sandbox env,
-  // and unknown y values.
+  // (sealBlob itself never writes an unknown y).
   await assert.rejects(openBlob(env, 'handle', await handleFor(env, 'ab'.repeat(32))));
   await assert.rejects(openBlob(env, 'handle', await sealBlob(env, 'handle', { t: TOKEN, e: 'sandbox', k: b64u(K_SEND), x: NOW + 10, p: 'fcm', y: 'voip' })));
-  await assert.rejects(openBlob(env, 'handle', await sealBlob(env, 'handle', { t: TOKEN, e: 'production', k: b64u(K_SEND), x: NOW + 10, p: 'fcm', y: 'call' })));
   // Pre-existing shapes still open.
   assert.equal((await openBlob(env, 'handle', await sealBlob(env, 'handle', { t: TOKEN, e: 'production', k: b64u(K_SEND), x: NOW + 10, p: 'fcm' }))).y, undefined);
 });

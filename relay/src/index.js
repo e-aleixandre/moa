@@ -24,10 +24,12 @@ const FCM_TOKEN_LIFETIME = 3600;
 const FCM_TOKEN_MARGIN = 300;
 const CHALLENGE_TTL_FCM = `${CHALLENGE_TTL}s`;
 const SEND_TTL_FCM = `${SEND_EXPIRATION}s`;
+// An incoming call is worthless once the invitation (45 s) is over.
+const SEND_TTL_FCM_CALL = '45s';
 const PROVIDERS = new Set(['apns', 'fcm']);
-// Delivery types. `voip` (APNs only) rings an incoming call through PushKit;
-// it is sealed into the handle, so a handle issued for alerts can never send
-// VoIP and the reverse.
+// Delivery types. `voip` rings an incoming call: through PushKit on APNs, or
+// as a short-lived data-only message on FCM. It is sealed into the handle, so
+// a handle issued for alerts can never send VoIP and the reverse.
 const TYPES = new Set(['alert', 'voip']);
 
 const TOKEN_RE = /^[0-9a-f]{64,200}$/;
@@ -230,6 +232,8 @@ export async function openBlob(env, kind, sealed) {
   if (keys === 4) {
     if (!matches(TOKEN_RE, p.t) || !ENVS.has(p.e)) throw unauthorized();
   } else if (keys === 5 && p.p === 'fcm') {
+    if (!matches(FCM_TOKEN_RE, p.t) || p.e !== 'production') throw unauthorized();
+  } else if (keys === 6 && p.p === 'fcm' && p.y === 'voip') {
     if (!matches(FCM_TOKEN_RE, p.t) || p.e !== 'production') throw unauthorized();
   } else if (keys === 5 && p.y === 'voip') {
     if (!matches(TOKEN_RE, p.t) || !ENVS.has(p.e)) throw unauthorized();
@@ -497,12 +501,12 @@ async function register(request, env, deps) {
   const provider = Object.hasOwn(body, 'provider') ? body.provider : 'apns';
   if (typeof provider !== 'string' || !PROVIDERS.has(provider)) throw badRequest();
   const type = Object.hasOwn(body, 'type') ? body.type : 'alert';
-  if (typeof type !== 'string' || !TYPES.has(type) || (type === 'voip' && provider !== 'apns')) throw badRequest();
+  if (typeof type !== 'string' || !TYPES.has(type)) throw badRequest();
   const voip = type === 'voip';
   const fcm = provider === 'fcm';
   if (!matches(fcm ? FCM_TOKEN_RE : TOKEN_RE, body.token) || !(fcm ? body.env === 'production' : ENVS.has(body.env))
     || !key32(body.send_key)) throw badRequest();
-  await rateLimit(env.REGISTER_LIMITER, body.token, body.env, voip ? 'voip' : provider);
+  await rateLimit(env.REGISTER_LIMITER, body.token, body.env, voip ? (fcm ? 'fcm-voip' : 'voip') : provider);
   const now = deps.now();
   const c = await sealBlob(env, 'challenge', { t: body.token, e: body.env, k: body.send_key, x: now + CHALLENGE_TTL, p: provider, y: type });
   if (fcm) {
@@ -553,7 +557,13 @@ async function send(request, env, deps) {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', raw));
   if (!(await hmacVerify(key32(dest.k), 'moa-send-v1', digest, sig))) throw unauthorized();
 
-  await rateLimit(env.SEND_LIMITER, dest.t, dest.e, dest.y === 'voip' ? 'voip' : (dest.p ?? 'apns'));
+  await rateLimit(env.SEND_LIMITER, dest.t, dest.e, dest.y === 'voip' ? (dest.p === 'fcm' ? 'fcm-voip' : 'voip') : (dest.p ?? 'apns'));
+  if (dest.y === 'voip' && dest.p === 'fcm') {
+    // Data-only like alerts, but no collapse key: a call must never replace
+    // or be replaced by another message, and it expires with the invitation.
+    await pushFCM(env, deps, now, dest, { v: '1', k: e.k, c: e.c }, SEND_TTL_FCM_CALL);
+    return reply({ ok: true });
+  }
   if (dest.y === 'voip') {
     // No aps: PushKit hands the envelope to the app, which decrypts it and
     // reports the call to CallKit itself.
