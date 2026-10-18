@@ -124,6 +124,9 @@ type ManagedSession struct {
 	// run yet".
 	lastRunAt       time.Time
 	lastRunProvider string
+	// keepAlive counts this session's cache keep-alive pings and wakes
+	// (keepalive.go). Guarded by mu.
+	keepAlive KeepAliveInfo
 	// startedFreshAt is when the context was last cut with start fresh. Once
 	// no request has warmed the cache since, the action is spent: a second
 	// cut would cut nothing.
@@ -398,6 +401,9 @@ type SessionInfo struct {
 	// applicable (no run yet, or a provider without a known window). The UI
 	// warns once this time has passed that a new message pays a cache write.
 	CacheExpiresAt time.Time `json:"cache_expires_at,omitzero"`
+	// KeepAlive is the cache keep-alive activity, apart from the rest of the
+	// usage; omitted while there has been none.
+	KeepAlive *KeepAliveInfo `json:"keepalive,omitempty"`
 	// CanStartFresh reports that "Start fresh" would drop something: the
 	// context was not already cut since the last request warmed the cache and
 	// FindCutPoint finds a cut. Only computed while a cache expiry is known and
@@ -580,6 +586,9 @@ func (s *ManagedSession) info() SessionInfo {
 		BriefAttempting: s.briefAttempting,
 		BriefProgress:   s.briefProgress,
 		BriefUpdated:    s.briefUpdated,
+	}
+	if ka := s.keepAlive; ka.Pings > 0 || ka.Wakes > 0 || ka.Errors > 0 {
+		info.KeepAlive = &ka
 	}
 	s.mu.Unlock()
 	// Only surface an expiry once a request has warmed the cache, for a
@@ -858,6 +867,7 @@ type Manager struct {
 	workspaceRoot          string
 	moaCfg                 core.MoaConfig
 	configLoader           func(cwd string) core.MoaConfig
+	keepAlive              *keepAliveService
 	auxiliaryModelResolver func(spec string) (core.Model, bool, error)
 	// mcpSourcesLoader resolves the provenance (global vs project) of MCP disable
 	// vetoes for a cwd. nil when a custom ConfigLoader is in use (tests), in which
@@ -1128,6 +1138,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		workspaceRoot:               cfg.WorkspaceRoot,
 		moaCfg:                      cfg.MoaCfg,
 		configLoader:                configLoader,
+		keepAlive:                   newKeepAliveService(cfg.ConfigLoader, cfg.SessionBaseDir),
 		auxiliaryModelResolver:      cfg.AuxiliaryModelResolver,
 		compactSummarizer:           cfg.CompactSummarizer,
 		providerCredentialAvailable: cfg.ProviderCredentialAvailable,

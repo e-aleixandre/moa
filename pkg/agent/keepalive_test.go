@@ -101,7 +101,7 @@ type kaProvider struct {
 	// is told when one is waiting.
 	streamGate    chan struct{}
 	streamStarted chan struct{}
-	toolCalls []string      // the next responses call these tools, one per response
+	toolCalls     []string // the next responses call these tools, one per response
 }
 
 func newKAProvider(clock *kaClock, contextTokens int) *kaProvider {
@@ -199,7 +199,7 @@ func newKAHarness(t *testing.T, role string, contextTokens int, cacheTTL string,
 		t.Fatal(err)
 	}
 	h.agent = a
-	h.cfg = KeepAliveConfig{Policy: allRolesPolicy(), Role: role, Clock: h.clock, OnEvent: func(e KeepAliveEvent) {
+	h.cfg = KeepAliveConfig{Policy: allRolesPolicy, Role: role, Clock: h.clock, OnEvent: func(e KeepAliveEvent) {
 		h.mu.Lock()
 		h.events = append(h.events, e)
 		h.mu.Unlock()
@@ -367,11 +367,11 @@ func TestKeepAliveStopsWhenTheContextChanges(t *testing.T) {
 			}
 			return err
 		},
-		"model":       func(a *Agent) error { m := kaModel; m.ID = "claude-sonnet-5-5"; return a.SetModel(nil, m) },
-		"thinking":    func(a *Agent) error { return a.SetThinkingLevel("low") },
-		"system":      func(a *Agent) error { return a.SetSystemPrompt("another") },
-		"restore":     func(a *Agent) error { return a.RestoreConversation(a.Messages()[:1], 0) },
-		"stop":        func(a *Agent) error { a.Abort(); return nil },
+		"model":    func(a *Agent) error { m := kaModel; m.ID = "claude-sonnet-5-5"; return a.SetModel(nil, m) },
+		"thinking": func(a *Agent) error { return a.SetThinkingLevel("low") },
+		"system":   func(a *Agent) error { return a.SetSystemPrompt("another") },
+		"restore":  func(a *Agent) error { return a.RestoreConversation(a.Messages()[:1], 0) },
+		"stop":     func(a *Agent) error { a.Abort(); return nil },
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newKAHarness(t, core.KeepAliveRoleOwner, 250_000, "1h")
@@ -596,7 +596,7 @@ func TestKeepAliveOffSendsNothing(t *testing.T) {
 func TestKeepAliveDisabledRoleIsNotPinged(t *testing.T) {
 	h := newKAHarness(t, core.KeepAliveRoleOwner, 250_000, "1h")
 	p, _ := core.GetCacheKeepAlive(core.MoaConfig{CacheKeepAlive: &core.CacheKeepAliveConfig{Subagent: &core.KeepAliveHorizons{Enabled: true}}})
-	h.cfg.Policy = p
+	h.cfg.Policy = func() core.KeepAlivePolicy { return p }
 	h.agent.SetKeepAlive(&h.cfg)
 	h.send("hello")
 	h.advance(5 * time.Hour)
@@ -643,5 +643,43 @@ func TestKeepAliveDailyBudgetStopsPingsUntilTheNextDay(t *testing.T) {
 	h.advance(55 * time.Minute)
 	if n := h.prov.pingCount(); n != 3 {
 		t.Fatalf("pings the next day = %d, want 3", n)
+	}
+}
+
+// Settings apply at once: a role switched off mid-sleep stops being pinged,
+// and switched on again it is warmed from its next request.
+func TestKeepAlivePolicyChangesApplyAtOnce(t *testing.T) {
+	h := newKAHarness(t, core.KeepAliveRoleOwner, 250_000, "1h")
+	var mu sync.Mutex
+	on := true
+	h.cfg.Policy = func() core.KeepAlivePolicy {
+		mu.Lock()
+		defer mu.Unlock()
+		if on {
+			return allRolesPolicy()
+		}
+		return core.KeepAlivePolicy{}
+	}
+	h.agent.SetKeepAlive(&h.cfg)
+	h.send("hello")
+	h.advance(55 * time.Minute)
+	mu.Lock()
+	on = false
+	mu.Unlock()
+	h.advance(3 * time.Hour)
+	if n := h.prov.pingCount(); n != 1 {
+		t.Fatalf("pings after switching off = %d, want 1", n)
+	}
+	h.send("off")
+	if h.agent.keepAlive.Load().snap != nil {
+		t.Fatal("a role that is off took a snapshot")
+	}
+	mu.Lock()
+	on = true
+	mu.Unlock()
+	h.send("on")
+	h.advance(55 * time.Minute)
+	if n := h.prov.pingCount(); n != 2 {
+		t.Fatalf("pings after switching on = %d, want 2", n)
 	}
 }

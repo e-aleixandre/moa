@@ -50,7 +50,9 @@ func (systemKeepAliveClock) AfterFunc(d time.Duration, f func()) func() bool {
 
 // KeepAliveConfig turns keep-alive on for an agent (see SetKeepAlive).
 type KeepAliveConfig struct {
-	Policy core.KeepAlivePolicy
+	// Policy is read at every request and every ping, so a settings change
+	// applies at once. A role it leaves off takes no snapshot at all.
+	Policy func() core.KeepAlivePolicy
 	Role   string // core.KeepAliveRole*
 	// PendingWork reports background work that will wake the agent (an async
 	// subagent, a bash job): an idle agent with some counts as waiting. nil =
@@ -204,9 +206,10 @@ func (ka *keepAlive) sending(req core.Request, provider core.Provider, state *Ag
 	now := ka.clock.Now()
 	var snap *keepAliveSnapshot
 	ttl := cacheTTL(req.Options.CacheRetention)
-	every := ka.cfg.Policy.PingEvery(ttl)
+	policy := ka.cfg.Policy()
+	every := policy.PingEvery(ttl)
 	// OpenAI and the rest: nothing (their OAuth backends refuse a prewarm).
-	if req.Model.Provider == "anthropic" && every > 0 {
+	if req.Model.Provider == "anthropic" && every > 0 && policy.RoleEnabled(ka.cfg.Role) {
 		if pw, ok := core.ProviderPrewarmer(provider); ok {
 			ping := req
 			ping.Messages = slices.Clone(req.Messages)
@@ -340,7 +343,7 @@ func (ka *keepAlive) evaluate() {
 		return // between steps of a run: the next transition re-evaluates
 	}
 	valid := ka.a.keepAliveMatches(s)
-	horizon := ka.cfg.Policy.Horizon(ka.cfg.Role, state, s.contextTokens)
+	horizon := ka.cfg.Policy().Horizon(ka.cfg.Role, state, s.contextTokens)
 
 	ka.mu.Lock()
 	defer ka.mu.Unlock()

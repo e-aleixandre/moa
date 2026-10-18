@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/attachment"
 	"github.com/e-aleixandre/moa/pkg/bootstrap"
 	"github.com/e-aleixandre/moa/pkg/bus"
@@ -422,6 +423,12 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			}
 			return sess.saveSubagentWait(jobID, msgs)
 		},
+		SubagentKeepAlive: func(jobID string) *agent.KeepAliveConfig {
+			if s := sess; s != nil {
+				return m.keepAliveConfig(s, core.KeepAliveRoleSubagent, jobID)
+			}
+			return nil
+		},
 		OnSubagentUsage: func(jobID string, usage *core.Usage, costUSD float64, contextPct int) {
 			if s := sess; s != nil {
 				s.runtime.Bus.Publish(bus.SubagentUsage{
@@ -762,6 +769,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		m.scheduleSessionBrief(sess)
 	}
 	m.subscribeCacheClock(sess)
+	m.subscribeKeepAlive(sess, opts != nil && opts.ownerSession)
 	m.subscribeAttention(sess)
 	// A resumed automation session carries its callback target in the persisted
 	// metadata, so the loop keeps closing across a restart. Freshly created ones
