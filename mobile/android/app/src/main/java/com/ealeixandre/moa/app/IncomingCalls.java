@@ -2,6 +2,7 @@ package com.ealeixandre.moa.app;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONObject;
 
 // The one invitation that may be ringing: the Android port of iOS
@@ -89,6 +90,9 @@ final class IncomingCalls {
 
     private final Host host;
     private volatile Ringing ringing;
+    // Moves on when the secret is forgotten. A push admitted under an earlier
+    // epoch was validated with a secret that no longer exists.
+    private final AtomicInteger epoch = new AtomicInteger();
     // Invitations already shown or refused: a push repeated after the
     // invitation ended must not ring again.
     private final Deque<String> seen = new ArrayDeque<>();
@@ -103,8 +107,23 @@ final class IncomingCalls {
         return r == null ? null : r.invite;
     }
 
+    // The epoch to read before validating a push, on whichever thread does it.
+    int epoch() {
+        return epoch.get();
+    }
+
+    // Anything admitted under an earlier epoch is dropped. Any thread: it has
+    // to take effect before the call thread gets to the forget it queued.
+    void fence() {
+        epoch.incrementAndGet();
+    }
+
     void receive(CallInvite invite, String origin, String authorization) {
-        if (invite == null || host.now() >= invite.expiresAtSeconds * 1000) return;
+        receive(invite, origin, authorization, epoch());
+    }
+
+    void receive(CallInvite invite, String origin, String authorization, int admittedAt) {
+        if (admittedAt != epoch() || invite == null || host.now() >= invite.expiresAtSeconds * 1000) return;
         String key = invite.id.toLowerCase(java.util.Locale.ROOT);
         if (seen.contains(key)) return;
         // One at a time; another one is left to run out, as iOS does.
@@ -140,6 +159,9 @@ final class IncomingCalls {
                     break;
                 case DECLINED_ELSEWHERE:
                     end(r, Ended.DECLINED_ELSEWHERE);
+                    break;
+                case EXPIRED:
+                    end(r, Ended.UNANSWERED);
                     break;
                 case REMOTE_ENDED:
                     end(r, Ended.REMOTE_ENDED);
@@ -204,6 +226,9 @@ final class IncomingCalls {
 
     // Unpaired, paired again or revoked: the secret goes, and a ringing
     // invitation with it.
+    // The queued half of a forget: the epoch was already moved on by fence(),
+    // once, when the secret went. Moving it again here would also drop a push
+    // admitted under the new registration before this ran.
     void forgetLocal() {
         Ringing r = ringing;
         if (r != null) end(r, Ended.FAILED);

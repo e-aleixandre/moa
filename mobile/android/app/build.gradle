@@ -112,6 +112,8 @@ dependencies {
     // android.jar's org.json is a stub in JVM tests; the real one parses.
     testImplementation "org.json:json:$orgJsonVersion"
     testImplementation "com.squareup.okhttp3:mockwebserver:$okhttpVersion"
+    // android.jar classes are final stubs on the JVM: CallSystem's real adapter is tested with them mocked.
+    testImplementation "org.mockito:mockito-core:$mockitoVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

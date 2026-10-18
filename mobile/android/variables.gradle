@@ -16,5 +16,6 @@ ext {
     firebaseBomVersion = '34.19.0'
     orgJsonVersion = '20250517'
     okhttpVersion = '4.12.0'
+    mockitoVersion = '5.20.0'
     zxingAndroidEmbeddedVersion = '4.3.0'
 }

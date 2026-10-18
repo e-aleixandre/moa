@@ -12,7 +12,9 @@ final class InvitePoll {
         RINGING,
         ANSWERED_ELSEWHERE,
         DECLINED_ELSEWHERE,
-        // Cancelled, expired or unknown to the server.
+        // Nobody answered before the server's expiry: a missed call.
+        EXPIRED,
+        // Cancelled or unknown to the server.
         REMOTE_ENDED,
         // The server refuses this credential.
         FAILED,
@@ -34,6 +36,8 @@ final class InvitePoll {
                     return Outcome.ANSWERED_ELSEWHERE;
                 case "declined":
                     return Outcome.DECLINED_ELSEWHERE;
+                case "expired":
+                    return Outcome.EXPIRED;
                 default:
                     return Outcome.REMOTE_ENDED;
             }

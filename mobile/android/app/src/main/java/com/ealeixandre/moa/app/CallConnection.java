@@ -13,9 +13,11 @@ import android.telecom.TelecomManager;
 final class CallConnection extends Connection {
 
     private final CallSystem system;
+    private final int token;
 
-    CallConnection(CallSystem system, boolean incoming) {
+    CallConnection(CallSystem system, boolean incoming, int token) {
         this.system = system;
+        this.token = token;
         setConnectionProperties(PROPERTY_SELF_MANAGED);
         setConnectionCapabilities(CAPABILITY_MUTE);
         setAudioModeIsVoip(true);
@@ -25,6 +27,11 @@ final class CallConnection extends Connection {
         } else {
             setInitializing();
         }
+    }
+
+    // The call whose Telecom request created this connection.
+    int token() {
+        return token;
     }
 
     void describe(String name) {

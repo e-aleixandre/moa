@@ -127,9 +127,20 @@ final class PushNavigator {
     // UI thread; the authentication runs in PushTaps, off it.
     void handleTap(Context context, Map<String, String> envelope) {
         gateFor(context);
+        taps.handle(envelope, tapSource(context), tapNavigation());
+    }
+
+    // UI thread. The missed-call notification: the conversation of the call's
+    // envelope, checked as an alert tap is.
+    void handleMissedCall(Context context, String sessionId) {
+        gateFor(context);
+        taps.handleSession(sessionId, tapSource(context), tapNavigation());
+    }
+
+    private PushTaps.Source tapSource(Context context) {
         NativePushRegistration registration = NativePushRegistration.get(context);
         DeviceCredentialStore credentials = DeviceCredentialStore.get(context);
-        taps.handle(envelope, new PushTaps.Source() {
+        return new PushTaps.Source() {
             @Override
             public int generation() {
                 return registration.generation();
@@ -159,7 +170,11 @@ final class PushNavigator {
             public boolean knownValid() {
                 return credentials.knownValid();
             }
-        }, new PushTaps.Navigation() {
+        };
+    }
+
+    private PushTaps.Navigation tapNavigation() {
+        return new PushTaps.Navigation() {
             @Override
             public void open(PushEnvelope.Destination destination, String pairedOrigin, int generation) {
                 PushNavigator.this.open(destination, pairedOrigin, generation);
@@ -169,7 +184,7 @@ final class PushNavigator {
             public void pair() {
                 showPairing();
             }
-        });
+        };
     }
 
     // UI thread. An expired credential: whatever is on screen, the WebView

@@ -108,6 +108,14 @@ public final class PushMessages {
         return "moa-push:" + tag;
     }
 
+    // The missed-call notification's tap: the conversation of the call's
+    // envelope, authenticated when the phone rang. Anything else is no tap.
+    static final String ACTION_OPEN_MISSED_CALL = "com.ealeixandre.moa.app.OPEN_MISSED_CALL";
+
+    static String missedCallSession(String action, String session) {
+        return ACTION_OPEN_MISSED_CALL.equals(action) && PushEnvelope.isSessionId(session) ? session : null;
+    }
+
     // Whether an envelope may be shown at all, even as the generic alert, and
     // its keys used: push is on here (stateOrigin, cleared by disable, unpair
     // and any pairing change) for the stored pairing, whose credential is not

@@ -80,6 +80,9 @@ public class MainActivity extends BridgeActivity {
                 });
             }
         });
+        // A cold start from the missed-call notification; a restored activity
+        // has already used its intent.
+        if (savedInstanceState == null) openMissedCall(getIntent());
     }
 
     // BridgeActivity.onCreate calls load(), which builds the bridge and starts
@@ -89,7 +92,7 @@ public class MainActivity extends BridgeActivity {
     protected void load() {
         WebView webView = findViewById(com.getcapacitor.android.R.id.webview);
         if (webView != null) {
-            DeviceAuthBridge auth = new DeviceAuthBridge(this, credentials);
+            DeviceAuthBridge auth = new DeviceAuthBridge(this, credentials, this::pairingCompleted);
             bridges = new WebBridges(webView, credentials, auth, new NativePushBridge(this),
                 new ShareInboxBridge(this, credentials), NativeCalls.get(this).bridge());
             bridges.install();
@@ -118,6 +121,26 @@ public class MainActivity extends BridgeActivity {
             intent.removeExtra(PushNavigator.EXTRA_C);
             PushNavigator.get().handleTap(this, envelope);
         }
+        openMissedCall(intent);
+    }
+
+    // The missed-call notification's tap, once: a recreated activity must not
+    // replay it.
+    private void openMissedCall(Intent intent) {
+        if (intent == null) return;
+        String session = PushMessages.missedCallSession(intent.getAction(), intent.getStringExtra(IncomingCallNotifier.EXTRA_SESSION));
+        if (session == null) return;
+        intent.setAction(null);
+        PushNavigator.get().handleMissedCall(this, session);
+    }
+
+    // A pairing finished inside the running activity: what onResume does for
+    // an already paired phone is due now, not at the next resume. Any thread.
+    void pairingCompleted() {
+        runOnUiThread(() -> {
+            AndroidVoip.get(this).refresh(false);
+            askCallPermissions();
+        });
     }
 
     @Override

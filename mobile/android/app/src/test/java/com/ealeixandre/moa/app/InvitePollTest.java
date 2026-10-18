@@ -34,11 +34,15 @@ public class InvitePollTest {
     @Test
     public void anyOtherStateOrAnUnknownInvitationEndsTheRinging() {
         assertEquals(InvitePoll.Outcome.REMOTE_ENDED, of(200, "cancelled"));
-        assertEquals(InvitePoll.Outcome.REMOTE_ENDED, of(200, "expired"));
         assertEquals(InvitePoll.Outcome.REMOTE_ENDED, of(200, "something-new"));
         assertEquals(InvitePoll.Outcome.REMOTE_ENDED, of(200, null));
         assertEquals(InvitePoll.Outcome.REMOTE_ENDED, of(404, null));
         assertEquals(InvitePoll.Outcome.REMOTE_ENDED, of(404, "ringing"));
+    }
+
+    @Test
+    public void theServersExpiryIsAMissedCallNotARemoteEnd() {
+        assertEquals(InvitePoll.Outcome.EXPIRED, of(200, "expired"));
     }
 
     @Test

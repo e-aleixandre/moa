@@ -170,6 +170,46 @@ public class PushTapsTest {
         for (Runnable task : queued) task.run();
     }
 
+    private void missedCallTap(String session) throws InterruptedException {
+        taps.handleSession(session, source, navigation);
+        background.shutdown();
+        assertTrue(background.awaitTermination(5, TimeUnit.SECONDS));
+    }
+
+    // Owner decision: a missed call opens the conversation of the call's
+    // envelope, like the web, through the same gate as an alert tap.
+    @Test
+    public void aMissedCallTapOpensItsConversationThroughTheGate() throws Exception {
+        missedCallTap("sess_1");
+        assertEquals(Collections.emptyList(), opened);
+        drainMain();
+        assertEquals(Collections.singletonList("session@" + ORIGIN), opened);
+    }
+
+    @Test
+    public void aMissedCallTapIsFencedByAForgetOrAnExpiredCredential() throws Exception {
+        missedCallTap("sess_1");
+        lifecycle.end(() -> true);
+        drainMain();
+        assertEquals(Collections.emptyList(), opened);
+    }
+
+    @Test
+    public void aMissedCallTapWithAnExpiredCredentialEndsOnPairing() throws Exception {
+        expired = true;
+        missedCallTap("sess_1");
+        drainMain();
+        assertEquals(Collections.singletonList("pair"), opened);
+    }
+
+    @Test
+    public void aMissedCallTapWithAnUnreadableStoreLeadsHomeNotToTheSession() throws Exception {
+        unreadable = true;
+        missedCallTap("sess_1");
+        drainMain();
+        assertEquals(Collections.singletonList("home@" + ORIGIN), opened);
+    }
+
     @Test
     public void expiredTapDoesNotWaitOnALifecycleHeldByAPost() throws Exception {
         CountDownLatch posting = new CountDownLatch(1);

@@ -334,6 +334,14 @@ public class NativeCallManagerTest {
     }
 
     @Test
+    public void aRenewedCredentialOfTheSameDeviceKeepsTheCall() {
+        open("n1");
+        host.credential = "dev_1.renewed-secret";
+        manager.bindingChanged();
+        assertTrue(manager.hasCall());
+    }
+
+    @Test
     public void connectsWithTheDeviceCredentialAndRegistersTheSystemCall() {
         manager.open("n1", URL, "M" + "o".repeat(200), "s".repeat(300));
         assertEquals(URL, host.socket().url);

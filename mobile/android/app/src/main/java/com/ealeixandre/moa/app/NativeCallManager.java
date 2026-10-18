@@ -162,7 +162,11 @@ final class NativeCallManager {
         boolean sessionActive;
         boolean pageClosed;
         boolean serverEnded;
-        boolean hangingUp;
+        // Terminal for the microphone: once set, no document may reopen it.
+        volatile boolean hangingUp;
+        // The pairing the call was placed under; a new claim on the same
+        // server is another device and must not inherit it.
+        String deviceId;
         Runnable hangupTimer;
         final List<byte[]> pending = new ArrayList<>();
         int pendingBytes;
@@ -205,6 +209,7 @@ final class NativeCallManager {
         }
         Call c = new Call(id, CallProtocol.prefix(name, 80), CallProtocol.prefix(sessionId, 128), url.callId, origin,
             "Moa-Device " + credential);
+        c.deviceId = deviceIdOf(c.authorization);
         try {
             c.socket = host.connect(url.url, "Moa-Device " + credential, new Sockets(c));
         } catch (RuntimeException e) {
@@ -227,6 +232,7 @@ final class NativeCallManager {
         Call c = new Call("i" + callId, CallProtocol.prefix(name, 80), CallProtocol.prefix(sessionId, 128), callId, origin,
             authorization);
         c.incoming = true;
+        c.deviceId = deviceIdOf(authorization);
         c.audioWanted = true;
         // It cannot be asked for on a locked screen: a phone that never
         // allowed it hangs up, and says why.
@@ -246,7 +252,8 @@ final class NativeCallManager {
     void reportActive() {
         Call c = call;
         Object snapshot = null;
-        if (c != null && !c.finished && c.origin.equals(host.pairedOrigin())) {
+        // A call being hung up is not offered to a new document to adopt.
+        if (c != null && !c.finished && !c.hangingUp && c.origin.equals(host.pairedOrigin())) {
             Map<String, Object> map = new HashMap<>();
             map.put("id", c.id);
             map.put("sessionId", c.sessionId);
@@ -272,7 +279,7 @@ final class NativeCallManager {
 
     void startAudio(String id) {
         Call c = current(id);
-        if (c == null) {
+        if (c == null || c.hangingUp) {
             host.emit(id, "audio", "microphone");
             return;
         }
@@ -306,16 +313,28 @@ final class NativeCallManager {
         if (c != null) applyMute(c, muted, false);
     }
 
-    // The server this call belongs to is no longer the paired one (unpaired,
-    // or paired elsewhere): its audio must not reach another.
+    // The pairing this call belongs to is gone (unpaired, paired elsewhere or
+    // claimed again as another device): its audio must not reach another.
     void bindingChanged() {
         Call c = call;
-        if (c == null || c.origin.equals(host.pairedOrigin())) return;
+        if (c == null) return;
+        if (c.origin.equals(host.pairedOrigin())) {
+            String now = VoiceAuth.deviceId(host.credential(c.origin));
+            if (now != null && now.equals(c.deviceId)) return;
+        }
         c.pageClosed = true;
         finish(c, false, "unpaired");
     }
 
     // ---- Internals
+
+    // The device a call authenticates as, from its own header
+    // ("Moa-Device <id>.<secret>" or "Moa-Voice <id>.<key>"), never from a
+    // later read of the stored credential. Null when it names none.
+    private static String deviceIdOf(String authorization) {
+        if (authorization == null) return null;
+        return VoiceAuth.deviceId(authorization.substring(authorization.indexOf(' ') + 1));
+    }
 
     // The live call, if this id names it and the app is still paired with
     // the server that call belongs to.
@@ -350,7 +369,7 @@ final class NativeCallManager {
     }
 
     private void startEngine(Call c) {
-        if (!c.audioWanted || !c.micGranted || c.audio != null || c.finished) return;
+        if (!c.audioWanted || !c.micGranted || c.audio != null || c.finished || c.hangingUp) return;
         Audio audio = null;
         try {
             host.systemCall().enableMicrophone();
@@ -487,7 +506,7 @@ final class NativeCallManager {
         @Override
         public void frame(byte[] frame) {
             Socket socket = c.socket;
-            if (c.finished || !c.open || c.muted || socket == null) return;
+            if (c.finished || c.hangingUp || !c.open || c.muted || socket == null) return;
             if (CallProtocol.dropFrame(socket.queueSize(), frame.length)) return;
             socket.sendBinary(frame);
         }

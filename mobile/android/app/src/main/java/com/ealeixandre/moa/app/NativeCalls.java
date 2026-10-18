@@ -39,9 +39,14 @@ final class NativeCalls {
 
     // A call envelope that opened: ring the phone. Origin and authorization
     // are those of the secret that opened it. Any thread.
-    static void ring(Context context, CallInvite invite, String origin, String authorization) {
+    static void ring(Context context, CallInvite invite, String origin, String authorization, int admittedAt) {
         NativeCalls calls = get(context);
-        calls.host.post(() -> calls.incoming.receive(invite, origin, authorization));
+        calls.host.post(() -> calls.incoming.receive(invite, origin, authorization, admittedAt));
+    }
+
+    // Read before a push is validated against the secret; ring() hands it back.
+    static int incomingEpoch(Context context) {
+        return get(context).incoming.epoch();
     }
 
     // Answer and Decline, from the notification, the call screen or Telecom.
@@ -71,16 +76,18 @@ final class NativeCalls {
         synchronized (NativeCalls.class) {
             calls = shared;
         }
-        if (calls != null) calls.host.post(calls.incoming::forgetLocal);
+        if (calls == null) return;
+        calls.incoming.fence();
+        calls.host.post(calls.incoming::forgetLocal);
     }
 
-    // The ongoing-call notification's Hang up.
-    static void requestHangUp() {
+    // The ongoing-call notification's Hang up, for the call it was built for.
+    static void requestHangUp(int token) {
         NativeCalls calls;
         synchronized (NativeCalls.class) {
             calls = shared;
         }
-        if (calls != null) calls.host.system().requestHangUp();
+        if (calls != null) calls.host.system().requestHangUp(token);
     }
 
     private NativeCalls(Context context) {

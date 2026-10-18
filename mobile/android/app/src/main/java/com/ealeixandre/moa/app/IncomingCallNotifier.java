@@ -24,6 +24,7 @@ final class IncomingCallNotifier {
     static final String ACTION_DECLINE = "com.ealeixandre.moa.app.CALL_DECLINE";
     static final String EXTRA_INVITE = "invite";
     static final String EXTRA_NAME = "name";
+    static final String EXTRA_SESSION = "session";
     private static final int RINGING_ID = 3;
     private static final int MISSED_ID = 4;
     private static final long SLACK_MILLIS = 2000;
@@ -89,7 +90,13 @@ final class IncomingCallNotifier {
         PushNotifier.ensureChannels(context);
         NotificationManagerCompat manager = NotificationManagerCompat.from(context);
         if (!manager.areNotificationsEnabled()) return;
-        Intent open = new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        // The conversation the call was about, as the web does. Its own data
+        // keeps one missed call's PendingIntent from taking another's extras.
+        Intent open = new Intent(context, MainActivity.class)
+            .setAction(PushMessages.ACTION_OPEN_MISSED_CALL)
+            .setData(Uri.parse("moa-missed:" + ringing.invite))
+            .putExtra(EXTRA_SESSION, ringing.sessionId)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         Notification notification = new NotificationCompat.Builder(context, PushMessages.CHANNEL_ACTIVE)
             .setSmallIcon(R.drawable.ic_stat_moa)
             .setContentTitle(context.getString(R.string.call_missed))
