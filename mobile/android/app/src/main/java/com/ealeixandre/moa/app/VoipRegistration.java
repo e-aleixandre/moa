@@ -152,11 +152,14 @@ final class VoipRegistration {
             retryScheduled = true;
             delay = RETRY_DELAYS_MILLIS[retries++];
         }
-        host.retryLater(delay, this::retry);
+        host.retryLater(delay, () -> retry(current));
     }
 
-    private void retry() {
+    // A retry belongs to the pairing that scheduled it: after a forget it is
+    // dropped, and the new pairing keeps its own budget.
+    private void retry(int scheduledBy) {
         synchronized (this) {
+            if (generation != scheduledBy) return;
             retryScheduled = false;
         }
         refresh(true);
@@ -300,6 +303,8 @@ final class VoipRegistration {
             generation++;
             registering = false;
             lastRefresh = 0;
+            retries = 0;
+            retryScheduled = false;
             waiting = pending;
             pending = null;
             deleted = secrets.delete();
