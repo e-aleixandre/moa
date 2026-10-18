@@ -180,6 +180,34 @@ func (q *questionService) attach(sess *ManagedSession) {
 		return q.Answer(q.m.baseCtx, sess.ID, id, answers, responder)
 	})
 	q.seed(sess)
+	sess.runtime.Bus.Subscribe(func(e bus.RunEnded) { q.runEnded(sess.ID, e) })
+}
+
+// runEnded settles the continuation an admitted answer owed: the run that read
+// it is over, whatever came of it. An answer not yet admitted still owes its
+// work, and a Stop already marked its own as stopped.
+//
+// TODO(phase 2): a restart that finds work still due after the answer was
+// admitted should continue the run (ContinueRun); phase 1 only records it.
+func (q *questionService) runEnded(sessionID string, e bus.RunEnded) {
+	ctx := q.m.baseCtx
+	due, err := q.repo.DueQuestionWork(ctx)
+	if err != nil {
+		slog.Warn("questions: reading owed work failed", "session", sessionID, "error", err)
+		return
+	}
+	for _, question := range due {
+		if question.SessionID != sessionID {
+			continue
+		}
+		n, err := q.repo.Notice(ctx, question.EventID)
+		if err != nil || n.State != tasks.NoticeDelivered {
+			continue
+		}
+		if _, err := q.repo.SetQuestionWork(ctx, question.EventID, "due", "done"); err != nil {
+			slog.Warn("questions: settling owed work failed", "session", sessionID, "error", err)
+		}
+	}
 }
 
 // seed loads the open questions of a session being built or resumed into its

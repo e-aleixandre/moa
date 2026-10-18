@@ -233,6 +233,12 @@ func buildPrompt(msgs []core.AgentMessage) string {
 			continue
 		}
 		text := allText(msg.Content)
+		if msg.Custom["source"] == "question_answer" {
+			// The answer to a question the assistant posted, not something the
+			// user typed: say so, and keep the event's own markup out of a
+			// prompt that frames the transcript with markup of its own.
+			role, text = "Answer to the assistant's question", questionAnswerBody(text)
+		}
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
@@ -266,6 +272,19 @@ func buildPrompt(msgs []core.AgentMessage) string {
 		}
 	}
 	return strings.TrimSpace(joined)
+}
+
+// questionAnswerBody drops the opening and closing tag lines of a
+// question_answer event and keeps what they enclose.
+func questionAnswerBody(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) > 0 && strings.HasPrefix(lines[0], "<question_answer") {
+		lines = lines[1:]
+	}
+	if n := len(lines); n > 0 && strings.HasPrefix(lines[n-1], "</question_answer") {
+		lines = lines[:n-1]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // allText joins every text block in a message while deliberately excluding
