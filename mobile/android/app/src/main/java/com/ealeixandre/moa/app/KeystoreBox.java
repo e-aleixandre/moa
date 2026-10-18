@@ -21,7 +21,7 @@ import javax.crypto.spec.GCMParameterSpec;
 // so a copied file is useless anywhere else -- the Android counterpart of the
 // iOS Keychain's *ThisDeviceOnly items. The alias is bound in as AAD so one
 // box's file cannot be swapped for another's.
-final class KeystoreBox {
+final class KeystoreBox implements SecretBox {
 
     private static final String KEYSTORE = "AndroidKeyStore";
     private static final byte FORMAT = 1;
@@ -38,7 +38,8 @@ final class KeystoreBox {
     // Null when nothing is stored. A file whose key is gone (the Keystore was
     // reset) is unreadable for good: it is removed and reported as absent so
     // the app can pair again instead of failing on every launch.
-    synchronized byte[] load() throws GeneralSecurityException, IOException {
+    @Override
+    public synchronized byte[] load() throws GeneralSecurityException, IOException {
         if (!file.getBaseFile().exists()) return null;
         KeyStore keyStore = keyStore();
         if (!keyStore.containsAlias(alias)) {
@@ -56,7 +57,8 @@ final class KeystoreBox {
         return cipher.doFinal(blob, 1 + NONCE_SIZE, blob.length - 1 - NONCE_SIZE);
     }
 
-    synchronized void save(byte[] plaintext) throws GeneralSecurityException, IOException {
+    @Override
+    public synchronized void save(byte[] plaintext) throws GeneralSecurityException, IOException {
         SecretKey key = keyOrCreate();
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         // The Keystore picks the nonce (randomized encryption is required).
@@ -81,7 +83,8 @@ final class KeystoreBox {
 
     // Removes the file and then the key, so even a file that survived a
     // failed delete can no longer be decrypted.
-    synchronized void delete() throws GeneralSecurityException, IOException {
+    @Override
+    public synchronized void delete() throws GeneralSecurityException, IOException {
         file.delete();
         if (file.getBaseFile().exists()) throw new IOException("could not delete " + alias);
         KeyStore keyStore = keyStore();

@@ -36,6 +36,18 @@ public final class PushMessages {
         return Kind.IGNORE;
     }
 
+    // One FCM token carries two destinations, alerts and calls, each sealed
+    // with its own secret. The key id in the clear names the secret an
+    // envelope is for, so the right one is tried and a call never opens as an
+    // alert (or the reverse).
+    static boolean addressedTo(Map<String, String> data, PushEnvelope.Keys keys) {
+        if (data == null || keys == null) return false;
+        String kid = data.get("k");
+        if (kid == null || kid.length() != PushEnvelope.ENCODED_KID_LENGTH) return false;
+        byte[] decoded = PushEnvelope.base64UrlDecode(kid);
+        return decoded != null && java.security.MessageDigest.isEqual(decoded, keys.kid);
+    }
+
     // urgent: "Preguntas y permisos" (heads-up, sound); active: "Terminadas"
     // (sound); passive: "Resúmenes" (silent). An envelope that cannot be
     // opened is shown on the active channel, which sounds: losing a question

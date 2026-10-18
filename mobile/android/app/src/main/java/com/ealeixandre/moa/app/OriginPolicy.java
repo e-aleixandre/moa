@@ -139,6 +139,22 @@ public final class OriginPolicy {
                     return false;
             }
         }
+        // window.MoaNativeCall: the paired server's page only, like the iOS
+        // handler's NativeServerBinding check.
+        if ("call".equals(bridge)) {
+            switch (method) {
+                case "open":
+                case "send":
+                case "close":
+                case "active":
+                case "startAudio":
+                case "stopAudio":
+                case "setMuted":
+                    return caller == Caller.PAIRED;
+                default:
+                    return false;
+            }
+        }
         return false;
     }
 

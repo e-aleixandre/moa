@@ -9,6 +9,21 @@
     <string name="channel_urgent">Questions and permissions</string>
     <string name="channel_active">Finished</string>
     <string name="channel_passive">Summaries</string>
+    <string name="channel_call">Calls</string>
+
+    <string name="channel_incoming_call">Incoming calls</string>
+    <string name="call_incoming">Incoming call</string>
+    <string name="call_answer">Answer</string>
+    <string name="call_decline">Decline</string>
+    <string name="call_missed">Missed call</string>
+
+    <!-- Asked once, on the first opening of a paired phone. -->
+    <string name="calls_permission_message">Allow calls so owners can ring you.</string>
+    <string name="calls_permission_continue">Continue</string>
+    <string name="calls_permission_not_now">Not now</string>
+
+    <!-- The ongoing-call notification, under the other party's name. -->
+    <string name="call_ongoing">Ongoing call</string>
 
     <!-- Shown for a notification moa could not decrypt. -->
     <string name="push_fallback_title">moa</string>

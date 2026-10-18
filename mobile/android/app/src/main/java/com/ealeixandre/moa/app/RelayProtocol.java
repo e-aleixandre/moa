@@ -18,13 +18,16 @@ public final class RelayProtocol {
         public final String token;
         public final String env;
         public final String provider;
+        // "alert" | "voip"; null from a relay that predates types.
+        public final String type;
 
-        Handle(String handle, long expiresAt, String token, String env, String provider) {
+        Handle(String handle, long expiresAt, String token, String env, String provider, String type) {
             this.handle = handle;
             this.expiresAt = expiresAt;
             this.token = token;
             this.env = env;
             this.provider = provider;
+            this.type = type;
         }
     }
 
@@ -36,6 +39,11 @@ public final class RelayProtocol {
             .put("env", ENV)
             .put("send_key", sendKey)
             .put("provider", PROVIDER);
+    }
+
+    // The incoming-call destination: the same FCM token, a separate handle.
+    public static JSONObject voipRegisterBody(String token, String sendKey) throws JSONException {
+        return registerBody(token, sendKey).put("type", "voip");
     }
 
     public static Handle parseHandle(String body, long nowSeconds) {
@@ -55,7 +63,7 @@ public final class RelayProtocol {
         }
         long expiresAt = ((Number) expires).longValue();
         if (expiresAt <= nowSeconds || expiresAt > nowSeconds + MAXIMUM_HANDLE_LIFETIME) return null;
-        return new Handle(text, expiresAt, string(object, "token"), string(object, "env"), string(object, "provider"));
+        return new Handle(text, expiresAt, string(object, "token"), string(object, "env"), string(object, "provider"), string(object, "type"));
     }
 
     // Binds a confirmation to the registration the app is waiting on (iOS
@@ -65,7 +73,18 @@ public final class RelayProtocol {
     // is refused, never trusted: S, hence K_send, is reused on renewal, so a
     // late challenge for an earlier token would otherwise verify too.
     public static boolean confirms(Handle handle, String token, String env) {
+        // An older relay says no type: that is an alert destination.
+        return confirms(handle, token, env, "alert");
+    }
+
+    // type: the destination type the registration asked for. Alerts and calls
+    // share one FCM token and one challenge channel, so a confirmation for
+    // the other type is never taken for this one.
+    public static boolean confirms(Handle handle, String token, String env, String type) {
+        String confirmed = handle == null ? null : handle.type;
+        if (confirmed == null && "alert".equals(type)) confirmed = "alert";
         return handle != null
+            && type.equals(confirmed)
             && handle.token != null
             && handle.env != null
             && handle.provider != null

@@ -1,16 +1,26 @@
 package com.ealeixandre.moa.app;
 
 import android.Manifest;
+import android.app.NotificationManager;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AlertDialog;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import com.getcapacitor.BridgeActivity;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 // The Capacitor activity plus everything iOS does in MoaBridgeViewController,
 // AppDelegate and SceneDelegate. Share-in (ACTION_SEND) is ShareActivity's;
@@ -21,6 +31,7 @@ public class MainActivity extends BridgeActivity {
     private WebBridges bridges;
     private MoaWebViewClient webViewClient;
     private CompletableFuture<Boolean> permissionResult;
+    private Consumer<Boolean> microphoneAnswer;
 
     // Registered at construction: an ActivityResult launcher must exist
     // before the activity starts.
@@ -33,6 +44,16 @@ public class MainActivity extends BridgeActivity {
         }
     );
 
+    // A call that needs the microphone asks here, with the app on screen.
+    private final ActivityResultLauncher<String> microphonePermission = registerForActivityResult(
+        new ActivityResultContracts.RequestPermission(),
+        (Boolean granted) -> {
+            Consumer<Boolean> answer = microphoneAnswer;
+            microphoneAnswer = null;
+            if (answer != null) answer.accept(Boolean.TRUE.equals(granted));
+        }
+    );
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         credentials = DeviceCredentialStore.get(this);
@@ -41,6 +62,7 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         PushNotifier.ensureChannels(this);
         NativePushRegistration.get(this).setPermissionRequester(this::requestNotificationPermission);
+        NativeCalls.get(this).setMicRequester(this::requestMicrophone);
 
         // Back: the page closes its sheet or steps back (window.MoaHandleBack);
         // at the root, or on a page without a handler, the app is minimized,
@@ -69,7 +91,7 @@ public class MainActivity extends BridgeActivity {
         if (webView != null) {
             DeviceAuthBridge auth = new DeviceAuthBridge(this, credentials);
             bridges = new WebBridges(webView, credentials, auth, new NativePushBridge(this),
-                new ShareInboxBridge(this, credentials));
+                new ShareInboxBridge(this, credentials), NativeCalls.get(this).bridge());
             bridges.install();
         }
         super.load();
@@ -103,6 +125,8 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         PushNavigator.get().setForeground(true);
         NativePushRegistration.get(this).refreshIfNeeded(false);
+        AndroidVoip.get(this).refresh(false);
+        askCallPermissions();
         if (webViewClient != null) webViewClient.onForeground();
     }
 
@@ -110,6 +134,62 @@ public class MainActivity extends BridgeActivity {
     public void onPause() {
         PushNavigator.get().setForeground(false);
         super.onPause();
+    }
+
+    @Override
+    public void onDestroy() {
+        // The call outlives the activity; it must not hold on to it.
+        NativeCalls.get(this).setMicRequester(null);
+        super.onDestroy();
+    }
+
+    // Once, the first time a paired phone is opened with something missing:
+    // a locked phone cannot ask when a call comes in. What was asked is not
+    // asked again at every launch; the settings stay where they are.
+    private void askCallPermissions() {
+        if (credentials.pairedOrigin() == null || !credentials.knownValid()) return;
+        SharedPreferences prefs = getSharedPreferences("moa_call_permissions", MODE_PRIVATE);
+        List<CallPermissions.Step> missing = CallPermissions.missing(Build.VERSION.SDK_INT,
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+            NotificationManagerCompat.from(this).areNotificationsEnabled(), canUseFullScreen());
+        if (!CallPermissions.shouldAsk(true, prefs.getBoolean("asked", false), missing)) return;
+        prefs.edit().putBoolean("asked", true).apply();
+        new AlertDialog.Builder(this)
+            .setMessage(R.string.calls_permission_message)
+            .setPositiveButton(R.string.calls_permission_continue, (dialog, which) -> askCallStep(missing, 0))
+            .setNegativeButton(R.string.calls_permission_not_now, null)
+            .show();
+    }
+
+    private boolean canUseFullScreen() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return true;
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        return manager == null || manager.canUseFullScreenIntent();
+    }
+
+    private void askCallStep(List<CallPermissions.Step> steps, int index) {
+        if (index >= steps.size()) return;
+        Runnable next = () -> runOnUiThread(() -> askCallStep(steps, index + 1));
+        switch (steps.get(index)) {
+            case MICROPHONE:
+                requestMicrophone(granted -> next.run());
+                break;
+            case NOTIFICATIONS:
+                requestNotificationPermission().thenAccept(granted -> next.run());
+                break;
+            default:
+                // The last step: the system's own screen for this app.
+                startActivity(new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                    Uri.parse("package:" + getPackageName())));
+        }
+    }
+
+    private void requestMicrophone(Consumer<Boolean> answer) {
+        runOnUiThread(() -> {
+            if (microphoneAnswer != null) microphoneAnswer.accept(false);
+            microphoneAnswer = answer;
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO);
+        });
     }
 
     private CompletableFuture<Boolean> requestNotificationPermission() {

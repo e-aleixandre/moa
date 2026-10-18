@@ -22,6 +22,12 @@
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
     </style>
+    <!-- The incoming-call screen. -->
+    <style name="Theme.Moa.Call" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/moa_background</item>
+        <item name="android:statusBarColor">@color/moa_background</item>
+        <item name="android:navigationBarColor">@color/moa_background</item>
+    </style>
     <!-- The share sheet: a dark bottom sheet over the app that shared. -->
     <style name="Theme.Moa.Share" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>

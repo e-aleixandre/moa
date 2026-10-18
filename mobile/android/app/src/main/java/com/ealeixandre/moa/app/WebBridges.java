@@ -18,8 +18,8 @@ import java.util.Set;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-// Installs window.MoaNativeAuth, window.MoaNativePush and window.MoaShareInbox
-// with the same JS API as the iOS container. Each is a document-start script plus a WebMessage
+// Installs window.MoaNativeAuth, window.MoaNativePush, window.MoaShareInbox and
+// window.MoaNativeCall with the same JS API as the iOS container. Each is a document-start script plus a WebMessage
 // listener, both restricted by origin rules to the pages allowed to use them:
 // the local pairing page, and the paired server's exact origin. A page from
 // any other origin gets neither the object nor the port. Never
@@ -103,23 +103,26 @@ final class WebBridges {
     static final String PUSH_PORT = "moaNativePushPort";
     static final String SHARE_LOCAL_PORT = "moaShareInboxLocal";
     static final String SHARE_PAIRED_PORT = "moaShareInboxPaired";
+    static final String CALL_PORT = "moaNativeCallPort";
 
     private final WebView webView;
     private final DeviceCredentialStore credentials;
     private final MethodHandler auth;
     private final MethodHandler push;
     private final MethodHandler share;
+    private final NativeCallBridge call;
     private final List<ScriptHandler> pairedScripts = new ArrayList<>();
     private String installedPairedOrigin;
     private boolean supported;
 
     WebBridges(WebView webView, DeviceCredentialStore credentials, MethodHandler auth, MethodHandler push,
-        MethodHandler share) {
+        MethodHandler share, NativeCallBridge call) {
         this.webView = webView;
         this.credentials = credentials;
         this.auth = auth;
         this.push = push;
         this.share = share;
+        this.call = call;
     }
 
     static boolean isSupported() {
@@ -155,6 +158,7 @@ final class WebBridges {
             WebViewCompat.removeWebMessageListener(webView, AUTH_PAIRED_PORT);
             WebViewCompat.removeWebMessageListener(webView, PUSH_PORT);
             WebViewCompat.removeWebMessageListener(webView, SHARE_PAIRED_PORT);
+            WebViewCompat.removeWebMessageListener(webView, CALL_PORT);
             for (ScriptHandler script : pairedScripts) script.remove();
             pairedScripts.clear();
         }
@@ -164,9 +168,21 @@ final class WebBridges {
         WebViewCompat.addWebMessageListener(webView, AUTH_PAIRED_PORT, rules, listener("auth", auth));
         WebViewCompat.addWebMessageListener(webView, PUSH_PORT, rules, listener("push", push));
         WebViewCompat.addWebMessageListener(webView, SHARE_PAIRED_PORT, rules, listener("share", share));
+        WebViewCompat.addWebMessageListener(webView, CALL_PORT, rules, callListener());
         pairedScripts.add(WebViewCompat.addDocumentStartJavaScript(webView, authScript(AUTH_PAIRED_PORT), rules));
         pairedScripts.add(WebViewCompat.addDocumentStartJavaScript(webView, pushScript(), rules));
         pairedScripts.add(WebViewCompat.addDocumentStartJavaScript(webView, shareScript(SHARE_PAIRED_PORT), rules));
+        pairedScripts.add(WebViewCompat.addDocumentStartJavaScript(webView, callScript(), rules));
+    }
+
+    // Unlike the request/reply bridges, the call bridge streams events back,
+    // so its messages are {op, id, ...} and the reply proxy is kept.
+    private WebViewCompat.WebMessageListener callListener() {
+        return (WebView view, WebMessageCompat message, Uri sourceOrigin, boolean isMainFrame, JavaScriptReplyProxy proxy) -> {
+            if (!isMainFrame || message == null || message.getData() == null) return;
+            OriginPolicy.Caller caller = OriginPolicy.classify(sourceOrigin.toString(), credentials.pairedOrigin());
+            call.onMessage(message.getData(), caller, proxy);
+        };
     }
 
     private WebViewCompat.WebMessageListener listener(String bridge, MethodHandler handler) {
@@ -300,6 +316,72 @@ final class WebBridges {
             + "    peek: () => call(\"peek\"),\n"
             + "    acknowledge: (id) => call(\"acknowledge\", { id }),\n"
             + "  });\n"
+            + "})();\n";
+    }
+
+    // window.MoaNativeCall v1, the same object the iOS user script defines
+    // (NativeVoiceCall.swift), with the port in place of webkit.messageHandlers.
+    // The frontend feature-detects it and talks to it as it does on iOS.
+    static String callScript() {
+        return "(() => {\n"
+            + "  if (window.top !== window || window.MoaNativeCall) return;\n"
+            + "  const port = window." + CALL_PORT + ";\n"
+            + "  if (!port) return;\n"
+            + "  const post = (m) => port.postMessage(JSON.stringify(m));\n"
+            + "  const audio = new Map();\n"
+            + "  const snapshots = [];\n"
+            + "  const settle = (id, result) => {\n"
+            + "    const p = audio.get(id);\n"
+            + "    if (!p) return;\n"
+            + "    audio.delete(id);\n"
+            + "    if (result === \"ok\") p.resolve(); else p.reject(new Error(result || \"microphone\"));\n"
+            + "  };\n"
+            + "  window.MoaNativeCall = {\n"
+            + "    version: 1,\n"
+            + "    onevent: null,\n"
+            + "    open(url, opts) {\n"
+            + "      const id = \"n\" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);\n"
+            + "      post({\n"
+            + "        op: \"open\", id, url: String(url),\n"
+            + "        name: String((opts && opts.name) || \"moa\"),\n"
+            + "        sessionId: String((opts && opts.sessionId) || \"\")\n"
+            + "      });\n"
+            + "      return id;\n"
+            + "    },\n"
+            + "    send(id, text) { post({ op: \"send\", id, text: String(text) }); },\n"
+            + "    close(id) { settle(id, \"closed\"); post({ op: \"close\", id }); },\n"
+            + "    active() {\n"
+            + "      return new Promise((resolve) => {\n"
+            + "        snapshots.push(resolve);\n"
+            + "        post({ op: \"active\", id: \"\" });\n"
+            + "      });\n"
+            + "    },\n"
+            + "    startAudio(id) {\n"
+            + "      return new Promise((resolve, reject) => {\n"
+            + "        audio.set(id, { resolve, reject });\n"
+            + "        post({ op: \"startAudio\", id });\n"
+            + "      });\n"
+            + "    },\n"
+            + "    stopAudio(id) { settle(id, \"stopped\"); post({ op: \"stopAudio\", id }); },\n"
+            + "    setMuted(id, muted) { post({ op: \"setMuted\", id, muted: !!muted }); },\n"
+            + "    __event(ev) {\n"
+            + "      if (ev.type === \"audio\") {\n"
+            + "        settle(ev.id, ev.data);\n"
+            + "        return;\n"
+            + "      }\n"
+            + "      if (ev.type === \"active\") {\n"
+            + "        snapshots.splice(0).forEach((resolve) => resolve(ev.data || null));\n"
+            + "        return;\n"
+            + "      }\n"
+            + "      if (ev.type === \"close\") settle(ev.id, \"closed\");\n"
+            + "      if (typeof this.onevent === \"function\") this.onevent(ev);\n"
+            + "    }\n"
+            + "  };\n"
+            + "  port.onmessage = (event) => {\n"
+            + "    let ev;\n"
+            + "    try { ev = JSON.parse(event.data); } catch (e) { return; }\n"
+            + "    if (ev && typeof ev === \"object\") window.MoaNativeCall.__event(ev);\n"
+            + "  };\n"
             + "})();\n";
     }
 }
