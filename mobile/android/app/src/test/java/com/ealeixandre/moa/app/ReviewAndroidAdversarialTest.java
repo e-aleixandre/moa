@@ -56,6 +56,8 @@ public class ReviewAndroidAdversarialTest {
         CallInvite admitted = invite(host.now / 1000 + 45);
         // AndroidVoip.receive reads the epoch before validating the old secret/credential, but has not yet posted NativeCalls.ring.
         int epoch = calls.epoch();
+        // NativeCalls.forgetRinging: fence at once, then the queued forgetLocal.
+        calls.fence();
         calls.forgetLocal();
         // The old FCM thread resumes and posts the captured invitation/auth after forgetRinging's task.
         calls.receive(admitted, ORIGIN, IncomingCallsTest.AUTH, epoch);

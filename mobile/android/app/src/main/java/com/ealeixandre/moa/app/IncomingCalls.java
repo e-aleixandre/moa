@@ -226,8 +226,10 @@ final class IncomingCalls {
 
     // Unpaired, paired again or revoked: the secret goes, and a ringing
     // invitation with it.
+    // The queued half of a forget: the epoch was already moved on by fence(),
+    // once, when the secret went. Moving it again here would also drop a push
+    // admitted under the new registration before this ran.
     void forgetLocal() {
-        fence();
         Ringing r = ringing;
         if (r != null) end(r, Ended.FAILED);
     }
