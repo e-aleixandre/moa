@@ -178,6 +178,7 @@ type kaHarness struct {
 	clock  *kaClock
 	prov   *kaProvider
 	agent  *Agent
+	cfg    KeepAliveConfig
 	mu     sync.Mutex
 	events []KeepAliveEvent
 	evCh   chan KeepAliveEvent
@@ -198,14 +199,24 @@ func newKAHarness(t *testing.T, role string, contextTokens int, cacheTTL string,
 		t.Fatal(err)
 	}
 	h.agent = a
-	a.SetKeepAlive(&KeepAliveConfig{Policy: core.DefaultCacheKeepAlive, Role: role, Clock: h.clock, OnEvent: func(e KeepAliveEvent) {
+	h.cfg = KeepAliveConfig{Policy: allRolesPolicy(), Role: role, Clock: h.clock, OnEvent: func(e KeepAliveEvent) {
 		h.mu.Lock()
 		h.events = append(h.events, e)
 		h.mu.Unlock()
 		h.evCh <- e
-	}})
+	}}
+	a.SetKeepAlive(&h.cfg)
 	t.Cleanup(func() { a.SetKeepAlive(nil) })
 	return h
+}
+
+func allRolesPolicy() core.KeepAlivePolicy {
+	p, ok := core.GetCacheKeepAlive(core.MoaConfig{CacheKeepAlive: &core.CacheKeepAliveConfig{
+		Owner: &core.KeepAliveHorizons{Enabled: true}, Session: &core.KeepAliveHorizons{Enabled: true}, Subagent: &core.KeepAliveHorizons{Enabled: true}}})
+	if !ok {
+		panic("roles off")
+	}
+	return p
 }
 
 func (h *kaHarness) send(text string) {
@@ -578,5 +589,59 @@ func TestKeepAliveOffSendsNothing(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	if n := prov.pingCount(); n != 0 {
 		t.Fatalf("pinged %d times", n)
+	}
+}
+
+// Scenario: Activación por segmento — a role left off is never pinged.
+func TestKeepAliveDisabledRoleIsNotPinged(t *testing.T) {
+	h := newKAHarness(t, core.KeepAliveRoleOwner, 250_000, "1h")
+	p, _ := core.GetCacheKeepAlive(core.MoaConfig{CacheKeepAlive: &core.CacheKeepAliveConfig{Subagent: &core.KeepAliveHorizons{Enabled: true}}})
+	h.cfg.Policy = p
+	h.agent.SetKeepAlive(&h.cfg)
+	h.send("hello")
+	h.advance(5 * time.Hour)
+	if n := h.prov.pingCount(); n != 0 {
+		t.Fatalf("owner pinged %d times with only subagents on", n)
+	}
+}
+
+// Scenario: Tope diario de gasto en pings.
+func TestKeepAliveDailyBudgetStopsPingsUntilTheNextDay(t *testing.T) {
+	h := newKAHarness(t, core.KeepAliveRoleOwner, 250_000, "1h")
+	// One ping reads 250K at $0.5/M: $0.125. The cap lets two through.
+	exhausted := make(chan string, 4)
+	h.cfg.Budget = NewKeepAliveBudget(0.3, h.clock.Now, func(day string, spent, capUSD float64) { exhausted <- day })
+	h.agent.SetKeepAlive(&h.cfg)
+	h.send("hello")
+	h.advance(5 * time.Hour)
+	if n := h.prov.pingCount(); n != 2 {
+		t.Fatalf("pings under a $0.30 cap = %d, want 2", n)
+	}
+	select {
+	case day := <-exhausted:
+		if day != "2026-10-18" {
+			t.Fatalf("exhausted day = %q", day)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cap was not recorded")
+	}
+	if _, spent := h.cfg.Budget.Spent(); spent < 0.24 || spent > 0.26 {
+		t.Fatalf("spent = %v, want the two pings' real cost", spent)
+	}
+	// Same day, new request: still capped, and recorded only once.
+	h.send("again")
+	h.advance(2 * time.Hour)
+	if n := h.prov.pingCount(); n != 2 {
+		t.Fatalf("pinged past the cap: %d", n)
+	}
+	if len(exhausted) != 0 {
+		t.Fatal("the cap was recorded twice in a day")
+	}
+	// The next day the count starts over.
+	h.advance(16 * time.Hour)
+	h.send("tomorrow")
+	h.advance(55 * time.Minute)
+	if n := h.prov.pingCount(); n != 3 {
+		t.Fatalf("pings the next day = %d, want 3", n)
 	}
 }

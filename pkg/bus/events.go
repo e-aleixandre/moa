@@ -220,6 +220,15 @@ type CompactionUsage struct {
 	GoalActivation uint64
 }
 
+// KeepAliveUsage is what one cache keep-alive ping of the session's agent,
+// or of one of its subagents (JobID), cost. It is added to the session cost.
+type KeepAliveUsage struct {
+	SessionID string
+	JobID     string
+	Usage     core.Usage
+	CostUSD   float64
+}
+
 // ContextTrimmed is published when old tool results were elided from the
 // model's context instead of compacting.
 type ContextTrimmed struct {

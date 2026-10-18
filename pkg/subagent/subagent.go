@@ -162,6 +162,10 @@ type Config struct {
 	// final total.
 	OnChildUsage func(jobID string, usage *core.Usage, costUSD float64, contextPct int)
 
+	// ChildKeepAlive returns the cache keep-alive of one child job's agent,
+	// nil for none (see agent.SetKeepAlive). It lives only for that run.
+	ChildKeepAlive func(jobID string) *agent.KeepAliveConfig
+
 	// OnChildRequestFingerprint receives content-free fingerprints of the
 	// final provider requests of one child job as a snapshot: count requests
 	// were built, first is the first one, last the most recent (nil when it
@@ -986,6 +990,12 @@ func runJob(jobCtx context.Context, cfg Config, jobs *jobStore, j *job, provider
 		// Registered after the terminal defer above, so the final audit
 		// snapshot lands before OnChildEnd, async notifications and close(done).
 		defer finishFingerprints()
+	}
+	if cfg.ChildKeepAlive != nil {
+		if keepAlive := cfg.ChildKeepAlive(j.id); keepAlive != nil {
+			child.SetKeepAlive(keepAlive)
+			defer child.SetKeepAlive(nil)
+		}
 	}
 	j.mu.Lock()
 	daybreak := j.daybreak

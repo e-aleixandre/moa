@@ -492,6 +492,14 @@ func registerRunReactors(sctx *SessionContext) {
 			sctx.Goal.AddSpentForActivation(e.GoalActivation, cost)
 		}
 	})
+	// A keep-alive ping is spent outside any run, so it is charged here.
+	b.Subscribe(func(e KeepAliveUsage) {
+		if e.CostUSD <= 0 {
+			return
+		}
+		total := sctx.addSessionCost(e.CostUSD)
+		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: e.CostUSD})
+	})
 	b.Subscribe(func(e CompactionEnded) {
 		// Automatic compactions are bridged from the running agent and their
 		// usage is already folded into RunEnded.Cost.
