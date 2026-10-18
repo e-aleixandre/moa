@@ -2257,3 +2257,27 @@ func TestSubagentConversationShowsCompactionSummary(t *testing.T) {
 		t.Fatalf("summary text not projected, got %q", summary.Text)
 	}
 }
+
+func TestSafeSubagentConversationMessagesKeepsPricedRepliesAndTheirTools(t *testing.T) {
+	priced := func() map[string]any {
+		return map[string]any{"request_cost_usd": 0.0123, "compaction_epoch": 2}
+	}
+	projection := safeSubagentConversationMessages([]core.AgentMessage{
+		{Message: core.Message{MsgID: "parent", Role: "user", Content: []core.Content{core.TextContent("do it")}}, Custom: map[string]any{"source": "subagent_parent"}},
+		{Message: core.Message{MsgID: "a1", Role: "assistant", Content: []core.Content{
+			core.TextContent("looking"),
+			core.ToolCallContent("call", "bash", map[string]any{"command": "pwd"}),
+		}}, Custom: priced()},
+		{Message: core.Message{Role: "tool_result", ToolCallID: "call", Content: []core.Content{core.TextContent("/workspace")}}},
+		{Message: core.Message{MsgID: "a2", Role: "assistant", Content: []core.Content{core.TextContent("done")}}, Custom: priced()},
+		{Message: core.Message{MsgID: "internal", Role: "assistant", Content: []core.Content{core.TextContent("hidden")}}, Custom: map[string]any{"request_cost_usd": 0.1, "source": "prepare_compact"}},
+	})
+	var kinds []string
+	for _, m := range projection.messages {
+		kinds = append(kinds, m.Role+":"+m.Text+m.Tool)
+	}
+	want := []string{"user:do it", "assistant:looking", "tool:bash", "assistant:done"}
+	if strings.Join(kinds, "|") != strings.Join(want, "|") {
+		t.Fatalf("projection = %v, want %v", kinds, want)
+	}
+}

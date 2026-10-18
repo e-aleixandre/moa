@@ -398,9 +398,10 @@ func isVisibleSubagentConversationMessage(msg core.AgentMessage) bool {
 	if msg.Role != "user" && msg.Role != "assistant" {
 		return false
 	}
-	if len(msg.Custom) == 0 {
+	if source, _ := msg.Custom["source"].(string); source == "subagent_parent" {
 		return true
 	}
-	source, _ := msg.Custom["source"].(string)
-	return source == "subagent_parent"
+	// Accounting stamps (request_cost_usd, compaction_epoch) sit on every
+	// ordinary priced reply and must not hide it.
+	return !isExtensionMessage(msg.Custom)
 }
