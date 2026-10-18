@@ -121,6 +121,9 @@ public class CallService extends Service {
             .setSmallIcon(R.drawable.ic_stat_moa)
             .setContentText(getString(R.string.call_ongoing))
             .setCategory(NotificationCompat.CATEGORY_CALL)
+            // On a secure lock screen too, as a phone call's: the owner's name
+            // and Hang Up, nothing of the conversation.
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setUsesChronometer(true)
@@ -138,6 +141,7 @@ public class CallService extends Service {
             NotificationManager.IMPORTANCE_LOW);
         channel.setSound(null, null);
         channel.enableVibration(false);
+        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         manager.createNotificationChannel(channel);
     }
 
