@@ -112,6 +112,43 @@ func (cfg *loopConfig) toolCallOrigin(toolCallID string) string {
 	return ""
 }
 
+// ephemeralBlock evaluates the per-request block, flagged so providers keep
+// their cache breakpoint off it. nil when there is none.
+func (cfg *loopConfig) ephemeralBlock() *core.Message {
+	if cfg.ephemeralContext == nil {
+		return nil
+	}
+	block := cfg.ephemeralContext()
+	if block == nil {
+		return nil
+	}
+	eph := *block
+	eph.Ephemeral = true
+	return &eph
+}
+
+// frozenEphemeral is the block an ordinary request carried and where it sat in
+// that request's messages. The continuations of that request (a transport
+// repair, a pause_turn or truncation resubmit) resend it in the same place:
+// they finish a request that was already sent, so they must not rewrite what
+// the model was shown. The next ordinary request evaluates it afresh.
+type frozenEphemeral struct {
+	msg *core.Message
+	at  int
+}
+
+// into returns msgs with the block in its place, msgs itself when there is none.
+func (f frozenEphemeral) into(msgs []core.Message) []core.Message {
+	if f.msg == nil {
+		return msgs
+	}
+	at := min(f.at, len(msgs))
+	out := make([]core.Message, 0, len(msgs)+1)
+	out = append(out, msgs[:at]...)
+	out = append(out, *f.msg)
+	return append(out, msgs[at:]...)
+}
+
 // ErrAdmissionNotSaved ends a run whose next request would carry a message
 // that must be on disk first (core.CustomDurableAdmission) when the save fails.
 var ErrAdmissionNotSaved = errors.New("an admitted message could not be saved; no request was made")
@@ -304,13 +341,16 @@ func sameModel(a, b core.Model) bool {
 
 // contextExceeds reports whether the conversation is past the compaction
 // threshold of s's model — the same judgement the compaction check makes.
-func contextExceeds(cfg *loopConfig, s requestSettings, toolSpecs []core.ToolSpec) bool {
+//
+// extra is what the next request carries beyond the conversation (the
+// ephemeral block), which the conversation's own estimate does not see.
+func contextExceeds(cfg *loopConfig, s requestSettings, toolSpecs []core.ToolSpec, extra int) bool {
 	c := s.compaction
 	if c == nil || !c.Enabled || s.model.MaxInput <= 0 {
 		return false
 	}
 	estimate := core.EstimateContextTokens(cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
-	return core.ShouldCompact(estimate.Tokens, c.EffectiveWindow(s.model.MaxInput), *c)
+	return core.ShouldCompact(estimate.Tokens+extra, c.EffectiveWindow(s.model.MaxInput), *c)
 }
 
 // hardCapacity is the most context s's model accepts: its window minus the
@@ -459,6 +499,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	// paused message and lose the continuation).
 	pauseResubmits := 0
 	justPaused := false
+	// The ephemeral block of the last ordinary request, for its continuations.
+	var frozen frozenEphemeral
 	// Local to this admitted work, never inherited by another Send or child.
 	// A tool result can change ordinary settings without being a new entry
 	// into API while this work's OAuth restriction still makes return early.
@@ -545,10 +587,22 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 		// The model whose window the check below judges the context against.
 		checkedFor := cfg.model
+		// What the request will carry beyond the conversation. A continuation
+		// carries the block of the request it finishes; an ordinary request a
+		// fresh one, which is the one it will send if nothing changes.
+		ephemeralTokens := 0
+		if justPaused {
+			if frozen.msg != nil {
+				ephemeralTokens = core.EstimateTokens(*frozen.msg)
+			}
+		} else if block := cfg.ephemeralBlock(); block != nil {
+			ephemeralTokens = core.EstimateTokens(*block)
+		}
 		if !justPaused && compactionSettings != nil && compactionSettings.Enabled && cfg.model.MaxInput > 0 {
 			estimate := core.EstimateContextTokens(
 				cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
 			)
+			estimate.Tokens += ephemeralTokens
 			window := compactionSettings.EffectiveWindow(cfg.model.MaxInput)
 
 			// Warn before the threshold, not at it: an automatic compaction
@@ -727,7 +781,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		if justPaused && cfg.background && cfg.settings != nil {
 			if c := cfg.settings().compaction; c != nil && c.Enabled && cfg.model.MaxInput > 0 {
 				estimate := core.EstimateContextTokens(cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
-				if estimate.Tokens > cfg.model.MaxInput-c.ReserveTokens {
+				if estimate.Tokens+ephemeralTokens > cfg.model.MaxInput-c.ReserveTokens {
 					loopErr = fmt.Errorf("%w: a continuation cannot be compacted", ErrContextCapacity)
 					return loopErr
 				}
@@ -820,33 +874,26 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				hard := hardCapacity(next)
 				shrunk := (window > 0 && (checkedWindow == 0 || window < checkedWindow)) ||
 					(hard > 0 && (checkedHard == 0 || hard < checkedHard))
-				if (!sameModel(next.model, checkedFor) || shrunk) && contextExceeds(cfg, next, toolSpecs) {
+				if (!sameModel(next.model, checkedFor) || shrunk) && contextExceeds(cfg, next, toolSpecs, ephemeralTokens) {
 					recheckContext = true
 					break
 				}
 				cfg.applySettings(next)
 				requestCompaction = next.compaction
 			}
-			reqMessages := baseMessages
+			bound := justPaused || repairPartial != nil
+			if !bound {
+				frozen = frozenEphemeral{msg: cfg.ephemeralBlock(), at: len(baseMessages)}
+			}
+			reqMessages := frozen.into(baseMessages)
 			if repairPartial != nil {
-				reqMessages = append(append([]core.Message{}, baseMessages...), *repairPartial, streamContinueHint())
+				reqMessages = append(append([]core.Message{}, reqMessages...), *repairPartial, streamContinueHint())
 			}
 			// History can carry thinking another model signed: a switch since
 			// these messages were prepared, or a restored session whose append-
 			// only tree keeps it. Only the request drops it; history keeps it.
 			cfg.requestProgram = cfg.accessProgram()
 			reqMessages = withoutForeignThinking(reqMessages, cfg.model, cfg.requestProgram)
-			// TODO(phase 2): a repair or pause_turn continuation should reuse the
-			// block of the request it continues, and the request-size estimates
-			// should count it; it is bounded, so neither is needed for
-			// correctness.
-			if cfg.ephemeralContext != nil && repairPartial == nil && !justPaused {
-				if block := cfg.ephemeralContext(); block != nil {
-					eph := *block
-					eph.Ephemeral = true
-					reqMessages = append(append([]core.Message(nil), reqMessages...), eph)
-				}
-			}
 			// Whatever got this request here (an unstable-source fallback, a
 			// compaction that found no cut, a transport repair appending the
 			// partial and a hint), it never leaves over the model window minus
@@ -876,7 +923,6 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				Options:  cfg.requestOptions(),
 			}
 			req.Options.AccessProgram = cfg.requestProgram
-			bound := justPaused || repairPartial != nil
 			if !bound && retrySource == nil && apiWorkOrigin != nil && apiWorkOrigin.Model == cfg.model.ID && apiWorkOrigin.OAuthNotBefore != nil && time.Now().Before(*apiWorkOrigin.OAuthNotBefore) {
 				req.Options.ProviderBinding = apiWorkOrigin
 			}
