@@ -128,6 +128,12 @@ func (q *questionService) postQuestions(ctx context.Context, sess *ManagedSessio
 	if q.hooks.afterCheckpoint != nil {
 		q.hooks.afterCheckpoint()
 	}
+	// Delete settles the session's questions a last time under this same lock
+	// (questionService.deleted): a post after that must not leave a question
+	// nobody can ever answer, and one before it is settled by it.
+	if _, gone := q.gone.Load(sess.ID); gone {
+		return core.ErrorResult("The session was deleted, so the question was not posted.")
+	}
 	id := tasks.NewQuestionID()
 	stored, existed, err := q.repo.InsertQuestion(ctx, tasks.Question{
 		ID: id, SessionID: sess.ID, OriginMsgID: msgID, OriginToolCallID: callID, OriginTool: tool,

@@ -995,6 +995,9 @@ func (m *Manager) deleteSession(id string) (err error) {
 	// the in-flight request to return. Taken outside m.mu, as in CloseSession.
 	sess.closing.Store(true)
 	sess.drainLifecycleUsers()
+	// A post that committed its question before seeing sess.deleted is
+	// settled now; one after it refuses to commit (questionService.deleted).
+	m.questions.deleted(id)
 	sess.attachmentScope.Revoke()
 	// Mark deleted to prevent persistence from resurrecting.
 	if sess.persister != nil {

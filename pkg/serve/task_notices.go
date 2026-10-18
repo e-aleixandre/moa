@@ -439,6 +439,13 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 		// first by the durable order is what happens.
 		unlock := m.questions.lock(to)
 		defer unlock()
+		if m.questions.barredLocked(ctx, to) {
+			// A Stop whose fence never reached the database: nothing it covers
+			// is admitted until the fence is on disk. The row stays reserved and
+			// a later pass retries.
+			d.steers.Delete(steerID)
+			return n
+		}
 		cur, err := m.tasks.Notice(ctx, n.ID)
 		switch {
 		case err != nil:

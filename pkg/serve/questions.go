@@ -47,6 +47,14 @@ type questionService struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 	hooks questionHooks
+	// unfenced holds, per session, a Stop or recall whose fence could not be
+	// written (true when it also stopped the run). Until a retry commits it, no
+	// accepted answer of that session is admitted or continued in this
+	// process. Guarded by the session's lock.
+	unfenced sync.Map
+	// gone marks the sessions Delete has settled for the last time; a post
+	// for one of them refuses to commit. Written under the session's lock.
+	gone sync.Map
 }
 
 // questionHooks are seams for tests to stop the service at the boundaries the
@@ -241,13 +249,18 @@ func (q *questionService) reconcileLocked(ctx context.Context, sessionID string,
 			} else if changed {
 				q.retire(sessionID, question.ID)
 			}
-		case question.State == tasks.QuestionAnswered && question.Work == tasks.WorkDue:
+		case question.State == tasks.QuestionAnswered:
+			// Whatever a Stop decided about its run, an answer that was never
+			// admitted is only deliverable to the branch that asked: Stop removes
+			// the autorun, it does not make the answer valid anywhere.
 			var err error
 			switch {
 			case entriesHaveNotice(path, question.EventID):
-				// Read on this branch: its run is still owed.
+				// Read on this branch: its run, if still owed, stays owed.
 			case entriesHaveNotice(all, question.EventID):
-				_, err = q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkStopped)
+				if question.Work == tasks.WorkDue {
+					_, err = q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkStopped)
+				}
 			case !originOnPath(path, question):
 				_, err = q.repo.AbandonQuestionAnswer(ctx, question.EventID, tasks.ReasonRewound)
 			}
@@ -291,6 +304,22 @@ func (q *questionService) settleLeafLocked(sess *ManagedSession) {
 	q.reconcileLocked(q.m.baseCtx, sess.ID, sess.runtime.Context().Tree)
 }
 
+// deleted settles a deleted session's questions a last time, under its lock
+// and once its runtime's users are drained: the first settlement (with the
+// rest of its scheduled work) cannot see a post that was between its
+// checkpoint and its commit. Later posts see gone and refuse.
+func (q *questionService) deleted(sessionID string) {
+	if q == nil {
+		return
+	}
+	unlock := q.lock(sessionID)
+	defer unlock()
+	q.gone.Store(sessionID, struct{}{})
+	if err := q.repo.SettleDeletedSessionQuestions(q.m.baseCtx, sessionID); err != nil {
+		slog.Warn("questions: settling a deleted session's questions failed", "session", sessionID, "error", err)
+	}
+}
+
 // cleared settles the questions of a session whose conversation was emptied
 // (/clear run from the queue): nothing is left for an origin to be on.
 func (q *questionService) cleared(sess *ManagedSession) {
@@ -309,7 +338,14 @@ func (q *questionService) checkOrigin(ctx context.Context, sessionID, id string)
 		return nil // AnswerQuestion reports it
 	}
 	tree, err := q.currentTree(sessionID)
-	if err != nil {
+	switch {
+	case errors.Is(err, session.ErrNotFound):
+		// The conversation is gone: nothing could ever read the answer.
+		if _, _, err := q.repo.CloseQuestion(ctx, sessionID, id, tasks.QuestionInvalidated, tasks.ReasonSessionDeleted); err != nil {
+			return err
+		}
+		return &tasks.ErrQuestionConflict{State: tasks.QuestionInvalidated}
+	case err != nil:
 		return err
 	}
 	if tree == nil || originOnPath(tree.Path(), question) {
@@ -324,8 +360,8 @@ func (q *questionService) checkOrigin(ctx context.Context, sessionID, id string)
 }
 
 // currentTree is the session's branch as it stands: the live tree, or the
-// saved snapshot read without loading the session. nil when there is none to
-// judge by.
+// saved snapshot read without loading the session; nil for a saved session
+// with no entries, session.ErrNotFound when the session exists nowhere.
 func (q *questionService) currentTree(sessionID string) (*session.Tree, error) {
 	if sess, ok := q.m.Get(sessionID); ok {
 		return sess.runtime.Context().Tree, nil
@@ -333,7 +369,7 @@ func (q *questionService) currentTree(sessionID string) (*session.Tree, error) {
 	saved, _, err := session.FindSessionReadOnly(q.m.sessionBaseDir, sessionID)
 	switch {
 	case errors.Is(err, session.ErrNotFound):
-		return nil, nil
+		return nil, err
 	case err != nil:
 		return nil, fmt.Errorf("reading the saved session: %w", err)
 	case len(saved.Entries) == 0:
@@ -360,26 +396,57 @@ func (q *questionService) Open(ctx context.Context, sessionID string) ([]tasks.Q
 }
 
 // Fence commits, before a Stop or a recall is confirmed, what becomes of the
-// answers already accepted (see tasks.FenceQuestionAnswers). A failure is
-// logged and the Stop goes on: it must never be the reason a run cannot be
-// stopped.
+// answers already accepted (see tasks.FenceQuestionAnswers). A failure never
+// keeps the run from being stopped: the caller stops it and reports the
+// error, and the session stays barred (see unfenced) so no answer accepted
+// before the Stop starts a run while the decision is not on disk.
 //
 // A recall (stopRun false) never touches an answer that already has a receipt
 // in the conversation: it is being read, and the outbox state ("sent") only
 // says what the transport did, not whether the model has it.
-func (q *questionService) Fence(ctx context.Context, sessionID string, stopRun bool) {
+func (q *questionService) Fence(ctx context.Context, sessionID string, stopRun bool) error {
 	if q == nil {
-		return
+		return nil
 	}
 	unlock := q.lock(sessionID)
 	defer unlock()
+	if prev, ok := q.unfenced.Load(sessionID); ok && prev.(bool) {
+		stopRun = true
+	}
+	if err := q.fenceLocked(ctx, sessionID, stopRun); err != nil {
+		q.unfenced.Store(sessionID, stopRun)
+		slog.Warn("questions: fencing the accepted answers failed", "session", sessionID, "error", err)
+		return fmt.Errorf("%w: %w", errFenceNotSaved, err)
+	}
+	q.unfenced.Delete(sessionID)
+	return nil
+}
+
+func (q *questionService) fenceLocked(ctx context.Context, sessionID string, stopRun bool) error {
 	var admitted []string
 	if !stopRun {
 		admitted = q.admittedEvents(ctx, sessionID)
 	}
-	if _, err := q.repo.FenceQuestionAnswers(ctx, sessionID, stopRun, admitted); err != nil {
-		slog.Warn("questions: fencing the accepted answers failed", "session", sessionID, "error", err)
+	_, err := q.repo.FenceQuestionAnswers(ctx, sessionID, stopRun, admitted)
+	return err
+}
+
+// errFenceNotSaved marks a Stop or recall that did happen but whose decision
+// about accepted answers is not on disk.
+var errFenceNotSaved = errors.New("the answers accepted before this stop could not be saved as stopped")
+
+// barredLocked reports whether the session still has a fence that never
+// reached the database, retrying it first. Callers hold the session's lock.
+func (q *questionService) barredLocked(ctx context.Context, sessionID string) bool {
+	stopRun, ok := q.unfenced.Load(sessionID)
+	if !ok {
+		return false
 	}
+	if err := q.fenceLocked(ctx, sessionID, stopRun.(bool)); err != nil {
+		return true
+	}
+	q.unfenced.Delete(sessionID)
+	return false
 }
 
 // admittedEvents returns the session's owed answers whose message is already
@@ -525,6 +592,9 @@ func (q *questionService) continueDue(sess *ManagedSession) {
 	ctx := q.m.baseCtx
 	unlock := q.lock(sess.ID)
 	defer unlock()
+	if q.barredLocked(ctx, sess.ID) {
+		return
+	}
 	due, err := q.repo.DueQuestionWork(ctx)
 	if err != nil {
 		slog.Warn("questions: reading owed work failed", "session", sess.ID, "error", err)

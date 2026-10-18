@@ -1300,6 +1300,12 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		discarded, err := mgr.CancelWithDiscardedSteers(r.PathValue("id"), op.StopID)
+		// The run did stop: the steers it discarded must still reach the
+		// composer, with the storage failure reported beside them.
+		fenceErr := ""
+		if errors.Is(err, errFenceNotSaved) {
+			fenceErr, err = err.Error(), nil
+		}
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -1320,6 +1326,7 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 				"discarded_steer_ids": ids,
 				"discarded_steers":    recallableSteers(discarded),
 				"stop_id":             op.StopID,
+				"fence_error":         fenceErr,
 			})
 		}
 	}
@@ -1343,11 +1350,15 @@ func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		// A recall must not leave an accepted answer free to start a run.
-		mgr.questions.Fence(mgr.baseCtx, sess.ID, false)
+		fenceErr := mgr.questions.Fence(mgr.baseCtx, sess.ID, false)
 		var discarded []core.SteerItem
 		if err := sess.runtime.Bus.Execute(bus.CancelSteer{DiscardedSteers: &discarded, RecallID: op.RecallID}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		if fenceErr != nil {
+			// The steers are withdrawn; only the answers' fence failed.
+			slog.Warn("recall: steers withdrawn but the answer fence was not saved", "session", sess.ID, "error", fenceErr)
 		}
 		if r.Header.Get("X-Moa-Steers-Cancel-Response") == "discarded" {
 			steers := recallableSteers(discarded)

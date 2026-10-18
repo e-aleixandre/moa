@@ -420,6 +420,15 @@ func (r *Repo) CloseQuestion(ctx context.Context, sessionID, id string, to Quest
 	return out, changed, err
 }
 
+// SettleDeletedSessionQuestions applies the question half of
+// SettleSessionDeleted on its own: Delete runs it again once no post of the
+// session can be in flight, for a question committed after the first pass.
+func (r *Repo) SettleDeletedSessionQuestions(ctx context.Context, sessionID string) error {
+	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
+		return settleDeletedQuestions(ctx, tx, sessionID, r.now().UnixMilli())
+	})
+}
+
 // settleDeletedQuestions is the question half of SettleSessionDeleted: the
 // session is gone, so its open questions can never be answered, the answers
 // not yet admitted can never be delivered, and no continuation is owed.
