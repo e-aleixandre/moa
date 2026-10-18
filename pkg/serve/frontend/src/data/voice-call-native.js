@@ -9,7 +9,8 @@
 // this page: the app sends the microphone and plays the provider itself,
 // and only the JSON control frames are mirrored here for the interface.
 //
-// Bridge (v1): open(url, {name, sessionId}) → id; send(id, text); close(id);
+// Bridge (v1): open(url, {name, sessionId, owner}) → id; `owner` says the name
+// is an owner's (anything else is a conversation title); send(id, text); close(id);
 // startAudio(id) → Promise; stopAudio(id); setMuted(id, muted);
 // active() → Promise<{id, sessionId, callId, muted} | null>, the call the app
 // is still carrying when this document loads (a reload, or the page killed
@@ -21,7 +22,7 @@ export function nativeCallBridge(win = globalThis.window) {
   return b && b.version >= 1 && typeof b.open === 'function' ? b : null;
 }
 
-export function createNativeCallDeps(bridge, { name = () => '', sessionId = () => '' } = {}) {
+export function createNativeCallDeps(bridge, { name = () => '', sessionId = () => '', owner = () => false } = {}) {
   const sockets = new Map();
   const engines = new Map();
 
@@ -78,7 +79,7 @@ export function createNativeCallDeps(bridge, { name = () => '', sessionId = () =
           this.onopen?.();
         });
       } else {
-        this.id = bridge.open(String(url), { name: name() || 'moa', sessionId: sessionId() || '' });
+        this.id = bridge.open(String(url), { name: name() || 'moa', sessionId: sessionId() || '', owner: !!owner() });
       }
       sockets.set(this.id, this);
       current = this.id;

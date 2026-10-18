@@ -14,6 +14,7 @@ final class NativeCallMessage {
     final String sessionId;
     final String text;
     final boolean muted;
+    final boolean owner;
 
     private NativeCallMessage(JSONObject body, String op, String id) {
         this.op = op;
@@ -23,11 +24,14 @@ final class NativeCallMessage {
         this.sessionId = string(body, "sessionId", "");
         this.text = string(body, "text", null);
         this.muted = Boolean.TRUE.equals(body.opt("muted"));
+        this.owner = Boolean.TRUE.equals(body.opt("owner"));
     }
 
-    // What the system call and its notification are named.
+    // What the system call and its notification are named. The page names a
+    // call after its owner, or after its conversation when it has none: only
+    // an owner's name may be shown on a lock screen, a title never is.
     String displayName() {
-        return name;
+        return owner ? name : "moa";
     }
 
     // Only a real string counts, as iOS's `as? String`.
@@ -56,7 +60,7 @@ final class NativeCallMessage {
     void applyTo(NativeCallManager manager) {
         switch (op) {
             case "open":
-                manager.open(id, url, name, sessionId);
+                manager.open(id, url, displayName(), sessionId);
                 break;
             case "active":
                 manager.reportActive();

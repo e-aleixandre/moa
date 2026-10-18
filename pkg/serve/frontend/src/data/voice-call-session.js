@@ -16,6 +16,7 @@ import { sessionTitle } from './util/format.js';
 let controller = null;
 let callName = '';
 let callSession = '';
+let callIsOwner = false;
 
 // The name the phone shows for the call: the owner, or the conversation.
 function partyName(sessionId) {
@@ -25,6 +26,10 @@ function partyName(sessionId) {
   return owner?.name || (session ? sessionTitle(session) : '');
 }
 
+function isOwnerCall(sessionId) {
+  return !!(store.get().owners?.list || []).find((o) => o.session_id === sessionId)?.name;
+}
+
 // Injectable for tests: the controller's I/O boundary. Inside the iOS app
 // the socket and audio are the app's own (a system call that survives the
 // lock screen); elsewhere they are the page's.
@@ -32,7 +37,7 @@ const nativeBridge = nativeCallBridge();
 const webDeps = { fetch: undefined, WebSocket: undefined, createAudio: () => createCallAudio({ claimWakeLock }) };
 const webFallback = { WebSocket: globalThis.WebSocket, createAudio: webDeps.createAudio };
 const browserDeps = nativeBridge
-  ? { fetch: undefined, ...createNativeCallDeps(nativeBridge, { name: () => callName, sessionId: () => callSession }), fallback: webFallback }
+  ? { fetch: undefined, ...createNativeCallDeps(nativeBridge, { name: () => callName, sessionId: () => callSession, owner: () => callIsOwner }), fallback: webFallback }
   : webDeps;
 
 // A native call that dropped before it had audio is taken over by the page;
@@ -79,6 +84,7 @@ export function startVoiceCall(sessionId, { provider, screen, callRequestId } = 
     });
   }
   callName = partyName(sessionId);
+  callIsOwner = isOwnerCall(sessionId);
   callSession = sessionId;
   const showScreen = screen ?? !!store.get().isMobile;
   setState({ voiceCall: { ...controller.state(), sessionId, screen: showScreen } });
@@ -102,6 +108,7 @@ export async function adoptNativeCall() {
     onState: (state) => publish(snap.sessionId, state),
   });
   callName = partyName(snap.sessionId);
+  callIsOwner = isOwnerCall(snap.sessionId);
   callSession = snap.sessionId;
   controller.adopt({ callId: snap.callId, muted: !!snap.muted });
   return true;

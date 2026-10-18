@@ -161,6 +161,14 @@ describe("Android native voice call", () => {
 
   // The frontend (voice-call-native.js) feature-detects this object and is the
   // same on iOS and Android: the surface below is NativeVoiceCall.swift's.
+  // The page says whether the call's name is an owner's; a title is never
+  // shown on a lock screen, and the app only trusts what the script forwards.
+  it("forwards whether the call's name is an owner's, and decides the displayed name from it", () => {
+    const bridges = code(java["WebBridges.java"]);
+    expect(bridges).toContain("owner: !!(opts && opts.owner)");
+    expect(code(java["NativeCallMessage.java"])).toContain("manager.open(id, url, displayName(), sessionId)");
+  });
+
   it("exposes the iOS MoaNativeCall v1 surface to the paired origin only", () => {
     const bridges = code(java["WebBridges.java"]);
     const ios = readFileSync("ios/App/App/NativeVoiceCall.swift", "utf8");
