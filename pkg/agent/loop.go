@@ -112,8 +112,57 @@ func (cfg *loopConfig) toolCallOrigin(toolCallID string) string {
 	return ""
 }
 
+// ErrAdmissionNotSaved ends a run whose next request would carry a message
+// that must be on disk first (core.CustomDurableAdmission) when the save fails.
+var ErrAdmissionNotSaved = errors.New("an admitted message could not be saved; no request was made")
+
+// saveAdmissions makes durable, before the request that would carry them, the
+// messages admitted since the last assistant reply that ask for a receipt. The
+// save is the agent's acknowledged one, so success means the transcript on
+// disk holds them; failure means the model must not read them yet.
+func (cfg *loopConfig) saveAdmissions(ctx context.Context) error {
+	cfg.stateMu.Lock()
+	var pending []string
+	for i := len(cfg.state.Messages) - 1; i >= 0; i-- {
+		m := cfg.state.Messages[i]
+		if m.Role == "assistant" {
+			break
+		}
+		if durable, _ := m.Custom[core.CustomDurableAdmission].(bool); durable && (m.MsgID == "" || !cfg.admissionSaved[m.MsgID]) {
+			pending = append(pending, m.MsgID)
+		}
+	}
+	cfg.stateMu.Unlock()
+	if len(pending) == 0 {
+		return nil
+	}
+	var save func(context.Context) error
+	if cfg.agent != nil {
+		cfg.agent.mu.Lock()
+		save = cfg.agent.providerWaitSave
+		cfg.agent.mu.Unlock()
+	}
+	if save == nil {
+		return fmt.Errorf("%w: %w", ErrAdmissionNotSaved, core.ErrProviderWaitNotSaved)
+	}
+	if err := save(ctx); err != nil {
+		return fmt.Errorf("%w: %w", ErrAdmissionNotSaved, err)
+	}
+	if cfg.admissionSaved == nil {
+		cfg.admissionSaved = map[string]bool{}
+	}
+	for _, id := range pending {
+		if id != "" {
+			cfg.admissionSaved[id] = true
+		}
+	}
+	return nil
+}
+
 // loopConfig holds all dependencies for the agent loop.
 type loopConfig struct {
+	// admissionSaved: messages whose receipt the loop already made durable.
+	admissionSaved  map[string]bool
 	quotaBudget     *activeBudget
 	requestRevision uint64
 	// background moves automatic compaction off the request path (see
@@ -459,6 +508,13 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// before we make another provider call.
 		if spent, limit, over := cfg.overBudget(); over {
 			loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
+			return loopErr
+		}
+
+		// Receipt before inference: nothing below (compaction included) may
+		// call the provider with an admitted answer the disk has not seen.
+		if err := cfg.saveAdmissions(ctx); err != nil {
+			loopErr = err
 			return loopErr
 		}
 

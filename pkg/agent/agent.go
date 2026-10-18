@@ -2234,11 +2234,11 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 			defer a.mu.Unlock()
 			return a.requestSettingsLocked()
 		},
+		ephemeralContext: a.config.EphemeralContext,
 		// A prepare-compact run writes the checkpoint and is then discarded by
 		// restoreConversation, so an auto-compaction inside it must not consume
 		// the slot: doing so would clear the checkpoint the real compaction is
 		// about to read.
-		ephemeralContext: a.config.EphemeralContext,
 		readCheckpoint: func() func() (string, *uint64, func()) {
 			if allowCheckpoint {
 				return nil

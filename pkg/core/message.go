@@ -190,6 +190,13 @@ type Message struct {
 	Ephemeral bool `json:"-"`
 }
 
+// CustomDurableAdmission is the Custom key of a message whose admission to the
+// conversation must be on disk before the model reads it: the loop saves the
+// session, acknowledged, before the next request that would carry it. A failed
+// save ends the run without inferring, so a receipt (the message in the saved
+// transcript) always precedes the work that message causes.
+const CustomDurableAdmission = "durable_admission"
+
 // EnsureMsgID assigns a stable identifier when the message does not have one.
 func (m *Message) EnsureMsgID() {
 	if m.MsgID != "" {

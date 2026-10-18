@@ -429,6 +429,9 @@ func questionAnswerCustom(n tasks.Notice, q tasks.Question, run, steer bool) map
 		"asked_at":          time.UnixMilli(q.AskedAt).UTC().Format(time.RFC3339),
 		"answered_at":       time.UnixMilli(q.ClosedAt).UTC().Format(time.RFC3339),
 		"autorun":           run,
+		// The loop saves the session before the model reads this message: the
+		// saved transcript is the admission's receipt (see core.CustomDurableAdmission).
+		core.CustomDurableAdmission: true,
 	}
 	if steer {
 		custom["steer"] = true
