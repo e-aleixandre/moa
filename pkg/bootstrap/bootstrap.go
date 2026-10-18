@@ -130,6 +130,10 @@ type SessionConfig struct {
 	// told so in its prompt, but never writes it.
 	OwnerSession bool
 
+	// AsyncQuestions marks a session whose ask_user does not wait for the
+	// answer (see agentcontext.SystemPromptOptions.AsyncQuestions).
+	AsyncQuestions bool
+
 	// EphemeralContext is AgentConfig.EphemeralContext for this session.
 	EphemeralContext func() *core.Message
 
@@ -778,6 +782,8 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 			SkillsIndex: skillsIndex,
 			OwnerRole:   promptSources.OwnerRole(),
 			OwnerBook:   promptSources.OwnerBook(),
+
+			AsyncQuestions: cfg.AsyncQuestions,
 		})
 	}
 	sess.Sources = promptSources

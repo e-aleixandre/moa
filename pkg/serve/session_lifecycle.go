@@ -328,6 +328,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		ExtraMCPServers:     extraMCPServers,
 		Ctx:                 sessionCtx,
 		EnableAskUser:       true,
+		AsyncQuestions:      askAsync,
 		EphemeralContext:    m.questions.inventory(askAsync, func() *ManagedSession { return sess }),
 		EnableSecretActions: true,
 		OwnerSession:        opts != nil && opts.ownerSession,

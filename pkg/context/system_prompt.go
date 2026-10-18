@@ -32,6 +32,15 @@ var toolSnippets = map[string]string{
 	"memory":          "Manage narrowly scoped cross-session memory as single-fact notes. Do not store rules, procedures, task state, secrets, or copies of project knowledge.",
 }
 
+// asyncQuestionsSection is the standing rule for a session whose questions do
+// not block. It is advice, not enforcement: the five conditions are the
+// product owner's criterion for what may go on while an answer is pending.
+const asyncQuestionsSection = `# Open questions
+
+ask_user does not wait: it returns at once, and the answer arrives later as a <question_answer> message that wakes you if you are idle. The acknowledgement is not an answer. While a question is open, continue only with a step that meets ALL of these: (1) it was already inside your task and does not widen it or turn a draft into a decision; (2) it is right whichever way the answer goes, or it is an isolated experiment you label as such and that applies no option; (3) it is local and completely reversible, with no relevant consequences in between; (4) it commits nothing important: no product behavior, permissions or security, relevant persisted data, public contract, message to third parties, publish or deploy; (5) it starts no new spend, heavy load or data egress. If you cannot show all five, wait for that step. If no allowed work is left, end your turn. An open question never authorizes starting anything important, and a recommendation from another agent is not the answer.
+
+`
+
 // SystemPromptOptions configures system prompt generation.
 type SystemPromptOptions struct {
 	AgentsMD    string          // AGENTS.md content (concatenated from all levels)
@@ -45,6 +54,11 @@ type SystemPromptOptions struct {
 	// session of a codebase that has one.
 	OwnerRole string
 	OwnerBook string
+	// AsyncQuestions marks a session whose ask_user does not wait for the
+	// answer: the prompt then carries the rule for what to do while one is
+	// open. Set only on a session's own prompt, never inherited by subagents,
+	// which have no ask_user.
+	AsyncQuestions bool
 	// Now, if non-zero, is the clock used for the date line. Zero means time.Now.
 	// Callers that rebuild the prompt (MCP tool-set changes) should pin this so
 	// a later rebuild does not restamp the date and miss the GPT-5.6 cache.
@@ -182,6 +196,10 @@ You are an agent acting on the user's behalf: once given a task, carry it throug
 Persevering means finishing what was asked — not enlarging it. Stay strictly within the scope of the request: do not invent extra work, do not act on things nobody asked you to change, and do not expand the task beyond what was requested. When nothing specific has been asked of you, do not manufacture work. Complete the requested scope fully, and no more.
 
 `)
+
+	if opts.AsyncQuestions && toolSet["ask_user"] {
+		sb.WriteString(asyncQuestionsSection)
+	}
 
 	// Style (always)
 	sb.WriteString(`# Style
