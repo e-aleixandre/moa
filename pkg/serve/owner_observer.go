@@ -175,6 +175,14 @@ func newOwnerReportObserver(sess *ManagedSession, emit func(runOutcome)) *ownerR
 		case bus.PermissionResolved:
 			delete(openPrompts, "permission:"+e.ID)
 		case bus.AskUserRequested:
+			if e.Async {
+				// An open question does not hold the session: it neither
+				// counts as a blocking prompt (a permission asked meanwhile is
+				// still a transition to blocked) nor is silenced by one. The
+				// owner hears of it once, when it is posted.
+				o.blocked(e.RunGen, askPending(e))
+				return
+			}
 			block("ask:"+e.ID, e.RunGen, askPending(e))
 		case bus.AskUserResolved:
 			delete(openPrompts, "ask:"+e.ID)

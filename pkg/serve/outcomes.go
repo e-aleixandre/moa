@@ -37,6 +37,10 @@ type runOutcome struct {
 //     pending interaction, at most once per run (a run can ask many times; the
 //     consumer only needs to learn that somebody has to answer). A later
 //     RunEnded still delivers done/failed.
+//   - An asynchronous question is the exception on both sides: it is reported
+//     once per question, whatever the run, and while it stays open the end of
+//     a run is not "done" (the turn is waiting for the answer, which the
+//     continuation will consume), though a failure is still reported.
 //
 // All four triggers are handled by ONE SubscribeAll subscriber: it sees events
 // in publication order on a single goroutine, which is what makes the
@@ -90,6 +94,15 @@ func subscribeRunOutcomes(sess *ManagedSession, sink func(runOutcome)) {
 		case bus.PermissionRequested:
 			needsInput(e.RunGen, permissionPending(e))
 		case bus.AskUserRequested:
+			if e.Async {
+				// Posted once, so this is once per question. It does not
+				// touch the run's guard: a permission asked later in the same
+				// run is a different need.
+				slog.Info("run outcome emitted", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusNeedsInput, "run_gen", e.RunGen, "batch", "", "n", 1)
+				pending := askPending(e)
+				go1(func() { sink(runOutcome{Status: callbackStatusNeedsInput, RunGen: e.RunGen, Pending: pending}) })
+				return
+			}
 			needsInput(e.RunGen, askPending(e))
 		case bus.RunEnded:
 			lastRunGen.Store(e.RunGen)
@@ -115,6 +128,12 @@ func subscribeRunOutcomes(sess *ManagedSession, sink func(runOutcome)) {
 				if lastRunGen.Load() != e.RunGen {
 					slog.Info("run outcome discarded", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 0, "reason", "superseded")
 					return // superseded by a newer run, which reports for itself
+				}
+				// Checked after the wait so a question closed meanwhile (withdrawn,
+				// dismissed) does not leave the caller without its done.
+				if sess.runtime.Context().Approvals.HasOpenAsync() {
+					slog.Info("run outcome discarded", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 0, "reason", "question open")
+					return // the answer's continuation reports for itself
 				}
 				slog.Info("run outcome emitted", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 1)
 				sink(runOutcome{Status: callbackStatusDone, RunGen: e.RunGen, FinalText: e.FinalText})

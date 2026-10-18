@@ -15,6 +15,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/session"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
 // SessionsToolName is the owner's handle on the sessions of its codebase.
@@ -272,7 +273,11 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 		if info.BriefProgress != "" {
 			fmt.Fprintf(&sb, "    progress: %s\n", info.BriefProgress)
 		}
-		if pending := m.ownerPendingLine(info.ID); pending != "" {
+		pending := m.ownerPendingLine(info.ID)
+		if pending == "" && info.State == StateSaved {
+			pending = m.savedQuestionLine(info.ID)
+		}
+		if pending != "" {
 			fmt.Fprintf(&sb, "    %s", pending)
 			if !info.PendingSince.IsZero() {
 				fmt.Fprintf(&sb, " — waiting since %s", book.RelativeAge(now.Sub(info.PendingSince)))
@@ -331,17 +336,43 @@ func (m *Manager) ownerPendingLine(id string) string {
 		return ""
 	}
 	pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
-	switch {
-	case pending.Ask != nil:
-		questions := make([]string, 0, len(pending.Ask.Questions))
-		for _, q := range pending.Ask.Questions {
+	var lines []string
+	if ask := pending.Ask; ask != nil {
+		questions := make([]string, 0, len(ask.Questions))
+		for _, q := range ask.Questions {
 			questions = append(questions, q.Describe())
 		}
-		return fmt.Sprintf("asking (ask_id %s): %s", pending.Ask.ID, strings.Join(questions, " | "))
-	case pending.Permission != nil:
-		return fmt.Sprintf("waiting for the user to approve %s", pending.Permission.ToolName)
+		// An asynchronous question does not hold the session: it may be idle or
+		// working, and the answer is what it waits for.
+		label := "asking"
+		if ask.Async {
+			label = "open question"
+		}
+		lines = append(lines, fmt.Sprintf("%s (ask_id %s): %s", label, ask.ID, strings.Join(questions, " | ")))
 	}
-	return ""
+	if pending.Permission != nil {
+		lines = append(lines, fmt.Sprintf("waiting for the user to approve %s", pending.Permission.ToolName))
+	}
+	return strings.Join(lines, "; ")
+}
+
+// savedQuestionLine is the open question a saved session holds in the store.
+// A saved session cannot be blocked, but the owner can still answer its
+// question, so the roster names it.
+func (m *Manager) savedQuestionLine(id string) string {
+	if m.questions == nil {
+		return ""
+	}
+	open, err := m.questions.Open(m.baseCtx, id)
+	if err != nil || len(open) == 0 {
+		return ""
+	}
+	q := open[0]
+	questions := make([]string, 0, len(q.Questions))
+	for _, item := range busQuestions(q.Questions) {
+		questions = append(questions, item.Describe())
+	}
+	return fmt.Sprintf("open question (ask_id %s): %s", q.ID, strings.Join(questions, " | "))
 }
 
 func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Result {
@@ -463,15 +494,27 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 	if askID == "" {
 		return core.ErrorResult("ask_id is required")
 	}
-	if _, err := m.ownerSession(own, id); err != nil {
+	info, err := m.ownerSession(own, id)
+	if err != nil {
 		return core.ErrorResult(err.Error())
+	}
+	if info.Origin != "owner" {
+		return core.ErrorResult("This session is the user's: do not answer for them. Ask the user with ask_user, proposing the answer you would give as the first option.")
 	}
 	sess, ok := m.Get(id)
 	if !ok {
-		return core.ErrorResult(fmt.Sprintf("session %s is not loaded; it cannot be waiting on a question", id))
-	}
-	if sess.Origin != "owner" {
-		return core.ErrorResult("This session is the user's: do not answer for them. Ask the user with ask_user, proposing the answer you would give as the first option.")
+		// A saved session cannot be blocked, but it can hold a durable question:
+		// the store accepts the answer and the session is woken from there.
+		if m.questions == nil {
+			return core.ErrorResult(fmt.Sprintf("session %s is not loaded; it cannot be waiting on a question", id))
+		}
+		if err := m.questions.Answer(m.baseCtx, id, askID, answers, ownerResponder(own)); err != nil {
+			if errors.Is(err, tasks.ErrQuestionNotFound) {
+				return core.ErrorResult(fmt.Sprintf("session %s is not loaded and has no question %s", id, askID))
+			}
+			return core.ErrorResult(fmt.Sprintf("cannot answer %s: %v (it may already have been answered)", askID, err))
+		}
+		return core.TextResult(fmt.Sprintf("Answered %s in session %s.", askID, id))
 	}
 	if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: askID, Answers: answers, Responder: ownerResponder(own)}); err != nil {
 		// The user may have answered it in the UI first; the approval manager
