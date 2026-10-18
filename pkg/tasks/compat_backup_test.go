@@ -67,7 +67,7 @@ func TestCompatEmptyBackupIsRecoverable(t *testing.T) {
 	if snapshot(t, bak) != before {
 		t.Fatal("recovered backup is not the pre-migration database")
 	}
-	if compatVersion(t, p) != 1 {
+	if compatVersion(t, p) != 2 {
 		t.Fatal("compat not applied after recovering the backup")
 	}
 }

@@ -100,6 +100,7 @@ type MoaConfig struct {
 	AutoVerify             *bool                 `json:"auto_verify,omitempty"`                   // nil = false (disabled by default)
 	PersistentShell        *bool                 `json:"persistent_shell,omitempty"`              // nil = true (enabled by default)
 	UpdateCheck            *bool                 `json:"update_check,omitempty"`                  // nil = true (check stable releases at most every 6h)
+	AskUserAsync           *bool                 `json:"ask_user_async,omitempty"`                // Pilot: ask_user posts a durable question and returns at once; the answer arrives later as an event. nil = the build's default (off).
 	PushSummaries          string                `json:"push_summaries,omitempty"`                // How owner digests and event notifications are announced: "passive" (default: no sound, one per project replacing the last), "active" or "off".
 	PushRelayURL           string                `json:"push_relay_url,omitempty"`                // Origin of the native push relay (default https://moa-push-relay.ealeixandre.workers.dev, provisional until push.letmoa.run exists). Only for an app built with its own APNs key and relay. Global config only.
 	CacheTTL               string                `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "1h" (default) or "5m". Only "5m" changes behavior.
@@ -228,6 +229,15 @@ func IsPersistentShellEnabled(cfg MoaConfig) bool {
 		return *cfg.PersistentShell
 	}
 	return true
+}
+
+// IsAskUserAsync reports whether ask_user is asynchronous for a session built
+// with cfg. nil means "no opinion": the caller supplies its default.
+func IsAskUserAsync(cfg MoaConfig, def bool) bool {
+	if cfg.AskUserAsync != nil {
+		return *cfg.AskUserAsync
+	}
+	return def
 }
 
 // IsUpdateCheckEnabled returns whether release update checks are enabled.
@@ -728,6 +738,12 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		merged.PersistentShell = override.PersistentShell
 	} else {
 		merged.PersistentShell = base.PersistentShell
+	}
+	// AskUserAsync: project overrides global (explicit wins).
+	if override.AskUserAsync != nil {
+		merged.AskUserAsync = override.AskUserAsync
+	} else {
+		merged.AskUserAsync = base.AskUserAsync
 	}
 	// A global opt-out is a privacy preference, not a project setting: a
 	// trusted repository must never silently turn GitHub requests back on.

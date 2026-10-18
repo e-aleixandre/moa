@@ -175,6 +175,9 @@ type Repo struct {
 	// hookAfterPlan, when set by a test, runs between a slot consumption's
 	// calendar read and its write transaction.
 	hookAfterPlan func()
+	// hookBeforeQuestionEvent, when set by a test, fails an answer inside its
+	// transaction, after the question was read and before the notice is written.
+	hookBeforeQuestionEvent func() error
 }
 
 // New returns a repository on path. Nothing touches the disk until first use.
@@ -384,6 +387,55 @@ CREATE TABLE task_notifications_new (
   task_id INTEGER NOT NULL,
   kind TEXT NOT NULL CHECK(kind IN ('assigned','updated','request_done','agent_done','agent_deleted',
     'handoff','comment','handoff_closed','handoff_declined')),
+  recipient_session_id TEXT NOT NULL,
+  deliver TEXT NOT NULL CHECK(deliver IN ('wake','hold')),
+  method TEXT NOT NULL CHECK(method IN ('run','append')),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('pending','held','sent','delivered','failed')),
+  reason TEXT NOT NULL DEFAULT '',
+  steer_id TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, delivered_at INTEGER
+);
+INSERT INTO task_notifications_new(rowid, id, task_id, kind, recipient_session_id, deliver, method, title, body,
+  state, reason, steer_id, created_at, updated_at, delivered_at)
+  SELECT rowid, id, task_id, kind, recipient_session_id, deliver, method, title, body,
+  state, reason, steer_id, created_at, updated_at, delivered_at FROM task_notifications ORDER BY rowid;
+DROP TABLE task_notifications;
+ALTER TABLE task_notifications_new RENAME TO task_notifications;
+CREATE INDEX task_notifications_task ON task_notifications(task_id, created_at);
+CREATE INDEX task_notifications_open ON task_notifications(state, created_at);`,
+	// 2: questions an agent posted and left open (asynchronous ask_user). A
+	// question is not a task: it has its own table, and its answer travels as
+	// a task_notifications row of kind question_answer with task_id 0 (no task
+	// has that id, so an older binary scanning the outbox sees an unknown
+	// notice for nobody's task and nothing else). The outbox is rebuilt only to
+	// widen the kinds, as in 1: same columns, same rowids.
+	`CREATE TABLE questions (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  origin_msg_id TEXT NOT NULL DEFAULT '',
+  origin_tool_call_id TEXT NOT NULL,
+  origin_tool TEXT NOT NULL CHECK(origin_tool IN ('ask_user','request_call')),
+  questions_json TEXT NOT NULL,
+  requires_tap INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL CHECK(state IN ('open','answered','withdrawn','dismissed','invalidated')),
+  reason TEXT NOT NULL DEFAULT '',
+  ack_json TEXT NOT NULL DEFAULT '',
+  answers_json TEXT NOT NULL DEFAULT '',
+  responder_json TEXT NOT NULL DEFAULT '',
+  event_id TEXT NOT NULL DEFAULT '',
+  work TEXT NOT NULL DEFAULT '' CHECK(work IN ('','due','done','stopped')),
+  asked_at INTEGER NOT NULL, closed_at INTEGER, updated_at INTEGER NOT NULL,
+  UNIQUE(session_id, origin_msg_id, origin_tool_call_id)
+);
+CREATE UNIQUE INDEX questions_one_open ON questions(session_id) WHERE state = 'open';
+CREATE INDEX questions_event ON questions(event_id) WHERE event_id <> '';
+CREATE TABLE task_notifications_new (
+  id TEXT PRIMARY KEY,
+  task_id INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('assigned','updated','request_done','agent_done','agent_deleted',
+    'handoff','comment','handoff_closed','handoff_declined','question_answer')),
   recipient_session_id TEXT NOT NULL,
   deliver TEXT NOT NULL CHECK(deliver IN ('wake','hold')),
   method TEXT NOT NULL CHECK(method IN ('run','append')),
