@@ -47,11 +47,15 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 	// conversation) never pushes: its owner hears about it through its
 	// reports, unless the user detached it: then nobody else hears it. Origin and Kind are assigned after the session is built, so they
 	// are read here, when an event arrives, not at subscription time.
-	allowed := func() bool {
+	//
+	// A password request is the exception: it is not a turn end, so no report
+	// ever tells the owner about it and nobody would hear it at all. It pushes
+	// for those sessions too, with the same generic payload.
+	allowed := func(kind push.Kind) bool {
 		if sess.deleted.Load() {
 			return false
 		}
-		return sess.Origin != "owner" || sess.Kind == session.KindOwner || sess.ownerDetached.Load()
+		return kind == push.KindSecret || sess.Origin != "owner" || sess.Kind == session.KindOwner || sess.ownerDetached.Load()
 	}
 	signal := func(kind push.Kind) push.Signal {
 		return push.Signal{
@@ -61,7 +65,7 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 			Watched:   sess.presence.watched(),
 			// Checked again when the notification leaves the delivery queue,
 			// so a session reattached to its owner meanwhile announces nothing.
-			StillPending: allowed,
+			StillPending: func() bool { return allowed(kind) },
 		}
 	}
 	// A question or permission someone was looking at waits out a grace period;
@@ -69,14 +73,14 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 	// before an immediate send (the request may have been answered while this
 	// event waited its turn).
 	request := func(kind push.Kind, id string) {
-		if !allowed() {
+		if !allowed(kind) {
 			return
 		}
 		approvals := sess.runtime.Context().Approvals
 		s := signal(kind)
 		s.RequestID = id
 		s.StillPending = func() bool {
-			if !allowed() {
+			if !allowed(kind) {
 				return false
 			}
 			switch kind {
@@ -135,7 +139,7 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 			case bus.RunEnded:
 				r := runs[e.RunGen]
 				delete(runs, e.RunGen)
-				if e.Err != nil || e.Cancelled || !allowed() {
+				if e.Err != nil || e.Cancelled || !allowed(push.KindDone) {
 					return
 				}
 				switch {
@@ -149,7 +153,7 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 					pol.Handle(signal(push.KindDone))
 				}
 			case bus.StateChanged:
-				if e.State == string(bus.StateError) && allowed() {
+				if e.State == string(bus.StateError) && allowed(push.KindFailed) {
 					pol.Handle(signal(push.KindFailed))
 				}
 			}
