@@ -76,13 +76,6 @@ func (q *questionService) lock(sessionID string) func() {
 	return l.Unlock
 }
 
-// forget drops the lock of a deleted session.
-func (q *questionService) forget(sessionID string) {
-	q.mu.Lock()
-	delete(q.locks, sessionID)
-	q.mu.Unlock()
-}
-
 // Answer accepts an answer durably (answer and event in one transaction),
 // then retires the question's projection and wakes the dispatcher. The same
 // answer from the same responder again succeeds without a second event.
