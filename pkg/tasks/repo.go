@@ -418,6 +418,12 @@ CREATE INDEX task_notifications_open ON task_notifications(state, created_at);`,
 	// has that id, so an older binary scanning the outbox sees an unknown
 	// notice for nobody's task and nothing else). The outbox is rebuilt only to
 	// widen the kinds, as in 1: same columns, same rowids.
+	//
+	// Rollback limit: a binary from before this migration opens the database
+	// and ignores the questions table, but it would deliver an open
+	// question_answer notice again as a Tasks notice (it does not know the
+	// receipt in the transcript). Going back is therefore safe only if the
+	// pilot never ran or no such notice is pending, held or sent.
 	`CREATE TABLE questions (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
