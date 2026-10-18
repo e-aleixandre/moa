@@ -167,10 +167,8 @@ func f1PostBoundaryChild(t *testing.T, mode string) {
 		mgr.questions.hooks.afterCommit = crash
 	}
 	e.send(sess, "F1-TRIGGER please ask")
-	select {
-	case <-time.After(30 * time.Second):
-		t.Fatal("the post never reached the crash point")
-	}
+	<-time.After(30 * time.Second)
+	t.Fatal("the post never reached the crash point")
 }
 
 // A retry of the same invocation gets the same acknowledgement and no second

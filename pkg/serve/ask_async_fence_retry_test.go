@@ -46,8 +46,7 @@ func TestAskAsyncStopFenceHoldsAgainstLaterDispatcherAttempts(t *testing.T) {
 	before := e.prov.countSession(t, sess.ID)
 	f1Stop(t, e, sess)
 	once.Do(func() { close(release) })
-	e.mgr.notices.mu.Lock() // the held attempt is over once the dispatcher's lock is free
-	e.mgr.notices.mu.Unlock()
+	waitDispatcherIdle(e)
 	sess.runtime.Bus.Drain(2 * time.Second)
 
 	f1AssertFenced(t, e, qid)
@@ -58,8 +57,7 @@ func TestAskAsyncStopFenceHoldsAgainstLaterDispatcherAttempts(t *testing.T) {
 	// full pass so the retry has certainly run.
 	pass := func() {
 		e.mgr.notices.nudge()
-		e.mgr.notices.mu.Lock()
-		e.mgr.notices.mu.Unlock() //nolint:staticcheck // waits for a pass in flight
+		waitDispatcherIdle(e)
 	}
 	for name, fire := range map[string]func(){
 		"session opened": func() { e.mgr.notices.sessionOpened(sess.ID) },
@@ -87,4 +85,16 @@ func TestAskAsyncStopFenceHoldsAgainstLaterDispatcherAttempts(t *testing.T) {
 		t.Fatalf("after a restart the fenced answer woke the model %d time(s)", prov2.count())
 	}
 	f1AssertFenced(t, e2, qid)
+}
+
+// waitDispatcherIdle returns once no attempt holds the dispatcher's lock: an
+// attempt in flight when it was called has finished.
+func waitDispatcherIdle(e *f1Env) {
+	done := make(chan struct{})
+	go func() {
+		e.mgr.notices.mu.Lock()
+		defer e.mgr.notices.mu.Unlock()
+		close(done)
+	}()
+	<-done
 }
