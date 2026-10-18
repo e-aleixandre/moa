@@ -38,6 +38,28 @@ travel through a small relay that sees only an opaque envelope, never the title,
 session or project, which only your app can decrypt. Turn them on in the app's
 Settings; on Android 13 and later the system asks for permission when you do.
 
+## Calls
+
+In the app, a [call](./serve.md#calls) uses the phone's own call system: it
+carries on with the screen locked or the app in the background, goes to
+headphones or Bluetooth like a phone call, and can be hung up from the
+lock screen, which shows only the owner's name (or *moa*).
+
+An owner set to **Ring** can also call you. The phone rings even with the app
+closed and the screen locked, as an incoming call from that owner: answer, and
+the microphone opens only then; decline, or let it ring out, and the owner asks
+in writing instead. If several of your devices can ring, they all do and the
+first one to answer takes the call. An owner set to **Ask first** sends a
+notification instead of ringing; tap it to answer or write.
+
+- The app sets itself up to ring the first time you open it after pairing;
+  keep it open for a moment then.
+- On Android, the app asks once for the microphone, notifications and the
+  full-screen call screen. Without the full-screen permission an incoming call
+  still rings, as a call notification with Answer and Decline.
+- Incoming calls need the push relay you use to support them; otherwise
+  **Ring** falls back to a notification.
+
 ## Sharing into moa
 
 In the system share sheet choose moa from any app: a link, text, an image, a PDF
@@ -75,5 +97,8 @@ lists them and forgets any of them; unpairing forgets all of them.
   carry only the encrypted envelope; the app decrypts it itself. They work only
   if the push relay you use has Android set up; otherwise enabling
   notifications fails.
+- A phone that has not been unlocked since it restarted, or an app stopped
+  with **Force stop**, gets no notifications or calls until moa is opened
+  again.
 - Reinstalling over a build signed with a different key requires uninstalling
   first, which forgets the pairing.

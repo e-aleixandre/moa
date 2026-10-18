@@ -499,8 +499,9 @@ Moa carries the audio, so the browser never talks to the provider.
   this session, Still open — with `transcript.md` to download. Your draft is
   left as it was. If the call drops, the minutes say so and the transcript
   remains.
-- Keep the app open and the screen on during a call; it can drop if the app
-  goes to the background or the phone locks.
+- In a browser, keep the page open and the screen on during a call; it can
+  drop if the page goes to the background or the phone locks. The [native
+  app](./mobile.md#calls) keeps the call going and can ring you.
 - **Uses your plan** means the call runs on your ChatGPT or Grok subscription,
   not that it is free. How much of the plan's quota it uses, and whether an
   account that also has API credits is charged, is not verified: check your
