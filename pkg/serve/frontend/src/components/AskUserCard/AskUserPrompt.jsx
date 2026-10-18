@@ -296,15 +296,19 @@ export function AskUserPrompt({ session }) {
               Dismiss
             </button>
           )}
-          <button
-            type="button"
-            class="ask-user-prompt-skip"
-            onPointerDown={(e) => { skipPointerDown.current = e.pointerId ?? true; }}
-            onPointerCancel={() => { skipPointerDown.current = null; }}
-            onClick={handleSkip}
-          >
-            Skip
-          </button>
+          {/* An async question waits without blocking anyone, so it has no
+              Skip: it is answered or dismissed, never filled with '(skipped)'. */}
+          {!ask.async && (
+            <button
+              type="button"
+              class="ask-user-prompt-skip"
+              onPointerDown={(e) => { skipPointerDown.current = e.pointerId ?? true; }}
+              onPointerCancel={() => { skipPointerDown.current = null; }}
+              onClick={handleSkip}
+            >
+              Skip
+            </button>
+          )}
           <button type="button" class="ask-user-prompt-submit" onClick={handleContinue}>
             {continueLabel}
             <kbd class="ask-user-prompt-key" aria-hidden="true">⏎</kbd>

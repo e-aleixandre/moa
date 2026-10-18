@@ -140,6 +140,12 @@ test("an async question offers Dismiss and says Stop keeps it open", async () =>
   expect(dismissed).toEqual([["s1", "ask-9"]]);
 });
 
+test("an async question offers no Skip; a synchronous one keeps it", () => {
+  const isSkip = (node) => node.props?.class === "ask-user-prompt-skip" && node.props?.children === "Skip";
+  expect(descendants(renderAsync({ async: true })).find(isSkip)).toBeUndefined();
+  expect(descendants(renderAsync({})).find(isSkip)).toBeDefined();
+});
+
 test("a synchronous question shows no Dismiss and no hint", () => {
   const nodes = descendants(renderAsync({}));
   expect(nodes.find((node) => node.props?.class === "ask-user-prompt-async")).toBeUndefined();
