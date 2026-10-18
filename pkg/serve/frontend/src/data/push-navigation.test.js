@@ -166,3 +166,39 @@ test('native navigation is exposed on the page and removed on teardown', async (
   stop();
   expect(target.MoaNavigation).toBeUndefined();
 });
+
+test('a call-request tap opens the request card link and acknowledges', async () => {
+  const worker = new FakeServiceWorker();
+  const links = [];
+  const selected = [];
+  const acks = [];
+  const stop = installOpenSessionNavigation({
+    serviceWorker: worker,
+    openCallRequest: async id => { links.push(id); return true; },
+    selectSession: id => selected.push(id),
+  });
+  worker.send({ type: 'open-call-request', callRequestId: 'cr-1', sessionId: 's1', requestId: 'tap-9' }, [{ postMessage: m => acks.push(m) }]);
+  await new Promise(r => setTimeout(r, 0));
+  expect(links).toEqual(['cr-1']);
+  expect(selected).toEqual([]);
+  expect(acks).toEqual([{ type: 'open-call-request-ack', requestId: 'tap-9' }]);
+  stop();
+});
+
+test('a call-request tap on a request that ended opens the owner conversation instead', async () => {
+  restore = { sessions: store.get().sessions, sessionsLoaded: store.get().sessionsLoaded };
+  setState({ sessions: { s1: { id: 's1' } }, sessionsLoaded: true });
+  const worker = new FakeServiceWorker();
+  const selected = [];
+  const acks = [];
+  const stop = installOpenSessionNavigation({
+    serviceWorker: worker,
+    openCallRequest: async () => false,
+    selectSession: id => { selected.push(id); return true; },
+  });
+  worker.send({ type: 'open-call-request', callRequestId: 'gone', sessionId: 's1', requestId: 'tap-10' }, [{ postMessage: m => acks.push(m) }]);
+  await new Promise(r => setTimeout(r, 0));
+  expect(selected).toEqual(['s1']);
+  expect(acks).toEqual([{ type: 'open-call-request-ack', requestId: 'tap-10' }]);
+  stop();
+});
