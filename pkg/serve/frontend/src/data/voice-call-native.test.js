@@ -286,3 +286,20 @@ test('native call: a microphone the user denied ends the call as microphone, no 
   expect(c.state().endedReason).toBe('microphone');
   expect(opened).toHaveLength(0);
 });
+
+test('open tells the app whether the name is an owner\'s (a title is never shown on a lock screen)', () => {
+  const opens = [];
+  const bridge = { version: 1, onevent: null, open: (url, opts) => { opens.push(opts); return 'c1'; }, send() {}, close() {} };
+  for (const owner of [true, false]) {
+    const deps = createNativeCallDeps(bridge, { name: () => 'Infra', sessionId: () => 's1', owner: () => owner });
+    const socket = new deps.WebSocket('wss://moa.example/api/voice/calls/k1/ws');
+    expect(socket.id).toBe('c1');
+  }
+  expect(opens).toEqual([
+    { name: 'Infra', sessionId: 's1', owner: true },
+    { name: 'Infra', sessionId: 's1', owner: false },
+  ]);
+  const plain = createNativeCallDeps(bridge, { name: () => 'Infra' });
+  new plain.WebSocket('wss://moa.example/api/voice/calls/k1/ws');
+  expect(opens[2].owner).toBe(false);
+});

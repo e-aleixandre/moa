@@ -545,6 +545,47 @@ public class VoipRegistrationTest {
         assertTrue(host.retryTasks.isEmpty());
     }
 
+    // A retry belongs to the pairing that scheduled it (recheck-fix3).
+    @Test
+    public void aRetryOfAForgottenPairingCannotTouchTheNewOne() {
+        host.registerCode = 410;
+        registration.refresh(false);
+        Runnable obsolete = host.retryTasks.remove(0);
+        assertTrue(registration.forgetLocal());
+        host.paired = new DeviceCredentialStore.Stored(ORIGIN, "dev_2.fresh", NOW + 86_400_000L);
+        host.registerCode = 202;
+        host.sent.clear();
+        obsolete.run();
+        assertTrue("An old generation's retry must not touch the new pairing: " + host.lines(), host.sent.isEmpty());
+        assertNull(secrets.load());
+        assertNull(memory.get("token"));
+    }
+
+    @Test
+    public void aNewPairingGetsItsOwnRetries() {
+        host.registerCode = 410;
+        registration.refresh(false);
+        for (int i = 0; i < 3; i++) host.retryTasks.remove(0).run();
+        assertEquals(3, host.retryDelays.size());
+        assertTrue(host.retryTasks.isEmpty());
+        assertTrue(registration.forgetLocal());
+        host.paired = new DeviceCredentialStore.Stored(ORIGIN, "dev_2.fresh", NOW + 86_400_000L);
+        registration.refresh(false);
+        assertEquals("The new pairing must get its own retry, not inherit exhaustion", 1, host.retryTasks.size());
+        assertEquals(15_000L, (long) host.retryDelays.get(3));
+    }
+
+    @Test
+    public void aPendingRetryDoesNotBlockTheNewPairingsFirstRetry() {
+        host.registerCode = 410;
+        registration.refresh(false);
+        assertEquals(1, host.retryTasks.size());
+        assertTrue(registration.forgetLocal());
+        host.paired = new DeviceCredentialStore.Stored(ORIGIN, "dev_2.fresh", NOW + 86_400_000L);
+        registration.refresh(false);
+        assertEquals(2, host.retryTasks.size());
+    }
+
     // A token FCM rotated while the app was in the background cannot be
     // registered then (a challenge must not ring a locked phone); it is due at
     // the next foreground, not an hour later.

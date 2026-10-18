@@ -24,6 +24,31 @@ public class NativeCallMessageTest {
         assertEquals("s1", m.sessionId);
     }
 
+    // The page says whether the name is an owner's; a conversation title is
+    // never shown on a lock screen, so anything else is the app's own name.
+    @Test
+    public void onlyAnOwnersNameIsShownOnTheLockScreen() {
+        NativeCallMessage owner = NativeCallMessage.parse("{\"op\":\"open\",\"id\":\"n1\",\"name\":\"Atlas\",\"owner\":true}");
+        assertEquals("Atlas", owner.displayName());
+        NativeCallMessage title = NativeCallMessage.parse("{\"op\":\"open\",\"id\":\"n1\",\"name\":\"PRIVATE: diagnosis\",\"owner\":false}");
+        assertEquals("moa", title.displayName());
+        // An older page does not say: not an owner.
+        NativeCallMessage older = NativeCallMessage.parse("{\"op\":\"open\",\"id\":\"n1\",\"name\":\"PRIVATE: diagnosis\"}");
+        assertEquals("moa", older.displayName());
+        // Only a real boolean counts.
+        NativeCallMessage text = NativeCallMessage.parse("{\"op\":\"open\",\"id\":\"n1\",\"name\":\"X\",\"owner\":\"true\"}");
+        assertEquals("moa", text.displayName());
+    }
+
+    @Test
+    public void theSystemCallIsStartedWithTheDisplayName() {
+        NativeCallManagerTest.FakeHost host = new NativeCallManagerTest.FakeHost();
+        NativeCallManager manager = new NativeCallManager(host);
+        NativeCallMessage.parse("{\"op\":\"open\",\"id\":\"n1\",\"url\":\"" + NativeCallManagerTest.URL
+            + "\",\"name\":\"PRIVATE: diagnosis\",\"sessionId\":\"s\"}").applyTo(manager);
+        assertEquals("start moa", host.system.log.get(0));
+    }
+
     @Test
     public void openDefaultsLikeIos() {
         NativeCallMessage m = NativeCallMessage.parse("{\"op\":\"open\",\"id\":\"n1\"}");

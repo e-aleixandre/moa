@@ -25,6 +25,11 @@ final class NativeCallMessage {
         this.muted = Boolean.TRUE.equals(body.opt("muted"));
     }
 
+    // What the system call and its notification are named.
+    String displayName() {
+        return name;
+    }
+
     // Only a real string counts, as iOS's `as? String`.
     private static String string(JSONObject body, String key, String fallback) {
         Object value = body.opt(key);
