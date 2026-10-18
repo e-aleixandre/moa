@@ -734,13 +734,6 @@ func isFastModeUnavailable(body []byte) bool {
 	return bytes.Contains(bytes.ToLower(body), []byte("fast mode"))
 }
 
-// PrewarmOptions tunes a cache prewarm.
-type PrewarmOptions struct {
-	// MaxTokens1 sends max_tokens:1 instead of the documented max_tokens:0,
-	// for credentials that reject zero. One output token is billed.
-	MaxTokens1 bool
-}
-
 // PrewarmError is a non-200 answer to a prewarm. Body is empty for 401/403,
 // whose bodies can echo credentials.
 type PrewarmError struct {
@@ -755,14 +748,16 @@ func (e *PrewarmError) Error() string {
 	return fmt.Sprintf("anthropic: prewarm HTTP %d: %s", e.Status, e.Body)
 }
 
-// Prewarm writes (or refreshes) the prompt cache for req without generating
-// output. The body is the one Stream would send for req, through the same
-// builder and the same OAuth profile (preamble, tool renaming, beta headers);
-// only "stream" (false) and "max_tokens" (0, or 1 with opts.MaxTokens1)
-// differ, so the cached prefix is the real request's prefix. The usage of the
-// non-streaming response is returned. There is no retry: a paid probe is
-// never replayed, and no credential is refreshed here.
-func (a *Anthropic) Prewarm(ctx context.Context, req core.Request, opts PrewarmOptions) (core.Usage, error) {
+// Prewarm refreshes the prompt cache for req without generating output. The
+// body is the one Stream would send for req, through the same builder and the
+// same OAuth profile (preamble, tool renaming, beta headers); only "stream"
+// (false) and "max_tokens" (0) differ, so the cached prefix is the real
+// request's prefix. The usage of the non-streaming response is returned.
+// There is no retry: a ping is never replayed, and no credential is
+// refreshed here. Manual extended thinking is refused before sending: the
+// API rejects max_tokens 0 with a thinking budget, and changing the thinking
+// to get past it would invalidate the very prefix the ping is for.
+func (a *Anthropic) Prewarm(ctx context.Context, req core.Request) (core.Usage, error) {
 	apiKey := a.apiKey
 	oauthMode := a.isOAuth
 	if req.Options.APIKey != "" {
@@ -770,16 +765,19 @@ func (a *Anthropic) Prewarm(ctx context.Context, req core.Request, opts PrewarmO
 		oauthMode = isOAuthToken(apiKey)
 	}
 	profileOAuth := oauthMode || req.Options.AnthropicWireProfile == "oauth"
-	maxTokens := 0
-	if opts.MaxTokens1 {
-		maxTokens = 1
-	}
+	manualThinking := false
 	body, err := buildRequestBodyWith(req, profileOAuth, func(ar *anthropicRequest) {
 		ar.Stream = false
-		ar.MaxTokens = maxTokens
+		// resolveMaxTokens turns 0 into the model default, so it is set here,
+		// after the builder.
+		ar.MaxTokens = 0
+		manualThinking = ar.Thinking != nil && ar.Thinking.Type == "enabled"
 	})
 	if err != nil {
 		return core.Usage{}, fmt.Errorf("anthropic: building prewarm request: %w", err)
+	}
+	if manualThinking {
+		return core.Usage{}, core.ErrPrewarmUnsupported
 	}
 	if a.dispatch != nil {
 		if apiKey, err = a.dispatch(ctx); err != nil {

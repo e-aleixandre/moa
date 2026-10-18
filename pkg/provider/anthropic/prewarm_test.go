@@ -82,7 +82,7 @@ func countTTL(v any, ttl string) int {
 
 func TestPrewarm_BodyMatchesStreamingExceptStreamAndMaxTokens(t *testing.T) {
 	for _, key := range []string{"sk-ant-oat-test", "sk-ant-api-test"} {
-		for _, opts := range []PrewarmOptions{{}, {MaxTokens1: true}} {
+		{
 			srv, got := prewarmFixture(t)
 			a := NewWithBaseURL(key, srv.URL)
 			req := prewarmRequest()
@@ -93,7 +93,7 @@ func TestPrewarm_BodyMatchesStreamingExceptStreamAndMaxTokens(t *testing.T) {
 			}
 			for range ch { //nolint:revive
 			}
-			usage, err := a.Prewarm(context.Background(), req, opts)
+			usage, err := a.Prewarm(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,12 +105,8 @@ func TestPrewarm_BodyMatchesStreamingExceptStreamAndMaxTokens(t *testing.T) {
 			if real.body["stream"] != true || ping.body["stream"] != false {
 				t.Errorf("stream: real=%v ping=%v", real.body["stream"], ping.body["stream"])
 			}
-			wantMax := float64(0)
-			if opts.MaxTokens1 {
-				wantMax = 1
-			}
-			if ping.body["max_tokens"] != wantMax {
-				t.Errorf("ping max_tokens = %v, want %v", ping.body["max_tokens"], wantMax)
+			if ping.body["max_tokens"] != float64(0) {
+				t.Errorf("ping max_tokens = %v, want 0", ping.body["max_tokens"])
 			}
 			for _, b := range []map[string]any{real.body, ping.body} {
 				delete(b, "stream")
@@ -159,9 +155,28 @@ func TestPrewarm_HTTPErrorIsTyped(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"max_tokens: must be >= 1"}}`))
 	}))
 	defer srv.Close()
-	_, err := NewWithBaseURL("sk-ant-oat-x", srv.URL).Prewarm(context.Background(), prewarmRequest(), PrewarmOptions{})
+	_, err := NewWithBaseURL("sk-ant-oat-x", srv.URL).Prewarm(context.Background(), prewarmRequest())
 	var pe *PrewarmError
 	if !errors.As(err, &pe) || pe.Status != 400 || !strings.Contains(pe.Body, "max_tokens") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPrewarm_ManualThinkingIsRefusedWithoutSending(t *testing.T) {
+	srv, got := prewarmFixture(t)
+	req := prewarmRequest()
+	// A model without adaptive thinking gets a manual budget.
+	req.Model = core.Model{ID: "claude-sonnet-4-5", Provider: "anthropic", MaxOutput: 64000}
+	if _, err := NewWithBaseURL("sk-ant-oat-x", srv.URL).Prewarm(context.Background(), req); !errors.Is(err, core.ErrPrewarmUnsupported) {
+		t.Fatalf("err = %v, want ErrPrewarmUnsupported", err)
+	}
+	if len(*got) != 0 {
+		t.Fatalf("sent %d requests", len(*got))
+	}
+}
+
+func TestPrewarm_SatisfiesTheCoreCapability(t *testing.T) {
+	if _, ok := core.ProviderPrewarmer(NewWithBaseURL("sk-ant-oat-x", "http://unused")); !ok {
+		t.Fatal("*Anthropic is not a core.CachePrewarmer")
 	}
 }

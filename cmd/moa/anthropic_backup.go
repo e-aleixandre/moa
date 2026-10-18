@@ -98,29 +98,10 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 	if p.httpClient != nil {
 		base.WithHTTPClient(p.httpClient)
 	}
-	base.WithDispatch(func(ctx context.Context) (string, error) {
-		next, err := p.authStore.ResolveSnapshot(ctx, "anthropic")
-		if err != nil {
-			return "", err
-		}
-		if next.Source != primary.Source || next.Kind != primary.Kind || next.Generation != primary.Generation || next.AccountID != primary.AccountID {
-			return "", core.NewProviderCredentialError("anthropic", primary.Source, "dispatch", core.CredentialChanged)
-		}
-		var key string
-		err = p.authStore.AdmitSnapshot(ctx, next, func(selected auth.CredentialSnapshot) error {
-			source = core.ProviderSource{Kind: selected.Kind, PrimaryGeneration: selected.Generation, Provider: req.Model.Provider, Model: req.Model.ID}
-			if selected.Kind == "oauth" {
-				source.WireProfile = "oauth"
-			}
-			if err := dispatch(source); err != nil {
-				return err
-			}
-			key = selected.Token
-			secrets.add(selected)
-			return nil
-		})
-		return key, err
-	})
+	base.WithDispatch(p.primaryDispatch(primary, secrets, req.Model, func(next core.ProviderSource) error {
+		source = next
+		return dispatch(source)
+	}))
 	ch, err := base.Stream(ctx, req)
 	if err != nil {
 		if qe, ok := core.AsQuotaExceeded(err); ok && qe.Wait != nil && qe.Wait.Kind == "quota_confirmed" && (qe.Wait.Scope == "five_hour" || qe.Wait.Scope == "seven_day") && primary.Source == core.CredentialSourceStore && primary.Kind == "oauth" && backup.Active && backup.Revision.Primary == primary.Generation && backupReplaySupported(req) {
@@ -132,6 +113,67 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 		return nil, err
 	}
 	return withAnthropicSource(ch, source, secrets, func(err error) { p.authStore.RecordUse(primary, p.classify(ctx, primary, secrets, err)) }), nil
+}
+
+// primaryDispatch resolves, at each send, the stored sign-in a request was
+// prepared with and admits it: a sign-in replaced meanwhile fails the send
+// instead of serving it from another login. onSource sees the source before
+// the key is handed over and can veto it.
+func (p *snapshotProvider) primaryDispatch(primary auth.CredentialSnapshot, secrets *secretSet, model core.Model, onSource func(core.ProviderSource) error) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		next, err := p.authStore.ResolveSnapshot(ctx, "anthropic")
+		if err != nil {
+			return "", err
+		}
+		if next.Source != primary.Source || next.Kind != primary.Kind || next.Generation != primary.Generation || next.AccountID != primary.AccountID {
+			return "", core.NewProviderCredentialError("anthropic", primary.Source, "dispatch", core.CredentialChanged)
+		}
+		var key string
+		err = p.authStore.AdmitSnapshot(ctx, next, func(selected auth.CredentialSnapshot) error {
+			source := core.ProviderSource{Kind: selected.Kind, PrimaryGeneration: selected.Generation, Provider: model.Provider, Model: model.ID}
+			if selected.Kind == "oauth" {
+				source.WireProfile = "oauth"
+			}
+			if err := onSource(source); err != nil {
+				return err
+			}
+			key = selected.Token
+			secrets.add(selected)
+			return nil
+		})
+		return key, err
+	}
+}
+
+// Prewarm is the cache keep-alive ping: req, the last request an agent sent,
+// resent with no output on the plan sign-in that served it. Only a stored
+// Anthropic plan sign-in pings. Never the paid API backup, and never another
+// login: a ping that lands on a different account finds no cache and writes
+// the whole prefix cold, which is what it exists to avoid. The binding is the
+// source the last response reported.
+func (p *snapshotProvider) Prewarm(ctx context.Context, req core.Request) (core.Usage, error) {
+	binding := req.Options.ProviderBinding
+	if p.model.Provider != "anthropic" || p.plan != nil || binding == nil || binding.Kind != "oauth" {
+		return core.Usage{}, core.ErrPrewarmUnsupported
+	}
+	snap, err := p.resolve(ctx)
+	if err != nil {
+		return core.Usage{}, err
+	}
+	if snap.Kind != "oauth" || snap.Source != core.CredentialSourceStore || snap.Generation != binding.PrimaryGeneration {
+		return core.Usage{}, core.ErrPrewarmUnsupported
+	}
+	secrets := &secretSet{}
+	secrets.add(snap)
+	base := anthropic.NewWithKind("", true)
+	if p.httpClient != nil {
+		base.WithHTTPClient(p.httpClient)
+	}
+	base.WithDispatch(p.primaryDispatch(snap, secrets, req.Model, func(core.ProviderSource) error { return nil }))
+	req.Options.APIKey = ""
+	req.Options.ProviderBinding = nil
+	usage, err := base.Prewarm(ctx, req)
+	return usage, secrets.redact(err)
 }
 
 func withAnthropicSource(in <-chan core.AssistantEvent, source core.ProviderSource, secrets *secretSet, finished func(error)) <-chan core.AssistantEvent {
