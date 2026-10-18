@@ -182,6 +182,12 @@ type Message struct {
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	ToolName   string `json:"tool_name,omitempty"`
 	IsError    bool   `json:"is_error,omitempty"`
+
+	// Ephemeral marks a message that exists only in the request being sent: it
+	// is never stored, and a provider that caches the conversation must not
+	// place its cache breakpoint on it, since the next request will not have
+	// it.
+	Ephemeral bool `json:"-"`
 }
 
 // EnsureMsgID assigns a stable identifier when the message does not have one.

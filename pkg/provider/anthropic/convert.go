@@ -133,7 +133,11 @@ func buildRequestBodyWith(req core.Request, isOAuth bool, mutate func(*anthropic
 	}
 
 	// Messages — merge consecutive same-role messages (Anthropic requires alternation)
-	ar.Messages = convertMessages(req.Messages, isOAuth)
+	// An ephemeral tail (a block that exists only in this request) is converted
+	// after the cache breakpoints are placed, so they land on the conversation
+	// the next request will also have.
+	base, tail := splitEphemeralTail(req.Messages)
+	ar.Messages = convertMessages(base, isOAuth)
 
 	// Tools — remap names for OAuth
 	if len(req.Tools) > 0 {
@@ -193,11 +197,38 @@ func buildRequestBodyWith(req core.Request, isOAuth bool, mutate func(*anthropic
 	// 2. Last tool definition (tool specs are identical turn-to-turn)
 	// 3. Last content block of the last user message (caches conversation history)
 	addCacheBreakpoints(&ar, req.Options.CacheRetention)
+	if len(tail) > 0 {
+		ar.Messages = appendMerged(ar.Messages, convertMessages(tail, isOAuth))
+	}
 
 	if mutate != nil {
 		mutate(&ar)
 	}
 	return json.Marshal(ar)
+}
+
+// splitEphemeralTail separates the request-only messages at the end.
+func splitEphemeralTail(msgs []core.Message) (base, tail []core.Message) {
+	i := len(msgs)
+	for i > 0 && msgs[i-1].Ephemeral {
+		i--
+	}
+	return msgs[:i], msgs[i:]
+}
+
+// appendMerged adds converted messages, merging a same-role neighbour as
+// convertMessages does.
+func appendMerged(result, add []map[string]any) []map[string]any {
+	for _, m := range add {
+		if n := len(result); n > 0 && result[n-1]["role"] == m["role"] {
+			prev, _ := result[n-1]["content"].([]any)
+			more, _ := m["content"].([]any)
+			result[n-1]["content"] = append(prev, more...)
+			continue
+		}
+		result = append(result, m)
+	}
+	return result
 }
 
 // manyImageThreshold is the number of image blocks in a single request above

@@ -126,6 +126,57 @@ func (q *questionService) close(ctx context.Context, sessionID, id string, to ta
 	return question, nil
 }
 
+// Bounds of the open-questions block: it is read on every request, so it stays
+// small whatever the session has asked.
+const (
+	inventoryMaxQuestions = 8
+	inventoryMaxText      = 400
+)
+
+// inventory returns the per-request block that tells the model which of its
+// questions are still open. It is derived from the live projection, so it
+// follows answers and withdrawals made during the run, and it is never stored:
+// the transcript keeps only the acknowledgement and, later, the answer.
+func (q *questionService) inventory(enabled bool, session func() *ManagedSession) func() *core.Message {
+	if q == nil || !enabled {
+		return nil
+	}
+	return func() *core.Message {
+		sess := session()
+		if sess == nil {
+			return nil
+		}
+		open := sess.runtime.Context().Approvals.AsyncAsks()
+		if len(open) == 0 {
+			return nil
+		}
+		var b strings.Builder
+		b.WriteString("<open_questions>\nQuestions you asked that nobody has answered yet. Each answer arrives later as a <question_answer> event; do not ask them again, and apply the pending-answer rule to anything you do meanwhile. Use ask_user with action \"list\" for detail.\n")
+		for i, ask := range open {
+			if i == inventoryMaxQuestions {
+				fmt.Fprintf(&b, "(and %d more)\n", len(open)-i)
+				break
+			}
+			tap := ""
+			if ask.RequiresTap {
+				tap = " requires the user's own tap"
+			}
+			fmt.Fprintf(&b, "- %s%s, asked %s:", ask.ID, tap, ask.RequestedAt.UTC().Format(time.RFC3339))
+			for _, item := range ask.Questions {
+				text := item.Text
+				if len(text) > inventoryMaxText {
+					text = strings.ToValidUTF8(text[:inventoryMaxText], "") + "..."
+				}
+				fmt.Fprintf(&b, " %s", xmlText(strings.Join(strings.Fields(text), " ")))
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("</open_questions>")
+		msg := core.NewUserMessage(b.String())
+		return &msg
+	}
+}
+
 // reconcileOrigins retires the open questions whose posting message is no
 // longer on the session's current branch: a rewind before the call that asked
 // takes the question with it, so a later answer with its old ID is refused

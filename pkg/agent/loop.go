@@ -184,6 +184,8 @@ type loopConfig struct {
 	// (nil when there is nothing to append), and a callback to clear it once
 	// consumed. Nil when no checkpoint slot is wired.
 	readCheckpoint func() (string, *uint64, func())
+	// ephemeralContext: see AgentConfig.EphemeralContext.
+	ephemeralContext func() *core.Message
 	// ephemeralCompaction is set for a /prepare-compact preparation run, whose
 	// conversation is discarded: its automatic compactions are flagged so the
 	// session does not record them.
@@ -778,6 +780,17 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// only tree keeps it. Only the request drops it; history keeps it.
 			cfg.requestProgram = cfg.accessProgram()
 			reqMessages = withoutForeignThinking(reqMessages, cfg.model, cfg.requestProgram)
+			// TODO(phase 2): a repair or pause_turn continuation should reuse the
+			// block of the request it continues, and the request-size estimates
+			// should count it; it is bounded, so neither is needed for
+			// correctness.
+			if cfg.ephemeralContext != nil && repairPartial == nil && !justPaused {
+				if block := cfg.ephemeralContext(); block != nil {
+					eph := *block
+					eph.Ephemeral = true
+					reqMessages = append(append([]core.Message(nil), reqMessages...), eph)
+				}
+			}
 			// Whatever got this request here (an unstable-source fallback, a
 			// compaction that found no cut, a transport repair appending the
 			// partial and a hint), it never leaves over the model window minus

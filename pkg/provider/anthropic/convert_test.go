@@ -1208,3 +1208,37 @@ func TestConvertMessages_RestoredSessionHasNoOrphanToolBlocks(t *testing.T) {
 		t.Fatalf("tool_use=%d tool_result=%d, want 1/1", uses, results)
 	}
 }
+
+// A request-only block rides after the conversation: the cache breakpoint
+// stays on the last block the next request will also have.
+func TestCacheBreakpoints_SkipEphemeralTail(t *testing.T) {
+	block := core.NewUserMessage("<open_questions>q_1</open_questions>")
+	block.Ephemeral = true
+	req := core.Request{
+		Model:    core.Model{ID: "claude-sonnet-4-6"},
+		Messages: []core.Message{core.NewUserMessage("real input"), block},
+	}
+	data, err := buildRequestBody(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Messages []struct {
+			Role    string           `json:"role"`
+			Content []map[string]any `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Messages) != 1 || len(body.Messages[0].Content) != 2 {
+		t.Fatalf("messages = %+v, want one user message with the input and the block", body.Messages)
+	}
+	input, tail := body.Messages[0].Content[0], body.Messages[0].Content[1]
+	if input["text"] != "real input" || input["cache_control"] == nil {
+		t.Errorf("the breakpoint is not on the real input: %v", input)
+	}
+	if tail["cache_control"] != nil || !strings.Contains(fmt.Sprint(tail["text"]), "open_questions") {
+		t.Errorf("the ephemeral block carries a breakpoint or is missing: %v", tail)
+	}
+}

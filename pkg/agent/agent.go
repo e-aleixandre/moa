@@ -563,6 +563,12 @@ type AgentConfig struct {
 	// the manual CompactWithCheckpoint path.
 	SessionCheckpoint *sessioncheckpoint.Slot
 
+	// EphemeralContext returns a message appended, as the last one, to each
+	// ordinary request (nil for none). It is built per request, never enters the
+	// conversation, the saved tree or the system prompt, and subagents do not
+	// get one.
+	EphemeralContext func() *core.Message
+
 	// DrainTimeout is the maximum time Send/Run will wait for subscribers to
 	// finish processing events before returning. Default: 2s.
 	// Set to 0 to disable auto-drain.
@@ -2232,6 +2238,7 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		// restoreConversation, so an auto-compaction inside it must not consume
 		// the slot: doing so would clear the checkpoint the real compaction is
 		// about to read.
+		ephemeralContext: a.config.EphemeralContext,
 		readCheckpoint: func() func() (string, *uint64, func()) {
 			if allowCheckpoint {
 				return nil
