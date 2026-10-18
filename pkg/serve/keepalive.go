@@ -3,9 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,7 +13,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
-	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 // KeepAliveInfo is a session's cache keep-alive activity since it was loaded,
@@ -128,7 +125,7 @@ func (k *keepAliveService) rollLocked() {
 }
 
 // keepAliveSaving estimates what a warm wake after pings did not pay: the
-// prefix it read from the cache, written cold at the window's rate, minus
+// kept prefix it read from the cache, written cold at the window's rate, minus
 // reading it. Only a wake that slept past the TTL counts: a shorter sleep
 // would have found the cache warm without any ping.
 func keepAliveSaving(e agent.KeepAliveEvent, ttl time.Duration) float64 {
@@ -136,7 +133,9 @@ func keepAliveSaving(e agent.KeepAliveEvent, ttl time.Duration) float64 {
 	if p == nil || ttl <= 0 || e.Slept < ttl || e.Usage.CacheRead <= 0 {
 		return 0
 	}
-	n := e.Usage.CacheRead
+	// Only the prefix the pings kept: a longer read was cached by something
+	// else and saved nothing on their account.
+	n := min(e.Usage.CacheRead, e.ContextTokens)
 	cold := core.Usage{CacheWrite: n}
 	if ttl >= time.Hour {
 		cold.CacheWrite1h = n
@@ -288,74 +287,9 @@ func (m *Manager) onKeepAliveEvent(sess *ManagedSession, jobID string, e agent.K
 		m.keepAlive.add(0, rec.SavedUSD)
 	}
 	if e.Kind == agent.KeepAlivePing && e.CostUSD > 0 {
-		m.chargeKeepAlive(sess.ID, bus.KeepAliveUsage{SessionID: sess.ID, JobID: jobID, Usage: e.Usage, CostUSD: e.CostUSD})
+		// A ping served after its session closed reaches a closed bus: its
+		// cost stays in Spent today and the trace, not in the saved total.
+		sess.runtime.Bus.Publish(bus.KeepAliveUsage{SessionID: sess.ID, JobID: jobID, Usage: e.Usage, CostUSD: e.CostUSD})
 	}
 	m.keepAlive.record(rec)
-}
-
-// chargeKeepAlive adds a ping's cost to the session total wherever the
-// session is now. A ping cancelled by a close can still have been served:
-// then the session is no longer live and the cost goes to its saved file,
-// under the same reservation resume, close and delete honor.
-func (m *Manager) chargeKeepAlive(id string, usage bus.KeepAliveUsage) {
-	for wait := time.Duration(0); ; wait += 50 * time.Millisecond {
-		if wait > 30*time.Second {
-			slog.Warn("cache keep-alive: session busy, ping cost not added to it", "session", id, "cost_usd", usage.CostUSD)
-			return
-		}
-		if wait > 0 {
-			time.Sleep(50 * time.Millisecond)
-		}
-		m.mu.Lock()
-		if _, busy := m.resuming[id]; busy {
-			m.mu.Unlock()
-			continue // closing or reopening: decide once it settles
-		}
-		live, loaded := m.sessions[id]
-		if loaded && live == nil {
-			m.mu.Unlock()
-			continue
-		}
-		if loaded {
-			m.mu.Unlock()
-			if _, err := live.runtime.Bus.Query(bus.GetSessionCost{}); !errors.Is(err, bus.ErrClosed) {
-				live.runtime.Bus.Publish(usage)
-				return
-			}
-			// Shut down: its runtime is closed but still listed; nothing
-			// else writes the file any more.
-		} else {
-			m.resuming[id] = struct{}{}
-			m.mu.Unlock()
-			defer func() {
-				m.mu.Lock()
-				delete(m.resuming, id)
-				m.mu.Unlock()
-			}()
-		}
-		if err := m.addSavedSessionCost(id, usage.CostUSD); err != nil {
-			slog.Warn("cache keep-alive: ping cost not saved", "session", id, "error", err)
-		}
-		return
-	}
-}
-
-func (m *Manager) addSavedSessionCost(id string, usd float64) error {
-	saved, store, err := session.FindSession(m.sessionBaseDir, id)
-	if err != nil {
-		return err
-	}
-	if saved.Metadata == nil {
-		saved.Metadata = map[string]any{}
-	}
-	prev, _ := saved.Metadata[session.MetaSessionCostUSD].(float64)
-	if prev < 0 || math.IsNaN(prev) || math.IsInf(prev, 0) {
-		prev = 0
-	}
-	saved.Metadata[session.MetaSessionCostUSD] = prev + usd
-	if err := store.Save(saved); err != nil {
-		return err
-	}
-	m.invalidateSavedCache()
-	return nil
 }

@@ -56,9 +56,11 @@ func criticalServePing(t *testing.T, h *kaServeHarness, fn func(context.Context,
 	return events
 }
 
-// RED: known successful usage arriving after close/shutdown never reaches the
-// session's cost reactor, even though telemetry records the same usage.
-func TestCriticalREDLatePingCostSurvivesLifecycleTeardown(t *testing.T) {
+// Accepted limitation (owner, 18/10, on Sol's recheck of 72d41983): a ping
+// cancelled by close/shutdown that the provider still served is not added to
+// the saved session total. Its cost is kept in Spent today and in the trace.
+// This test pins that contract instead of a disk repair.
+func TestCriticalLatePingAfterTeardownKeepsSpentTodayNotSavedTotal(t *testing.T) {
 	for _, operation := range []string{"close", "shutdown"} {
 		t.Run(operation, func(t *testing.T) {
 			h := newKAServe(t, allKA())
@@ -71,6 +73,7 @@ func TestCriticalREDLatePingCostSurvivesLifecycleTeardown(t *testing.T) {
 			})
 			ctx := criticalReceive(t, started, "prewarm")
 			before := sessionCostOf(t, h.sess)
+			spentBefore, _ := h.mgr.keepAlive.today()
 			if operation == "close" {
 				if err := h.mgr.CloseSession(h.sess.ID); err != nil {
 					t.Fatal(err)
@@ -91,8 +94,14 @@ func TestCriticalREDLatePingCostSurvivesLifecycleTeardown(t *testing.T) {
 			if !ok || !number {
 				t.Fatalf("setup: no persisted session cost: %#v", saved)
 			}
-			if math.Abs((after-before)-e.CostUSD) > 1e-9 {
-				t.Fatalf("%s returned before ping settled: known usage cost=$%.6f, recorded session delta=$%.6f; ping trace lines=%d", operation, e.CostUSD, after-before, h.kindCount("ping"))
+			if math.Abs(after-before) > 1e-9 {
+				t.Fatalf("saved total moved by $%.6f after teardown; the accepted contract leaves it", after-before)
+			}
+			if spent, _ := h.mgr.keepAlive.today(); math.Abs(spent-spentBefore-e.CostUSD) > 1e-9 {
+				t.Fatalf("Spent today delta=$%.6f, want the late ping's $%.6f", spent-spentBefore, e.CostUSD)
+			}
+			if n := h.kindCount("ping"); n != 1 {
+				t.Fatalf("ping trace lines=%d, want 1", n)
 			}
 		})
 	}

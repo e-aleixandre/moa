@@ -287,8 +287,9 @@ func TestKeepAliveOwnerIdleIsPingedWithTheLastRequest(t *testing.T) {
 	if !reflect.DeepEqual(stripCallbacks(ping.Options), stripCallbacks(real.Options)) {
 		t.Fatalf("options differ:\nreal %+v\nping %+v", stripCallbacks(real.Options), stripCallbacks(ping.Options))
 	}
-	if ping.Options.OnProviderDispatch != nil || ping.Options.OnRequestFingerprint != nil {
-		t.Fatal("the ping carries the turn's callbacks")
+	// Only keep-alive's own dispatch gate: none of the turn's callbacks.
+	if ping.Options.OnProviderPrepare != nil || ping.Options.OnRequestFingerprint != nil || ping.Options.OnProviderDispatch == nil {
+		t.Fatal("the ping carries the turn's callbacks, or lacks its dispatch gate")
 	}
 	if b := ping.Options.ProviderBinding; b == nil || b.Kind != "oauth" || b.PrimaryGeneration != "g1" {
 		t.Fatalf("binding = %+v, want the source that served the request", b)

@@ -784,6 +784,13 @@ func (a *Anthropic) Prewarm(ctx context.Context, req core.Request) (core.Usage, 
 			return core.Usage{}, err
 		}
 	}
+	// The caller's last word, after the credential and right before the
+	// POST: the ping may have stopped being worth sending meanwhile.
+	if gate := req.Options.OnProviderDispatch; gate != nil {
+		if err := gate(ctx, core.ProviderSource{Provider: req.Model.Provider, Model: req.Model.ID}); err != nil {
+			return core.Usage{}, err
+		}
+	}
 	r, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
 		return core.Usage{}, err

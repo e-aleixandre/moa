@@ -328,7 +328,7 @@ func TestKeepAlive_WarmWakeIsCreditedWithTheSaving(t *testing.T) {
 
 func TestKeepAliveSavingNeedsASleepPastTheTTL(t *testing.T) {
 	model, _ := core.ResolveModel("claude-opus-5-5")
-	e := agent.KeepAliveEvent{Model: model, Usage: core.Usage{CacheRead: 200_000}, Slept: 58 * time.Minute}
+	e := agent.KeepAliveEvent{Model: model, ContextTokens: 200_000, Usage: core.Usage{CacheRead: 200_000}, Slept: 58 * time.Minute}
 	if got := keepAliveSaving(e, time.Hour); got != 0 {
 		t.Errorf("a wake within the TTL saved %v", got)
 	}

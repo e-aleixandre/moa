@@ -30,14 +30,16 @@ import (
 // forgets every snapshot.
 
 // pingSendMargin is how long before the cache expires a ping must already be
-// leaving: past it, the request could reach the provider after the TTL and
+// on its way: past it, the request could reach the provider after the TTL and
 // write the whole prefix cold instead of refreshing it. Pings are due 30 s
-// before expiry, so this only refuses one delayed past its slot.
+// before expiry, so this only refuses one delayed past its slot. It bounds the
+// whole ping, credential and HTTP included: one that is not out by then is
+// abandoned unsent.
 const pingSendMargin = 15 * time.Second
 
-// pingTimeout bounds one ping. A ping answers with no output, so it takes
-// about as long as reading the prefix.
-const pingTimeout = 2 * time.Minute
+// errPingStale is the dispatch gate's refusal: the ping stopped being worth
+// sending between its admission and its POST.
+var errPingStale = errors.New("cache keep-alive: ping no longer current")
 
 // KeepAliveClock is the time source of keep-alive (fake in tests).
 type KeepAliveClock interface {
@@ -135,7 +137,7 @@ type keepAlive struct {
 	gen        uint64 // bumped by every real request and every suspension
 	inFlight   bool
 	toolsBusy  bool
-	toolsDone  <-chan struct{} // the running batch's run context
+	toolsCtx   context.Context // the running batch's run context
 	askUser    bool
 	stopTimer  func() bool
 	pingCancel context.CancelFunc
@@ -346,7 +348,7 @@ func (ka *keepAlive) settled(msg *core.Message) {
 func (ka *keepAlive) tools(ctx context.Context, names []string) {
 	ka.mu.Lock()
 	ka.toolsBusy = names != nil
-	ka.toolsDone = ctx.Done()
+	ka.toolsCtx = ctx
 	ka.askUser = slices.Contains(names, "ask_user")
 	ka.mu.Unlock()
 	if names != nil {
@@ -424,7 +426,7 @@ func (ka *keepAlive) evaluate() {
 	default:
 		state = core.KeepAliveIdle
 	}
-	if ka.toolsBusy && isDone(ka.toolsDone) {
+	if ka.toolsBusy && ka.toolsCtx.Err() != nil {
 		// The run was cancelled and its tools are unwinding: nothing comes
 		// back to this prefix.
 		ka.suspendLocked()
@@ -438,15 +440,32 @@ func (ka *keepAlive) evaluate() {
 		ka.suspendLocked()
 		return
 	}
-	ctx, cancel := context.WithTimeout(ka.ctx, pingTimeout)
+	parent := ka.ctx
+	if ka.toolsBusy {
+		// A run waiting on its tools owns the ping: cancelling the run
+		// cancels it, even once admitted. Every other stop (a real request,
+		// a setting, a shutdown) cancels it through pingCancel.
+		parent = ka.toolsCtx
+	}
+	ctx, cancel := context.WithTimeout(parent, s.anchor.Add(s.ttl-pingSendMargin).Sub(now))
 	ka.pingCancel = cancel
 	ka.stopTimerLocked()
 	go ka.ping(ctx, cancel, s, gen, now, state)
 }
 
 func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *keepAliveSnapshot, gen uint64, sentAt time.Time, state string) {
-	usage, err := s.pw.Prewarm(ctx, s.req)
-	cancelled := ctx.Err() != nil && errors.Is(err, context.Canceled)
+	req := s.req
+	req.Options.OnProviderDispatch = func(context.Context, core.ProviderSource) error {
+		if !ka.stillCurrent(s, gen) {
+			return errPingStale
+		}
+		return nil
+	}
+	usage, err := s.pw.Prewarm(ctx, req)
+	// Cancelled, out of time before it left, or stale at the gate: nothing
+	// known was spent.
+	cancelled := (ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))) ||
+		errors.Is(err, errPingStale)
 	cancel()
 	ev := &KeepAliveEvent{At: sentAt, Role: ka.cfg.Role, State: state, Model: s.req.Model, ContextTokens: s.contextTokens}
 
@@ -470,7 +489,10 @@ func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *kee
 			ka.armLocked(s.every - ka.clock.Now().Sub(sentAt))
 		}
 	case cancelled:
-		ev = nil // a real request took over
+		ev = nil
+		if current {
+			ka.suspendLocked()
+		}
 	case errors.Is(err, core.ErrPrewarmUnsupported):
 		ev = nil
 		slog.Debug("cache keep-alive: prewarm unsupported", "model", s.req.Model.ID)
@@ -486,6 +508,24 @@ func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *kee
 	}
 	ka.mu.Unlock()
 	ka.emit(ev)
+}
+
+// stillCurrent is the dispatch gate: whether, right now, the admitted ping is
+// still the one to send. It re-checks under the same locks as the admission
+// what any change since could have broken, so no mutator has to remember to
+// cancel it: a changed prefix, a newer request or suspension, or a cancelled
+// run whose tools are unwinding, or a cache too close to expiring.
+func (ka *keepAlive) stillCurrent(s *keepAliveSnapshot, gen uint64) bool {
+	a := ka.a
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ka.mu.Lock()
+	defer ka.mu.Unlock()
+	if gen != ka.gen || ka.snap != s || ka.inFlight || (ka.toolsBusy && ka.toolsCtx.Err() != nil) ||
+		ka.clock.Now().Sub(s.anchor) > s.ttl-pingSendMargin {
+		return false
+	}
+	return a.keepAliveMatchesLocked(s)
 }
 
 // keepAliveMatches reports whether s is still the prefix of the agent's next
@@ -514,13 +554,4 @@ func cacheTTL(retention string) time.Duration {
 		return 5 * time.Minute
 	}
 	return 0 // core.CacheOff
-}
-
-func isDone(ch <-chan struct{}) bool {
-	select {
-	case <-ch:
-		return true
-	default:
-		return false
-	}
 }
