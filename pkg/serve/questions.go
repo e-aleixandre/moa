@@ -395,6 +395,7 @@ func (q *questionService) attach(sess *ManagedSession) {
 	sess.runtime.Context().Approvals.SetAsyncAskResolver(func(id string, answers []string, responder askuser.Responder) error {
 		return q.Answer(q.m.baseCtx, sess.ID, id, answers, responder)
 	})
+	sess.runtime.Context().AnswerWorkOwed = func() bool { return q.owed(sess) }
 	q.seed(sess)
 	sess.runtime.Bus.Subscribe(func(e bus.RunEnded) { q.runEnded(sess, e) })
 	sess.runtime.Bus.Subscribe(func(e bus.CommandExecuted) {
@@ -419,20 +420,44 @@ func (q *questionService) runEnded(sess *ManagedSession, e bus.RunEnded) {
 		slog.Warn("questions: reading owed work failed", "session", sess.ID, "error", err)
 		return
 	}
-	// History is the projection the model reads, which a compaction may have
-	// cut the answer out of; the tree keeps every entry.
-	onPath := func(id string) bool {
-		tree := sess.runtime.Context().Tree
-		return tree != nil && entriesHaveNotice(tree.Path(), id)
-	}
 	for _, question := range due {
-		if question.SessionID != sess.ID || !(hasNotice(sess.History(), question.EventID) || onPath(question.EventID)) {
+		if question.SessionID != sess.ID || !q.read(sess, question.EventID) {
 			continue
 		}
 		if _, err := q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkDone); err != nil {
 			slog.Warn("questions: settling owed work failed", "session", sess.ID, "error", err)
 		}
 	}
+}
+
+// read reports whether the answer's event is already in the conversation the
+// session holds. History is the projection the model reads, which a
+// compaction may have cut the answer out of; the tree keeps every entry.
+func (q *questionService) read(sess *ManagedSession, eventID string) bool {
+	if hasNotice(sess.History(), eventID) {
+		return true
+	}
+	tree := sess.runtime.Context().Tree
+	return tree != nil && entriesHaveNotice(tree.Path(), eventID)
+}
+
+// owed reports whether an accepted answer still has to be read: its work is
+// due and its event has not entered the conversation. The run that read it
+// has nothing owed even while its work is still marked due (runEnded settles
+// it), so a goal verifying that run's end is not held back by it.
+func (q *questionService) owed(sess *ManagedSession) bool {
+	due, err := q.repo.DueQuestionWork(q.m.baseCtx)
+	if err != nil {
+		// Fail closed: yielding spends nothing, a wrong verdict does.
+		slog.Warn("questions: reading owed work failed", "session", sess.ID, "error", err)
+		return true
+	}
+	for _, question := range due {
+		if question.SessionID == sess.ID && !q.read(sess, question.EventID) {
+			return true
+		}
+	}
+	return false
 }
 
 // continueDue is for a session just loaded from disk: an answer that reached

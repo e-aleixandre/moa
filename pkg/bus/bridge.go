@@ -137,6 +137,11 @@ type SessionContext struct {
 	AskBridge         *askuser.Bridge         // may be nil
 	PersistNow        func() error            // synchronous checkpoint-safe save
 
+	// AnswerWorkOwed reports that an accepted answer to a question has not been
+	// read by the model yet, so a run is still owed. Set by the serve layer,
+	// which owns the answers' store; nil elsewhere.
+	AnswerWorkOwed func() bool
+
 	// SecretBroker holds the pending run_with_secret/browser_fill_secret
 	// requests; nil when the frontend cannot answer them. Answers reach it
 	// directly (never as a bus command), see secretaction.
@@ -375,6 +380,16 @@ type SessionContext struct {
 // in the tree (releaseMsgID from the append announcement) or once the send is
 // known never to have started. The map therefore holds only in-flight sends,
 // and after a restart nothing needs rebuilding: the tree already is the truth.
+// awaitingAnswer reports that the session waits on a question: one is open, or
+// an answer was accepted and its run has not happened yet. Automatic loops
+// (goal) yield until the answer's event wakes the session.
+func (sctx *SessionContext) awaitingAnswer() bool {
+	if sctx.Approvals != nil && sctx.Approvals.HasOpenAsync() {
+		return true
+	}
+	return sctx.AnswerWorkOwed != nil && sctx.AnswerWorkOwed()
+}
+
 func (sctx *SessionContext) reserveMsgID(msgID string) string {
 	sctx.msgIDMu.Lock()
 	defer sctx.msgIDMu.Unlock()

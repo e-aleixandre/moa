@@ -175,6 +175,13 @@ func registerGoalReactor(sctx *SessionContext) {
 			return
 		}
 
+		// A pending question is neither success nor a reason to relaunch: yield
+		// without spending a verifier call or an iteration. The answer's event
+		// wakes the session and its run ends here again.
+		if sctx.awaitingAnswer() {
+			return
+		}
+
 		startRunGen := e.RunGen
 
 		// Backstops that don't depend on the verdict — checked before spending
