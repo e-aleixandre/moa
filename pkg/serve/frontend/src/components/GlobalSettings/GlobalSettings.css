@@ -365,6 +365,11 @@ button.zl-set-row[disabled] { cursor: default; }
 }
 .zl-set-input input::placeholder { color: var(--zl-t4); }
 .zl-set-unit { flex: none; font-family: var(--mono); font-size: var(--zl-fs-meta); color: var(--zl-t4); }
+.zl-set-sum.is-root { margin: 0 0 6px; }
+/* The daily limit sits on its row, not under it: a narrower well, the number
+   right-aligned like the other readings. Still 16px (the iOS floor). */
+.zl-set-input.is-inline { flex: none; width: 112px; height: 40px; }
+.zl-set-input.is-inline input { height: 40px; text-align: right; }
 .zl-set-note { margin: 8px 2px 0; line-height: 1.4; color: var(--zl-t4); }
 .zl-set-note.is-warn { color: var(--zl-yellow); }
 

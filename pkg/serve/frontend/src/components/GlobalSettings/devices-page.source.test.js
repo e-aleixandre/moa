@@ -22,9 +22,9 @@ describe("how Devices is reached", () => {
     expect(jsx).toMatch(/page === "devices" && <DevicesPage/);
   });
 
-  test("the row sits in an Access section, after Subagents and before About", () => {
+  test("the row sits in an Access section, after Subagents and Cache keep-alive, before About", () => {
     const keys = [...jsx.matchAll(/class="zl-set-k">([^<]+)</g)].map((m) => m[1]);
-    expect(keys).toEqual(["Context", "Notifications", "Voice", "Subagents", "Access", "About"]);
+    expect(keys).toEqual(["Context", "Notifications", "Voice", "Subagents", "Cache keep-alive", "Access", "About"]);
   });
 
   test("the row states its count on the right, like every other row's value", () => {

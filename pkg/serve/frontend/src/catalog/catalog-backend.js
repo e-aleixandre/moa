@@ -183,6 +183,7 @@ function subagentPayload(sessions, sessionId, jobId) {
 // The pins are the one preference the lab keeps between requests: the picker
 // writes them one model at a time, as core.UpdatePinnedModels does, and a
 // reopened picker has to show what was just pinned.
+let catalogKeepAlive = { owner: false, session: false, subagent: false, daily_budget_usd: 10, spent_today_usd: 0.42 };
 let catalogPinned = ["claude-opus-4-8", "gpt-5-sol"];
 
 function updatePinned(ids, id, pinned) {
@@ -215,6 +216,8 @@ export function catalogResponse(method, path, body = null, sessions = CATALOG_SE
   // different picture from the one production draws.
   if (m === "GET" && p === "/api/compact-model") return { compact_model: "session", choices: COMPACT_MODEL_CHOICES };
   if (m === "PATCH" && p === "/api/compact-model") return { compact_model: body?.compact_model || "session", choices: COMPACT_MODEL_CHOICES };
+  if (m === "GET" && p === "/api/cache-keepalive") return catalogKeepAlive;
+  if (m === "PATCH" && p === "/api/cache-keepalive") { catalogKeepAlive = { ...catalogKeepAlive, ...body }; return catalogKeepAlive; }
   if (m === "GET" && p === "/api/subagent-models") return { allowed_models: [] };
   if (m === "PATCH" && p === "/api/subagent-models") return { allowed_models: body?.allowed_models || [] };
   // The paired devices, so Settings › Access › Devices is a real screen in the

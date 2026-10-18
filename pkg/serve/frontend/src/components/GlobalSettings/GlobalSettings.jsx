@@ -37,6 +37,7 @@ import { ProvidersPage } from "./ProvidersPage.jsx";
 import { voiceValue, planOptions, paidOptions, usageLine, backendModelChoices, backendModelName } from "./voice-settings-model.js";
 import { providersValue } from "./providers-model.js";
 import { useProviderStatus } from "../../data/providers.js";
+import { formatUsd, normalizeKeepAlive, parseLimit, spentLine, MAX_LIMIT_USD } from "./keepalive-model.js";
 import "./GlobalSettings.css";
 
 // GlobalSettings — the device-wide settings sheet.
@@ -265,6 +266,78 @@ function useCompactModel() {
   };
 
   return { spec, choices, loaded, save };
+}
+
+// Cache keep-alive: three switches and a daily limit, saved the moment they
+// change like every other switch here. Re-read each time the sheet opens, so
+// "Spent today" is today's and not the value from the first open.
+function useKeepAlive(open) {
+  const [state, setState] = useState(() => normalizeKeepAlive(null));
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    let live = true;
+    api("GET", "/api/cache-keepalive").catch(() => null).then((payload) => {
+      if (!live) return;
+      setState(normalizeKeepAlive(payload));
+      setLoaded(true);
+    });
+    return () => { live = false; };
+  }, [open]);
+
+  const patch = (change, wire, failure) => {
+    const previous = state;
+    setState((s) => ({ ...s, ...change }));
+    return api("PATCH", "/api/cache-keepalive", wire)
+      .then((payload) => setState(normalizeKeepAlive(payload)))
+      .catch((error) => {
+        setState(previous);
+        addToast({ title: failure, detail: String(error.message || error), type: "error" });
+      });
+  };
+
+  const setRole = (role, on) => patch({ [role]: on }, { [role]: on }, "Could not change cache keep-alive");
+  const setLimit = (usd) => patch({ limit: usd }, { daily_budget_usd: usd }, "Could not set the daily limit");
+
+  return { ...state, loaded, setRole, setLimit };
+}
+
+function KeepAliveLimit({ state }) {
+  const { limit, loaded, setLimit } = state;
+  const [draft, setDraft] = useState(String(limit));
+  useEffect(() => { setDraft(String(limit)); }, [limit]);
+
+  // Committed on blur/Enter, like the compaction threshold: each save is a
+  // config write, and a half-typed "1" must not briefly become the limit.
+  const commit = () => {
+    const usd = parseLimit(draft);
+    if (usd === null) {
+      setDraft(String(limit));
+      addToast({ title: "Daily limit not changed", detail: `Enter an amount above $0 and up to ${formatUsd(MAX_LIMIT_USD)}.`, type: "error" });
+      return;
+    }
+    if (usd !== limit) setLimit(usd);
+    else setDraft(String(limit));
+  };
+
+  return (
+    <label class="zl-set-input is-inline">
+      <span class="zl-set-unit">$</span>
+      <input
+        type="number"
+        inputmode="decimal"
+        min="0.01"
+        step="0.5"
+        value={draft}
+        disabled={!loaded}
+        aria-label="Daily limit, in US dollars"
+        onInput={(event) => setDraft(event.currentTarget.value)}
+        onBlur={commit}
+        onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()}
+      />
+    </label>
+  );
 }
 
 function useSubagentModels() {
@@ -1061,6 +1134,7 @@ export function GlobalSettings({
   const strategy = useCompactStrategy();
   const compactModel = useCompactModel();
   const subagents = useSubagentModels();
+  const keepAlive = useKeepAlive(open);
   const devices = useDevices(open);
   const saved = useSavedSecrets(open);
   const voiceSettings = useVoiceSettings(open);
@@ -1258,6 +1332,26 @@ export function GlobalSettings({
                 onOpen={() => setPage("subagent-models")}
                 pageLabel={SETTINGS_PAGES["subagent-models"]}
               />
+            </div>
+
+            <div class="zl-set-sec">
+              <span class="zl-set-k">Cache keep-alive</span>
+              <p class="zl-set-sum is-root">
+                Keeps idle conversations ready so the next message is cheaper. Small daily cost.
+              </p>
+              <Row label="Owners" hint="Your owner conversations.">
+                <Switch on={keepAlive.owner} disabled={!keepAlive.loaded} onChange={(on) => keepAlive.setRole("owner", on)} label="Keep owners ready" />
+              </Row>
+              <Row label="Sessions" hint="Your other conversations.">
+                <Switch on={keepAlive.session} disabled={!keepAlive.loaded} onChange={(on) => keepAlive.setRole("session", on)} label="Keep sessions ready" />
+              </Row>
+              <Row label="Subagents" hint="While they wait on a tool.">
+                <Switch on={keepAlive.subagent} disabled={!keepAlive.loaded} onChange={(on) => keepAlive.setRole("subagent", on)} label="Keep subagents waiting on a tool ready" />
+              </Row>
+              <Row label="Daily limit" hint="It stops for the day when it is spent.">
+                <KeepAliveLimit state={keepAlive} />
+              </Row>
+              <Row label="Spent today" value={keepAlive.loaded ? spentLine(keepAlive.spent, keepAlive.limit) : null} loading={!keepAlive.loaded} />
             </div>
 
             {/* Access sits after Subagents and before About: the three
