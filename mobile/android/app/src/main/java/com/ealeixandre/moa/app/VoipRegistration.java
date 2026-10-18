@@ -156,7 +156,7 @@ final class VoipRegistration {
         }
         PushEnvelope.Keys keys = PushEnvelope.deriveKeys(secret.secret);
         if (keys == null) return;
-        RelayProtocol.Handle handle = relayHandle(relay, token, keys);
+        RelayProtocol.Handle handle = relayHandle(relay, token, keys, current);
         if (handle == null || generation != current) return;
 
         JSONObject body;
@@ -189,9 +189,12 @@ final class VoipRegistration {
 
     // Registers at the relay and waits for its challenge, which arrives as an
     // FCM message (handleChallenge), until the window closes.
-    private RelayProtocol.Handle relayHandle(String relay, String token, PushEnvelope.Keys keys) throws IOException {
+    private RelayProtocol.Handle relayHandle(String relay, String token, PushEnvelope.Keys keys, int current) throws IOException {
         Pending registration = new Pending(token, keys.send, relay, host.now());
         synchronized (this) {
+            // The same exclusion forgetLocal uses: a forget either cancels
+            // what is armed here or is seen here, never lands in between.
+            if (generation != current) return null;
             if (pending != null) pending.result.complete(null);
             // Armed before the request: the challenge may beat the 202.
             pending = registration;

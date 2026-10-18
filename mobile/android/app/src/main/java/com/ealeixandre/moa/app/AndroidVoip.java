@@ -61,6 +61,9 @@ final class AndroidVoip {
     // rings: a call envelope must never fall through to the alert path and
     // show as a generic alert.
     boolean receive(Map<String, String> data) {
+        // Before the secret is read: a forget that lands after this fences
+        // the delivery, whatever the secret still said when it was checked.
+        int admittedAt = NativeCalls.incomingEpoch(context);
         CallSecretStore.Secret secret = secrets.load();
         PushEnvelope.Keys keys = secret == null ? null : PushEnvelope.deriveKeys(secret.secret);
         if (!PushMessages.addressedTo(data, keys)) return false;
@@ -78,7 +81,7 @@ final class AndroidVoip {
         }
         CallInvite invite = CallInvite.fromPush(data, keys, System.currentTimeMillis() / 1000);
         String authorization = secret.authorization();
-        if (invite != null && authorization != null) NativeCalls.ring(context, invite, secret.origin, authorization);
+        if (invite != null && authorization != null) NativeCalls.ring(context, invite, secret.origin, authorization, admittedAt);
         return true;
     }
 
@@ -87,8 +90,10 @@ final class AndroidVoip {
     // null when it was refused or is already gone.
     static void forget(Context context, DeviceCredentialStore.Stored paired) {
         AndroidVoip voip = get(context);
-        NativeCalls.forgetRinging();
+        // The secret first: a push that read it before it went is fenced by
+        // the epoch the forget moves on afterwards.
         voip.registration.forgetLocal();
+        NativeCalls.forgetRinging();
         if (paired != null) voip.operations.execute(() -> voip.registration.unregister(paired));
     }
 
