@@ -114,7 +114,7 @@ public class CallService extends Service {
     private Notification build(String name, int token) {
         Person caller = new Person.Builder().setName(name == null || name.isEmpty() ? getString(R.string.app_name) : name).build();
         Intent hangUp = new Intent(this, CallService.class).setAction(ACTION_HANGUP).putExtra(EXTRA_TOKEN, token);
-        PendingIntent hangUpIntent = PendingIntent.getService(this, 0, hangUp, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent hangUpIntent = PendingIntent.getService(this, token, hangUp, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent openIntent = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new NotificationCompat.Builder(this, CHANNEL)
