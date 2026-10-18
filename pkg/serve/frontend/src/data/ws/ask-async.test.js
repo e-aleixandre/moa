@@ -63,6 +63,22 @@ test('question_answer renders as an event row naming who answered, not as a user
   expect(ev.body).not.toContain('<question_answer');
 });
 
+test('the answer row shows the questions from the event itself when the call that posted them is not loaded', () => {
+  // The asking call is on an older page of the history: only the event is here.
+  const withQuestions = { ...answer({ kind: 'user' }), custom: { ...answer({ kind: 'user' }).custom, questions: ['Deploy now?'] } };
+  const messages = normalizeHistory([withQuestions]);
+  const ev = projectStream({ messages }).flatMap((b) => (b.kind ? [b] : b.blocks || [])).find((b) => b.kind === 'event');
+  expect(ev.body).toBe('Deploy now?\n→ Yes');
+  // An event recorded before the field existed still finds its call when loaded.
+  const old = projectStream({ messages: normalizeHistory([call, ack, answer({ kind: 'user' })]) })
+    .flatMap((b) => (b.kind ? [b] : b.blocks || [])).find((b) => b.kind === 'event');
+  expect(old.body).toBe('Deploy now?\n→ Yes');
+  // Without either, the answer still reads (no question text to show).
+  const lone = projectStream({ messages: normalizeHistory([answer({ kind: 'user' })]) })
+    .flatMap((b) => (b.kind ? [b] : b.blocks || [])).find((b) => b.kind === 'event');
+  expect(lone.body).toBe('Yes');
+});
+
 test('who answered comes from the record; none recorded means the user', () => {
   expect(answererLabel(undefined)).toBe('you');
   expect(answererLabel({ kind: 'automation' })).toBe('an automation');

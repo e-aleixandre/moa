@@ -3,6 +3,8 @@ import { expect, mock, test } from "bun:test";
 const refs = [];
 const resolved = [];
 const dismissed = [];
+const toasts = [];
+let failDismiss = false;
 
 // Spread the real hooks first. bun's mock.module replaces the module for the
 // whole process and never restores it, so a factory listing only some hooks
@@ -24,7 +26,14 @@ mock.module("preact/hooks", () => ({
 
 mock.module("../../data/session-actions.js", () => ({
   resolveAskUser: async (...args) => { resolved.push(args); },
-  dismissAskUser: async (...args) => { dismissed.push(args); },
+  dismissAskUser: async (...args) => {
+    dismissed.push(args);
+    if (failDismiss) throw new Error("HTTP 500");
+  },
+}));
+
+mock.module("../../data/notifications.js", () => ({
+  addToast: (toast) => { toasts.push(toast); },
 }));
 
 mock.module("../../hooks/useVoiceGesture.js", () => ({
@@ -138,6 +147,25 @@ test("an async question offers Dismiss and says Stop keeps it open", async () =>
   dismiss.props.onClick();
   await Promise.resolve();
   expect(dismissed).toEqual([["s1", "ask-9"]]);
+});
+
+test("a failed Dismiss tells the user", async () => {
+  dismissed.length = 0;
+  toasts.length = 0;
+  failDismiss = true;
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const nodes = descendants(renderAsync({ async: true }));
+    const dismiss = nodes.find((node) => String(node.props?.class || "").includes("ask-user-prompt-dismiss"));
+    dismiss.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    failDismiss = false;
+    console.error = quiet;
+  }
+  expect(dismissed).toHaveLength(1);
+  expect(toasts).toEqual([{ title: "Could not dismiss this question", detail: "Try Dismiss again.", type: "error" }]);
 });
 
 test("an async question offers no Skip; a synchronous one keeps it", () => {

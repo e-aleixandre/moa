@@ -626,7 +626,12 @@ export function projectStream(session) {
       // from the recorded metadata, never from the XML in the text.
       if (msg.custom?.source === 'question_answer') {
         const answers = Array.isArray(msg.custom.answers) ? msg.custom.answers : [];
-        const questions = askedQuestions(messages, msg.custom.question_id);
+        // The event carries the questions as asked; the call that posted them
+        // is looked for only in an event recorded before it did, and may be on
+        // a page of the history that is not loaded.
+        const questions = Array.isArray(msg.custom.questions)
+          ? msg.custom.questions.map(String)
+          : askedQuestions(messages, msg.custom.question_id);
         blocks.push({
           kind: 'event',
           id: blockID('answer', msg, i),

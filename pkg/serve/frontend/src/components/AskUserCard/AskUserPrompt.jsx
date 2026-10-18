@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { ChevronUp, ChevronDown, Check } from "lucide-preact";
 import { AskUserCard } from "./AskUserCard.jsx";
 import { resolveAskUser, dismissAskUser } from "../../data/session-actions.js";
+import { addToast } from "../../data/notifications.js";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { useCanTranscribe } from "../../hooks/useCanTranscribe.js";
 import {
@@ -215,6 +216,8 @@ export function AskUserPrompt({ session }) {
       resolvingRef.current = false;
       setSubmitting(false);
       setDismissing(false);
+      // The card comes back as it was; say why, so a second tap is a choice.
+      addToast({ title: "Could not dismiss this question", detail: "Try Dismiss again.", type: "error" });
     }
   };
 
