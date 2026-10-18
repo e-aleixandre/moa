@@ -1,8 +1,11 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,6 +15,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 // KeepAliveInfo is a session's cache keep-alive activity since it was loaded,
@@ -62,6 +66,7 @@ type keepAliveService struct {
 	// setting is the global cache_keepalive setting in force, replaced
 	// when Settings saves it (nil = everything off).
 	setting atomic.Pointer[core.CacheKeepAliveConfig]
+	group   agent.KeepAliveGroup
 	logPath string
 	clock   agent.KeepAliveClock // nil = system; tests only
 	mu      sync.Mutex
@@ -93,6 +98,10 @@ func (k *keepAliveService) set(c *core.CacheKeepAliveConfig) {
 		c = &cp
 	}
 	k.setting.Store(c)
+	// A role switched off stops now, ping in flight included, not at its
+	// next timer.
+	p, _ := core.GetCacheKeepAlive(core.MoaConfig{CacheKeepAlive: c})
+	k.group.Stop(func(role string) bool { return !p.RoleEnabled(role) })
 }
 
 // today returns what pings cost today and the estimated saving of the
@@ -190,6 +199,7 @@ func (m *Manager) keepAliveConfig(sess *ManagedSession, role, jobID string) *age
 	k := m.keepAlive
 	cfg := &agent.KeepAliveConfig{
 		Policy: k.policy,
+		Group:  &k.group,
 		Role:   role,
 		Clock:  m.keepAlive.clock,
 		OnEvent: func(e agent.KeepAliveEvent) {
@@ -198,6 +208,16 @@ func (m *Manager) keepAliveConfig(sess *ManagedSession, role, jobID string) *age
 	}
 	if role != core.KeepAliveRoleSubagent {
 		cfg.PendingWork = func() bool { return sess.runtime.BackgroundWork() > 0 }
+	}
+	if role == core.KeepAliveRoleSession && m.tasks != nil {
+		// A session whose next wake is a known scheduled task pays it cold:
+		// at the usual distance of one, the pings cost as much as the write.
+		cfg.Exempt = func() bool {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			scheduled, err := m.sessionScheduled(ctx, sess.ID)
+			return err != nil || len(scheduled) > 0
+		}
 	}
 	return cfg
 }
@@ -264,7 +284,74 @@ func (m *Manager) onKeepAliveEvent(sess *ManagedSession, jobID string, e agent.K
 		m.keepAlive.add(0, rec.SavedUSD)
 	}
 	if e.Kind == agent.KeepAlivePing && e.CostUSD > 0 {
-		sess.runtime.Bus.Publish(bus.KeepAliveUsage{SessionID: sess.ID, JobID: jobID, Usage: e.Usage, CostUSD: e.CostUSD})
+		m.chargeKeepAlive(sess.ID, bus.KeepAliveUsage{SessionID: sess.ID, JobID: jobID, Usage: e.Usage, CostUSD: e.CostUSD})
 	}
 	m.keepAlive.record(rec)
+}
+
+// chargeKeepAlive adds a ping's cost to the session total wherever the
+// session is now. A ping cancelled by a close can still have been served:
+// then the session is no longer live and the cost goes to its saved file,
+// under the same reservation resume, close and delete honor.
+func (m *Manager) chargeKeepAlive(id string, usage bus.KeepAliveUsage) {
+	for wait := time.Duration(0); ; wait += 50 * time.Millisecond {
+		if wait > 30*time.Second {
+			slog.Warn("cache keep-alive: session busy, ping cost not added to it", "session", id, "cost_usd", usage.CostUSD)
+			return
+		}
+		if wait > 0 {
+			time.Sleep(50 * time.Millisecond)
+		}
+		m.mu.Lock()
+		if _, busy := m.resuming[id]; busy {
+			m.mu.Unlock()
+			continue // closing or reopening: decide once it settles
+		}
+		live, loaded := m.sessions[id]
+		if loaded && live == nil {
+			m.mu.Unlock()
+			continue
+		}
+		if loaded {
+			m.mu.Unlock()
+			if _, err := live.runtime.Bus.Query(bus.GetSessionCost{}); !errors.Is(err, bus.ErrClosed) {
+				live.runtime.Bus.Publish(usage)
+				return
+			}
+			// Shut down: its runtime is closed but still listed; nothing
+			// else writes the file any more.
+		} else {
+			m.resuming[id] = struct{}{}
+			m.mu.Unlock()
+			defer func() {
+				m.mu.Lock()
+				delete(m.resuming, id)
+				m.mu.Unlock()
+			}()
+		}
+		if err := m.addSavedSessionCost(id, usage.CostUSD); err != nil {
+			slog.Warn("cache keep-alive: ping cost not saved", "session", id, "error", err)
+		}
+		return
+	}
+}
+
+func (m *Manager) addSavedSessionCost(id string, usd float64) error {
+	saved, store, err := session.FindSession(m.sessionBaseDir, id)
+	if err != nil {
+		return err
+	}
+	if saved.Metadata == nil {
+		saved.Metadata = map[string]any{}
+	}
+	prev, _ := saved.Metadata[session.MetaSessionCostUSD].(float64)
+	if prev < 0 || math.IsNaN(prev) || math.IsInf(prev, 0) {
+		prev = 0
+	}
+	saved.Metadata[session.MetaSessionCostUSD] = prev + usd
+	if err := store.Save(saved); err != nil {
+		return err
+	}
+	m.invalidateSavedCache()
+	return nil
 }

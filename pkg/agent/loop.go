@@ -1195,11 +1195,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			for _, tc := range toolCalls {
 				names = append(names, tc.ToolName)
 			}
-			ka.tools(names)
+			ka.tools(ctx, names)
 		}
 		claimed, allRejected := executeTools(ctx, cfg, toolCalls, repeated)
 		if ka != nil {
-			ka.tools(nil)
+			ka.tools(ctx, nil)
 		}
 		if allRejected {
 			lastToolSig, repeatCount = prevSig, prevCount

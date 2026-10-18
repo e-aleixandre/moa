@@ -605,7 +605,6 @@ func TestKeepAliveDisabledRoleIsNotPinged(t *testing.T) {
 	}
 }
 
-
 // Settings apply at once: a role switched off mid-sleep stops being pinged,
 // and switched on again it is warmed from its next request.
 func TestKeepAlivePolicyChangesApplyAtOnce(t *testing.T) {

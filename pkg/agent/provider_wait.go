@@ -38,6 +38,13 @@ func (a *Agent) ProviderSnapshot() (core.ProviderExecution, core.Model, string) 
 
 func (a *Agent) wakeProviderLocked() {
 	a.configRevision++
+	// The next request's prefix changes: what was kept warm is not it, and a
+	// ping in flight for it is cancelled before the change returns.
+	if ka := a.keepAlive.Load(); ka != nil {
+		ka.mu.Lock()
+		ka.suspendLocked()
+		ka.mu.Unlock()
+	}
 	if a.providerWake != nil {
 		close(a.providerWake)
 		a.providerWake = make(chan struct{})

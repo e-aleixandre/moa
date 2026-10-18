@@ -29,6 +29,12 @@ import (
 // never waits for a ping: it cancels it. Nothing here persists: a restart
 // forgets every snapshot.
 
+// pingSendMargin is how long before the cache expires a ping must already be
+// leaving: past it, the request could reach the provider after the TTL and
+// write the whole prefix cold instead of refreshing it. Pings are due 30 s
+// before expiry, so this only refuses one delayed past its slot.
+const pingSendMargin = 15 * time.Second
+
 // pingTimeout bounds one ping. A ping answers with no output, so it takes
 // about as long as reading the prefix.
 const pingTimeout = 2 * time.Minute
@@ -58,6 +64,13 @@ type KeepAliveConfig struct {
 	// subagent, a bash job): an idle agent with some counts as waiting. nil =
 	// never. Called with no agent lock held.
 	PendingWork func() bool
+	// Exempt reports that the agent is not to be kept warm right now (a
+	// session whose next wake is a known scheduled task). nil = never.
+	// Called with no agent lock held.
+	Exempt func() bool
+	// Group, when set, is told about this agent so a settings change can stop
+	// it at once (see KeepAliveGroup).
+	Group *KeepAliveGroup
 	// OnEvent receives every ping, failed ping and warm wake. Called from
 	// keep-alive's goroutines, never with a lock held.
 	OnEvent func(KeepAliveEvent)
@@ -122,6 +135,7 @@ type keepAlive struct {
 	gen        uint64 // bumped by every real request and every suspension
 	inFlight   bool
 	toolsBusy  bool
+	toolsDone  <-chan struct{} // the running batch's run context
 	askUser    bool
 	stopTimer  func() bool
 	pingCancel context.CancelFunc
@@ -144,6 +158,54 @@ func (a *Agent) SetKeepAlive(cfg *KeepAliveConfig) {
 	}
 	if old := a.keepAlive.Swap(next); old != nil {
 		old.shutdown()
+		if g := old.cfg.Group; g != nil {
+			g.remove(old)
+		}
+	}
+	if next != nil && next.cfg.Group != nil {
+		next.cfg.Group.add(next)
+	}
+}
+
+// KeepAliveGroup is the set of agents that share one live setting. When the
+// setting switches a role off, Stop ends that role's keep-alive at once: the
+// ping in flight is cancelled, and an evaluation already past the setting
+// read cannot start a new one.
+type KeepAliveGroup struct {
+	mu     sync.Mutex
+	agents map[*keepAlive]struct{}
+}
+
+func (g *KeepAliveGroup) add(ka *keepAlive) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.agents == nil {
+		g.agents = make(map[*keepAlive]struct{})
+	}
+	g.agents[ka] = struct{}{}
+}
+
+func (g *KeepAliveGroup) remove(ka *keepAlive) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.agents, ka)
+}
+
+// Stop drops the snapshot of every agent whose role stop reports, until its
+// next request.
+func (g *KeepAliveGroup) Stop(stop func(role string) bool) {
+	g.mu.Lock()
+	var hit []*keepAlive
+	for ka := range g.agents {
+		if stop(ka.cfg.Role) {
+			hit = append(hit, ka)
+		}
+	}
+	g.mu.Unlock()
+	for _, ka := range hit {
+		ka.mu.Lock()
+		ka.suspendLocked()
+		ka.mu.Unlock()
 	}
 }
 
@@ -280,10 +342,11 @@ func (ka *keepAlive) settled(msg *core.Message) {
 	ka.emit(wake)
 }
 
-// tools marks a tool batch running (names) or finished (nil).
-func (ka *keepAlive) tools(names []string) {
+// tools marks a tool batch of the run ctx running (names) or finished (nil).
+func (ka *keepAlive) tools(ctx context.Context, names []string) {
 	ka.mu.Lock()
 	ka.toolsBusy = names != nil
+	ka.toolsDone = ctx.Done()
 	ka.askUser = slices.Contains(names, "ask_user")
 	ka.mu.Unlock()
 	if names != nil {
@@ -314,6 +377,13 @@ func (ka *keepAlive) emit(e *KeepAliveEvent) {
 // evaluate pings if one is due and the agent is in a state that allows it,
 // or arms the timer for when one will be. Idempotent; safe from any
 // goroutine with no lock held.
+//
+// What calls out (the setting, background work, schedules) is read first,
+// with no lock held. The decision is then taken in one step under the
+// agent's lock and keep-alive's, the same locks every change to the prefix,
+// the setting or the run takes: the clock is read again there, so a ping
+// starts only if, at that instant, it is still due, inside the cache's TTL,
+// for an unchanged prefix and a role still on.
 func (ka *keepAlive) evaluate() {
 	ka.mu.Lock()
 	s := ka.snap
@@ -321,35 +391,50 @@ func (ka *keepAlive) evaluate() {
 		ka.mu.Unlock()
 		return
 	}
-	now := ka.clock.Now()
-	if due := s.anchor.Add(s.every); now.Before(due) {
-		ka.armLocked(due.Sub(now))
+	if due := s.anchor.Add(s.every); ka.clock.Now().Before(due) {
+		ka.armLocked(due.Sub(ka.clock.Now()))
 		ka.mu.Unlock()
 		return
 	}
-	if now.Sub(s.anchor) >= s.ttl {
-		// Too late: a ping now would write the whole prefix cold.
-		ka.suspendLocked()
-		ka.mu.Unlock()
-		return
-	}
-	gen, toolsBusy, askUser := ka.gen, ka.toolsBusy, ka.askUser
+	gen := ka.gen
 	ka.mu.Unlock()
 
-	state, ok := ka.state(toolsBusy, askUser)
-	if !ok {
-		return // between steps of a run: the next transition re-evaluates
-	}
-	valid := ka.a.keepAliveMatches(s)
-	horizon := ka.cfg.Policy().Horizon(ka.cfg.Role, state, s.contextTokens)
+	policy := ka.cfg.Policy()
+	pending := ka.cfg.PendingWork != nil && ka.cfg.PendingWork()
+	exempt := ka.cfg.Exempt != nil && ka.cfg.Exempt()
 
+	a := ka.a
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	ka.mu.Lock()
 	defer ka.mu.Unlock()
-	if gen != ka.gen || ka.snap != s || ka.inFlight || ka.pingCancel != nil {
+	if gen != ka.gen || ka.snap != s || ka.inFlight || ka.pingCancel != nil || ka.ctx.Err() != nil {
 		return
 	}
-	if !valid || now.Sub(s.sentAt) >= horizon {
-		// Changed context, or past the horizon: only a new request re-arms.
+	var state string
+	switch {
+	case ka.toolsBusy && ka.askUser:
+		state = core.KeepAliveAskUser
+	case ka.toolsBusy:
+		state = core.KeepAliveWaiting
+	case a.cancel != nil:
+		return // between steps of a run: the next transition re-evaluates
+	case pending:
+		state = core.KeepAliveWaiting
+	default:
+		state = core.KeepAliveIdle
+	}
+	if ka.toolsBusy && isDone(ka.toolsDone) {
+		// The run was cancelled and its tools are unwinding: nothing comes
+		// back to this prefix.
+		ka.suspendLocked()
+		return
+	}
+	now := ka.clock.Now()
+	if now.Sub(s.anchor) > s.ttl-pingSendMargin || exempt || !a.keepAliveMatchesLocked(s) ||
+		now.Sub(s.sentAt) >= policy.Horizon(ka.cfg.Role, state, s.contextTokens) {
+		// Too late for the cache, not wanted, a changed prefix, or past the
+		// horizon: only a new request re-arms.
 		ka.suspendLocked()
 		return
 	}
@@ -357,25 +442,6 @@ func (ka *keepAlive) evaluate() {
 	ka.pingCancel = cancel
 	ka.stopTimerLocked()
 	go ka.ping(ctx, cancel, s, gen, now, state)
-}
-
-// state classifies an agent not calling the model. ok is false while a run
-// is between steps (about to send).
-func (ka *keepAlive) state(toolsBusy, askUser bool) (string, bool) {
-	ka.a.mu.Lock()
-	running := ka.a.cancel != nil
-	ka.a.mu.Unlock()
-	switch {
-	case toolsBusy && askUser:
-		return core.KeepAliveAskUser, true
-	case toolsBusy:
-		return core.KeepAliveWaiting, true
-	case running:
-		return "", false
-	case ka.cfg.PendingWork != nil && ka.cfg.PendingWork():
-		return core.KeepAliveWaiting, true
-	}
-	return core.KeepAliveIdle, true
 }
 
 func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *keepAliveSnapshot, gen uint64, sentAt time.Time, state string) {
@@ -395,9 +461,11 @@ func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *kee
 		if p := s.req.Model.Pricing; p != nil {
 			ev.CostUSD = p.Cost(usage)
 		}
-		ka.pings++
-		ka.pingCost += ev.CostUSD
+		// Its cost is spent either way, but only a ping of the snapshot still
+		// kept warms the next wake: a late one belongs to an older prefix.
 		if current {
+			ka.pings++
+			ka.pingCost += ev.CostUSD
 			s.anchor = sentAt
 			ka.armLocked(s.every - ka.clock.Now().Sub(sentAt))
 		}
@@ -423,9 +491,8 @@ func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *kee
 // keepAliveMatches reports whether s is still the prefix of the agent's next
 // request: same settings, same tools and system prompt, and a conversation
 // that has only grown since (no compaction, fresh, trim, restore or rewind).
-func (a *Agent) keepAliveMatches(s *keepAliveSnapshot) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+// Caller holds a.mu.
+func (a *Agent) keepAliveMatchesLocked(s *keepAliveSnapshot) bool {
 	if a.configRevision != s.revision || !sameModel(a.config.Model, s.req.Model) ||
 		a.config.SystemPrompt != s.req.System || a.config.Fast != s.req.Options.Fast ||
 		a.config.CacheTTL != s.req.Options.CacheRetention ||
@@ -447,4 +514,13 @@ func cacheTTL(retention string) time.Duration {
 		return 5 * time.Minute
 	}
 	return 0 // core.CacheOff
+}
+
+func isDone(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
