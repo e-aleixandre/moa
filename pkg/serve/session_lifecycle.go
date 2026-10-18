@@ -1485,6 +1485,9 @@ func (m *Manager) Shutdown() {
 	if m.planner != nil {
 		<-m.planner.done
 	}
+	if m.tasksWatcherDone != nil {
+		<-m.tasksWatcherDone
+	}
 	if m.secretReaperCancel != nil {
 		m.secretReaperCancel()
 		if m.secretReaperDone != nil {

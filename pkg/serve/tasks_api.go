@@ -74,16 +74,24 @@ func (m *Manager) startTasksWatcher(ctx context.Context) {
 	if m.tasks == nil {
 		return
 	}
-	go m.tasks.Watch(ctx, tasksWatchInterval, func(rev int64) {
-		m.taskHub.broadcast(rev)
-		m.publishChecklists()
-		// Agents write notices too (a task sent to another owner, a comment,
-		// a close): the dispatcher learns of them here.
-		m.notices.nudge()
-		// A schedule created or moved by any writer may change the planner's
-		// next wake-up.
-		m.planner.nudge()
-	})
+	done := make(chan struct{})
+	m.tasksWatcherDone = done
+	go func() {
+		defer close(done)
+		m.tasks.Watch(ctx, tasksWatchInterval, m.tasksChanged)
+	}()
+}
+
+// tasksChanged is the watcher's callback for a commit at rev.
+func (m *Manager) tasksChanged(rev int64) {
+	m.taskHub.broadcast(rev)
+	m.publishChecklists()
+	// Agents write notices too (a task sent to another owner, a comment,
+	// a close): the dispatcher learns of them here.
+	m.notices.nudge()
+	// A schedule created or moved by any writer may change the planner's
+	// next wake-up.
+	m.planner.nudge()
 }
 
 func (m *Manager) publishChecklists() {

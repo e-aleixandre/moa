@@ -906,6 +906,10 @@ type Manager struct {
 	taskHub     *tasksHub
 	projectKeys sync.Map
 	tasksCancel context.CancelFunc
+	// tasksWatcherDone closes once the task watcher has returned (nil when it
+	// never started): cancelling it only asks it to stop, and until it returns
+	// it may still open the task database.
+	tasksWatcherDone chan struct{}
 	// notices delivers task notices; one dispatcher per serve process.
 	notices *noticeDispatcher
 	// questions owns the sessions' asynchronous ask_user questions; nil when
