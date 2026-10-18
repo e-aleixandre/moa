@@ -20,7 +20,7 @@ export function addToast(toast) {
   const id = Date.now() + Math.random();
   toasts = [...toasts, { ...toast, id }];
   notifyToastListeners();
-  setTimeout(() => removeToast(id), toast.duration ?? 5000);
+  if (!toast.sticky) setTimeout(() => removeToast(id), toast.duration ?? 5000);
   return id;
 }
 
@@ -76,7 +76,7 @@ function browserNotify(title, body) {
 // alertAway adds what a toast alone does not: a session the user is not
 // looking at reached a point that matters. Toasts that answer the user's own
 // action never come through here.
-function alertAway(title, body, soundEnabled) {
+export function alertAway(title, body, soundEnabled) {
   if (soundEnabled) initAudio().then(playBeep);
   browserNotify(title, body);
   if (navigator.vibrate) navigator.vibrate(200);

@@ -13,7 +13,7 @@ import { settleFreshMarkers } from '../start-fresh.js';
 import { parseCacheUsage } from '../cache-usage.js';
 import { toolImageRefs } from '../util/tool-images.js';
 import { normalizeErrorDetail, sameErrorDetail } from '../provider-error.js';
-import { normalizeSecretRequests } from '../secret-action.js';
+import { normalizeSecretRequests, secretIdsOf } from '../secret-action.js';
 
 function initErrorDetail(raw, previous) {
   const detail = normalizeErrorDetail(raw);
@@ -131,6 +131,7 @@ export function handleWsInit(id, data) {
     // Authoritative, including its absence: a request answered while this
     // client had no socket must not linger as a card.
     pendingSecrets: normalizeSecretRequests(data.pending_secret_requests),
+    secretIds: secretIdsOf(normalizeSecretRequests(data.pending_secret_requests)),
     // The server's steer queue is authoritative and shared across all of this
     // session's clients. The snapshot replaces the queue; a local chip is kept
     // only if its client-minted ID is not yet in the snapshot (its POST was

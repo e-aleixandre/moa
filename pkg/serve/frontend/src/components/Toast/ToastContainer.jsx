@@ -40,7 +40,7 @@ export function ToastContainer() {
   if (shown.length === 0) return null;
 
   return (
-    <div class="toast-stack" ref={stackRef}>
+    <div class={`toast-stack${shown.some((s) => s.item.sticky) ? " has-sticky" : ""}`} ref={stackRef}>
       {shown.map(({ item: t, leaving }) => (
         <Toast
           key={t.id}

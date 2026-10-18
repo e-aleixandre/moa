@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Square } from "lucide-preact";
+import { Lock, Square } from "lucide-preact";
 import { activityPhase, activityText, backgroundSummarizing, formatElapsed } from "../../data/util/activity.js";
 import { StateDot } from "../../primitives/StateDot/StateDot.jsx";
 import { LiveSentence } from "./LiveSentence.jsx";
@@ -364,7 +364,7 @@ function LiveRow({ agent, onOpen }) {
         ) : (
           <>
             <span class="zl-live-row-t">{agent.name}{!!agent.task && <> <span class="zl-live-row-task">· {agent.task}</span></>}</span>
-            {!!agent.action && <span class="zl-live-row-d">{agent.action}</span>}
+            {!!agent.action && <span class="zl-live-row-d">{agent.lock && <Lock size={11} aria-hidden="true" class="zl-row-lock" />}{agent.action}</span>}
           </>
         )}
       </span>

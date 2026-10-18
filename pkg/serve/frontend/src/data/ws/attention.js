@@ -4,7 +4,7 @@ import { triggerAttention } from '../notifications.js';
 import { acknowledgeVisibleAttentionThrough } from '../api.js';
 import { store, setState, updateSession, visibleSessionIds } from '../store.js';
 import { finishHistoryHydration } from '../history-hydration.js';
-import { normalizeSecretRequest, withSecret, withoutSecret } from '../secret-action.js';
+import { normalizeSecretRequest, secretIdsOf, withSecret, withoutSecret } from '../secret-action.js';
 
 export function parseAttentionNamespace(namespace) {
   const separator = typeof namespace === 'string' ? namespace.lastIndexOf(':') : -1;
@@ -141,22 +141,18 @@ export function handleWsSecretRequest(id, data, seq = 0) {
   updateSession(id, {
     state: 'permission',
     pendingSecrets: withSecret(prev, request),
+    secretIds: secretIdsOf(withSecret(prev, request)),
   });
   markUnseen(id, seq, true);
   acknowledgeVisibleLiveAttention(id, seq);
   flashSession(id, 'attention');
-  const state = store.get();
-  if (!visibleSessionIds(state).includes(id)) {
-    const sess = state.sessions[id];
-    if (sess) triggerAttention(sess, 'Needs a password', state.soundEnabled);
-  }
 }
 
 export function handleWsSecretResolved(id, data) {
   const pending = store.get().sessions[id]?.pendingSecrets;
   if (!pending || !data?.id) return;
   const next = withoutSecret(pending, data.id);
-  if (next !== pending) updateSession(id, { pendingSecrets: next });
+  if (next !== pending) updateSession(id, { pendingSecrets: next, secretIds: secretIdsOf(next) });
 }
 
 export function handleWsAskResolved(id, data) {

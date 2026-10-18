@@ -1,4 +1,4 @@
-import { Import, X } from "lucide-preact";
+import { Import, Lock, X } from "lucide-preact";
 import "./SessionRow.css";
 
 // SessionRow — the session piece. Markup and CSS are the catalogue's
@@ -79,6 +79,7 @@ export function SessionRow({
   origin,
   brief,
   briefTone,
+  briefLock,
   project,
   path,
   onClick,
@@ -140,7 +141,7 @@ export function SessionRow({
               live. Two lines is the budget, so the more useful datum wins. */}
           {brief && (
             <span class="zl-row-l2">
-              <span class={`zl-row-brief${briefTone ? ` tone-${briefTone}` : ""}`} aria-hidden="true">{brief}</span>
+              <span class={`zl-row-brief${briefTone ? ` tone-${briefTone}` : ""}`} aria-hidden="true">{briefLock && <Lock size={11} aria-hidden="true" class="zl-row-lock" />}{brief}</span>
               {project && <span class="zl-row-proj zl-data" aria-hidden="true">{project}</span>}
             </span>
           )}

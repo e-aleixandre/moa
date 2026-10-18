@@ -141,3 +141,10 @@ export function withoutSecret(list, id) {
   const next = current.filter((r) => r.id !== id);
   return next.length === current.length ? current : next;
 }
+
+// secretIdsOf names the open requests, the one thing every client can compare
+// (the roster carries only these): a request replaced by another keeps the
+// count but not the ids.
+export function secretIdsOf(pending) {
+  return (pending || []).map((r) => r.id);
+}

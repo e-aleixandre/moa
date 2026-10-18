@@ -362,6 +362,10 @@ type SessionInfo struct {
 	ServerInstance     string                    `json:"server_instance"`
 	AttentionNamespace string                    `json:"attention_namespace,omitempty"`
 	UntrustedMCP       bool                      `json:"untrusted_mcp,omitempty"`
+	// PendingSecretIDs names the open password requests, and nothing else. The
+	// roster is all a client has for a session it holds no socket to, and the
+	// id is what tells a new request from one it already announced.
+	PendingSecretIDs []string `json:"pending_secret_ids,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
 	// exist and turn red when one has failed or exited. The full per-server
@@ -526,7 +530,14 @@ func (s *ManagedSession) info() SessionInfo {
 	cacheWindow := cacheWindow(s.lastRunProvider, s.cacheTTL)
 	cacheProvider := s.lastRunProvider
 	startedFresh := s.startedFreshAt
+	var pendingSecrets []string
+	if broker := s.runtime.Context().SecretBroker; broker != nil {
+		for _, req := range broker.Pending() {
+			pendingSecrets = append(pendingSecrets, req.ID)
+		}
+	}
 	info := SessionInfo{
+		PendingSecretIDs: pendingSecrets,
 		ProviderExecution: func() core.ProviderExecution {
 			streaming, _, _ := s.runtime.Context().SnapshotInFlightWithCut()
 			return streaming.ProviderExecution

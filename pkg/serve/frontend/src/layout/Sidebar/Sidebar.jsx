@@ -412,6 +412,7 @@ export function Sidebar({
         when={s.when || s.meta}
         brief={s.brief}
         briefTone={s.briefTone}
+        briefLock={s.briefLock}
         path={s.brief ? undefined : s.path}
         /* A row with a brief has no path, so it names its project at the end
            of that line -- unless the heading above already did. */
