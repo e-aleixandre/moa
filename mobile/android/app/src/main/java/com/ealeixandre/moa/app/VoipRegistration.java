@@ -43,7 +43,7 @@ final class VoipRegistration {
         NativeHttp.Response send(String method, String url, Map<String, String> headers, String body) throws IOException;
 
         // Runs `task` once after the delay, off the main thread.
-        default void retryLater(long delayMillis, Runnable task) {}
+        void retryLater(long delayMillis, Runnable task);
     }
 
     // The last registered token, origin and env (not secret).
@@ -73,6 +73,10 @@ final class VoipRegistration {
     private static final long REFRESH_INTERVAL_MILLIS = 3_600_000;
     private static final long REFRESH_MARGIN_SECONDS = 30L * 24 * 3600;
     static final long CHALLENGE_WINDOW_MILLIS = 300_000;
+    // After a failed registration (the relay refused the token, offline, the
+    // server refused): when to try again without waiting for the app to be
+    // reopened. Three tries, then the next foreground is the next chance.
+    private static final long[] RETRY_DELAYS_MILLIS = {15_000, 60_000, 300_000};
 
     private final Host host;
     private final CallSecretStore secrets;
@@ -82,6 +86,8 @@ final class VoipRegistration {
     private Pending pending;
     private boolean registering;
     private long lastRefresh;
+    private int retries;
+    private boolean retryScheduled;
 
     VoipRegistration(Host host, CallSecretStore secrets, Memory memory) {
         this(host, secrets, memory, CHALLENGE_WINDOW_MILLIS);
@@ -97,7 +103,17 @@ final class VoipRegistration {
     // On every foreground, and when FCM issues a new token (force).
     void refresh(boolean force) {
         DeviceCredentialStore.Stored paired = host.paired();
-        if (!host.foreground() || paired == null || paired.expiresAtMillis <= host.now() || !paired.origin.startsWith("https://")) return;
+        if (!host.foreground()) {
+            // A token FCM rotated while the app was away is due at the next
+            // foreground, not an hour later.
+            if (force) {
+                synchronized (this) {
+                    lastRefresh = 0;
+                }
+            }
+            return;
+        }
+        if (paired == null || paired.expiresAtMillis <= host.now() || !paired.origin.startsWith("https://")) return;
         String deviceId = VoiceAuth.deviceId(paired.credential);
         if (deviceId == null) return;
         int current;
@@ -109,31 +125,59 @@ final class VoipRegistration {
             registering = true;
             current = generation;
         }
+        boolean failed = false;
         try {
-            run(paired, deviceId, current);
+            failed = !run(paired, deviceId, current);
         } catch (IOException e) {
-            // Offline: the next foreground tries again.
+            // Offline.
+            failed = true;
         } finally {
             synchronized (this) {
                 if (generation == current) registering = false;
             }
         }
+        if (failed) failed(current);
     }
 
-    private void run(DeviceCredentialStore.Stored paired, String deviceId, int current) throws IOException {
+    // A registration that did not happen must not count as the hour's
+    // attempt (the next foreground tries again) and is retried by itself with
+    // a growing delay, so a token FCM had not accepted yet does not leave the
+    // phone unreachable until the app is reopened.
+    private void failed(int current) {
+        long delay;
+        synchronized (this) {
+            if (generation != current) return;
+            lastRefresh = 0;
+            if (retryScheduled || retries >= RETRY_DELAYS_MILLIS.length) return;
+            retryScheduled = true;
+            delay = RETRY_DELAYS_MILLIS[retries++];
+        }
+        host.retryLater(delay, this::retry);
+    }
+
+    private void retry() {
+        synchronized (this) {
+            retryScheduled = false;
+        }
+        refresh(true);
+    }
+
+    // False when the registration was attempted and did not happen; true when
+    // it did, was not needed, or was stopped on purpose.
+    private boolean run(DeviceCredentialStore.Stored paired, String deviceId, int current) throws IOException {
         NativeHttp.Response status = server("GET", paired, "/api/push/voip/status", null);
         // An older server without incoming calls answers 404; nothing to do.
-        if (status.status != 200 || generation != current) return;
+        if (status.status != 200 || generation != current) return true;
         JSONObject report;
         try {
             report = new JSONObject(status.body);
         } catch (JSONException e) {
-            return;
+            return true;
         }
         String token = host.fcmToken();
-        if (token == null || token.isEmpty() || generation != current) return;
+        if (token == null || token.isEmpty() || generation != current) return true;
         String relay = host.relayUrl();
-        if (relay == null || !relay.equals(report.optString("relay_url", null))) return;
+        if (relay == null || !relay.equals(report.optString("relay_url", null))) return true;
 
         CallSecretStore.Secret stored = secrets.load();
         if (stored != null && (!stored.origin.equals(paired.origin) || !stored.deviceId.equals(deviceId))) stored = null;
@@ -144,7 +188,7 @@ final class VoipRegistration {
         if (stored != null && report.optBoolean("registered", false) && !expired
             && paired.origin.equals(memory.get("origin")) && token.equals(memory.get("token"))
             && env.equals(memory.get("env")) && remaining > REFRESH_MARGIN_SECONDS) {
-            return;
+            return true;
         }
 
         CallSecretStore.Secret secret = stored;
@@ -154,13 +198,14 @@ final class VoipRegistration {
             secret = new CallSecretStore.Secret(paired.origin, deviceId, bytes);
             // Kept before anything is registered with it.
             synchronized (this) {
-                if (generation != current || !secrets.save(secret)) return;
+                if (generation != current || !secrets.save(secret)) return true;
             }
         }
         PushEnvelope.Keys keys = PushEnvelope.deriveKeys(secret.secret);
-        if (keys == null) return;
+        if (keys == null) return true;
         RelayProtocol.Handle handle = relayHandle(relay, token, keys, current);
-        if (handle == null || generation != current) return;
+        if (generation != current) return true;
+        if (handle == null) return false;
 
         JSONObject body;
         try {
@@ -172,7 +217,7 @@ final class VoipRegistration {
                 .put("env", env)
                 .put("provider", RelayProtocol.PROVIDER);
         } catch (JSONException e) {
-            return;
+            return true;
         }
         NativeHttp.Response posted = server("POST", paired, "/api/push/voip", body.toString());
         boolean ok = posted.status >= 200 && posted.status < 300;
@@ -182,12 +227,14 @@ final class VoipRegistration {
                     memory.put("origin", paired.origin);
                     memory.put("token", token);
                     memory.put("env", env);
+                    retries = 0;
                 }
-                return;
+                return ok;
             }
         }
         // Forgotten while this was on its way: what it created goes.
         if (ok) unregister(paired);
+        return true;
     }
 
     // Registers at the relay and waits for its challenge, which arrives as an

@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -31,6 +32,12 @@ final class AndroidVoip {
     // One registration at a time and in order: the DELETE of a forgotten one
     // lands after the POST it is cleaning up after.
     private final ExecutorService operations = Executors.newSingleThreadExecutor();
+    // Only waits: what it schedules runs on `operations`.
+    private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "moa-voip-retry");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     static synchronized AndroidVoip get(Context context) {
         if (shared == null) shared = new AndroidVoip(context.getApplicationContext());
@@ -141,6 +148,11 @@ final class AndroidVoip {
         @Override
         public long now() {
             return System.currentTimeMillis();
+        }
+
+        @Override
+        public void retryLater(long delayMillis, Runnable task) {
+            timer.schedule(() -> operations.execute(task), delayMillis, TimeUnit.MILLISECONDS);
         }
 
         @Override

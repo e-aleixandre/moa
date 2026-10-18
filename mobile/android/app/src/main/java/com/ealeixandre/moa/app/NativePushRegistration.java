@@ -306,6 +306,11 @@ final class NativePushRegistration {
                 });
             } catch (PushException e) {
                 Log.i(TAG, "refresh: " + e.code);
+                // A refresh that did not register is not the hour's attempt:
+                // the next foreground tries again.
+                synchronized (this) {
+                    lastRefresh = 0;
+                }
             }
         });
     }

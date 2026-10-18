@@ -89,6 +89,7 @@ public class ReviewAndroidAdversarialTest {
             public String relayUrl() { return "https://push.example"; }
             public String fcmToken() { return "fcm-test-token"; }
             public long now() { return IncomingCallsTest.NOW; }
+            public void retryLater(long delayMillis, Runnable task) {}
             public NativeHttp.Response send(String method, String url, Map<String,String> headers, String body) {
                 sent.add(method + " " + url);
                 String json = url.endsWith("/status")
