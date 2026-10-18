@@ -218,6 +218,7 @@ func TestRequestCall_UnavailableToNonOwnerSessions(t *testing.T) {
 
 // F2-2 (I23): a new owner is at Never; request_call goes straight to writing.
 func TestOwnerCallLevel_DefaultNever(t *testing.T) {
+	pinSyncAskUser(t)
 	f := rcNewFixture(t, "grok-plan", "")
 	raw := f.mustRequest(http.MethodGet, "/api/owners/"+f.own.ID, nil, f.owner(), http.StatusOK)
 	var info struct {

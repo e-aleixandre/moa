@@ -151,7 +151,7 @@ func (q *questionService) inventory(enabled bool, session func() *ManagedSession
 			return nil
 		}
 		var b strings.Builder
-		b.WriteString("<open_questions>\nQuestions you asked that nobody has answered yet. Each answer arrives later as a <question_answer> event; do not ask them again, and apply the pending-answer rule to anything you do meanwhile. Use ask_user with action \"list\" for detail.\n")
+		b.WriteString("<open_questions>\nQuestions you asked that nobody has answered yet. Each answer arrives later as a question_answer event; do not ask them again, and apply the pending-answer rule to anything you do meanwhile. Use ask_user with action \"list\" for detail.\n")
 		for i, ask := range open {
 			if i == inventoryMaxQuestions {
 				fmt.Fprintf(&b, "(and %d more)\n", len(open)-i)
