@@ -3,13 +3,10 @@ package serve
 import (
 	"context"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/e-aleixandre/moa/pkg/askuser"
-	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
