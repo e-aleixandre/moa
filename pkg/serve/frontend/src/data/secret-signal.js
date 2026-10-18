@@ -31,20 +31,20 @@ function cardShown(state, id) {
 
 export function reconcileSecretSignal(state = store.get()) {
   const pending = new Set();
-  // Requests already open when the list first loads (a reload, a reconnect)
-  // are not news: they show, but make no sound and no vibration.
-  // The base is a matter of data, not of time or taps: whatever the first
-  // roster brings, until the list is marked loaded, is the base.
+  // A request id is known from the first time this client sees it, in any
+  // circumstance. Only an id first seen with the list loaded and its session
+  // out of view is news worth a sound or a buzz; a reload, a reconnect or a
+  // card you were looking at never turns a known id into news again.
   const loading = state.sessionsLoaded === false;
-  if (loading) {
-    for (const sess of Object.values(state.sessions)) for (const id of sess.secretIds || []) alerted.add(id);
-  }
   for (const sess of Object.values(state.sessions)) {
     const ids = (sess.secretIds || []).filter((id) => !dismissed.has(id));
     for (const id of sess.secretIds || []) pending.add(id);
     const key = ids.join(',');
     const on = raised.get(sess.id);
-    if (!ids.length || cardShown(state, sess.id)) {
+    const shown = cardShown(state, sess.id);
+    const news = (sess.secretIds || []).filter((id) => !alerted.has(id));
+    for (const id of news) alerted.add(id);
+    if (!ids.length || shown) {
       if (on) { removeToast(on.toast); raised.delete(sess.id); }
       continue;
     }
@@ -64,8 +64,7 @@ export function reconcileSecretSignal(state = store.get()) {
         onDismiss: () => { for (const id of ids) dismissed.add(id); },
       }),
     });
-    if (ids.some((id) => !alerted.has(id))) {
-      for (const id of ids) alerted.add(id);
+    if (!loading && news.some((id) => ids.includes(id))) {
       alertAway(title, 'Needs a password', state.soundEnabled);
     }
   }

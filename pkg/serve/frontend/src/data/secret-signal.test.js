@@ -293,3 +293,25 @@ test('a toast raised without an id never replaces another toast', () => {
     expect(getToasts().filter((x) => ids.includes(x.id))).toHaveLength(2);
   } finally { Math.random = real; }
 });
+
+test('a request seen with its card visible never buzzes later, not even after a reconnect', () => {
+  stopWatching();
+  let buzzes = 0;
+  globalThis.navigator = { vibrate: () => { buzzes += 1; }, userActivation: { hasBeenActive: true } };
+  globalThis.window = {};
+  try {
+    stopWatching = watchSecretSignal();
+    look();
+    handleWsSecretRequest('c1', REQ, 3);
+    expect(secretToasts()).toHaveLength(0);
+    expect(buzzes).toBe(0);
+    // The socket drops and reconnects: history is rehydrated, the request is the same.
+    updateSession('c1', { historyHydrated: false });
+    expect(buzzes).toBe(0);
+    updateSession('c1', { historyHydrated: true });
+    expect(buzzes).toBe(0);
+    setState({ activeSession: 'other' });
+    expect(secretToasts()).toHaveLength(1);
+    expect(buzzes).toBe(0);
+  } finally { delete globalThis.window; }
+});
