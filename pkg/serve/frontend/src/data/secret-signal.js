@@ -29,8 +29,16 @@ function cardShown(state, id) {
   return isPresent(state, id) && !(state.isMobile && state.drawerOpen);
 }
 
+let baselined = false;
+
 export function reconcileSecretSignal(state = store.get()) {
   const pending = new Set();
+  // Requests already open when the list first loads (a reload, a reconnect)
+  // are not news: they show, but make no sound and no vibration.
+  if (!baselined && state.sessionsLoaded !== false) {
+    baselined = true;
+    for (const sess of Object.values(state.sessions)) for (const id of sess.secretIds || []) alerted.add(id);
+  }
   for (const sess of Object.values(state.sessions)) {
     const ids = (sess.secretIds || []).filter((id) => !dismissed.has(id));
     for (const id of sess.secretIds || []) pending.add(id);
@@ -43,10 +51,14 @@ export function reconcileSecretSignal(state = store.get()) {
     if (on?.key === key) continue;
     if (on) removeToast(on.toast);
     const title = sess.title || 'Untitled';
+    // The id names the session and its requests: raising it again (a frame that
+    // looked like presence, then did not) replaces the toast, never doubles it.
     raised.set(sess.id, {
       key,
       toast: addToast({
+        id: `secret:${sess.id}:${key}`,
         sessionId: sess.id, title, type: 'attention', sticky: true,
+        onOpen: () => enterSecretSession(sess.id),
         detail: 'Stopped until you enter the password',
         action: { label: 'Enter', onClick: () => enterSecretSession(sess.id) },
         onDismiss: () => { for (const id of ids) dismissed.add(id); },
@@ -86,5 +98,6 @@ export function watchSecretSignal() {
     raised.clear();
     dismissed.clear();
     alerted.clear();
+    baselined = false;
   };
 }

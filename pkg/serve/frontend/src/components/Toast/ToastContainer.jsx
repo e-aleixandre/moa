@@ -32,8 +32,8 @@ export function ToastContainer() {
   const stackRef = useFlip([shown.map((s) => `${s.item.id}${s.leaving ? "-" : ""}`).join("\n")]);
 
   const handleClick = useCallback((toast) => {
-    if (toast.sessionId) openSession(toast.sessionId);
-    else toast.onOpen?.();
+    if (toast.onOpen) toast.onOpen();
+    else if (toast.sessionId) openSession(toast.sessionId);
     removeToast(toast.id);
   }, []);
 

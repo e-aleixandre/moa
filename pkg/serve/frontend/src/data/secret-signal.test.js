@@ -241,3 +241,40 @@ test('F5: a standing toast docks below the phone chrome instead of covering it',
   expect(jsx).toContain('has-sticky');
   expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*\.toast-stack\.has-sticky\s*\{[^}]*top:\s*calc\(var\(--shell-top\) \+ 64px\)/);
 });
+
+test('the toast keeps one identity per request: leaving and coming back is the same toast, not a second one', async () => {
+  await poll(['sec_a']);
+  const first = secretToasts()[0].id;
+  look();
+  expect(secretToasts()).toHaveLength(0);
+  setState({ activeSession: 'other' });
+  expect(secretToasts()).toHaveLength(1);
+  expect(secretToasts()[0].id).toBe(first);
+  // Raising it again while it stands replaces it.
+  const { addToast } = await import('./notifications.js');
+  addToast({ ...secretToasts()[0] });
+  expect(secretToasts()).toHaveLength(1);
+});
+
+test('tapping the toast body does what Enter does: closes the drawer, opens the card', async () => {
+  setState({ drawerOpen: true, activeSession: 'other' });
+  await poll(['sec_a']);
+  secretToasts()[0].onOpen();
+  expect(store.get().drawerOpen).toBe(false);
+  expect(store.get().activeSession).toBe('c1');
+});
+
+test('a request already open at load makes no vibration; a new one does', () => {
+  stopWatching();
+  let buzzes = 0;
+  globalThis.navigator = { vibrate: () => { buzzes += 1; } };
+  globalThis.window = {};
+  try {
+    setState({ sessions: { c1: child({ secretIds: ['sec_old'] }) }, sessionsLoaded: true });
+    stopWatching = watchSecretSignal();
+    expect(secretToasts()).toHaveLength(1);
+    expect(buzzes).toBe(0);
+    updateSession('c1', { secretIds: ['sec_old', 'sec_new'] });
+    expect(buzzes).toBe(1);
+  } finally { delete globalThis.window; }
+});

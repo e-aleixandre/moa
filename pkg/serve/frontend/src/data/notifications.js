@@ -17,8 +17,10 @@ function notifyToastListeners() {
 // toast (wake-on-event coalesces a burst of arrivals into a single count) can
 // remove the previous one instead of stacking a second.
 export function addToast(toast) {
-  const id = Date.now() + Math.random();
-  toasts = [...toasts, { ...toast, id }];
+  // A caller that owns a toast by identity passes a stable id: the same toast
+  // raised again replaces itself instead of standing twice.
+  const id = toast.id ?? Date.now() + Math.random();
+  toasts = [...toasts.filter((t) => t.id !== id), { ...toast, id }];
   notifyToastListeners();
   if (!toast.sticky) setTimeout(() => removeToast(id), toast.duration ?? 5000);
   return id;
@@ -79,7 +81,8 @@ function browserNotify(title, body) {
 export function alertAway(title, body, soundEnabled) {
   if (soundEnabled) initAudio().then(playBeep);
   browserNotify(title, body);
-  if (navigator.vibrate) navigator.vibrate(200);
+  // Chromium blocks vibration until the page has had a tap; skip rather than log.
+  if (navigator.vibrate && navigator.userActivation?.hasBeenActive !== false) navigator.vibrate(200);
 }
 
 // Question/permission — called for non-visible sessions. `detail` says what
