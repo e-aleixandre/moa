@@ -267,7 +267,7 @@ func (r *callRequestRegistry) outcome(req *callRequest) (state, why string) {
 
 // announce tells the user a request rings. Ring rings the iPhones through
 // CallKit when one can ring; otherwise, and for Ask first, it is the urgent
-// call_request push (none while the conversation is in view). Open apps ring
+// call_request push (none while any client is in view). Open apps ring
 // from the requests feed either way.
 func (r *callRequestRegistry) announce(ctx context.Context, req *callRequest) {
 	if !r.isState(req.ID, crRinging) {
@@ -287,7 +287,9 @@ func (r *callRequestRegistry) announce(ctx context.Context, req *callRequest) {
 	}
 	r.m.pushPolicy.Handle(push.Signal{
 		Kind: push.KindCallRequest, SessionID: req.SessionID, Title: sess.title(), Headline: headline,
-		RequestID: id, Watched: sess.presence.watched(),
+		// Any visible client rings itself from the requests feed, whatever
+		// conversation it shows: a system notification would only duplicate it.
+		RequestID: id, Watched: r.m.anyViewerVisible(),
 		StillPending: func() bool { return r.isState(id, crRinging) },
 	})
 }

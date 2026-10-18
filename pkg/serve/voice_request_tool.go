@@ -99,6 +99,13 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge) c
 			if bridge == nil {
 				return core.ErrorResult("No call (" + whyText[why] + ") and this session cannot ask in writing."), nil
 			}
+			if req != nil && why == whyMissed {
+				if sess, ok := m.Get(sessionID); ok {
+					from := req.OwnerName
+					sess.missedCallFrom.Store(&from)
+					defer sess.missedCallFrom.Store(nil)
+				}
+			}
 			res := askuser.Ask(ctx, bridge, []askuser.Question{question}, requiresTap)
 			var b strings.Builder
 			b.WriteString("No call: " + whyText[why] + ". Your written_fallback was asked in writing instead.")

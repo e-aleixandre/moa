@@ -71,6 +71,12 @@ type ManagedSession struct {
 	// must not read disk: every report emission and every owner listing
 	// consults it. Written only by SetOwnerDetached.
 	ownerDetached atomic.Bool
+
+	// missedCallFrom is the owner whose call request went unanswered, set
+	// while its written question is open: that question's push then reads
+	// «Missed call from <owner>» in place of the ringing notification it
+	// replaces (same tag). Empty otherwise.
+	missedCallFrom atomic.Pointer[string]
 	// ownerDetachMu linearizes detach with report admission: a report that has
 	// not entered the coordinator before detach returns cannot enter afterward.
 	ownerDetachMu sync.Mutex
@@ -1623,6 +1629,25 @@ func (m *Manager) invalidateSavedCache() {
 	m.savedCacheMu.Lock()
 	m.savedCache = nil
 	m.savedCacheMu.Unlock()
+}
+
+// anyViewerVisible reports whether any client has any conversation visible
+// right now (see presence.go).
+func (m *Manager) anyViewerVisible() bool {
+	m.mu.RLock()
+	sessions := make([]*ManagedSession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s != nil {
+			sessions = append(sessions, s)
+		}
+	}
+	m.mu.RUnlock()
+	for _, s := range sessions {
+		if s.presence.watched() {
+			return true
+		}
+	}
+	return false
 }
 
 // Get returns a managed session by ID.

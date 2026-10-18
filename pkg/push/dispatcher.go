@@ -21,6 +21,9 @@ type Notification struct {
 	Body      string `json:"body,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
 	Tag       string `json:"tag,omitempty"` // coalesces same-session notifications on the device
+	// RequestID names the owner's call request of a call_request push, so a
+	// tap opens that request's card. Additive: absent on every other kind.
+	RequestID string `json:"request_id,omitempty"`
 	// Inbox asks the client to open the event inbox (pending events have no
 	// session to deep-link). The service worker turns this into /?inbox=1.
 	Inbox bool `json:"inbox,omitempty"`

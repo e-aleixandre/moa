@@ -75,6 +75,11 @@ func (m *Manager) subscribePush(sess *ManagedSession) {
 		approvals := sess.runtime.Context().Approvals
 		s := signal(kind)
 		s.RequestID = id
+		if kind == push.KindAsk {
+			if from := sess.missedCallFrom.Swap(nil); from != nil {
+				s.Headline = "Missed call from " + *from
+			}
+		}
 		s.StillPending = func() bool {
 			if !allowed() {
 				return false
