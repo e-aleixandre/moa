@@ -261,6 +261,8 @@ describe("Android incoming calls", () => {
     expect(notifier).toContain("AudioAttributes.USAGE_NOTIFICATION_RINGTONE");
     expect(notifier).toContain("Notification.FLAG_INSISTENT");
     expect(notifier).toContain(".setTimeoutAfter(");
+    // Without the channel a missed call is dropped silently (seen on the emulator).
+    expect(notifier.indexOf("PushNotifier.ensureChannels(context)")).toBeGreaterThan(notifier.indexOf("static void missed("));
     const block = manifest.slice(manifest.indexOf('android:name=".IncomingCallActivity"'), manifest.indexOf("/>", manifest.indexOf('android:name=".IncomingCallActivity"')));
     expect(block).toContain('android:exported="false"');
     expect(block).toContain('android:showWhenLocked="true"');

@@ -84,6 +84,9 @@ final class IncomingCallNotifier {
     }
 
     static void missed(Context context, IncomingCalls.Ringing ringing) {
+        // The app may never have shown an alert: the channel would not exist
+        // and the system would drop the notification without a word.
+        PushNotifier.ensureChannels(context);
         NotificationManagerCompat manager = NotificationManagerCompat.from(context);
         if (!manager.areNotificationsEnabled()) return;
         Intent open = new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
