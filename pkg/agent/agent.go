@@ -457,6 +457,10 @@ type Agent struct {
 	// can still be debited to. Cleared, with its debits, when it finishes.
 	bgOwner *loopConfig
 	bgWG    sync.WaitGroup
+
+	// keepAlive keeps the prompt cache warm between requests (keepalive.go);
+	// nil = off.
+	keepAlive atomic.Pointer[keepAlive]
 }
 
 // AgentConfig configures an Agent.
@@ -1900,6 +1904,8 @@ func (a *Agent) Abort() {
 	a.mu.Unlock()
 	a.steerMu.Unlock()
 	a.emitBG(evt, changed)
+	// A stop is not a pause: nothing is kept warm until the next request.
+	a.keepAliveSuspend()
 }
 
 // MarkerRunTimedOut is the synthetic assistant-message text inserted when a run
@@ -2109,6 +2115,9 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		a.mu.Unlock()
 		a.runTerminal = false
 		a.steerMu.Unlock()
+		if ka := a.keepAlive.Load(); ka != nil {
+			ka.runEnded()
+		}
 	}()
 
 	// Publish this agent's attachment capability on the run context, so shared

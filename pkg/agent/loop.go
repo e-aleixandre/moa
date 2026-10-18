@@ -320,6 +320,14 @@ func withoutForeignThinking(msgs []core.Message, model core.Model, program strin
 	return out
 }
 
+// keepAlive is the agent's cache keep-alive, nil when it is off.
+func (cfg *loopConfig) keepAlive() *keepAlive {
+	if cfg.agent == nil {
+		return nil
+	}
+	return cfg.agent.keepAlive.Load()
+}
+
 func (cfg *loopConfig) requestOptions() core.StreamOptions {
 	opts := cfg.streamOpts
 	if cfg.fast != nil {
@@ -827,6 +835,9 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				}
 			}
 
+			if ka := cfg.keepAlive(); ka != nil {
+				ka.sending(req, cfg.provider, cfg.state, cfg.requestRevision)
+			}
 			ch, err := cfg.provider.Stream(ctx, req)
 			if err != nil {
 				if errors.Is(err, core.ErrProviderReconfigured) {
@@ -907,6 +918,13 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				continue
 			}
 			break
+		}
+		if ka := cfg.keepAlive(); ka != nil && !recheckContext {
+			var settled *core.Message
+			if streamErr == nil && !emptyRetry {
+				settled = assistantMsg
+			}
+			ka.settled(settled)
 		}
 		if emptyRetry {
 			inTurn = false
@@ -1171,7 +1189,18 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 
 		// Execute tool calls concurrently.
+		ka := cfg.keepAlive()
+		if ka != nil {
+			names := make([]string, 0, len(toolCalls))
+			for _, tc := range toolCalls {
+				names = append(names, tc.ToolName)
+			}
+			ka.tools(names)
+		}
 		claimed, allRejected := executeTools(ctx, cfg, toolCalls, repeated)
+		if ka != nil {
+			ka.tools(nil)
+		}
 		if allRejected {
 			lastToolSig, repeatCount = prevSig, prevCount
 		}
