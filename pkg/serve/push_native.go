@@ -138,7 +138,6 @@ func handlePushNativeRegister(mgr *Manager, dest pushDestination) http.HandlerFu
 		if err != nil || len(secret) != 32 ||
 			len(body.Handle) < 40 || len(body.Handle) > 1024 || !nativeHandlePattern.MatchString(body.Handle) ||
 			(provider != "apns" && provider != "fcm") ||
-			(voip && provider != "apns") ||
 			(body.Env != "sandbox" && body.Env != "production") ||
 			(provider == "fcm" && body.Env != "production") ||
 			!expires.After(now) || expires.After(now.Add(nativeHandleMaxAge)) {
