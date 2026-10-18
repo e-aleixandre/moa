@@ -33,6 +33,10 @@ var ErrVerifyRunning = errors.New("verify already running")
 // queued.
 var ErrNotIdle = errors.New("session is not idle")
 
+// ErrNothingToContinue is returned by ContinueRun when the conversation already
+// ends in the model's reply, so there is no work to resume.
+var ErrNothingToContinue = errors.New("nothing to continue")
+
 // ErrSessionNotSaved is returned when a compaction could not be saved and the
 // session's state has not been saved again since. Nothing starts on its own
 // until then; a new attempt by the user saves it first and fails with this
@@ -101,6 +105,16 @@ type SendPrompt struct {
 	// RefuseQuestion rejects the prompt with ErrSessionQuestion while the
 	// session is in StatePermission. Checked under abortMu, before admission.
 	RefuseQuestion bool
+}
+
+// ContinueRun resumes a conversation whose last message is waiting for the
+// model without adding one: the run that was to read it ended before it did
+// (a restart). Source is the provenance the run carries, as a prompt's
+// Custom["source"] would. It fails with ErrNothingToContinue when the
+// conversation does not end in something the model owes a reply to.
+type ContinueRun struct {
+	SessionID string
+	Source    string
 }
 
 // SendPromptWithContent starts an agent run with structured content (e.g. images).

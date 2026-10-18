@@ -314,6 +314,30 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		return nil
 	})
 
+	b.OnCommand(func(cmd ContinueRun) error {
+		sctx.abortMu.Lock()
+		defer sctx.abortMu.Unlock()
+		if err := reconcileStorage(sctx); err != nil {
+			return err
+		}
+		if sctx.Agent.QueueLen() > 0 {
+			return ErrNotIdle
+		}
+		// A request must end in input for the model: after its own reply there
+		// is nothing owed.
+		msgs := sctx.Agent.Messages()
+		last := ""
+		for i := len(msgs) - 1; i >= 0 && last == ""; i-- {
+			if msgs[i].IsLLMMessage() {
+				last = msgs[i].Role
+			}
+		}
+		if last != "user" && last != "tool_result" {
+			return ErrNothingToContinue
+		}
+		return startRunWithOrigin(sctx, "continue", RunOrigin{Explicit: true, Source: cmd.Source}, sctx.Agent.Continue)
+	})
+
 	b.OnCommand(func(cmd SendPromptWithContent) error {
 		sctx.abortMu.Lock()
 		defer sctx.abortMu.Unlock()

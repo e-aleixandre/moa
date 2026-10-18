@@ -234,6 +234,49 @@ func (d *noticeDispatcher) pass(ctx context.Context) {
 			}
 		}
 	}
+	if trig.retryAll || trig.retryWaiting {
+		d.wakeOwed(ctx)
+	}
+}
+
+// wakeOwed loads the saved sessions that owe a run to an answer already in
+// their transcript (the process died while the model was reading it). Loading
+// is what continues the run (questionService.continueDue); a full house waits
+// for the next tick. Must run under d.mu.
+func (d *noticeDispatcher) wakeOwed(ctx context.Context) {
+	m := d.m
+	if m.questions == nil {
+		return
+	}
+	due, err := m.tasks.DueQuestionWork(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("task notices: reading owed answer work failed", "error", err)
+		}
+		return
+	}
+	tried := map[string]bool{}
+	for _, question := range due {
+		id := question.SessionID
+		if _, live := m.Get(id); live || tried[id] || ctx.Err() != nil {
+			continue
+		}
+		tried[id] = true
+		saved, _, err := session.FindSessionReadOnly(m.sessionBaseDir, id)
+		switch {
+		case errors.Is(err, session.ErrNotFound):
+			_, _ = m.tasks.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkStopped)
+			continue
+		case err != nil || !transcriptHasNotice(saved, question.EventID):
+			continue
+		}
+		if n, err := m.tasks.Notice(ctx, question.EventID); err != nil || n.State == tasks.NoticeFailed || n.Method != tasks.MethodRun {
+			continue
+		}
+		if _, err := m.resumeSession(id, maxNoticeLoadedSessions); err != nil && !errors.Is(err, ErrAutomationTooManySessions) && !errors.Is(err, ErrBusy) {
+			slog.Warn("task notices: loading a session that owes a run failed", "session", id, "error", err)
+		}
+	}
 }
 
 // setState moves n to state/reason unless it is already there, so a pass that

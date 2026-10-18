@@ -77,6 +77,8 @@ type AgentController interface {
 	SendWithMsgIDCustom(ctx context.Context, prompt, msgID string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithCustom(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
 	SendWithCustomAnnounced(ctx context.Context, prompt string, custom map[string]any) ([]core.AgentMessage, error)
+	// Continue runs over the conversation as it is, appending no message.
+	Continue(ctx context.Context) ([]core.AgentMessage, error)
 	SendWithContent(ctx context.Context, content []core.Content) ([]core.AgentMessage, error)
 	SendWithContentMsgID(ctx context.Context, content []core.Content, msgID string) ([]core.AgentMessage, error)
 	// SendWithContentAnnounced is SendWithContentMsgID that also announces the

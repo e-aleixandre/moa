@@ -774,6 +774,17 @@ func (a *Agent) SendWithCustomAnnounced(ctx context.Context, prompt string, cust
 	})
 }
 
+// Continue runs the agent over the conversation as it stands, appending
+// nothing: the work a message already in history owes the model when the run
+// that was to read it never finished (a restart).
+func (a *Agent) Continue(ctx context.Context) ([]core.AgentMessage, error) {
+	return a.execute(ctx, func() {
+		if a.state.Model.ID == "" {
+			a.state.Model = a.config.Model
+		}
+	})
+}
+
 // SendPrepareCompact runs the internal pre-compaction turn. It is the only
 // entry point that grants the checkpoint permission bypass, and it always
 // constructs that tool from slot rather than accepting a caller-provided tool.

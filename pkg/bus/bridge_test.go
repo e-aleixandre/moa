@@ -406,6 +406,10 @@ func (f *fakeAgent) SendWithCustomAnnounced(ctx context.Context, prompt string, 
 	return f.Send(ctx, prompt)
 }
 
+func (f *fakeAgent) Continue(ctx context.Context) ([]core.AgentMessage, error) {
+	return f.Send(ctx, "")
+}
+
 func (f *fakeAgent) SendPrepareCompact(ctx context.Context, prompt string, _ *sessioncheckpoint.Slot, _ string) ([]core.AgentMessage, error) {
 	return f.Send(ctx, prompt)
 }

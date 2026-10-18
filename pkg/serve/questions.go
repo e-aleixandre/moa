@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -256,33 +257,79 @@ func (q *questionService) attach(sess *ManagedSession) {
 		return q.Answer(q.m.baseCtx, sess.ID, id, answers, responder)
 	})
 	q.seed(sess)
-	sess.runtime.Bus.Subscribe(func(e bus.RunEnded) { q.runEnded(sess.ID, e) })
+	sess.runtime.Bus.Subscribe(func(e bus.RunEnded) { q.runEnded(sess, e) })
 }
 
-// runEnded settles the continuation an admitted answer owed: the run that read
-// it is over, whatever came of it. An answer not yet admitted still owes its
-// work, and a Stop already marked its own as stopped.
-//
-// TODO(phase 2): a restart that finds work still due after the answer was
-// admitted should continue the run (ContinueRun); phase 1 only records it.
-func (q *questionService) runEnded(sessionID string, e bus.RunEnded) {
+// runEnded settles the continuation an admitted answer owed: the run that
+// read it is over. An answer not yet admitted still owes its work, a Stop
+// already marked its own as stopped, and a run that never got to read it (the
+// receipt could not be saved) or that a shutdown cut short leaves it due, for
+// the next time the session is loaded.
+func (q *questionService) runEnded(sess *ManagedSession, e bus.RunEnded) {
 	ctx := q.m.baseCtx
+	if e.Cancelled || errors.Is(e.Err, agent.ErrAdmissionNotSaved) || ctx.Err() != nil {
+		return
+	}
 	due, err := q.repo.DueQuestionWork(ctx)
 	if err != nil {
-		slog.Warn("questions: reading owed work failed", "session", sessionID, "error", err)
+		slog.Warn("questions: reading owed work failed", "session", sess.ID, "error", err)
 		return
 	}
 	for _, question := range due {
-		if question.SessionID != sessionID {
+		if question.SessionID != sess.ID || !hasNotice(sess.History(), question.EventID) {
+			continue
+		}
+		if _, err := q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkDone); err != nil {
+			slog.Warn("questions: settling owed work failed", "session", sess.ID, "error", err)
+		}
+	}
+}
+
+// continueDue is for a session just loaded from disk: an answer that reached
+// its saved transcript and still owes a run (the process died before the run
+// ended) gets that run now, over the conversation as saved, with no new
+// message. Stop's fence decides under the same lock, so a stopped answer
+// owes nothing, and the work stays due until its own run ends.
+func (q *questionService) continueDue(sess *ManagedSession, saved *session.Session) {
+	if q == nil {
+		return
+	}
+	ctx := q.m.baseCtx
+	unlock := q.lock(sess.ID)
+	defer unlock()
+	due, err := q.repo.DueQuestionWork(ctx)
+	if err != nil {
+		slog.Warn("questions: reading owed work failed", "session", sess.ID, "error", err)
+		return
+	}
+	var owed []tasks.Question
+	for _, question := range due {
+		if question.SessionID != sess.ID || !transcriptHasNotice(saved, question.EventID) {
 			continue
 		}
 		n, err := q.repo.Notice(ctx, question.EventID)
-		if err != nil || n.State != tasks.NoticeDelivered {
-			continue
+		switch {
+		case err != nil:
+			slog.Warn("questions: reading an answer's notice failed", "session", sess.ID, "error", err)
+		case n.State == tasks.NoticeFailed:
+			// The answer was refused its delivery (rewound, deleted): no run is owed.
+			_, _ = q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkStopped)
+		case n.Method == tasks.MethodRun:
+			owed = append(owed, question)
 		}
-		if _, err := q.repo.SetQuestionWork(ctx, question.EventID, "due", "done"); err != nil {
-			slog.Warn("questions: settling owed work failed", "session", sessionID, "error", err)
+	}
+	if len(owed) == 0 {
+		return
+	}
+	switch err := sess.runtime.Bus.Execute(bus.ContinueRun{SessionID: sess.ID, Source: "question_answer"}); {
+	case err == nil:
+	case errors.Is(err, bus.ErrNothingToContinue):
+		// The conversation already ends in the model's reply: the run did finish.
+		for _, question := range owed {
+			_, _ = q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkDone)
 		}
+	default:
+		slog.Warn("questions: continuing a session's owed run failed", "session", sess.ID, "error", err)
 	}
 }
 
