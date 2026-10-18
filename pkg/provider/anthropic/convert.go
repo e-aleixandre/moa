@@ -133,11 +133,7 @@ func buildRequestBodyWith(req core.Request, isOAuth bool, mutate func(*anthropic
 	}
 
 	// Messages — merge consecutive same-role messages (Anthropic requires alternation)
-	// An ephemeral tail (a block that exists only in this request) is converted
-	// after the cache breakpoints are placed, so they land on the conversation
-	// the next request will also have.
-	base, tail := splitEphemeralTail(req.Messages)
-	ar.Messages = convertMessages(base, isOAuth)
+	ar.Messages = convertMessages(req.Messages, isOAuth)
 
 	// Tools — remap names for OAuth
 	if len(req.Tools) > 0 {
@@ -197,9 +193,7 @@ func buildRequestBodyWith(req core.Request, isOAuth bool, mutate func(*anthropic
 	// 2. Last tool definition (tool specs are identical turn-to-turn)
 	// 3. Last content block of the last user message (caches conversation history)
 	addCacheBreakpoints(&ar, req.Options.CacheRetention)
-	if len(tail) > 0 {
-		ar.Messages = appendMerged(ar.Messages, convertMessages(tail, isOAuth))
-	}
+	stripEphemeralMarks(ar.Messages)
 
 	if mutate != nil {
 		mutate(&ar)
@@ -207,28 +201,30 @@ func buildRequestBodyWith(req core.Request, isOAuth bool, mutate func(*anthropic
 	return json.Marshal(ar)
 }
 
-// splitEphemeralTail separates the request-only messages at the end.
-func splitEphemeralTail(msgs []core.Message) (base, tail []core.Message) {
-	i := len(msgs)
-	for i > 0 && msgs[i-1].Ephemeral {
-		i--
+// ephemeralMark tags, on the way to the wire, a content block that exists only
+// in this request (core.Message.Ephemeral): a cache breakpoint is never put on
+// one, since the next request will not have it. stripEphemeralMarks removes the
+// tag before the body is serialized.
+const ephemeralMark = "\x00ephemeral"
+
+func markEphemeral(apiMsg map[string]any) {
+	content, _ := apiMsg["content"].([]any)
+	for _, c := range content {
+		if block, ok := c.(map[string]any); ok {
+			block[ephemeralMark] = true
+		}
 	}
-	return msgs[:i], msgs[i:]
 }
 
-// appendMerged adds converted messages, merging a same-role neighbour as
-// convertMessages does.
-func appendMerged(result, add []map[string]any) []map[string]any {
-	for _, m := range add {
-		if n := len(result); n > 0 && result[n-1]["role"] == m["role"] {
-			prev, _ := result[n-1]["content"].([]any)
-			more, _ := m["content"].([]any)
-			result[n-1]["content"] = append(prev, more...)
-			continue
+func stripEphemeralMarks(msgs []map[string]any) {
+	for _, m := range msgs {
+		content, _ := m["content"].([]any)
+		for _, c := range content {
+			if block, ok := c.(map[string]any); ok {
+				delete(block, ephemeralMark)
+			}
 		}
-		result = append(result, m)
 	}
-	return result
 }
 
 // manyImageThreshold is the number of image blocks in a single request above
@@ -350,6 +346,9 @@ func convertMessages(msgs []core.Message, isOAuth bool) []map[string]any {
 		apiMsg := convertMessage(msg, isOAuth, retire)
 		if apiMsg == nil {
 			continue
+		}
+		if msg.Ephemeral {
+			markEphemeral(apiMsg)
 		}
 
 		// Merge consecutive same-role messages
@@ -704,15 +703,24 @@ func addCacheBreakpoints(ar *anthropicRequest, ttl string) {
 	}
 
 	// 3. Last content block of the final user message (caches conversation history).
-	// Walk backwards to find the last user-role message.
+	// Walk backwards to find the last user-role message. A block that exists
+	// only in this request (the open-questions inventory) is passed over,
+	// wherever it sits, so the breakpoint stays on what the next request
+	// shares.
 	for i := len(ar.Messages) - 1; i >= 0; i-- {
 		if ar.Messages[i]["role"] == "user" {
-			if content, ok := ar.Messages[i]["content"].([]any); ok && len(content) > 0 {
-				if block, ok := content[len(content)-1].(map[string]any); ok {
+			content, _ := ar.Messages[i]["content"].([]any)
+			if len(content) == 0 {
+				return
+			}
+			for j := len(content) - 1; j >= 0; j-- {
+				if block, ok := content[j].(map[string]any); ok && block[ephemeralMark] == nil {
 					block["cache_control"] = cc
+					return
 				}
 			}
-			break
+			// Nothing but request-only blocks: the previous user message is
+			// what the next request shares.
 		}
 	}
 }

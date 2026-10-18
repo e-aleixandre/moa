@@ -1828,8 +1828,10 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 				projected[key] = value
 			}
 		}
-		if answers, ok := custom["answers"].([]string); ok {
-			projected["answers"] = append([]string(nil), answers...)
+		for _, key := range []string{"answers", "questions"} {
+			if list, ok := custom[key].([]string); ok {
+				projected[key] = append([]string(nil), list...)
+			}
 		}
 		if r, ok := askuser.ResponderFromCustom(custom[askuser.CustomKey]); ok {
 			projected[askuser.CustomKey] = r

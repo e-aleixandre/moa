@@ -145,10 +145,35 @@ func (q *questionService) close(ctx context.Context, sessionID, id string, to ta
 
 // Bounds of the open-questions block: it is read on every request, so it stays
 // small whatever the session has asked.
+//
+// The bounds are on what is serialized: at most 8 questions listed, each one's
+// text (all its items together) at most 400 bytes once escaped, and the whole
+// block at most inventoryMaxBytes whatever those add up to.
 const (
 	inventoryMaxQuestions = 8
 	inventoryMaxText      = 400
+	inventoryMaxBytes     = 4608
 )
+
+// escapedPrefix is s, whitespace-normalized and XML-escaped, cut so the
+// escaped text is at most max bytes (an ellipsis included when it was cut).
+// It cuts the raw text rune by rune, so no entity or character is split.
+func escapedPrefix(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if escaped := xmlText(s); len(escaped) <= max {
+		return escaped
+	}
+	const ellipsis = "..."
+	var b strings.Builder
+	for _, r := range s {
+		piece := xmlText(string(r))
+		if b.Len()+len(piece) > max-len(ellipsis) {
+			break
+		}
+		b.WriteString(piece)
+	}
+	return b.String() + ellipsis
+}
 
 // inventory returns the per-request block that tells the model which of its
 // questions are still open. It is derived from the live projection, so it
@@ -169,26 +194,25 @@ func (q *questionService) inventory(enabled bool, session func() *ManagedSession
 		}
 		var b strings.Builder
 		b.WriteString("<open_questions>\nQuestions you asked that nobody has answered yet. Each answer arrives later as a question_answer event; do not ask them again, and apply the pending-answer rule to anything you do meanwhile. Use ask_user with action \"list\" for detail.\n")
+		const closing = "</open_questions>"
+		const more = "(and 99999 more)\n"
 		for i, ask := range open {
-			if i == inventoryMaxQuestions {
-				fmt.Fprintf(&b, "(and %d more)\n", len(open)-i)
-				break
-			}
 			tap := ""
 			if ask.RequiresTap {
 				tap = " requires the user's own tap"
 			}
-			fmt.Fprintf(&b, "- %s%s, asked %s:", ask.ID, tap, ask.RequestedAt.UTC().Format(time.RFC3339))
+			texts := make([]string, 0, len(ask.Questions))
 			for _, item := range ask.Questions {
-				text := item.Text
-				if len(text) > inventoryMaxText {
-					text = strings.ToValidUTF8(text[:inventoryMaxText], "") + "..."
-				}
-				fmt.Fprintf(&b, " %s", xmlText(strings.Join(strings.Fields(text), " ")))
+				texts = append(texts, item.Text)
 			}
-			b.WriteString("\n")
+			line := fmt.Sprintf("- %s%s, asked %s: %s\n", ask.ID, tap, ask.RequestedAt.UTC().Format(time.RFC3339), escapedPrefix(strings.Join(texts, " "), inventoryMaxText))
+			if i == inventoryMaxQuestions || b.Len()+len(line)+len(more)+len(closing) > inventoryMaxBytes {
+				fmt.Fprintf(&b, "(and %d more)\n", len(open)-i)
+				break
+			}
+			b.WriteString(line)
 		}
-		b.WriteString("</open_questions>")
+		b.WriteString(closing)
 		msg := core.NewUserMessage(b.String())
 		return &msg
 	}
@@ -793,9 +817,13 @@ func questionAnswerCustom(n tasks.Notice, q tasks.Question, run, steer bool) map
 		"title":             n.Title,
 		askuser.CustomKey:   q.Responder,
 		"answers":           append([]string(nil), q.Answers...),
-		"asked_at":          time.UnixMilli(q.AskedAt).UTC().Format(time.RFC3339),
-		"answered_at":       time.UnixMilli(q.ClosedAt).UTC().Format(time.RFC3339),
-		"autorun":           run,
+		// The questions as asked, so the answer's row can show what it answers
+		// without finding the call that posted them (it may be on another page
+		// of the history, or compacted away).
+		"questions":   questionTexts(q),
+		"asked_at":    time.UnixMilli(q.AskedAt).UTC().Format(time.RFC3339),
+		"answered_at": time.UnixMilli(q.ClosedAt).UTC().Format(time.RFC3339),
+		"autorun":     run,
 		// The loop saves the session before the model reads this message: the
 		// saved transcript is the admission's receipt (see core.CustomDurableAdmission).
 		core.CustomDurableAdmission: true,
@@ -804,6 +832,15 @@ func questionAnswerCustom(n tasks.Notice, q tasks.Question, run, steer bool) map
 		custom["steer"] = true
 	}
 	return custom
+}
+
+// questionTexts are the literal texts of q's questions, in order.
+func questionTexts(q tasks.Question) []string {
+	out := make([]string, len(q.Questions))
+	for i, item := range q.Questions {
+		out[i] = item.Text
+	}
+	return out
 }
 
 // isAdmissionReceipt reports whether a message or steer is an event whose

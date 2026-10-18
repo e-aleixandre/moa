@@ -699,16 +699,18 @@ func projectWSMessageCustom(custom map[string]any) map[string]any {
 // projectQuestionAnswer copies the recorded answers and responder of a
 // question_answer message; they are []string live and []any after a reload.
 func projectQuestionAnswer(custom, projected map[string]any) {
-	switch answers := custom["answers"].(type) {
-	case []string:
-		projected["answers"] = append([]string(nil), answers...)
-	case []any:
-		out := make([]string, 0, len(answers))
-		for _, a := range answers {
-			s, _ := a.(string)
-			out = append(out, s)
+	for _, key := range []string{"answers", "questions"} {
+		switch list := custom[key].(type) {
+		case []string:
+			projected[key] = append([]string(nil), list...)
+		case []any:
+			out := make([]string, 0, len(list))
+			for _, a := range list {
+				s, _ := a.(string)
+				out = append(out, s)
+			}
+			projected[key] = out
 		}
-		projected["answers"] = out
 	}
 	if r, ok := askuser.ResponderFromCustom(custom[askuser.CustomKey]); ok {
 		projected[askuser.CustomKey] = r

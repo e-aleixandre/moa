@@ -1242,3 +1242,53 @@ func TestCacheBreakpoints_SkipEphemeralTail(t *testing.T) {
 		t.Errorf("the ephemeral block carries a breakpoint or is missing: %v", tail)
 	}
 }
+
+// A pause_turn or continue resubmit puts the inventory before the paused reply,
+// no longer at the tail: the breakpoint still stays off it, on the input the
+// next request shares, and the internal tag never reaches the wire.
+func TestCacheBreakpoints_SkipFrozenEphemeralBlock(t *testing.T) {
+	block := core.NewUserMessage("<open_questions>q_1</open_questions>")
+	block.Ephemeral = true
+	for _, reason := range []string{"pause_turn", "continue"} {
+		t.Run(reason, func(t *testing.T) {
+			req := core.Request{
+				Model: core.Model{ID: "claude-sonnet-4-6"},
+				Messages: []core.Message{
+					core.NewUserMessage("real input"), block,
+					{Role: "assistant", Content: []core.Content{core.TextContent("unfinished reply")}, StopReason: reason},
+				},
+			}
+			data, err := buildRequestBody(req, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), `\u0000`) {
+				t.Fatalf("the internal tag reached the wire: %s", data)
+			}
+			var body struct {
+				Messages []struct {
+					Role    string           `json:"role"`
+					Content []map[string]any `json:"content"`
+				} `json:"messages"`
+			}
+			if err := json.Unmarshal(data, &body); err != nil {
+				t.Fatal(err)
+			}
+			var onInput, onBlock bool
+			for _, m := range body.Messages {
+				for _, c := range m.Content {
+					text := fmt.Sprint(c["text"])
+					if c["cache_control"] != nil && strings.Contains(text, "open_questions") {
+						onBlock = true
+					}
+					if c["cache_control"] != nil && text == "real input" {
+						onInput = true
+					}
+				}
+			}
+			if onBlock || !onInput {
+				t.Fatalf("breakpoint on the frozen inventory = %v, on the input = %v: %s", onBlock, onInput, data)
+			}
+		})
+	}
+}
