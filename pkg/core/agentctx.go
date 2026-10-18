@@ -18,6 +18,10 @@ type agentIDKey struct{}
 // identifier is stored.
 type toolCallIDKey struct{}
 
+// toolCallMessageIDKey is the private context key under which the identifier
+// of the assistant message that carried the current tool call is stored.
+type toolCallMessageIDKey struct{}
+
 // WithAgentID tags ctx with an agent identifier used to isolate per-agent
 // shell state (see pkg/tool.BashState). The root/parent agent uses "" (no tag).
 func WithAgentID(ctx context.Context, id string) context.Context {
@@ -39,5 +43,20 @@ func WithToolCallID(ctx context.Context, id string) context.Context {
 // if the context does not represent a tool call.
 func ToolCallIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(toolCallIDKey{}).(string)
+	return id
+}
+
+// WithToolCallMessageID tags ctx with the MsgID of the assistant message that
+// carried the tool call being executed. Together with the tool call ID it
+// names the invocation, which a tool that must be idempotent across a crash
+// keys its effect on.
+func WithToolCallMessageID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, toolCallMessageIDKey{}, id)
+}
+
+// ToolCallMessageIDFromContext returns the id set by WithToolCallMessageID, or
+// "" if the context does not represent a tool call.
+func ToolCallMessageIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(toolCallMessageIDKey{}).(string)
 	return id
 }

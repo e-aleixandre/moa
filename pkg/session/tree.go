@@ -40,6 +40,17 @@ func NewTree() *Tree {
 // NewTreeFromEntries reconstructs a tree from persisted entries.
 // Returns an error if the entries are invalid (see ValidateEntries).
 func NewTreeFromEntries(entries []Entry, leafID string) (*Tree, error) {
+	return NewTreeFromEntriesRepairing(entries, leafID, nil)
+}
+
+// ToolCallRepair gives a caller the first chance to close a tool call that has
+// no result: it is told the call and the message that carried it, and returns
+// the result to record, or false to leave the call to the generic repair.
+type ToolCallRepair func(originMsgID string, call core.Content) (core.AgentMessage, bool)
+
+// NewTreeFromEntriesRepairing is NewTreeFromEntries with repair consulted for
+// each unresolved tool call before the generic "result unavailable" closes it.
+func NewTreeFromEntriesRepairing(entries []Entry, leafID string, repair ToolCallRepair) (*Tree, error) {
 	t := &Tree{
 		entries: make([]Entry, len(entries)),
 		index:   make(map[string]int, len(entries)),
@@ -76,7 +87,27 @@ func NewTreeFromEntries(entries []Entry, leafID string) (*Tree, error) {
 	// recorded tool calls but before their results. Close only the unresolved
 	// calls on the selected context; existing entries remain untouched.
 	msgs, epoch := t.BuildContext()
+	var origin map[string]string
+	if repair != nil {
+		origin = make(map[string]string)
+		for _, m := range msgs {
+			if m.Role != "assistant" {
+				continue
+			}
+			for _, c := range m.Content {
+				if c.Type == "tool_call" && c.ToolCallID != "" {
+					origin[c.ToolCallID] = m.MsgID
+				}
+			}
+		}
+	}
 	for _, tc := range unresolvedToolCalls(msgs, epoch) {
+		if repair != nil {
+			if res, ok := repair(origin[tc.ToolCallID], tc); ok {
+				t.Append(Entry{Type: EntryMessage, Message: res})
+				continue
+			}
+		}
 		t.Append(Entry{
 			Type: EntryMessage,
 			Message: core.WrapMessage(core.NewToolResultMessage(

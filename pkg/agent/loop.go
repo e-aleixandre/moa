@@ -91,6 +91,27 @@ func (cfg *loopConfig) appendState(msgs ...core.AgentMessage) {
 	cfg.stateMu.Unlock()
 }
 
+// toolCallOrigin returns the MsgID of the assistant message that carries the
+// tool call, "" when it is not in the state. The batch runs right after that
+// message was appended, so the search ends at the first step.
+func (cfg *loopConfig) toolCallOrigin(toolCallID string) string {
+	cfg.stateMu.Lock()
+	defer cfg.stateMu.Unlock()
+	for i := len(cfg.state.Messages) - 1; i >= 0; i-- {
+		m := cfg.state.Messages[i]
+		if m.Role != "assistant" {
+			continue
+		}
+		for _, c := range m.Content {
+			if c.Type == "tool_call" && c.ToolCallID == toolCallID {
+				return m.MsgID
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
 // loopConfig holds all dependencies for the agent loop.
 type loopConfig struct {
 	quotaBudget     *activeBudget
@@ -1945,6 +1966,7 @@ func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, batch
 	}()
 
 	ctx = core.WithToolCallID(ctx, tc.ToolCallID)
+	ctx = core.WithToolCallMessageID(ctx, cfg.toolCallOrigin(tc.ToolCallID))
 	if steerInterruptibleWaitTools[tc.ToolName] && cfg.registerSteerWait != nil {
 		var cancel context.CancelCauseFunc
 		ctx, cancel = context.WithCancelCause(ctx)

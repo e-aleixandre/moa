@@ -64,6 +64,9 @@ type RuntimeConfig struct {
 	// InitialMessages is ignored when InitialEntries is set.
 	InitialEntries []session.Entry
 	InitialLeafID  string
+	// RepairToolCall, when set, closes a tool call the loaded transcript left
+	// without a result before the generic repair does.
+	RepairToolCall session.ToolCallRepair
 }
 
 // SessionRuntime is a fully wired session: bus + state machine + bridge +
@@ -157,7 +160,7 @@ func NewSessionRuntime(cfg RuntimeConfig) (*SessionRuntime, error) {
 	// Load initial state (session restore).
 	if len(cfg.InitialEntries) > 0 {
 		// V2 session: reconstruct tree and derive agent state from it
-		tree, err := session.NewTreeFromEntries(cfg.InitialEntries, cfg.InitialLeafID)
+		tree, err := session.NewTreeFromEntriesRepairing(cfg.InitialEntries, cfg.InitialLeafID, cfg.RepairToolCall)
 		if err != nil {
 			return nil, fmt.Errorf("bus: tree reconstruction: %w", err)
 		}
@@ -310,6 +313,16 @@ func (r *SessionRuntime) AttachPersister(p SessionPersister) {
 		})
 	}
 	RegisterPersistenceReactor(r.Bus, r.sctx, p)
+}
+
+// CheckpointAcknowledged saves the session, in-flight turn included, and
+// returns only once the snapshot is on disk. A tool that must not be seen by
+// the world before its call is durable (the asynchronous ask_user) calls it.
+func (r *SessionRuntime) CheckpointAcknowledged(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.flush(true)
 }
 
 // Flush synchronously persists the current session state to disk, bypassing the
