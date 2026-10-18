@@ -33,6 +33,13 @@ final class CallSystem implements NativeCallManager.SystemCall {
         void post(Runnable task);
     }
 
+    // Answering or declining the ringing invitation from outside the app.
+    interface RingingListener {
+        void answer(String invite);
+
+        void decline(String invite);
+    }
+
     private enum Mode {
         NONE,
         PENDING,
@@ -40,6 +47,7 @@ final class CallSystem implements NativeCallManager.SystemCall {
         FALLBACK
     }
 
+    static final String EXTRA_INVITE = "moa_invite";
     private static final String ACCOUNT_ID = "moa-call";
     private static final long TELECOM_WAIT_MILLIS = 4000;
 
@@ -56,6 +64,10 @@ final class CallSystem implements NativeCallManager.SystemCall {
     private int lastRoute;
     private boolean lastMuted;
     private boolean serviceUp;
+    private RingingListener ringingListener;
+    private CallConnection ringingConnection;
+    private String ringingInvite;
+    private String ringingName = "";
 
     CallSystem(Context context, Poster poster, NativeCallManager.Host host) {
         this.context = context.getApplicationContext();
@@ -78,10 +90,7 @@ final class CallSystem implements NativeCallManager.SystemCall {
         PhoneAccountHandle handle = handle();
         mode = Mode.PENDING;
         try {
-            telecom.registerPhoneAccount(PhoneAccount.builder(handle, context.getString(R.string.app_name))
-                .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
-                .addSupportedUriScheme(PhoneAccount.SCHEME_SIP)
-                .build());
+            registerAccount(telecom);
             telecomTimeout = host.schedule(() -> telecomFailedOnCallThread("timeout"), TELECOM_WAIT_MILLIS);
             Bundle extras = new Bundle();
             extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle);
@@ -89,6 +98,64 @@ final class CallSystem implements NativeCallManager.SystemCall {
         } catch (RuntimeException e) {
             telecomFailedOnCallThread("refused");
         }
+    }
+
+    void setRingingListener(RingingListener listener) {
+        ringingListener = listener;
+    }
+
+    // An invitation is ringing: Telecom is told so headsets, watches and the
+    // car can answer it. If Telecom refuses, the notification rings alone.
+    void ringing(String invite, String name) {
+        ringingInvite = invite;
+        ringingName = name;
+        ringingConnection = null;
+        TelecomManager telecom = context.getSystemService(TelecomManager.class);
+        if (telecom == null) return;
+        try {
+            registerAccount(telecom);
+            Bundle incoming = new Bundle();
+            incoming.putString(EXTRA_INVITE, invite);
+            Bundle extras = new Bundle();
+            extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle());
+            extras.putBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS, incoming);
+            telecom.addNewIncomingCall(handle(), extras);
+        } catch (RuntimeException e) {
+            // Not registered with Telecom: the call still rings and answers.
+        }
+    }
+
+    // The invitation stopped ringing without being joined. cause is a
+    // DisconnectCause code.
+    void ringingEnded(String invite, int cause) {
+        if (!invite.equals(ringingInvite)) return;
+        CallConnection connection = ringingConnection;
+        ringingConnection = null;
+        ringingInvite = null;
+        if (connection != null) connection.endWith(cause);
+    }
+
+    @Override
+    public void startIncoming(String name, NativeCallManager.SystemListener listener) {
+        this.listener = listener;
+        this.name = name;
+        this.lastRoute = 0;
+        this.lastMuted = false;
+        serviceUp = CallService.start(context, name);
+        CallConnection ringingNow = ringingConnection;
+        ringingConnection = null;
+        ringingInvite = null;
+        if (ringingNow == null) {
+            // Telecom never took the invitation: the app sets the audio up.
+            useFallback();
+            return;
+        }
+        connection = ringingNow;
+        mode = Mode.TELECOM;
+        ringingNow.describe(name);
+        ringingNow.setActive();
+        requestFocus();
+        listener.ready();
     }
 
     @Override
@@ -140,9 +207,37 @@ final class CallSystem implements NativeCallManager.SystemCall {
         poster.post(() -> telecomFailedOnCallThread(code));
     }
 
+    void incomingConnectionCreated(CallConnection created, String invite) {
+        poster.post(() -> {
+            if (!invite.equals(ringingInvite) || ringingConnection != null) {
+                // Late, or the invitation is already over.
+                created.end(false);
+                return;
+            }
+            ringingConnection = created;
+            created.describe(ringingName);
+        });
+    }
+
+    void answerRequested(CallConnection from) {
+        poster.post(() -> {
+            if (from == ringingConnection && ringingListener != null) ringingListener.answer(ringingInvite);
+        });
+    }
+
+    void rejectRequested(CallConnection from) {
+        poster.post(() -> {
+            if (from == ringingConnection && ringingListener != null) ringingListener.decline(ringingInvite);
+        });
+    }
+
     void hangUpRequested(CallConnection from) {
         poster.post(() -> {
-            if (from == connection && listener != null) listener.hangUp();
+            if (from == ringingConnection && ringingListener != null) {
+                ringingListener.decline(ringingInvite);
+            } else if (from == connection && listener != null) {
+                listener.hangUp();
+            }
         });
     }
 
@@ -240,6 +335,13 @@ final class CallSystem implements NativeCallManager.SystemCall {
         AudioManager audio = context.getSystemService(AudioManager.class);
         if (audio != null) audio.abandonAudioFocusRequest(focus);
         focus = null;
+    }
+
+    private void registerAccount(TelecomManager telecom) {
+        telecom.registerPhoneAccount(PhoneAccount.builder(handle(), context.getString(R.string.app_name))
+            .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
+            .addSupportedUriScheme(PhoneAccount.SCHEME_SIP)
+            .build());
     }
 
     private PhoneAccountHandle handle() {

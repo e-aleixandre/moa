@@ -97,6 +97,10 @@ final class NativeCallManager {
     interface SystemCall {
         void start(String name, SystemListener listener);
 
+        // The call of an answered invitation: Telecom already holds it ringing
+        // (or refused it), so it is promoted, not placed.
+        void startIncoming(String name, SystemListener listener);
+
         // The outgoing call's socket is up.
         void connected();
 
@@ -124,6 +128,10 @@ final class NativeCallManager {
 
         SystemCall systemCall();
 
+        // POST /api/voice/calls/{id}/hangup with the call's own credential:
+        // a call the app cannot carry must not be left to time out.
+        void hangupCall(String origin, String callId, String authorization);
+
         // "granted" | "denied" | "undetermined", for the close reason.
         String micState();
 
@@ -143,6 +151,10 @@ final class NativeCallManager {
         final String sessionId;
         final String callId;
         final String origin;
+        final String authorization;
+        // An answered invitation, with no page behind it.
+        boolean incoming;
+        boolean micMissing;
         volatile Socket socket;
         Audio audio;
         boolean audioWanted;
@@ -158,7 +170,8 @@ final class NativeCallManager {
         volatile boolean open;
         volatile boolean finished;
 
-        Call(String id, String name, String sessionId, String callId, String origin) {
+        Call(String id, String name, String sessionId, String callId, String origin, String authorization) {
+            this.authorization = authorization;
             this.id = id;
             this.name = name;
             this.sessionId = sessionId;
@@ -190,7 +203,8 @@ final class NativeCallManager {
             host.emit(id, "close", null);
             return;
         }
-        Call c = new Call(id, CallProtocol.prefix(name, 80), CallProtocol.prefix(sessionId, 128), url.callId, origin);
+        Call c = new Call(id, CallProtocol.prefix(name, 80), CallProtocol.prefix(sessionId, 128), url.callId, origin,
+            "Moa-Device " + credential);
         try {
             c.socket = host.connect(url.url, "Moa-Device " + credential, new Sockets(c));
         } catch (RuntimeException e) {
@@ -199,6 +213,33 @@ final class NativeCallManager {
         }
         call = c;
         host.systemCall().start(c.name, new SystemEvents(c));
+    }
+
+    // The call of an answered invitation (iOS startIncoming): the server opened
+    // it for the answer, the socket joins it with the invitation's Moa-Voice
+    // key, and the microphone opens by itself once the system call is ready:
+    // there is no page to ask for it, and the screen may be locked. False when
+    // it cannot be joined (another call, another server, a bad URL).
+    boolean openIncoming(String name, String sessionId, String callId, String origin, String rawUrl, String authorization) {
+        if (hasCall() || origin == null || !origin.equals(host.pairedOrigin())) return false;
+        CallUrl url = CallUrl.validate(rawUrl, origin);
+        if (url == null || !url.callId.equals(callId)) return false;
+        Call c = new Call("i" + callId, CallProtocol.prefix(name, 80), CallProtocol.prefix(sessionId, 128), callId, origin,
+            authorization);
+        c.incoming = true;
+        c.audioWanted = true;
+        // It cannot be asked for on a locked screen: a phone that never
+        // allowed it hangs up, and says why.
+        c.micGranted = host.micState().equals("granted");
+        c.micMissing = !c.micGranted;
+        try {
+            c.socket = host.connect(url.url, authorization, new Sockets(c));
+        } catch (RuntimeException e) {
+            return false;
+        }
+        call = c;
+        host.systemCall().startIncoming(c.name, new SystemEvents(c));
+        return true;
     }
 
     // Answers a new document's question: is a call still on?
@@ -373,6 +414,7 @@ final class NativeCallManager {
         stopEngine(c);
         String reason = CallProtocol.closeReason(why, host.micState());
         c.socket.close(1000, reason);
+        if (c.micMissing) host.hangupCall(c.origin, c.callId, c.authorization);
         if (call == c) call = null;
         host.systemCall().end(remote && !(c.serverEnded || c.hangingUp));
         if (!c.pageClosed) emit(c, "close", reason);
@@ -395,6 +437,11 @@ final class NativeCallManager {
         public void opened() {
             if (!live()) return;
             c.open = true;
+            if (c.micMissing) {
+                // Joined only to leave with a reason the server's journal keeps.
+                finish(c, false, "mic_not_granted");
+                return;
+            }
             host.systemCall().connected();
             emit(c, "open", null);
         }

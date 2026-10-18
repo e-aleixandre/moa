@@ -26,6 +26,7 @@ final class AndroidCallHost implements NativeCallManager.Host {
     private final ScheduledExecutorService thread;
     private final OkHttpClient client = CallSocket.newClient();
     private final CallSystem system;
+    private final InviteApi invites;
     private volatile NativeCallBridge bridge;
     private volatile MicRequester micRequester;
     private volatile boolean micDenied;
@@ -35,6 +36,11 @@ final class AndroidCallHost implements NativeCallManager.Host {
         this.credentials = credentials;
         this.thread = thread;
         this.system = new CallSystem(this.context, this::post, this);
+        this.invites = new InviteApi(InviteApi.newClient(), this::post);
+    }
+
+    InviteApi invites() {
+        return invites;
     }
 
     void setBridge(NativeCallBridge bridge) {
@@ -47,6 +53,10 @@ final class AndroidCallHost implements NativeCallManager.Host {
 
     CallSystem system() {
         return system;
+    }
+
+    ScheduledExecutorService thread() {
+        return thread;
     }
 
     void post(Runnable task) {
@@ -128,6 +138,11 @@ final class AndroidCallHost implements NativeCallManager.Host {
     @Override
     public NativeCallManager.SystemCall systemCall() {
         return system;
+    }
+
+    @Override
+    public void hangupCall(String origin, String callId, String authorization) {
+        invites.post(origin, authorization, "calls/" + callId + "/hangup", (status, body) -> { });
     }
 
     @Override

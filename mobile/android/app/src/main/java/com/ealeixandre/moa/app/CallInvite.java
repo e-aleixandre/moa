@@ -22,6 +22,14 @@ final class CallInvite {
         this.expiresAtSeconds = expiresAtSeconds;
     }
 
+    // The invitation in an FCM data message, or null when it is not for this
+    // call secret, does not open, has expired or is not a call. Never anything
+    // is shown for a message that fails here.
+    static CallInvite fromPush(java.util.Map<String, String> data, PushEnvelope.Keys keys, long nowSeconds) {
+        if (!PushMessages.addressedTo(data, keys)) return null;
+        return from(PushEnvelope.open(data, keys, nowSeconds));
+    }
+
     // null when the envelope is not a call this app can ring for.
     static CallInvite from(PushEnvelope.Content content) {
         if (content == null || !"call".equals(content.kind)) return null;

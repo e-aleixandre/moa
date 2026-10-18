@@ -14,13 +14,17 @@ final class CallConnection extends Connection {
 
     private final CallSystem system;
 
-    CallConnection(CallSystem system) {
+    CallConnection(CallSystem system, boolean incoming) {
         this.system = system;
         setConnectionProperties(PROPERTY_SELF_MANAGED);
         setConnectionCapabilities(CAPABILITY_MUTE);
         setAudioModeIsVoip(true);
         setAddress(Uri.fromParts(PhoneAccount.SCHEME_SIP, "moa", null), TelecomManager.PRESENTATION_ALLOWED);
-        setInitializing();
+        if (incoming) {
+            setRinging();
+        } else {
+            setInitializing();
+        }
     }
 
     void describe(String name) {
@@ -28,8 +32,23 @@ final class CallConnection extends Connection {
     }
 
     void end(boolean failed) {
-        setDisconnected(new DisconnectCause(failed ? DisconnectCause.ERROR : DisconnectCause.LOCAL));
+        endWith(failed ? DisconnectCause.ERROR : DisconnectCause.LOCAL);
+    }
+
+    void endWith(int cause) {
+        setDisconnected(new DisconnectCause(cause));
         destroy();
+    }
+
+    // Answered from a headset, a watch or the car.
+    @Override
+    public void onAnswer() {
+        system.answerRequested(this);
+    }
+
+    @Override
+    public void onReject() {
+        system.rejectRequested(this);
     }
 
     @Override
