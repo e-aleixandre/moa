@@ -1791,6 +1791,15 @@ func projectLiveCustom(custom map[string]any) map[string]any {
 			}
 		}
 	}
+	// An answer to a question names the question and when it was asked and
+	// answered; the answers themselves are the message body.
+	if source == "question_answer" {
+		for _, key := range []string{"question_id", "event_id", "asked_at", "answered_at"} {
+			if value, ok := custom[key].(string); ok {
+				projected[key] = value
+			}
+		}
+	}
 	// A heartbeat carries its beat id and how many facts woke the owner; the
 	// facts themselves are in the message body, so nothing else crosses.
 	if source == "heartbeat" {

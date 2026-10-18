@@ -27,6 +27,9 @@ const (
 	noticeDetailLimit = 5
 )
 
+// reasonQuestionMissing fails an answer whose question row is gone.
+const reasonQuestionMissing = "question_missing"
+
 // maxNoticeLoadedSessions caps how many sessions may be resident when a notice
 // wakes a saved one; the same bound automation resumes use. A var so tests can
 // reach it without loading dozens of sessions.
@@ -212,6 +215,10 @@ func (d *noticeDispatcher) pass(ctx context.Context) {
 		switch n.State {
 		case tasks.NoticePending:
 			waiting := n.Reason == noticeReasonBusyWait || n.Reason == tasks.ReasonQuestionPending
+			// An accepted answer is never given up on a full house or a failed
+			// resume: the next tick tries again, with nobody having to reopen
+			// the session.
+			waiting = waiting || n.Kind == tasks.NoticeQuestionAnswer
 			retry := trig.retryAll || trig.retry[to] || (waiting && trig.retryWaiting)
 			if n.Reason != "" && !retry {
 				continue
@@ -279,6 +286,21 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 		if ok {
 			occ = &o
 		}
+	}
+	// An answer carries the question it closes: its metadata is built from it.
+	var answered tasks.Question
+	if n.Kind == tasks.NoticeQuestionAnswer {
+		q, err := m.tasks.QuestionByEvent(ctx, n.ID)
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Warn("task notices: reading an answer's question failed", "notice", n.ID, "error", err)
+			}
+			if errors.Is(err, tasks.ErrQuestionNotFound) {
+				d.setState(ctx, &n, tasks.NoticeChange{State: tasks.NoticeFailed, Reason: reasonQuestionMissing})
+			}
+			return n
+		}
+		answered = q
 	}
 	to := n.RecipientSessionID
 	if _, live := m.Get(to); !live {
@@ -361,9 +383,34 @@ func (d *noticeDispatcher) attempt(ctx context.Context, n tasks.Notice, wake boo
 	if m.planner != nil && m.planner.hooks.beforeAdmit != nil {
 		m.planner.hooks.beforeAdmit(n.ID)
 	}
+	if n.Kind == tasks.NoticeQuestionAnswer {
+		// A Stop or a recall may have landed since the reservation. Its fence
+		// is committed, so the row is the authority, read under the session's
+		// lock and kept under it until the message is in: what was decided
+		// first by the durable order is what happens.
+		unlock := m.questions.lock(to)
+		defer unlock()
+		cur, err := m.tasks.Notice(ctx, n.ID)
+		switch {
+		case err != nil:
+			if ctx.Err() == nil {
+				slog.Warn("task notices: re-reading an answer before admitting it failed", "notice", n.ID, "error", err)
+			}
+			d.steers.Delete(steerID)
+			return n
+		case cur.State != tasks.NoticeSent:
+			d.steers.Delete(steerID)
+			return cur
+		}
+		n.Method = cur.Method
+		run = n.Method == tasks.MethodRun
+	}
 	steered, err := m.injectEvent(to, eventInjection{
 		Text: func() string { return n.Text },
 		Custom: func(steer bool) map[string]any {
+			if n.Kind == tasks.NoticeQuestionAnswer {
+				return questionAnswerCustom(n, answered, run, steer)
+			}
 			c := noticeCustom(n, run, steer)
 			if occ != nil {
 				scheduledCustom(c, *occ, m.clock.Now())
@@ -505,7 +552,7 @@ func isTaskNotice(custom map[string]any) bool {
 
 func hasNotice(msgs []core.AgentMessage, id string) bool {
 	for _, msg := range msgs {
-		if isTaskNotice(msg.Custom) && msg.Custom["id"] == id {
+		if isAdmissionReceipt(msg.Custom) && msg.Custom["id"] == id {
 			return true
 		}
 	}
@@ -518,7 +565,7 @@ func transcriptHasNotice(s *session.Session, id string) bool {
 		return false
 	}
 	for _, e := range s.Entries {
-		if isTaskNotice(e.Message.Custom) && e.Message.Custom["id"] == id {
+		if isAdmissionReceipt(e.Message.Custom) && e.Message.Custom["id"] == id {
 			return true
 		}
 	}
@@ -623,7 +670,7 @@ func (d *noticeDispatcher) delivered(ctx context.Context, n tasks.Notice) tasks.
 func noticeQueued(sess *ManagedSession, n tasks.Notice) bool {
 	steers, _ := bus.QueryTyped[bus.GetPendingSteers, []core.SteerItem](sess.runtime.Bus, bus.GetPendingSteers{})
 	for _, s := range steers {
-		if (n.SteerID != "" && s.ID == n.SteerID) || (isTaskNotice(s.Custom) && s.Custom["id"] == n.ID) {
+		if (n.SteerID != "" && s.ID == n.SteerID) || (isAdmissionReceipt(s.Custom) && s.Custom["id"] == n.ID) {
 			return true
 		}
 	}

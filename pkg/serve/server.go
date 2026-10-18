@@ -32,6 +32,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/usage"
 )
 
@@ -163,6 +164,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/steers/cancel", handleCancelSteers(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/questions/{qid}/dismiss", handleDismissQuestion(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/secret-requests/{reqId}", handleSecretRequestResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/read", handleReadSession(manager))
@@ -752,17 +754,18 @@ func handlePermissionDecision(mgr *Manager) http.HandlerFunc {
 
 func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := mgr.Get(r.PathValue("id"))
-		if !ok {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
+		sessionID := r.PathValue("id")
+		sess, live := mgr.Get(sessionID)
 		limitBody(w, r, maxJSONBodySize)
 		var body struct {
 			ID      string   `json:"id"`
 			Answers []string `json:"answers"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if !live {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
@@ -770,11 +773,60 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 		if identity, ok := requestAuthIdentity(r); ok {
 			responder.Via = identity.auditID()
 		}
+		// A durable question is answered through the store, loaded or not: the
+		// session it names, and only that one, is woken by the answer.
+		if mgr.questions != nil {
+			_, err := mgr.tasks.GetQuestion(r.Context(), body.ID)
+			switch {
+			case err == nil:
+				writeQuestionResult(w, mgr.questions.Answer(r.Context(), sessionID, body.ID, body.Answers, responder))
+				return
+			case !errors.Is(err, tasks.ErrQuestionNotFound):
+				http.Error(w, "questions unavailable", http.StatusInternalServerError)
+				return
+			}
+		}
+		if !live {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
 		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: body.ID, Answers: body.Answers, Responder: responder}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleDismissQuestion closes an open question without answering it: the
+// human's way to put a question away. No model call, no event, idempotent.
+func handleDismissQuestion(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if mgr.questions == nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		writeQuestionResult(w, mgr.questions.Dismiss(r.Context(), r.PathValue("id"), r.PathValue("qid")))
+	}
+}
+
+// writeQuestionResult maps the question store's outcomes to the status the
+// contract names: 204 done (or already done the same way), 404 unknown or
+// another session's, 409 closed otherwise, 400 refused.
+func writeQuestionResult(w http.ResponseWriter, err error) {
+	var conflict *tasks.ErrQuestionConflict
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, tasks.ErrQuestionNotFound):
+		http.Error(w, "not found", http.StatusNotFound)
+	case errors.As(err, &conflict):
+		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, askuser.ErrRequiresTap), errors.Is(err, tasks.ErrAnswerCount):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	default:
+		slog.Warn("questions: request failed", "error", err)
+		http.Error(w, "question store error", http.StatusInternalServerError)
 	}
 }
 
@@ -1259,7 +1311,7 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 				// A task notice is not the owner's text: it is kept in the
 				// transcript instead, so it must not come back to the composer.
 				// Neither is a voice call's record.
-				if _, voice := voiceQueuedText(steer.Custom); isTaskNotice(steer.Custom) || voice {
+				if _, voice := voiceQueuedText(steer.Custom); isAdmissionReceipt(steer.Custom) || voice {
 					continue
 				}
 				ids = append(ids, steer.ID)
@@ -1290,6 +1342,8 @@ func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		// A recall must not leave an accepted answer free to start a run.
+		mgr.questions.Fence(mgr.baseCtx, sess.ID, false)
 		var discarded []core.SteerItem
 		if err := sess.runtime.Bus.Execute(bus.CancelSteer{DiscardedSteers: &discarded, RecallID: op.RecallID}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1339,7 +1393,7 @@ func readSteerOperation(w http.ResponseWriter, r *http.Request) (steerOperation,
 func recallableSteers(discarded []core.SteerItem) []PendingSteerData {
 	steers := make([]PendingSteerData, 0, len(discarded))
 	for _, steer := range discarded {
-		if _, voice := voiceQueuedText(steer.Custom); steer.Internal || isTaskNotice(steer.Custom) || voice {
+		if _, voice := voiceQueuedText(steer.Custom); steer.Internal || isAdmissionReceipt(steer.Custom) || voice {
 			continue
 		}
 		steers = append(steers, PendingSteerData{

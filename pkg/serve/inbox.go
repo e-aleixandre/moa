@@ -753,12 +753,16 @@ func (m *Manager) injectEvent(sessionID string, in eventInjection) (steered bool
 		// Minted before the append so the command can carry exactly this
 		// message: a snapshot of the agent context taken afterwards could end
 		// with a row from a concurrent send.
+		if id, _ := custom["id"].(string); custom["source"] == "question_answer" && id != "" {
+			// A retry of this admission is the same message.
+			msg.MsgID = "msg_" + id
+		}
 		msg.EnsureMsgID()
 		if err := sess.runtime.Bus.Execute(bus.AppendToConversation{SessionID: sess.ID, Message: msg}); err != nil {
 			return false, err
 		}
 		var published []core.AgentMessage
-		if isTaskNotice(custom) {
+		if isAdmissionReceipt(custom) {
 			published = []core.AgentMessage{msg}
 		} else {
 			published = sess.runtime.Context().Agent.Messages()

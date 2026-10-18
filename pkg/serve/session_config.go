@@ -196,6 +196,10 @@ func (m *Manager) CancelWithDiscardedSteers(sessionID, stopID string) ([]core.St
 	if err != nil {
 		return nil, err
 	}
+	// Durable first: what Stop decides about answers already accepted must be
+	// committed before the run is aborted, or an attempt reserved a moment ago
+	// could still wake the model after the user said stop.
+	m.questions.Fence(m.baseCtx, sessionID, true)
 	var discarded []core.SteerItem
 	if err := sess.runtime.Bus.Execute(bus.AbortAndRecall{RunGen: runGen, DiscardedSteers: &discarded, StopID: stopID}); err != nil {
 		return nil, err

@@ -856,7 +856,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 				Text:            s.Text,
 				Command:         s.IsBarrier(),
 				Images:          countImageContent(s.Content),
-				NonRecallable:   isTaskNotice(s.Custom),
+				NonRecallable:   isAdmissionReceipt(s.Custom),
 				SessionMentions: steerSessionMentions(s),
 			}
 			if label, ok := voiceQueuedText(s.Custom); ok {
