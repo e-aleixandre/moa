@@ -99,6 +99,13 @@ type outputConfig struct {
 // If isOAuth is true, the system prompt is prefixed with the Claude Code
 // identity string and tool names are mapped to Claude Code's canonical casing.
 func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
+	return buildRequestBodyWith(req, isOAuth, nil)
+}
+
+// buildRequestBodyWith is buildRequestBody plus a hook that adjusts the
+// finished request before it is marshaled. Prewarm uses it so that the only
+// differences from a streaming body are the ones it names.
+func buildRequestBodyWith(req core.Request, isOAuth bool, mutate func(*anthropicRequest)) ([]byte, error) {
 	ar := anthropicRequest{
 		Model:     req.Model.ID,
 		MaxTokens: resolveMaxTokens(req),
@@ -187,6 +194,9 @@ func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
 	// 3. Last content block of the last user message (caches conversation history)
 	addCacheBreakpoints(&ar, req.Options.CacheRetention)
 
+	if mutate != nil {
+		mutate(&ar)
+	}
 	return json.Marshal(ar)
 }
 

@@ -128,36 +128,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		if err != nil {
 			return nil, err
 		}
-		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("anthropic-version", "2023-06-01")
-		if oauthMode {
-			r.Header.Set("Authorization", "Bearer "+requestKey)
-			betas := "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
-			if bindsThinkingPrefix(req.Model.ID) {
-				betas += "," + thinkingBindingBeta
-			}
-			if fastMode {
-				betas += "," + fastModeBeta
-			}
-			r.Header.Set("anthropic-beta", betas)
-			r.Header.Set("User-Agent", "claude-cli/"+claudeCodeVersion)
-			r.Header.Set("x-app", "cli")
-		} else {
-			r.Header.Set("X-API-Key", requestKey)
-			var betas []string
-			if profileOAuth {
-				betas = append(betas, "interleaved-thinking-2025-05-14", "fine-grained-tool-streaming-2025-05-14")
-			}
-			if bindsThinkingPrefix(req.Model.ID) {
-				betas = append(betas, thinkingBindingBeta)
-			}
-			if fastMode {
-				betas = append(betas, fastModeBeta)
-			}
-			if len(betas) > 0 {
-				r.Header.Set("anthropic-beta", strings.Join(betas, ","))
-			}
-		}
+		a.setHeaders(r, requestKey, req.Model.ID, oauthMode, profileOAuth, fastMode)
 		return r, nil
 	}
 
@@ -256,6 +227,40 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	}()
 
 	return ch, nil
+}
+
+// setHeaders sets the auth and beta headers shared by Stream and Prewarm.
+func (a *Anthropic) setHeaders(r *http.Request, requestKey, modelID string, oauthMode, profileOAuth, fastMode bool) {
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("anthropic-version", "2023-06-01")
+	if oauthMode {
+		r.Header.Set("Authorization", "Bearer "+requestKey)
+		betas := "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
+		if bindsThinkingPrefix(modelID) {
+			betas += "," + thinkingBindingBeta
+		}
+		if fastMode {
+			betas += "," + fastModeBeta
+		}
+		r.Header.Set("anthropic-beta", betas)
+		r.Header.Set("User-Agent", "claude-cli/"+claudeCodeVersion)
+		r.Header.Set("x-app", "cli")
+	} else {
+		r.Header.Set("X-API-Key", requestKey)
+		var betas []string
+		if profileOAuth {
+			betas = append(betas, "interleaved-thinking-2025-05-14", "fine-grained-tool-streaming-2025-05-14")
+		}
+		if bindsThinkingPrefix(modelID) {
+			betas = append(betas, thinkingBindingBeta)
+		}
+		if fastMode {
+			betas = append(betas, fastModeBeta)
+		}
+		if len(betas) > 0 {
+			r.Header.Set("anthropic-beta", strings.Join(betas, ","))
+		}
+	}
 }
 
 // consumeStream parses SSE frames and emits normalized events.
@@ -727,4 +732,113 @@ func (state *streamState) materializeContentBlock() {
 // limit.
 func isFastModeUnavailable(body []byte) bool {
 	return bytes.Contains(bytes.ToLower(body), []byte("fast mode"))
+}
+
+// PrewarmOptions tunes a cache prewarm.
+type PrewarmOptions struct {
+	// MaxTokens1 sends max_tokens:1 instead of the documented max_tokens:0,
+	// for credentials that reject zero. One output token is billed.
+	MaxTokens1 bool
+}
+
+// PrewarmError is a non-200 answer to a prewarm. Body is empty for 401/403,
+// whose bodies can echo credentials.
+type PrewarmError struct {
+	Status int
+	Body   string
+}
+
+func (e *PrewarmError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("anthropic: prewarm HTTP %d", e.Status)
+	}
+	return fmt.Sprintf("anthropic: prewarm HTTP %d: %s", e.Status, e.Body)
+}
+
+// Prewarm writes (or refreshes) the prompt cache for req without generating
+// output. The body is the one Stream would send for req, through the same
+// builder and the same OAuth profile (preamble, tool renaming, beta headers);
+// only "stream" (false) and "max_tokens" (0, or 1 with opts.MaxTokens1)
+// differ, so the cached prefix is the real request's prefix. The usage of the
+// non-streaming response is returned. There is no retry: a paid probe is
+// never replayed, and no credential is refreshed here.
+func (a *Anthropic) Prewarm(ctx context.Context, req core.Request, opts PrewarmOptions) (core.Usage, error) {
+	apiKey := a.apiKey
+	oauthMode := a.isOAuth
+	if req.Options.APIKey != "" {
+		apiKey = req.Options.APIKey
+		oauthMode = isOAuthToken(apiKey)
+	}
+	profileOAuth := oauthMode || req.Options.AnthropicWireProfile == "oauth"
+	maxTokens := 0
+	if opts.MaxTokens1 {
+		maxTokens = 1
+	}
+	body, err := buildRequestBodyWith(req, profileOAuth, func(ar *anthropicRequest) {
+		ar.Stream = false
+		ar.MaxTokens = maxTokens
+	})
+	if err != nil {
+		return core.Usage{}, fmt.Errorf("anthropic: building prewarm request: %w", err)
+	}
+	if a.dispatch != nil {
+		if apiKey, err = a.dispatch(ctx); err != nil {
+			return core.Usage{}, err
+		}
+	}
+	r, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		return core.Usage{}, err
+	}
+	fastMode := req.Options.Fast && core.SupportsFast(req.Model.ID)
+	a.setHeaders(r, apiKey, req.Model.ID, oauthMode, profileOAuth, fastMode)
+	resp, err := a.client.Do(r)
+	if err != nil {
+		return core.Usage{}, fmt.Errorf("anthropic: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		pe := &PrewarmError{Status: resp.StatusCode}
+		if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+			_, pe.Body = retry.ErrorBody(resp.Body)
+		}
+		return core.Usage{}, pe
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return core.Usage{}, fmt.Errorf("anthropic: reading prewarm response: %w", err)
+	}
+	return parsePrewarmUsage(data)
+}
+
+func parsePrewarmUsage(data []byte) (core.Usage, error) {
+	var payload struct {
+		Usage *struct {
+			InputTokens   int    `json:"input_tokens"`
+			OutputTokens  int    `json:"output_tokens"`
+			CacheRead     int    `json:"cache_read_input_tokens"`
+			CacheCreate   int    `json:"cache_creation_input_tokens"`
+			Speed         string `json:"speed"`
+			CacheCreation *struct {
+				Ephemeral5m int `json:"ephemeral_5m_input_tokens"`
+				Ephemeral1h int `json:"ephemeral_1h_input_tokens"`
+			} `json:"cache_creation"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return core.Usage{}, fmt.Errorf("anthropic: parsing prewarm response: %w", err)
+	}
+	if payload.Usage == nil {
+		return core.Usage{}, fmt.Errorf("anthropic: no usage in prewarm response")
+	}
+	u := payload.Usage
+	usage := core.Usage{Input: u.InputTokens, Output: u.OutputTokens, CacheRead: u.CacheRead, CacheWrite: u.CacheCreate, Fast: u.Speed == "fast"}
+	if cc := u.CacheCreation; cc != nil {
+		usage.CacheWrite1h = cc.Ephemeral1h
+		if total := cc.Ephemeral5m + cc.Ephemeral1h; total > usage.CacheWrite {
+			usage.CacheWrite = total
+		}
+	}
+	usage.TotalTokens = usage.Input + usage.Output + usage.CacheRead + usage.CacheWrite
+	return usage, nil
 }
