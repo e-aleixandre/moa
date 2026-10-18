@@ -85,6 +85,7 @@ public class NativeCallManagerTest {
         final List<String> log = new ArrayList<>();
         final List<byte[]> played = new ArrayList<>();
         Exception startFailure;
+        Exception rebuildFailure;
         boolean muted;
 
         FakeAudio(NativeCallManager.AudioEvents events) {
@@ -116,6 +117,12 @@ public class NativeCallManagerTest {
         public void setMuted(boolean m) {
             muted = m;
             log.add("muted=" + m);
+        }
+
+        @Override
+        public void rebuild() throws Exception {
+            log.add("rebuild");
+            if (rebuildFailure != null) throw rebuildFailure;
         }
     }
 
@@ -521,6 +528,42 @@ public class NativeCallManagerTest {
         manager.stopAudio("n1");
         manager.startAudio("n1");
         assertEquals(2, host.audios.size());
+    }
+
+    @Test
+    public void aRouteChangeRebuildsTheAudio() {
+        FakeAudio audio = running("n1");
+        host.system.listener.routeChanged();
+        assertEquals("rebuild", audio.log.get(audio.log.size() - 1));
+        assertTrue(manager.hasCall());
+    }
+
+    @Test
+    public void aRouteChangeBeforeTheAudioRunsChangesNothing() {
+        opened("n1");
+        host.system.listener.routeChanged();
+        assertTrue(manager.hasCall());
+        assertTrue(host.audios.isEmpty());
+    }
+
+    @Test
+    public void aRouteThatCannotBeRebuiltEndsTheCall() {
+        FakeAudio audio = running("n1");
+        audio.rebuildFailure = new IllegalStateException("no input");
+        host.system.listener.routeChanged();
+        assertTrue(host.socket().closeReason.startsWith("native:route_rebuild"));
+        assertFalse(manager.hasCall());
+    }
+
+    @Test
+    public void audioTakenAwayWithoutASystemCallEndsTheCallAsInterrupted() {
+        FakeAudio audio = running("n1");
+        host.system.listener.interrupted();
+        assertEquals("native:interrupted mic=granted", host.socket().closeReason);
+        // Nothing is asked of the server: the audio is already gone.
+        assertTrue(host.socket().texts.isEmpty());
+        assertFalse(manager.hasCall());
+        assertEquals("stop", audio.log.get(audio.log.size() - 1));
     }
 
     // ---- capture frames
