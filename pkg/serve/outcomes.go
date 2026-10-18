@@ -135,6 +135,12 @@ func subscribeRunOutcomes(sess *ManagedSession, sink func(runOutcome)) {
 					slog.Info("run outcome discarded", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 0, "reason", "question open")
 					return // the answer's continuation reports for itself
 				}
+				// An answer accepted but not read yet is still owed a run, and this
+				// one ended without it.
+				if owed := sess.runtime.Context().AnswerWorkOwed; owed != nil && owed() {
+					slog.Info("run outcome discarded", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 0, "reason", "answer unread")
+					return // the run that reads it reports for itself
+				}
 				slog.Info("run outcome emitted", "codebase", sess.CWD, "session", sess.ID, "owner", "", "status", callbackStatusDone, "run_gen", e.RunGen, "batch", "", "n", 1)
 				sink(runOutcome{Status: callbackStatusDone, RunGen: e.RunGen, FinalText: e.FinalText})
 			})

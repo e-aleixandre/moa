@@ -273,7 +273,7 @@ func TestFenceQuestionAnswers(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A recall fences what was not admitted; the work it owed goes with it.
-	if n, err := r.FenceQuestionAnswers(bg, "s1", false); err != nil || n == 0 {
+	if n, err := r.FenceQuestionAnswers(bg, "s1", false, nil); err != nil || n == 0 {
 		t.Fatalf("fence: n=%d err=%v", n, err)
 	}
 	notice, _ := r.Notice(bg, ev)
@@ -284,7 +284,7 @@ func TestFenceQuestionAnswers(t *testing.T) {
 	// Another session is untouched.
 	q2, _, _ := r.InsertQuestion(bg, newQuestion("s2", "tc1"))
 	res2, _ := r.AnswerQuestion(bg, "s2", q2.ID, []string{"yes"}, human, renderTest)
-	if _, err := r.FenceQuestionAnswers(bg, "s1", true); err != nil {
+	if _, err := r.FenceQuestionAnswers(bg, "s1", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if n2, _ := r.Notice(bg, res2.Question.EventID); n2.Method != MethodRun {
@@ -294,17 +294,55 @@ func TestFenceQuestionAnswers(t *testing.T) {
 	if _, err := r.SetNoticeState(bg, res2.Question.EventID, NoticeChange{From: []string{NoticePending}, State: NoticeDelivered}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.FenceQuestionAnswers(bg, "s2", false); err != nil {
+	if _, err := r.FenceQuestionAnswers(bg, "s2", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := r.GetQuestion(bg, q2.ID); got.Work != WorkDue {
 		t.Fatalf("a recall stopped the work of an admitted answer: %s", got.Work)
 	}
-	if _, err := r.FenceQuestionAnswers(bg, "s2", true); err != nil {
+	if _, err := r.FenceQuestionAnswers(bg, "s2", true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := r.GetQuestion(bg, q2.ID); got.Work != WorkStopped {
 		t.Fatalf("Stop left the admitted answer's work %s, want stopped", got.Work)
+	}
+}
+
+// A recall leaves alone the answer the caller says is already in the
+// conversation, whatever the transport state (sent) says; the other one in the
+// same state is fenced.
+func TestFenceQuestionAnswersSkipsAdmittedEvents(t *testing.T) {
+	r := openRepo(t, filepath.Join(t.TempDir(), DatabaseName))
+	var events [2]string
+	var ids [2]string
+	for i := range events {
+		q, _, _ := r.InsertQuestion(bg, newQuestion("s1", fmt.Sprintf("tc%d", i)))
+		res, err := r.AnswerQuestion(bg, "s1", q.ID, []string{"yes"}, human, renderTest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events[i], ids[i] = res.Question.EventID, q.ID
+		if _, err := r.SetNoticeState(bg, events[i], NoticeChange{From: []string{NoticePending}, State: NoticeSent, SteerID: "st"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.FenceQuestionAnswers(bg, "s1", false, []string{events[0]}); err != nil {
+		t.Fatal(err)
+	}
+	kept, _ := r.Notice(bg, events[0])
+	if q, _ := r.GetQuestion(bg, ids[0]); kept.Method != MethodRun || q.Work != WorkDue {
+		t.Fatalf("admitted answer fenced by a recall: method=%s work=%s", kept.Method, q.Work)
+	}
+	fenced, _ := r.Notice(bg, events[1])
+	if q, _ := r.GetQuestion(bg, ids[1]); fenced.Method != MethodAppend || q.Work != WorkStopped {
+		t.Fatalf("unadmitted answer not fenced: method=%s work=%s", fenced.Method, q.Work)
+	}
+	// Stop cancels the admitted one's run all the same.
+	if _, err := r.FenceQuestionAnswers(bg, "s1", true, []string{events[0]}); err != nil {
+		t.Fatal(err)
+	}
+	if q, _ := r.GetQuestion(bg, ids[0]); q.Work != WorkStopped {
+		t.Fatalf("Stop left an admitted answer's work %s", q.Work)
 	}
 }
 

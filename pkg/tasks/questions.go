@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
 )
@@ -480,13 +481,30 @@ func (r *Repo) AbandonQuestionAnswer(ctx context.Context, eventID, reason string
 // It is the durable order the dispatcher re-reads before admitting, so a Stop
 // that lands between "accepted" and "admitted" cannot be raced by a reserved
 // attempt. It returns how many rows it changed.
-func (r *Repo) FenceQuestionAnswers(ctx context.Context, sessionID string, stopRun bool) (int, error) {
+//
+// admitted lists the events whose message is already in the conversation (the
+// caller knows; the outbox state only says what the transport did). Without
+// stopRun they are left alone: a recall withdraws queued steers, not a run
+// that is reading an answer.
+func (r *Repo) FenceQuestionAnswers(ctx context.Context, sessionID string, stopRun bool, admitted []string) (int, error) {
 	var n int
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		now := r.now().UnixMilli()
+		// Without stopRun the admitted events are left alone. The notice row is
+		// keyed by the event's id, the question row carries it as event_id.
+		var skipArgs []any
+		noticeSkip, questionSkip := "", ""
+		if !stopRun && len(admitted) > 0 {
+			marks := strings.TrimSuffix(strings.Repeat("?,", len(admitted)), ",")
+			noticeSkip = " AND id NOT IN (" + marks + ")"
+			questionSkip = " AND event_id NOT IN (" + marks + ")"
+			for _, id := range admitted {
+				skipArgs = append(skipArgs, id)
+			}
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE task_notifications SET method = 'append', updated_at = ?
-			WHERE kind = 'question_answer' AND recipient_session_id = ? AND state IN ('pending','held','sent') AND method <> 'append'`,
-			now, sessionID)
+			WHERE kind = 'question_answer' AND recipient_session_id = ? AND state IN ('pending','held','sent') AND method <> 'append'`+noticeSkip,
+			append([]any{now, sessionID}, skipArgs...)...)
 		if err != nil {
 			return false, err
 		}
@@ -494,11 +512,11 @@ func (r *Repo) FenceQuestionAnswers(ctx context.Context, sessionID string, stopR
 		// Work owed by an answer that never reached the session is stopped
 		// either way: an append owes no run.
 		q := `UPDATE questions SET work = 'stopped', updated_at = ? WHERE session_id = ? AND work = 'due'
-			AND event_id IN (SELECT id FROM task_notifications WHERE state IN ('pending','held','sent'))`
+			AND event_id IN (SELECT id FROM task_notifications WHERE state IN ('pending','held','sent'))` + questionSkip
 		if stopRun {
 			q = `UPDATE questions SET work = 'stopped', updated_at = ? WHERE session_id = ? AND work = 'due'`
 		}
-		res, err = tx.ExecContext(ctx, q, now, sessionID)
+		res, err = tx.ExecContext(ctx, q, append([]any{now, sessionID}, skipArgs...)...)
 		if err != nil {
 			return false, err
 		}

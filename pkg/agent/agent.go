@@ -774,6 +774,24 @@ func (a *Agent) SendWithCustomAnnounced(ctx context.Context, prompt string, cust
 	})
 }
 
+// OwesContinuation reports whether a conversation ends where the loop would
+// have gone on: in input for the model (a user message or a tool result), or in
+// a reply the provider itself said is not the end of the turn (pause_turn, or
+// the Responses end_turn:false "continue"). Any other reply is a real end.
+func OwesContinuation(msgs []core.AgentMessage) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if !msgs[i].IsLLMMessage() {
+			continue
+		}
+		switch msgs[i].Role {
+		case "user", "tool_result":
+			return true
+		}
+		return msgs[i].StopReason == "pause_turn" || msgs[i].StopReason == "continue"
+	}
+	return false
+}
+
 // Continue runs the agent over the conversation as it stands, appending
 // nothing: the work a message already in history owes the model when the run
 // that was to read it never finished (a restart).

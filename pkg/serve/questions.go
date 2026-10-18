@@ -363,15 +363,49 @@ func (q *questionService) Open(ctx context.Context, sessionID string) ([]tasks.Q
 // answers already accepted (see tasks.FenceQuestionAnswers). A failure is
 // logged and the Stop goes on: it must never be the reason a run cannot be
 // stopped.
+//
+// A recall (stopRun false) never touches an answer that already has a receipt
+// in the conversation: it is being read, and the outbox state ("sent") only
+// says what the transport did, not whether the model has it.
 func (q *questionService) Fence(ctx context.Context, sessionID string, stopRun bool) {
 	if q == nil {
 		return
 	}
 	unlock := q.lock(sessionID)
 	defer unlock()
-	if _, err := q.repo.FenceQuestionAnswers(ctx, sessionID, stopRun); err != nil {
+	var admitted []string
+	if !stopRun {
+		admitted = q.admittedEvents(ctx, sessionID)
+	}
+	if _, err := q.repo.FenceQuestionAnswers(ctx, sessionID, stopRun, admitted); err != nil {
 		slog.Warn("questions: fencing the accepted answers failed", "session", sessionID, "error", err)
 	}
+}
+
+// admittedEvents returns the session's owed answers whose message is already
+// in its conversation, in the history the model reads or anywhere in the tree.
+func (q *questionService) admittedEvents(ctx context.Context, sessionID string) []string {
+	sess, ok := q.m.Get(sessionID)
+	if !ok {
+		return nil
+	}
+	due, err := q.repo.DueQuestionWork(ctx)
+	if err != nil {
+		slog.Warn("questions: reading owed work to fence it failed", "session", sessionID, "error", err)
+		return nil
+	}
+	history := sess.History()
+	tree := sess.runtime.Context().Tree
+	var ids []string
+	for _, question := range due {
+		if question.SessionID != sessionID {
+			continue
+		}
+		if hasNotice(history, question.EventID) || (tree != nil && entriesHaveNotice(tree.Entries(), question.EventID)) {
+			ids = append(ids, question.EventID)
+		}
+	}
+	return ids
 }
 
 // project adds a question to the live session's pending set.
@@ -410,6 +444,11 @@ func (q *questionService) attach(sess *ManagedSession) {
 // already marked its own as stopped, and a run that never got to read it (the
 // receipt could not be saved) or that a shutdown cut short leaves it due, for
 // the next time the session is loaded.
+//
+// The work is only done once the end of that run is on disk: the snapshot
+// below is acknowledged after the run, so a conversation that survives a crash
+// either has the model's final reply or still owes the run. If the save
+// fails the work stays due and the next run end tries again.
 func (q *questionService) runEnded(sess *ManagedSession, e bus.RunEnded) {
 	ctx := q.m.baseCtx
 	if e.Cancelled || errors.Is(e.Err, agent.ErrAdmissionNotSaved) || ctx.Err() != nil {
@@ -420,10 +459,20 @@ func (q *questionService) runEnded(sess *ManagedSession, e bus.RunEnded) {
 		slog.Warn("questions: reading owed work failed", "session", sess.ID, "error", err)
 		return
 	}
+	var settled []tasks.Question
 	for _, question := range due {
-		if question.SessionID != sess.ID || !q.read(sess, question.EventID) {
-			continue
+		if question.SessionID == sess.ID && q.read(sess, question.EventID) {
+			settled = append(settled, question)
 		}
+	}
+	if len(settled) == 0 {
+		return
+	}
+	if err := sess.runtime.CheckpointAcknowledged(ctx); err != nil {
+		slog.Warn("questions: the end of the run could not be saved; its work stays due", "session", sess.ID, "error", err)
+		return
+	}
+	for _, question := range settled {
 		if _, err := q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkDone); err != nil {
 			slog.Warn("questions: settling owed work failed", "session", sess.ID, "error", err)
 		}
@@ -504,7 +553,8 @@ func (q *questionService) continueDue(sess *ManagedSession) {
 	switch err := sess.runtime.Bus.Execute(bus.ContinueRun{SessionID: sess.ID, Source: "question_answer"}); {
 	case err == nil:
 	case errors.Is(err, bus.ErrNothingToContinue):
-		// The conversation already ends in the model's reply: the run did finish.
+		// The saved conversation ends in the model's own final reply: the run did
+		// finish, and that reply is what reached the disk.
 		for _, question := range owed {
 			_, _ = q.repo.SetQuestionWork(ctx, question.EventID, tasks.WorkDue, tasks.WorkDone)
 		}

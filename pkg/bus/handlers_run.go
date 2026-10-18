@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -323,16 +324,9 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		if sctx.Agent.QueueLen() > 0 {
 			return ErrNotIdle
 		}
-		// A request must end in input for the model: after its own reply there
-		// is nothing owed.
-		msgs := sctx.Agent.Messages()
-		last := ""
-		for i := len(msgs) - 1; i >= 0 && last == ""; i-- {
-			if msgs[i].IsLLMMessage() {
-				last = msgs[i].Role
-			}
-		}
-		if last != "user" && last != "tool_result" {
+		// Only a conversation the loop itself would have gone on from is
+		// continued: after the model's own final reply there is nothing owed.
+		if !agent.OwesContinuation(sctx.Agent.Messages()) {
 			return ErrNothingToContinue
 		}
 		return startRunWithOrigin(sctx, "continue", RunOrigin{Explicit: true, Source: cmd.Source}, sctx.Agent.Continue)

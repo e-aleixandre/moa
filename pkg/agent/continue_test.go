@@ -25,3 +25,31 @@ func TestContinueRunsOverTheConversationWithoutAppending(t *testing.T) {
 		t.Fatalf("provider calls = %d, want 1", provider.calls)
 	}
 }
+
+// A conversation is continued from where the loop itself would have gone on:
+// input for the model, or a reply the provider said is not the end of the turn.
+func TestOwesContinuation(t *testing.T) {
+	msg := func(role, stop string) core.AgentMessage {
+		m := core.Message{Role: role, StopReason: stop}
+		return core.WrapMessage(m)
+	}
+	cases := []struct {
+		name string
+		msgs []core.AgentMessage
+		want bool
+	}{
+		{"empty", nil, false},
+		{"user", []core.AgentMessage{msg("user", "")}, true},
+		{"tool result", []core.AgentMessage{msg("assistant", "tool_use"), msg("tool_result", "")}, true},
+		{"final reply", []core.AgentMessage{msg("user", ""), msg("assistant", "end_turn")}, false},
+		{"pause_turn", []core.AgentMessage{msg("user", ""), msg("assistant", "pause_turn")}, true},
+		{"continue", []core.AgentMessage{msg("user", ""), msg("assistant", "continue")}, true},
+		{"truncated reply", []core.AgentMessage{msg("user", ""), msg("assistant", "max_tokens")}, false},
+		{"custom entry after a final reply", []core.AgentMessage{msg("assistant", "end_turn"), {Message: core.Message{Role: "compaction"}}}, false},
+	}
+	for _, c := range cases {
+		if got := OwesContinuation(c.msgs); got != c.want {
+			t.Errorf("%s: OwesContinuation = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
