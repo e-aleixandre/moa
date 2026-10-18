@@ -228,6 +228,9 @@ func ParseQuestion(m map[string]any) (Question, error) {
 	return qs[0], nil
 }
 
+// ParseQuestions validates the "questions" parameter as ask_user does.
+func ParseQuestions(params map[string]any) ([]Question, error) { return parseQuestions(params) }
+
 func parseQuestions(params map[string]any) ([]Question, error) {
 	raw, ok := params["questions"]
 	if !ok {

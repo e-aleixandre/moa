@@ -49,6 +49,9 @@ const (
 
 // ManagedSession wraps a bus.SessionRuntime with metadata for the web dashboard.
 type ManagedSession struct {
+	// askAsync: this session posts durable questions instead of blocking on
+	// them. Fixed when the session is built.
+	askAsync       bool
 	subagentSaveMu sync.Mutex
 	// voiceAdmission admits each voice call delivery once (voice_call_delivery.go).
 	voiceAdmission voiceAdmission
@@ -903,6 +906,9 @@ type Manager struct {
 	tasksCancel context.CancelFunc
 	// notices delivers task notices; one dispatcher per serve process.
 	notices *noticeDispatcher
+	// questions owns the sessions' asynchronous ask_user questions; nil when
+	// the task database is unavailable, and sessions then ask synchronously.
+	questions *questionService
 	// planner materializes scheduled tasks and assigns their runs; clock is
 	// its time source and the task repository's.
 	planner *taskScheduler
@@ -1203,6 +1209,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		m.tasks.SetClock(m.clock.Now)
 	}
 	if m.tasks != nil {
+		m.questions = newQuestionService(m)
 		m.notices = newNoticeDispatcher(m)
 		m.planner = newTaskScheduler(m, m.clock, cfg.schedulerHooks)
 		m.recoverScheduledTasks(tasksCtx)

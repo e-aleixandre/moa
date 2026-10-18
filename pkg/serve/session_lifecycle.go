@@ -277,6 +277,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
 	moaCfg := m.loadConfig(cwd)
+	// Decided once, when the session is built: a session does not change
+	// contract under a config edit, and the switch needs the question store.
+	askAsync := m.questions != nil && core.IsAskUserAsync(moaCfg, askUserAsyncDefault.Load())
 	autoTitleModel, autoTitleEnabled := m.resolveAuxiliaryModel(moaCfg.AutoTitleModel, id, "auto title")
 	briefModel, briefEnabled := m.resolveAuxiliaryModel(moaCfg.SessionBriefModel, id, "session brief")
 	var mcpSources *core.MCPDisableSources
@@ -576,6 +579,12 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	if opts != nil {
 		artifactStore = opts.artifactStore
 	}
+	if askAsync {
+		// Same name, different contract: the blocking tool and its bridge stay
+		// for the standalone harnesses and request_call's written fallback.
+		bs.ToolReg.Unregister("ask_user")
+		core.RegisterOrLog(bs.ToolReg, m.newAsyncAskTool(id, func() *ManagedSession { return sess }))
+	}
 	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, artifactStore))
 
 	bs.BindTranscript(func(fn func(*core.AgentMessage)) error {
@@ -606,6 +615,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	rcfg.SessionID = id
 	rcfg.Ctx = sessionCtx
 	rcfg.Checkpoints = cpStore
+	rcfg.RepairToolCall = m.questions.repairer(id)
 	rcfg.ProviderFactory = m.providerFactory
 	// Keep the full base system prompt (identity + tool guidance + Persistence).
 	// RuntimeConfig() already set it from the agent's prompt; do NOT wipe it.
@@ -722,6 +732,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		},
 		artifactStore:   artifactStore,
 		attachmentScope: attachScope,
+		askAsync:        askAsync,
+	}
+	if askAsync {
+		m.questions.attach(sess)
 	}
 	// Wire the MCP controller's prompt refresh now that the runtime exists: when
 	// a server is enabled/disabled the tool set changes, so the base system

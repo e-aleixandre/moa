@@ -8,4 +8,10 @@ import (
 )
 
 // TestMain keeps this package's tests away from the developer's real moa config.
-func TestMain(m *testing.M) { os.Exit(testenv.Run(m)) }
+// The suite runs the asynchronous ask_user: it is the contract these tests
+// specify. The ones that exercise the blocking path pin it with
+// AskUserAsync: false in their config.
+func TestMain(m *testing.M) {
+	askUserAsyncDefault.Store(true)
+	os.Exit(testenv.Run(m))
+}

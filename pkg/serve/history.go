@@ -64,7 +64,7 @@ func (m *Manager) historyMessages(id string) ([]core.AgentMessage, error) {
 	if len(saved.Entries) == 0 {
 		return saved.Messages, nil
 	}
-	tree, err := session.NewTreeFromEntries(saved.Entries, saved.LeafID)
+	tree, err := session.NewTreeFromEntriesRepairing(saved.Entries, saved.LeafID, m.questions.repairer(saved.ID))
 	if err != nil {
 		return nil, err
 	}

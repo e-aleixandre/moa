@@ -281,7 +281,7 @@ func (m *Manager) savedConversationMessages(saved *session.Session) (conversatio
 	if len(saved.Entries) == 0 {
 		return m.safeConversationMessages(saved.ID, saved.Messages), "", nil
 	}
-	tree, err := session.NewTreeFromEntries(saved.Entries, saved.LeafID)
+	tree, err := session.NewTreeFromEntriesRepairing(saved.Entries, saved.LeafID, m.questions.repairer(saved.ID))
 	if err != nil {
 		return conversationProjection{}, "", err
 	}
