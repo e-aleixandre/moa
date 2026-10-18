@@ -77,7 +77,7 @@ export function adoptAttentionNamespace(id, namespace) {
 
 export function handleWsAskUser(id, data, seq = 0) {
   updateSession(id, {
-    pendingAsk: { id: data.id, questions: data.questions },
+    pendingAsk: { id: data.id, questions: data.questions, ...(data.async ? { async: true } : {}) },
   });
   markUnseen(id, seq, true);
   acknowledgeVisibleLiveAttention(id, seq);

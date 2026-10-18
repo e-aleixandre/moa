@@ -142,6 +142,8 @@ type LiveToolInitData struct {
 	Result string `json:"result,omitempty"`
 	// AskResponder is who answered an ended ask_user (absent when not recorded).
 	AskResponder *askuser.Responder `json:"ask_responder,omitempty"`
+	// OpenQuestionID is set on an asynchronous ask_user's acknowledgement.
+	OpenQuestionID string `json:"open_question_id,omitempty"`
 	// Images are the stored-image references of a terminal call (see ToolEndData).
 	Images []core.Content `json:"images,omitempty"`
 	// PatchFiles is an apply_patch's per-file diff record (see ToolEndData).
@@ -213,6 +215,8 @@ type AskData struct {
 	RunGen      uint64            `json:"run_gen,omitempty"`
 	Questions   []bus.AskQuestion `json:"questions"`
 	RequiresTap bool              `json:"requires_tap,omitempty"`
+	// Async marks a durable question that outlives the run (additive).
+	Async bool `json:"async,omitempty"`
 }
 
 // StateChangeData is sent when the session state changes.
@@ -277,6 +281,8 @@ type ToolEndData struct {
 	Result     string `json:"result"`
 	// AskResponder is who answered an ask_user (absent when not recorded).
 	AskResponder *askuser.Responder `json:"ask_responder,omitempty"`
+	// OpenQuestionID is set on an asynchronous ask_user's acknowledgement.
+	OpenQuestionID string `json:"open_question_id,omitempty"`
 	// PatchFiles is an apply_patch's per-file diff record: path, op, +/- counts
 	// and the unified diff of what was written (bounded by the tool). Display
 	// only; the model's result text is just the M/A/D list.

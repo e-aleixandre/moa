@@ -114,7 +114,7 @@ export function fuseLedgerDetails(rows, siblingDiff, sessionId) {
     if (row.askUser) {
       return {
         ...row,
-        detail: { node: <AskUserDetail questions={row.askUser.questions} result={row.askUser.result} responder={row.askUser.responder} /> },
+        detail: { node: <AskUserDetail questions={row.askUser.questions} result={row.askUser.result} responder={row.askUser.responder} posted={row.askUser.posted} /> },
       };
     }
     if (row.message) {

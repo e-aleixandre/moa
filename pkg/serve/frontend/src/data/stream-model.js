@@ -160,7 +160,7 @@ import {
   modelCodename,
 } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
-import { splitAskResponder } from './ask-user-machine.js';
+import { splitAskResponder, answererLabel } from './ask-user-machine.js';
 import { parseHistoryResult, historyOut } from './history-result.js';
 import { parseFileCardData } from './util/file-card.js';
 import { parseUnifiedDiff } from './util/unified-diff.js';
@@ -449,7 +449,8 @@ export function projectStream(session) {
       // the card is asking it.
       const liveAskShownAsCard = msg.tool_name?.toLowerCase() === 'ask_user'
         && session.pendingAsk
-        && (msg.status === 'running' || msg.status === 'generating');
+        && ((msg.status === 'running' || msg.status === 'generating')
+          || (msg.openQuestionId && msg.openQuestionId === session.pendingAsk.id));
       if (!file && !sessionMessage && !liveAskShownAsCard) {
         if (!currentLedger) {
           currentLedger = { type: 'ledger', id: blockID('ledger', msg, i), rows: [] };
@@ -616,6 +617,25 @@ export function projectStream(session) {
           steer: !!(msg.custom.steer || msg._steer_id),
           // Absent means autorun ran: only an explicit false says otherwise,
           // so older transcripts do not all claim they were skipped.
+          autorun: msg.custom.autorun !== false,
+        });
+        continue;
+      }
+      // The late answer to an asynchronous ask_user: a user-role message only
+      // because that is how the model receives it. Who answered and what comes
+      // from the recorded metadata, never from the XML in the text.
+      if (msg.custom?.source === 'question_answer') {
+        const answers = Array.isArray(msg.custom.answers) ? msg.custom.answers : [];
+        const questions = askedQuestions(messages, msg.custom.question_id);
+        blocks.push({
+          kind: 'event',
+          id: blockID('answer', msg, i),
+          source: 'answer',
+          title: `Answered by ${answererLabel(msg.custom.ask_responder)}`,
+          body: answers
+            .map((a, n) => (questions[n] ? `${questions[n]}\n→ ${a}` : String(a)))
+            .join('\n\n'),
+          time: msg.timestamp,
           autorun: msg.custom.autorun !== false,
         });
         continue;
@@ -1104,6 +1124,18 @@ const PATH_ARG_TOOLS = new Set(['read', 'write', 'edit', 'multiedit', 'ls', 'sen
 // is also the path terminated subagent/bash cards take (they arrive as
 // tool_start rows in messages), so a subagent/bash card produces a normal,
 // legible ledger row: arg = first line of task/command, out = summary.
+// askedQuestions finds the question texts an asynchronous ask_user posted, by
+// the id its acknowledgement carries.
+function askedQuestions(messages, questionId) {
+  if (!questionId) return [];
+  for (const m of messages) {
+    if (m?._type !== 'tool_start' || m.openQuestionId !== questionId) continue;
+    const args = typeof m.args === 'string' ? tryParse(m.args) : m.args;
+    return Array.isArray(args?.questions) ? args.questions.map((q) => String(q?.question || '')) : [];
+  }
+  return [];
+}
+
 function toLedgerRow(msg) {
   const name = msg.tool_name || 'tool';
   // An answer given on the user's behalf starts with a label line for the
@@ -1154,6 +1186,14 @@ function toLedgerRow(msg) {
   if (name.toLowerCase() === 'ask_user') {
     const args = typeof msg.args === 'string' ? tryParse(msg.args) : msg.args;
     row.askUser = { questions: args?.questions, result: msg.result, responder: msg.askResponder };
+    // Posted, not answered: the result is the server's acknowledgement, which
+    // is neither an answer to quote nor a magnitude to count. The answer
+    // arrives later as its own event row.
+    if (msg.openQuestionId && status !== 'err') {
+      row.askUser.posted = true;
+      row.echo = 'asked';
+      row.out = '';
+    }
   }
   // A finished history call shows what it retrieved, message by message,
   // instead of the text the model read; its size is what it found.

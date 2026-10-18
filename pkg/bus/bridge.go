@@ -898,6 +898,7 @@ func (sctx *SessionContext) endLiveToolLocked(call LiveToolCall) {
 			sctx.liveTools[i].Phase = call.Phase
 			sctx.liveTools[i].Result = call.Result
 			sctx.liveTools[i].AskResponder = call.AskResponder
+			sctx.liveTools[i].OpenQuestionID = call.OpenQuestionID
 			sctx.liveTools[i].Images = call.Images
 			sctx.liveTools[i].PatchFiles = call.PatchFiles
 			sctx.liveTools[i].CallRequest = call.CallRequest
@@ -1500,7 +1501,7 @@ func EndedLiveToolCall(e core.AgentEvent) LiveToolCall {
 	} else if e.IsError {
 		phase = LiveToolPhaseError
 	}
-	return LiveToolCall{ToolCallID: e.ToolCallID, ToolName: e.ToolName, Phase: phase, Result: resultText(e.Result), AskResponder: askResponderOf(e.Result), Images: resultImageRefs(e.Result), PatchFiles: patchFilesOf(e.Result), CallRequest: callRequestOf(e.Result)}
+	return LiveToolCall{ToolCallID: e.ToolCallID, ToolName: e.ToolName, Phase: phase, Result: resultText(e.Result), AskResponder: askResponderOf(e.Result), OpenQuestionID: openQuestionIDOf(e.Result), Images: resultImageRefs(e.Result), PatchFiles: patchFilesOf(e.Result), CallRequest: callRequestOf(e.Result)}
 }
 
 // askResponderOf is who answered an ask_user, as its result records it.
@@ -1512,6 +1513,16 @@ func askResponderOf(result *core.Result) *askuser.Responder {
 		return &r
 	}
 	return nil
+}
+
+// openQuestionIDOf is the question an asynchronous ask_user acknowledgement
+// opened; empty for every other result.
+func openQuestionIDOf(result *core.Result) string {
+	if result == nil || result.Custom["question_state"] != "open" {
+		return ""
+	}
+	id, _ := result.Custom["question_id"].(string)
+	return id
 }
 
 // patchFilesOf is the per-file diff record an apply_patch result carries for
@@ -1659,17 +1670,18 @@ func TranslateAgentEvent(sid string, gen uint64, e core.AgentEvent, taskStore *t
 
 	case core.AgentEventToolExecEnd:
 		ended := ToolExecEnded{
-			SessionID:    sid,
-			RunGen:       gen,
-			ToolCallID:   e.ToolCallID,
-			ToolName:     e.ToolName,
-			Result:       resultText(e.Result),
-			Images:       resultImageRefs(e.Result),
-			IsError:      e.IsError,
-			Rejected:     e.Rejected,
-			AskResponder: askResponderOf(e.Result),
-			PatchFiles:   patchFilesOf(e.Result),
-			CallRequest:  callRequestOf(e.Result),
+			SessionID:      sid,
+			RunGen:         gen,
+			ToolCallID:     e.ToolCallID,
+			ToolName:       e.ToolName,
+			Result:         resultText(e.Result),
+			Images:         resultImageRefs(e.Result),
+			IsError:        e.IsError,
+			Rejected:       e.Rejected,
+			AskResponder:   askResponderOf(e.Result),
+			OpenQuestionID: openQuestionIDOf(e.Result),
+			PatchFiles:     patchFilesOf(e.Result),
+			CallRequest:    callRequestOf(e.Result),
 		}
 		events := []any{ended}
 		// Emit task update on tool_end only (matches serve behavior).

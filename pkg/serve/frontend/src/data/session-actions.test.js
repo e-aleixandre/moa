@@ -10,7 +10,7 @@ let apiResponse = [];
 
 const { store, setState, updateSession } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
-const { createSession, deleteSession, loadSessions, loadUsage, openPersistedSubagent, openBashJob, recallQueuedSteers, sendMessage, setOwnerDetached, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
+const { createSession, deleteSession, dismissAskUser, loadSessions, loadUsage, openPersistedSubagent, openBashJob, recallQueuedSteers, sendMessage, setOwnerDetached, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
 const { getToasts, removeToast } = await import('./notifications.js');
 const { __resetSteerRestoreForTests } = await import('./steer-restore.js');
 const { consumeComposerDrop } = await import('./share.js');
@@ -2026,4 +2026,28 @@ test('a send queued after a stale idle prediction keeps its own selection throug
   await stopRun('s1');
   const d = store.get().composerDrops.s1;
   expect(sessionMentionIds(d.text, d.mentions)).toEqual([A]);
+});
+
+test('dismissAskUser posts to the dismiss route and drops the card; a 409 drops it too', async () => {
+  const calls = [];
+  for (const status of [204, 409]) {
+    calls.length = 0;
+    setState({ sessions: { s1: { id: 's1', pendingAsk: { id: 'q/1', async: true, questions: [] } } } });
+    globalThis.fetch = (path, opts) => {
+      calls.push({ path, opts });
+      return Promise.resolve(new Response(status === 204 ? null : 'closed', { status }));
+    };
+    await dismissAskUser('s1', 'q/1');
+    expect(calls[0].path).toBe('/api/sessions/s1/questions/q%2F1/dismiss');
+    expect(calls[0].opts.method).toBe('POST');
+    expect(calls[0].opts.body).toBe('{}');
+    expect(store.get().sessions.s1.pendingAsk).toBeNull();
+  }
+});
+
+test('dismissAskUser keeps the card when the request fails', async () => {
+  setState({ sessions: { s1: { id: 's1', pendingAsk: { id: 'q1', async: true, questions: [] } } } });
+  globalThis.fetch = () => Promise.resolve(new Response('boom', { status: 500 }));
+  await expect(dismissAskUser('s1', 'q1')).rejects.toThrow();
+  expect(store.get().sessions.s1.pendingAsk?.id).toBe('q1');
 });

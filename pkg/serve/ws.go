@@ -234,7 +234,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		return Event{Type: "tool_end", Data: ToolEndData{
 			ToolCallID: e.ToolCallID, ToolName: e.ToolName,
 			IsError: e.IsError, Rejected: e.Rejected, Result: e.Result, Images: e.Images,
-			AskResponder: e.AskResponder, PatchFiles: e.PatchFiles, CallRequest: e.CallRequest,
+			AskResponder: e.AskResponder, OpenQuestionID: e.OpenQuestionID, PatchFiles: e.PatchFiles, CallRequest: e.CallRequest,
 		}}, true
 	case bus.TasksUpdated:
 		return Event{Type: "tasks_update", Data: TasksUpdateData{Tasks: e.Tasks}}, true
@@ -359,7 +359,7 @@ func wsEventFromBus(event any) (Event, bool) {
 	case bus.AskUserRequested:
 		return Event{Type: "ask_user", Data: map[string]any{
 			"id": e.ID, "run_gen": e.RunGen, "questions": e.Questions,
-			"requires_tap": e.RequiresTap,
+			"requires_tap": e.RequiresTap, "async": e.Async,
 		}}, true
 	case bus.AskUserResolved:
 		return Event{Type: "ask_resolved", Data: PromptResolvedData{ID: e.ID}}, true
@@ -978,6 +978,7 @@ func pendingAttentionData(pending bus.PendingApprovalInfo) (*PermissionData, *As
 			ID:          pending.Ask.ID,
 			Questions:   pending.Ask.Questions,
 			RequiresTap: pending.Ask.RequiresTap,
+			Async:       pending.Ask.Async,
 		}
 	}
 	return permissionData, askData
@@ -1088,15 +1089,16 @@ func liveToolInitData(calls []bus.LiveToolCall) []LiveToolInitData {
 			continue
 		}
 		d := LiveToolInitData{
-			ToolCallID:   c.ToolCallID,
-			ToolName:     c.ToolName,
-			Args:         boundedLiveToolArgs(c.Args),
-			Status:       c.Phase,
-			Result:       truncateHistoryString(c.Result),
-			AskResponder: c.AskResponder,
-			Images:       c.Images,
-			PatchFiles:   c.PatchFiles,
-			CallRequest:  c.CallRequest,
+			ToolCallID:     c.ToolCallID,
+			ToolName:       c.ToolName,
+			Args:           boundedLiveToolArgs(c.Args),
+			Status:         c.Phase,
+			Result:         truncateHistoryString(c.Result),
+			AskResponder:   c.AskResponder,
+			OpenQuestionID: c.OpenQuestionID,
+			Images:         c.Images,
+			PatchFiles:     c.PatchFiles,
+			CallRequest:    c.CallRequest,
 		}
 		if !c.StartedAt.IsZero() {
 			d.StartedAtMs = c.StartedAt.UnixMilli()

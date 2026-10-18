@@ -2,6 +2,7 @@ import { expect, mock, test } from "bun:test";
 
 const refs = [];
 const resolved = [];
+const dismissed = [];
 
 // Spread the real hooks first. bun's mock.module replaces the module for the
 // whole process and never restores it, so a factory listing only some hooks
@@ -23,6 +24,7 @@ mock.module("preact/hooks", () => ({
 
 mock.module("../../data/session-actions.js", () => ({
   resolveAskUser: async (...args) => { resolved.push(args); },
+  dismissAskUser: async (...args) => { dismissed.push(args); },
 }));
 
 mock.module("../../hooks/useVoiceGesture.js", () => ({
@@ -118,4 +120,28 @@ test("an assistive-technology activation of Skip is honoured", async () => {
   await Promise.resolve();
 
   expect(resolved).toHaveLength(1);
+});
+
+function renderAsync(extra) {
+  refs.length = 0;
+  return AskUserPrompt({ session: { id: "s1", pendingAsk: { id: "ask-9", questions: [{ question: "Ship it?" }], ...extra } } });
+}
+
+test("an async question offers Dismiss and says Stop keeps it open", async () => {
+  dismissed.length = 0;
+  const nodes = descendants(renderAsync({ async: true }));
+  const hint = nodes.find((node) => node.props?.class === "ask-user-prompt-async");
+  expect(hint).toBeDefined();
+  expect(String(hint.props.children)).toContain("Stop keeps this question open");
+  const dismiss = nodes.find((node) => String(node.props?.class || "").includes("ask-user-prompt-dismiss"));
+  expect(dismiss).toBeDefined();
+  dismiss.props.onClick();
+  await Promise.resolve();
+  expect(dismissed).toEqual([["s1", "ask-9"]]);
+});
+
+test("a synchronous question shows no Dismiss and no hint", () => {
+  const nodes = descendants(renderAsync({}));
+  expect(nodes.find((node) => node.props?.class === "ask-user-prompt-async")).toBeUndefined();
+  expect(nodes.find((node) => String(node.props?.class || "").includes("ask-user-prompt-dismiss"))).toBeUndefined();
 });

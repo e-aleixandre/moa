@@ -1077,6 +1077,19 @@ export async function resolveAskUser(sessionId, askId, answers) {
   updateSession(sessionId, { pendingAsk: null });
 }
 
+// dismissAskUser discards an open asynchronous question without answering it.
+// 409 means it was already closed (answered elsewhere): the card goes either
+// way, because there is nothing left to answer.
+export async function dismissAskUser(sessionId, askId) {
+  try {
+    await api('POST', `/api/sessions/${sessionId}/questions/${encodeURIComponent(askId)}/dismiss`, {});
+  } catch (e) {
+    if (e?.status !== 409) throw e;
+  }
+  const ask = store.get().sessions[sessionId]?.pendingAsk;
+  if (ask && ask.id === askId) updateSession(sessionId, { pendingAsk: null });
+}
+
 // closeCount counts the closes of each session, so a resume that was in flight
 // when the user closed it can tell its answer is stale.
 const closeCount = new Map();

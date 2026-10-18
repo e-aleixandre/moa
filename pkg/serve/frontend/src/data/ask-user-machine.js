@@ -167,3 +167,15 @@ export function splitAskResponder(result, recorded) {
   const match = RESPONDER_LINE.exec(text);
   return { responder, body: match ? text.slice(match[0].length) : text };
 }
+
+// answererLabel names who gave an answer, from the recorded responder only.
+// No record means the user: older sessions never recorded one.
+export function answererLabel(recorded) {
+  switch (recorded?.kind) {
+    case 'owner': return recorded.name ? `${recorded.name} (owner)` : 'the owner';
+    case 'automation': return 'an automation';
+    case 'voice': return 'a voice call';
+    case 'user': case undefined: case '': case null: return 'you';
+    default: return 'an unidentified responder';
+  }
+}

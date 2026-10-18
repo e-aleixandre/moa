@@ -164,6 +164,9 @@ type ToolExecEnded struct {
 	Rejected bool
 	// AskResponder is who answered an ask_user, when the result records it.
 	AskResponder *askuser.Responder
+	// OpenQuestionID is set on the acknowledgement of an asynchronous ask_user:
+	// the question is posted, not answered.
+	OpenQuestionID string
 	// PatchFiles is an apply_patch's per-file diff record (display only; the
 	// model never sees it). Opaque here: the tool defines its shape.
 	PatchFiles any

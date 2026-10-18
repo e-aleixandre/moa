@@ -270,6 +270,7 @@ export function liveToolRow(t) {
     // Who answered an ended ask_user, as recorded: its result reaches history
     // only with the whole batch.
     ...(ended && t.ask_responder ? { askResponder: t.ask_responder } : {}),
+    ...(ended && t.open_question_id ? { openQuestionId: t.open_question_id } : {}),
     ...(ended && t.patch_files ? { patchFiles: t.patch_files } : {}),
     ...(ended && t.call_request ? { callRequest: t.call_request } : {}),
     // Server-anchored so the row's elapsed timer resumes from the real start

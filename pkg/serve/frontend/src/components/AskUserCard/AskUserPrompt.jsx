@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { ChevronUp, ChevronDown, Check } from "lucide-preact";
 import { AskUserCard } from "./AskUserCard.jsx";
-import { resolveAskUser } from "../../data/session-actions.js";
+import { resolveAskUser, dismissAskUser } from "../../data/session-actions.js";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { useCanTranscribe } from "../../hooks/useCanTranscribe.js";
 import {
@@ -29,6 +29,7 @@ export function AskUserPrompt({ session }) {
   const [answers, setAnswers] = useState(() => initAnswers(questions));
   const [selections, setSelections] = useState(() => initSelections(questions));
   const [submitting, setSubmitting] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const [voiceError, setVoiceError] = useState(null);
   // Synchronous in-flight guard: `submitting` is reactive state, so two
   // activations before the next render could both fire resolveAskUser. This ref
@@ -50,6 +51,7 @@ export function AskUserPrompt({ session }) {
     setAnswers(initAnswers(questions));
     setSelections(initSelections(questions));
     setSubmitting(false);
+    setDismissing(false);
     setVoiceError(null);
     resolvingRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,7 +143,7 @@ export function AskUserPrompt({ session }) {
   }, [voiceUsable, ask?.id, submitting, toggleVoice]);
 
   if (!ask || questions.length === 0) return null;
-  if (submitting) return <div class="ask-user-resolved"><Check size={14} aria-hidden="true" /> Answered</div>;
+  if (submitting) return <div class="ask-user-resolved"><Check size={14} aria-hidden="true" /> {dismissing ? "Dismissed" : "Answered"}</div>;
 
   const q = questions[current];
   const options = (q.options || []).map((label) => ({ label }));
@@ -201,6 +203,21 @@ export function AskUserPrompt({ session }) {
     resolve(trimmed);
   };
 
+  const handleDismiss = async () => {
+    if (resolvingRef.current) return;
+    resolvingRef.current = true;
+    setSubmitting(true);
+    setDismissing(true);
+    try {
+      await dismissAskUser(session.id, ask.id);
+    } catch (e) {
+      console.error("Ask user dismiss failed:", e);
+      resolvingRef.current = false;
+      setSubmitting(false);
+      setDismissing(false);
+    }
+  };
+
   const handleSkip = (e) => {
     const armedPointerId = skipPointerDown.current;
     skipPointerDown.current = null;
@@ -244,6 +261,9 @@ export function AskUserPrompt({ session }) {
       {voiceError && (
         <div class="ask-user-prompt-voice-error" role="alert">{voiceError}</div>
       )}
+      {ask.async && (
+        <div class="ask-user-prompt-async">Stop keeps this question open. Answer now or later, or Dismiss it.</div>
+      )}
       <div class="ask-user-prompt-foot">
         {questions.length > 1 && (
           <div class="ask-user-prompt-nav" aria-label="Questions">
@@ -271,6 +291,11 @@ export function AskUserPrompt({ session }) {
           </div>
         )}
         <div class="ask-user-prompt-actions">
+          {ask.async && (
+            <button type="button" class="ask-user-prompt-skip ask-user-prompt-dismiss" onClick={handleDismiss}>
+              Dismiss
+            </button>
+          )}
           <button
             type="button"
             class="ask-user-prompt-skip"

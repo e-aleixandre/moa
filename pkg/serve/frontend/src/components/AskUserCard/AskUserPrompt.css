@@ -21,6 +21,12 @@
   padding: 0 2px;
 }
 
+.ask-user-prompt-async {
+  padding: 0 2px;
+  font-size: var(--zl-fs-meta);
+  color: var(--zl-t3);
+}
+
 .ask-user-prompt-nav {
   display: flex;
   align-items: center;

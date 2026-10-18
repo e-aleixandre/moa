@@ -23,6 +23,7 @@ mock.module("preact/hooks", () => ({
 }));
 mock.module("../../data/session-actions.js", () => ({
   resolveAskUser: async (...args) => { resolved.push(args); },
+  dismissAskUser: async () => {},
 }));
 mock.module("../../hooks/useVoiceGesture.js", () => ({
   useVoiceGesture: () => ({ handlers: {}, recording: false, transcribing: false, supported: false, cancel() {} }),

@@ -20,10 +20,12 @@ function optionLabel(option) {
   return typeof option === "string" ? option : option?.label || "";
 }
 
-export function AskUserDetail({ questions, result, responder: recorded }) {
+export function AskUserDetail({ questions, result, responder: recorded, posted = false }) {
   const items = Array.isArray(questions) ? questions : [];
-  const answers = parseAskAnswers(result, items.length, recorded);
-  const { responder } = splitAskResponder(result, recorded);
+  // A posted question's result is only the server's acknowledgement: no
+  // answer exists yet, so none is read out of it.
+  const answers = posted ? [] : parseAskAnswers(result, items.length, recorded);
+  const { responder } = posted ? { responder: null } : splitAskResponder(result, recorded);
 
   return (
     <div class="ask-detail">
@@ -64,6 +66,8 @@ export function AskUserDetail({ questions, result, responder: recorded }) {
                 <PenLine size={12} aria-hidden="true" />
                 {multi ? parsed.free : answer}
               </div>
+            ) : posted ? (
+              <div class="ask-detail-answer missing">Asked</div>
             ) : options.length === 0 ? (
               <div class="ask-detail-answer">{answer || "—"}</div>
             ) : !answer ? (
