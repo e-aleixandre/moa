@@ -61,14 +61,31 @@ const asyncAskSchema = `{
 	}
 }`
 
+// asyncAskCallNote and asyncAskCallProperty add call_after_minutes to an
+// owner's ask_user.
+const asyncAskCallNote = `
+
+call_after_minutes (only with post): if the question is still unanswered after that many minutes, you call the user about it (once, within their allowed call hours and your call level). Use it only for real urgency, when an unanswered question blocks important work; never by default. The call only alerts the user: it authorizes nothing, and a requires_tap question still needs their tap.`
+
+const asyncAskCallProperty = `"call_after_minutes": {"type": "integer", "minimum": 5, "maximum": 240, "description": "Only with post, and only for real urgency: call the user if the question is still unanswered after this many minutes (5-240)."},`
+
 // newAsyncAskTool is ask_user for a session that posts durable questions. The
 // session is looked up when the tool runs: the tool is registered before it
 // exists.
-func (m *Manager) newAsyncAskTool(sessionID string, session func() *ManagedSession) core.Tool {
+//
+// An owner's own conversation also gets call_after_minutes: only owners call.
+// Other sessions keep the tool exactly as it was.
+func (m *Manager) newAsyncAskTool(sessionID string, session func() *ManagedSession, ownerSession bool) core.Tool {
+	description, schema := asyncAskDescription, asyncAskSchema
+	if ownerSession {
+		description += asyncAskCallNote
+		schema = strings.Replace(schema, `"question_id": {`, asyncAskCallProperty+`
+		"question_id": {`, 1)
+	}
 	return core.Tool{
 		Name:        "ask_user",
-		Description: asyncAskDescription,
-		Parameters:  json.RawMessage(asyncAskSchema),
+		Description: description,
+		Parameters:  json.RawMessage(schema),
 		Effect:      core.EffectInteractive,
 		Execute: func(ctx context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
 			sess := session()
@@ -78,7 +95,7 @@ func (m *Manager) newAsyncAskTool(sessionID string, session func() *ManagedSessi
 			action, _ := params["action"].(string)
 			switch action {
 			case "", "post":
-				return m.questions.post(ctx, sess, params), nil
+				return m.questions.post(ctx, sess, params, ownerSession), nil
 			case "list":
 				return m.questions.list(ctx, sess), nil
 			case "withdraw":
@@ -95,19 +112,29 @@ func (m *Manager) newAsyncAskTool(sessionID string, session func() *ManagedSessi
 // commits with the acknowledgement it will return; only then is it announced.
 // A crash anywhere leaves either nothing, or a question whose acknowledgement
 // the next load reproduces from the row.
-func (q *questionService) post(ctx context.Context, sess *ManagedSession, params map[string]any) core.Result {
+func (q *questionService) post(ctx context.Context, sess *ManagedSession, params map[string]any, ownerSession bool) core.Result {
 	questions, err := askuser.ParseQuestions(params)
 	if err != nil {
 		return core.ErrorResult(err.Error())
 	}
 	requiresTap, _ := params["requires_tap"].(bool)
-	return q.postQuestions(ctx, sess, questions, requiresTap, tasks.OriginAskUser, openAck)
+	var callDue int64
+	if ownerSession {
+		after, err := parseCallAfterMinutes(params)
+		if err != nil {
+			return core.ErrorResult(err.Error())
+		}
+		callDue = q.m.questionCallDue(sess.ID, requiresTap, after)
+	}
+	return q.postQuestions(ctx, sess, questions, requiresTap, tasks.OriginAskUser, callDue, openAck)
 }
 
 // postQuestions is the durable post shared by ask_user and request_call's
 // written fallback; tool names the origin and ack builds what the call
 // returns, stored with the row so a recovered call returns the same thing.
-func (q *questionService) postQuestions(ctx context.Context, sess *ManagedSession, questions []askuser.Question, requiresTap bool, tool string, ack func(id string) tasks.QuestionAck) core.Result {
+// callDue, when not zero, is when the question escalates to a call if it is
+// still open then (question_calls.go).
+func (q *questionService) postQuestions(ctx context.Context, sess *ManagedSession, questions []askuser.Question, requiresTap bool, tool string, callDue int64, ack func(id string) tasks.QuestionAck) core.Result {
 	callID := core.ToolCallIDFromContext(ctx)
 	if callID == "" {
 		callID = newInvocationID()
@@ -138,7 +165,7 @@ func (q *questionService) postQuestions(ctx context.Context, sess *ManagedSessio
 	id := tasks.NewQuestionID()
 	stored, existed, err := q.repo.InsertQuestion(ctx, tasks.Question{
 		ID: id, SessionID: sess.ID, OriginMsgID: msgID, OriginToolCallID: callID, OriginTool: tool,
-		Questions: questions, RequiresTap: requiresTap, Ack: ack(id),
+		Questions: questions, RequiresTap: requiresTap, Ack: ack(id), CallDueAt: callDue,
 	})
 	var open *tasks.ErrQuestionOpen
 	switch {
@@ -152,6 +179,11 @@ func (q *questionService) postQuestions(ctx context.Context, sess *ManagedSessio
 	}
 	if !existed {
 		q.project(sess, stored, true)
+		if stored.CallState == tasks.CallPending {
+			// The planner sleeps until its earliest due time; this one may be
+			// earlier.
+			q.m.planner.nudge()
+		}
 	}
 	return ackResult(stored.Ack)
 }

@@ -106,8 +106,10 @@ type PendingAsk struct {
 	// Async marks a projection of a durable question (asynchronous ask_user).
 	// It has no reply channel, blocks no run, and outlives the run that posted
 	// it: only its answer, withdrawal or dismissal removes it.
-	Async    bool
-	response chan<- askuser.Reply
+	Async     bool
+	CallAt    time.Time
+	CallState string
+	response  chan<- askuser.Reply
 	resolved bool
 }
 
@@ -443,6 +445,8 @@ func (am *ApprovalManager) AddAsync(info PendingAskInfo) {
 		RequiresTap: info.RequiresTap,
 		RequestedAt: info.RequestedAt,
 		Async:       true,
+		CallAt:      info.CallAt,
+		CallState:   info.CallState,
 	}
 }
 
@@ -490,7 +494,8 @@ func (am *ApprovalManager) HasOpenAsync() bool {
 }
 
 func askInfo(a *PendingAsk) PendingAskInfo {
-	return PendingAskInfo{ID: a.ID, Questions: a.Questions, RequiresTap: a.RequiresTap, RequestedAt: a.RequestedAt, Async: a.Async}
+	return PendingAskInfo{ID: a.ID, Questions: a.Questions, RequiresTap: a.RequiresTap, RequestedAt: a.RequestedAt, Async: a.Async,
+		CallAt: a.CallAt, CallState: a.CallState}
 }
 
 // ResolveAskUser resolves a pending ask_user request. responder says who
@@ -637,6 +642,11 @@ type PendingAskInfo struct {
 	// Async marks a durable question that does not block the session.
 	// Additive: a client that does not know the field is unaffected.
 	Async bool `json:"async,omitempty"`
+	// CallAt is when an unanswered asynchronous question calls the user, and
+	// CallState where that escalation is (pending, calling, missed...).
+	// Additive; both as of the projection.
+	CallAt    time.Time `json:"call_at,omitzero"`
+	CallState string    `json:"call_state,omitempty"`
 }
 
 // PendingInfo returns the current pending approval state.

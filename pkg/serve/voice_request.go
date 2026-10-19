@@ -73,6 +73,9 @@ type callRequest struct {
 	State     string           `json:"state"`
 	Created   time.Time        `json:"created"`
 	Expires   *time.Time       `json:"expires_at,omitempty"`
+	// QuestionID is the open question this call escalates, if any: a client
+	// shows that question as being called about. Additive.
+	QuestionID string `json:"question_id,omitempty"`
 	provider  voice.ProviderID // fixed when asked: answering never picks another
 	question  string           // the written fallback, what the call is about
 	invite    string           // the iPhones' ringing invitation (Ring), if any
@@ -89,6 +92,10 @@ type callRequestRegistry struct {
 	m *Manager
 	// ringOverride replaces the configured ring time (tests).
 	ringOverride time.Duration
+
+	// announced, when set by a test, sees every request about to be
+	// announced: what rings is counted there.
+	announced func(req *callRequest)
 
 	// clients is the presence of the clients on the requests feed: whether a
 	// document that can show the incoming card is visible (see handleCallRequestsWS).
@@ -116,20 +123,84 @@ func (r *callRequestRegistry) ringTime() time.Duration {
 	return core.DefaultCallRingSeconds * time.Second
 }
 
-// open applies the policy. It returns the live request, or why there is no
-// call (then nothing was announced).
+// callPlacement is one call an owner places: request_call, or the
+// escalation of its own unanswered question.
+type callPlacement struct {
+	// ID is the request's id; empty mints one. An escalation passes the
+	// attempt it committed before anything rings.
+	ID        string
+	SessionID string
+	Owner     owner.Owner
+	Reason    string
+	Urgency   string
+	// Question is what the call is about: request_call's written fallback,
+	// or the escalated question itself.
+	Question   string
+	QuestionID string
+	// Now is the time the policy is read at (allowed hours, pause).
+	Now time.Time
+	// Opened runs once the request is live, before it is announced; false
+	// withdraws it unannounced.
+	Opened func(req *callRequest) bool
+}
+
+// place is the shared call orchestration: it applies the policy, announces
+// the request once and waits until it ends. ctx ending withdraws it at any
+// point (Stop of the run, or of the session that asked). It returns the
+// request and how it ended, or no request and why there was no call (then
+// nothing was announced).
+func (r *callRequestRegistry) place(ctx context.Context, p callPlacement) (req *callRequest, state, why string) {
+	req, why = r.openFor(p)
+	if req == nil {
+		return nil, "", why
+	}
+	id := req.ID
+	// Stopping withdraws the request at any point from here on, delivery and
+	// opening included: a withdrawn request never becomes a call (see
+	// callAnswer).
+	stop := context.AfterFunc(ctx, func() {
+		r.resolve(id, []string{crRinging, crHeld, crAccepted, crConnecting}, crCancelled, "")
+	})
+	defer stop()
+	if p.Opened != nil && !p.Opened(req) {
+		r.resolve(id, []string{crRinging, crHeld, crAccepted, crConnecting}, crCancelled, "")
+	}
+	if r.isState(id, crRinging) && r.announced != nil {
+		r.announced(req)
+	}
+	r.announce(ctx, req)
+	<-req.done
+	state, why = r.outcome(req)
+	return req, state, why
+}
+
+// withdraw ends a live request as cancelled (its question was answered,
+// closed, or its session stopped). Unknown or ended ids are left alone.
+func (r *callRequestRegistry) withdraw(id string) {
+	if id != "" {
+		r.resolve(id, []string{crRinging, crHeld, crAccepted, crConnecting}, crCancelled, "")
+	}
+}
+
+// open applies the policy to a request_call at the current time.
 func (r *callRequestRegistry) open(sessionID string, own owner.Owner, reason, urgency, question string) (*callRequest, string) {
+	return r.openFor(callPlacement{SessionID: sessionID, Owner: own, Reason: reason, Urgency: urgency, Question: question})
+}
+
+// openFor applies the policy. It returns the live request, or why there is no
+// call (then nothing was announced).
+func (r *callRequestRegistry) openFor(p callPlacement) (*callRequest, string) {
+	sessionID, own, reason, urgency, question := p.SessionID, p.Owner, p.Reason, p.Urgency, p.Question
 	level := own.Calls()
 	if level == owner.CallNever {
 		return nil, whyNever
 	}
-	now := time.Now()
-	calls := voiceSettings().Calls
-	if until, err := time.Parse(time.RFC3339, calls.PausedUntil); err == nil && now.Before(until) {
-		return nil, whyPaused
+	now := p.Now
+	if now.IsZero() {
+		now = time.Now()
 	}
-	if !callHoursAllow(calls.Hours, now) {
-		return nil, whyOutsideHours
+	if why := callWindowWhy(voiceSettings().Calls, now); why != "" {
+		return nil, why
 	}
 	provider, ok := r.m.ownerCallProvider(own)
 	if !ok {
@@ -144,10 +215,14 @@ func (r *callRequestRegistry) open(sessionID string, own owner.Owner, reason, ur
 	if withThisOwner || len(r.live) > 0 {
 		return nil, whyBusy
 	}
+	id := p.ID
+	if id == "" {
+		id = newVoiceCallID()
+	}
 	req := &callRequest{
-		ID: newVoiceCallID(), SessionID: sessionID, OwnerID: own.ID, OwnerName: own.Name,
+		ID: id, SessionID: sessionID, OwnerID: own.ID, OwnerName: own.Name,
 		Reason: reason, Urgency: urgency, Level: level, State: crRinging, Created: now,
-		provider: provider, question: question, done: make(chan struct{}),
+		QuestionID: p.QuestionID, provider: provider, question: question, done: make(chan struct{}),
 	}
 	req.withdrawCtx, req.withdraw = context.WithCancelCause(context.Background())
 	if onCall {
@@ -436,6 +511,44 @@ func (r *callRequestRegistry) subscribe() (<-chan struct{}, func()) {
 		delete(r.subs, ch)
 		r.mu.Unlock()
 	}
+}
+
+// callWindowWhy is why calls cannot be announced at now (paused, outside the
+// allowed hours), or "".
+func callWindowWhy(calls core.VoiceCallsConfig, now time.Time) string {
+	if until, err := time.Parse(time.RFC3339, calls.PausedUntil); err == nil && now.Before(until) {
+		return whyPaused
+	}
+	if !callHoursAllow(calls.Hours, now) {
+		return whyOutsideHours
+	}
+	return ""
+}
+
+// nextCallWindow is the first instant at or after now when a call may be
+// announced: after the pause, inside the allowed hours. The hours are read in
+// their own zone day by day, so a daylight-saving change moves the instant
+// with the wall clock; a start that falls in a skipped hour is normalized
+// forward by time.Date.
+func nextCallWindow(calls core.VoiceCallsConfig, now time.Time) time.Time {
+	t := now
+	if until, err := time.Parse(time.RFC3339, calls.PausedUntil); err == nil && t.Before(until) {
+		t = until
+	}
+	if callHoursAllow(calls.Hours, t) {
+		return t
+	}
+	h := calls.Hours
+	from, _ := parseHHMM(h.From)
+	loc, _ := time.LoadLocation(h.TZ)
+	local := t.In(loc)
+	for d := 0; d <= 2; d++ {
+		start := time.Date(local.Year(), local.Month(), local.Day()+d, from/60, from%60, 0, 0, loc)
+		if !start.Before(t) && callHoursAllow(h, start) {
+			return start
+		}
+	}
+	return t // unreachable with valid hours: callHoursAllow allows unreadable ones
 }
 
 // callHoursAllow reports whether now is inside the allowed daily window. nil

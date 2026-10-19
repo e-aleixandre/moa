@@ -364,6 +364,12 @@ func wsEventFromBus(event any) (Event, bool) {
 		if e.Async {
 			data["async"] = true
 		}
+		if !e.CallAt.IsZero() {
+			data["call_at"] = e.CallAt.UTC()
+		}
+		if e.CallState != "" {
+			data["call_state"] = e.CallState
+		}
 		return Event{Type: "ask_user", Data: data}, true
 	case bus.AskUserResolved:
 		return Event{Type: "ask_resolved", Data: PromptResolvedData{ID: e.ID}}, true

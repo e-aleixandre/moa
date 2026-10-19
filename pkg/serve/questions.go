@@ -126,6 +126,8 @@ func (q *questionService) Answer(ctx context.Context, sessionID, id string, answ
 	if res.Duplicate {
 		return nil
 	}
+	// The call this question was escalating to, if ringing, is pointless now.
+	q.m.withdrawQuestionCall(res.Question)
 	q.retire(sessionID, id)
 	q.m.notices.nudge()
 	return nil
@@ -151,6 +153,7 @@ func (q *questionService) close(ctx context.Context, sessionID, id string, to ta
 		return tasks.Question{}, err
 	}
 	if changed {
+		q.m.withdrawQuestionCall(question)
 		q.retire(sessionID, id)
 	}
 	return question, nil
@@ -290,9 +293,10 @@ func (q *questionService) reconcileLocked(ctx context.Context, sessionID string,
 			if originOnPath(path, question) {
 				continue
 			}
-			if _, changed, err := q.repo.CloseQuestion(ctx, sessionID, question.ID, tasks.QuestionInvalidated, tasks.ReasonRewound); err != nil {
+			if closed, changed, err := q.repo.CloseQuestion(ctx, sessionID, question.ID, tasks.QuestionInvalidated, tasks.ReasonRewound); err != nil {
 				slog.Warn("questions: invalidating a rewound question failed", "session", sessionID, "question", question.ID, "error", err)
 			} else if changed {
+				q.m.withdrawQuestionCall(closed)
 				q.retire(sessionID, question.ID)
 			}
 		case tasks.QuestionAnswered:
@@ -416,9 +420,11 @@ func (q *questionService) checkOrigin(ctx context.Context, sessionID, id string)
 	switch {
 	case errors.Is(err, session.ErrNotFound):
 		// The conversation is gone: nothing could ever read the answer.
-		if _, _, err := q.repo.CloseQuestion(ctx, sessionID, id, tasks.QuestionInvalidated, tasks.ReasonSessionDeleted); err != nil {
+		closed, _, err := q.repo.CloseQuestion(ctx, sessionID, id, tasks.QuestionInvalidated, tasks.ReasonSessionDeleted)
+		if err != nil {
 			return err
 		}
+		q.m.withdrawQuestionCall(closed)
 		return &tasks.ErrQuestionConflict{State: tasks.QuestionInvalidated}
 	case err != nil:
 		return err
@@ -426,9 +432,10 @@ func (q *questionService) checkOrigin(ctx context.Context, sessionID, id string)
 	if tree == nil || originOnPath(tree.Path(), question) {
 		return nil
 	}
-	if _, changed, err := q.repo.CloseQuestion(ctx, sessionID, id, tasks.QuestionInvalidated, tasks.ReasonRewound); err != nil {
+	if closed, changed, err := q.repo.CloseQuestion(ctx, sessionID, id, tasks.QuestionInvalidated, tasks.ReasonRewound); err != nil {
 		return err
 	} else if changed {
+		q.m.withdrawQuestionCall(closed)
 		q.retire(sessionID, id)
 	}
 	return &tasks.ErrQuestionConflict{State: tasks.QuestionInvalidated}
@@ -613,15 +620,34 @@ func (q *questionService) admittedEvents(ctx context.Context, sessionID string) 
 
 // project adds a question to the live session's pending set.
 func (q *questionService) project(sess *ManagedSession, question tasks.Question, announce bool) {
+	callAt, callState := questionCallView(question)
 	info := bus.PendingAskInfo{
 		ID: question.ID, Questions: busQuestions(question.Questions), RequiresTap: question.RequiresTap,
-		RequestedAt: time.UnixMilli(question.AskedAt), Async: true,
+		RequestedAt: time.UnixMilli(question.AskedAt), Async: true, CallAt: callAt, CallState: callState,
 	}
 	sess.runtime.Context().Approvals.AddAsync(info)
 	if announce {
 		sess.runtime.Bus.Publish(bus.AskUserRequested{
 			SessionID: sess.ID, ID: question.ID, Questions: info.Questions, RequiresTap: question.RequiresTap, Async: true,
+			CallAt: callAt, CallState: callState,
 		})
+	}
+}
+
+// reproject refreshes the live projection of the session's open questions
+// after their escalation changed, without announcing them again: a client
+// that loads the session sees the current call time and state, and the open
+// ones read it from For you.
+func (q *questionService) reproject(sess *ManagedSession) {
+	open, err := q.repo.OpenQuestions(q.m.baseCtx, sess.ID)
+	if err != nil {
+		return
+	}
+	approvals := sess.runtime.Context().Approvals
+	for _, question := range open {
+		if approvals.AskPending(question.ID) {
+			q.project(sess, question, false)
+		}
 	}
 }
 

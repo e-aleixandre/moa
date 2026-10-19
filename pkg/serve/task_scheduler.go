@@ -113,6 +113,8 @@ func (s *taskScheduler) syncPass() {
 
 func (s *taskScheduler) run(ctx context.Context) {
 	defer close(s.done)
+	// Before anything is claimed: what a previous process left calling.
+	s.m.interruptQuestionCalls(ctx)
 	var acks []chan struct{}
 	defer func() {
 		for _, a := range acks {
@@ -145,7 +147,13 @@ func (s *taskScheduler) run(ctx context.Context) {
 // sleepFor is the time to the earliest cursor, capped at plannerMaxSleep.
 func (s *taskScheduler) sleepFor(ctx context.Context) time.Duration {
 	next, err := s.m.tasks.NextDueAt(ctx)
-	if err != nil || next == 0 {
+	if err != nil {
+		return plannerMaxSleep
+	}
+	if call, err := s.m.tasks.NextCallDueAt(ctx); err == nil && call > 0 && (next == 0 || call < next) {
+		next = call
+	}
+	if next == 0 {
 		return plannerMaxSleep
 	}
 	d := time.UnixMilli(next).Sub(s.clock.Now())
@@ -166,6 +174,7 @@ func (s *taskScheduler) pass(ctx context.Context) {
 	}
 	repo := s.m.tasks
 	s.materialize(ctx)
+	s.escalateQuestions(ctx)
 	ready, err := repo.ReadyOccurrences(ctx)
 	if err != nil {
 		if ctx.Err() == nil {

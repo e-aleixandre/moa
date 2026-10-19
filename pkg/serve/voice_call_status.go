@@ -257,7 +257,7 @@ func (r *voiceCallRegistry) handleSettings(w http.ResponseWriter, req *http.Requ
 		if in.Calls != nil {
 			v.Calls = *in.Calls
 		}
-		if v.Provider == "" && v.PaidProvider == "" && v.BackendModel == "" && v.Calls.RingSeconds == 0 && v.Calls.PausedUntil == "" && v.Calls.Hours == nil {
+		if v.Provider == "" && v.PaidProvider == "" && v.BackendModel == "" && v.Calls.RingSeconds == 0 && v.Calls.PausedUntil == "" && v.Calls.Hours == nil && v.Calls.QuestionCallMinutes == 0 {
 			cfg.Voice = nil
 		} else {
 			cfg.Voice = &v
@@ -317,6 +317,9 @@ func handleActivity(m *Manager) http.HandlerFunc {
 func validCallsSettings(c core.VoiceCallsConfig) string {
 	if c.RingSeconds != 0 && (c.RingSeconds < 10 || c.RingSeconds > 120) {
 		return "invalid_ring_seconds"
+	}
+	if m := c.QuestionCallMinutes; m != 0 && (m < core.MinQuestionCallMinutes || m > core.MaxQuestionCallMinutes) {
+		return "invalid_question_call_minutes"
 	}
 	if c.PausedUntil != "" {
 		if _, err := time.Parse(time.RFC3339, c.PausedUntil); err != nil {

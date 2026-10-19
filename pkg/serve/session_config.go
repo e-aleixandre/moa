@@ -3,6 +3,7 @@ package serve
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -176,6 +177,11 @@ func (m *Manager) CancelWithDiscardedSteers(sessionID, stopID string) ([]core.St
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return nil, ErrNotFound
+	}
+	// Stop cancels the call an open question was escalating to (and stops it
+	// ringing), whether or not a run is going; the question stays open.
+	if err := m.cancelQuestionCalls(m.baseCtx, sessionID); err != nil {
+		slog.Warn("stop: cancelling the session's question calls failed", "session", sessionID, "error", err)
 	}
 
 	state := sess.runtime.State.Current()

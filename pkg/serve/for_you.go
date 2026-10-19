@@ -33,6 +33,11 @@ type ForYouItem struct {
 	// Secret: what the password is for, never a value.
 	Label   string `json:"label,omitempty"`
 	Command string `json:"command,omitempty"`
+	// CallAt is when an unanswered asynchronous question calls the user
+	// (only while that is pending); CallState is pending, calling or missed.
+	// Additive.
+	CallAt    *time.Time `json:"call_at,omitempty"`
+	CallState string     `json:"call_state,omitempty"`
 }
 
 // openQuestionIDsBySession maps each session to its open asynchronous
@@ -63,11 +68,17 @@ func (m *Manager) ForYou(ctx context.Context) []ForYouItem {
 	if m.tasks != nil {
 		if qs, err := m.tasks.AllOpenQuestions(ctx); err == nil {
 			for _, q := range qs {
-				items = append(items, ForYouItem{
+				item := ForYouItem{
 					Kind: "question", ID: q.ID, SessionID: q.SessionID,
 					Since: time.UnixMilli(q.AskedAt), Async: true,
 					RequiresTap: q.RequiresTap, Questions: q.Questions,
-				})
+				}
+				at, state := questionCallView(q)
+				if !at.IsZero() {
+					item.CallAt = &at
+				}
+				item.CallState = state
+				items = append(items, item)
 			}
 		}
 	}

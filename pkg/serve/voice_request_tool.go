@@ -81,32 +81,22 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge, a
 			if err != nil {
 				return core.ErrorResult(err.Error()), nil
 			}
-			reg := m.callRequests()
-			req, why := reg.open(sessionID, own, reason, urgency, question.Text)
+			req, state, w := m.callRequests().place(ctx, callPlacement{
+				SessionID: sessionID, Owner: own, Reason: reason, Urgency: urgency, Question: question.Text,
+			})
 			id := ""
 			if req != nil {
 				id = req.ID
-				// Stopping the run withdraws the request at any point from
-				// here on, delivery and opening included: a withdrawn
-				// request never becomes a call (see callAnswer).
-				stop := context.AfterFunc(ctx, func() {
-					reg.resolve(id, []string{crRinging, crHeld, crAccepted, crConnecting}, crCancelled, "")
-				})
-				reg.announce(ctx, req)
-				<-req.done
-				stop()
-				state, w := reg.outcome(req)
 				if state == crCancelled {
 					return core.ErrorResult("Call request withdrawn: this run was stopped."), nil
 				}
-				switch state {
-				case crAnswered:
+				if state == crAnswered {
 					res := core.TextResult("The user answered: they are on a voice call with you now, through the call relay. End your turn. What you agree arrives as call minutes and relayed tasks.")
 					res.Custom = map[string]any{"call_request": map[string]any{"id": id, "outcome": crAnswered, "reason": reason}}
 					return res, nil
 				}
-				why = w
 			}
+			why := w
 			missed := req != nil && why == whyMissed
 			if sess, ok := m.Get(sessionID); ok && sess.askAsync && m.questions != nil {
 				ackFor := func(qid string) tasks.QuestionAck {
@@ -120,7 +110,7 @@ func (m *Manager) newRequestCallTool(sessionID string, bridge *askuser.Bridge, a
 					ack.Custom["call_request"] = map[string]any{"id": id, "outcome": crWritten, "why": why, "reason": reason, "question_id": qid}
 					return ack
 				}
-				return m.questions.postQuestions(ctx, sess, []askuser.Question{question}, requiresTap, tasks.OriginRequestCall, ackFor), nil
+				return m.questions.postQuestions(ctx, sess, []askuser.Question{question}, requiresTap, tasks.OriginRequestCall, 0, ackFor), nil
 			}
 			if bridge == nil {
 				return core.ErrorResult("No call (" + whyText[why] + ") and this session cannot ask in writing."), nil

@@ -588,7 +588,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		// Same name, different contract: the blocking tool and its bridge stay
 		// for the standalone harnesses and request_call's written fallback.
 		bs.ToolReg.Unregister("ask_user")
-		core.RegisterOrLog(bs.ToolReg, m.newAsyncAskTool(id, func() *ManagedSession { return sess }))
+		core.RegisterOrLog(bs.ToolReg, m.newAsyncAskTool(id, func() *ManagedSession { return sess }, opts != nil && opts.ownerSession))
 	}
 	if notifyOn = notifyAllowed(opts != nil && opts.ownerSession, bs.HasProjectOwner); notifyOn {
 		core.RegisterOrLog(bs.ToolReg, m.newNotifyTool(id))

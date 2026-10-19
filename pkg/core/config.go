@@ -137,7 +137,21 @@ type VoiceCallsConfig struct {
 	RingSeconds int             `json:"ring_seconds,omitempty"` // how long one request rings before it is missed. 0 = DefaultCallRingSeconds.
 	PausedUntil string          `json:"paused_until,omitempty"` // RFC 3339; no owner call is announced before it.
 	Hours       *VoiceCallHours `json:"hours,omitempty"`        // when owners may call; nil = any time.
+	// QuestionCallMinutes is how long an owner's tap-only question waits
+	// unanswered before the owner calls about it. 0 = DefaultQuestionCallMinutes.
+	QuestionCallMinutes int `json:"question_call_minutes,omitempty"`
 }
+
+// DefaultQuestionCallMinutes is how long an owner's tap-only question waits
+// before it escalates to a call, unless Settings say otherwise.
+const DefaultQuestionCallMinutes = 15
+
+// Bounds of a question's wait before a call, in minutes (call_after_minutes
+// and QuestionCallMinutes alike).
+const (
+	MinQuestionCallMinutes = 5
+	MaxQuestionCallMinutes = 240
+)
 
 // VoiceCallHours is a daily window [From, Until) in TZ; Until before From
 // crosses midnight.

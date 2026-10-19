@@ -831,6 +831,10 @@ type AskUserRequested struct {
 	RequiresTap bool
 	// Async: a durable question that does not block the session. Additive.
 	Async bool
+	// CallAt and CallState: when an unanswered asynchronous question calls
+	// the user, and where that escalation is. Additive.
+	CallAt    time.Time
+	CallState string
 }
 
 // AskUserResolved is published when a pending ask-user prompt is answered.
