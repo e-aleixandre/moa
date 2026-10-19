@@ -1,6 +1,6 @@
 import { test, expect, mock } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { aggregateAttention, attentionTone, mobileTitleChipPresentation, newResultSessions, nextMobileTitleRipple } from './attention-model.js';
+import { aggregateAttention, attentionTone, mobileSessionsDoorLabel, mobileTitleChipPresentation, newResultSessions, nextMobileTitleRipple } from './attention-model.js';
 import { sessionDisplayDotState } from '../../../data/util/format.js';
 
 let layoutEffects = 0;
@@ -605,4 +605,19 @@ test('calling an owner from the drawer closes the drawer under the call screen',
     __setVoiceCallDepsForTests(null);
     setState({ isMobile: false, drawerOpen: false });
   }
+});
+
+test('owners and the sessions they dispatched count in the burger badge, the active one does not', () => {
+  const sessions = {
+    own: { id: 'own', kind: 'owner', state: 'idle', questionIds: ['q1'] },
+    child: { id: 'child', origin: 'owner', ownerId: 'o1', state: 'idle', unseen: true },
+    active: { id: 'active', state: 'idle', questionIds: ['q2'] },
+  };
+  const attention = aggregateAttention(sessions, 'active');
+  expect(attention.urgent).toBe(1);
+  expect(attention.unseen).toBe(1);
+  expect(mobileTitleChipPresentation(attention).hasAttention).toBe(true);
+  expect(mobileSessionsDoorLabel(attention)).toBe('Sessions; 2 other sessions need attention');
+  // viewing the owner itself leaves only its child
+  expect(aggregateAttention(sessions, 'own').urgent).toBe(1);
 });

@@ -1,8 +1,13 @@
 import { sessionDisplayDotState } from '../../../data/util/format.js';
-import { isOrdinarySession } from '../../../data/util/project-sessions.js';
 
 // These projections drive both the drawer's New results group and the title
 // chip. Keeping them here makes their use of the shared dot precedence explicit.
+//
+// Every session counts but the one on screen, owners and the sessions they
+// dispatched included: the lists keep an owner out of SESSIONS (it has its own
+// row), but the badge says "something wants you" and does not care where the
+// row lives. Filtering them here once left it dark for anyone who works
+// through owners.
 export function aggregateAttention(sessions, activeId) {
   let urgent = 0;
   let unseen = 0;
@@ -10,7 +15,7 @@ export function aggregateAttention(sessions, activeId) {
   let permission = 0;
   let arrival = 0;
   for (const session of Object.values(sessions)) {
-    if (session.id === activeId || !isOrdinarySession(session)) continue;
+    if (session.id === activeId) continue;
     const dotState = sessionDisplayDotState(session);
     if (dotState === 'error') {
       urgent += 1;
