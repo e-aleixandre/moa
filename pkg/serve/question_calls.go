@@ -212,8 +212,7 @@ func (m *Manager) fireQuestionCall(ctx context.Context, q tasks.Question) {
 			return
 		}
 	}
-	own, err := m.callingOwner(sess.ID)
-	if err != nil {
+	if _, err := m.callingOwner(sess.ID); err != nil {
 		// No longer an owner's own conversation: nobody can call.
 		if _, err := m.tasks.CancelPendingCall(ctx, q.ID); err != nil {
 			slog.Warn("question calls: cancelling failed", "question", q.ID, "error", err)
@@ -235,7 +234,8 @@ func (m *Manager) fireQuestionCall(ctx context.Context, q tasks.Question) {
 	}
 	// The owner is read again: its level may have changed since the claim
 	// began (Never must not ring).
-	if own, err = m.callingOwner(sess.ID); err != nil {
+	own, err := m.callingOwner(sess.ID)
+	if err != nil {
 		if _, err := m.tasks.FinishCallEscalation(ctx, q.ID, attempt, tasks.CallCancelled); err != nil {
 			slog.Warn("question calls: cancelling failed", "question", q.ID, "error", err)
 		}

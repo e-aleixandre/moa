@@ -341,7 +341,7 @@ func TestReviewForYouCalls_StartupInterruptsEstablishedEscalation(t *testing.T) 
 	// handle. No os.Exit: the first process's fake call stays live as evidence
 	// that the durable state was finalized before that call ended.
 	next := tasks.New(f.mgr.tasks.Path())
-	defer next.Close()
+	defer func() { _ = next.Close() }()
 	ids, err := next.InterruptCallEscalations(context.Background())
 	if err != nil {
 		t.Fatal(err)
