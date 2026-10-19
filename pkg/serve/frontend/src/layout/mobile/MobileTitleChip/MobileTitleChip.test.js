@@ -28,8 +28,8 @@ test('the title chip names its session and the inbox it can reach', () => {
   // It says "this session" because that is now where it GOES: the crumb opens
   // the session dossier, as the catalogue has it, not the list of sessions.
   expect(mobileTitleChipLabel('Build', 0)).toBe('Build — this session');
-  expect(mobileTitleChipLabel('Build', 1)).toBe('Build — this session; 1 event waiting in the inbox');
-  expect(mobileTitleChipLabel('Build', 3)).toBe('Build — this session; 3 events waiting in the inbox');
+  expect(mobileTitleChipLabel('Build', 1)).toBe('Build — this session; 1 event waiting in Events');
+  expect(mobileTitleChipLabel('Build', 3)).toBe('Build — this session; 3 events waiting in Events');
 });
 
 test('quiet mobile title chips do not mount a ripple presentation', () => {
