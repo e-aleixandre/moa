@@ -53,13 +53,13 @@ export function SessionForYouSheet({ open, onClose, sessionId, phone = false, sc
   if (phone) {
     return (
       <MobileSheet open={open} onClose={onClose} title="For you" scope={scope}>
-        {open && <div class="fy-phone fy-sheet"><SessionForYouList sessionId={sessionId} phone onOpenAll={openAll} /></div>}
+        {open && <div class="fy-phone fy-sheet"><SessionForYouList sessionId={sessionId} phone onOpenAll={openAll} onLeave={onClose} /></div>}
       </MobileSheet>
     );
   }
   return (
     <Sheet open={open} onClose={onClose} title="For you" class="fy-dsheet">
-      {open && <SessionForYouList sessionId={sessionId} onOpenAll={openAll} />}
+      {open && <SessionForYouList sessionId={sessionId} onOpenAll={openAll} onLeave={onClose} />}
     </Sheet>
   );
 }

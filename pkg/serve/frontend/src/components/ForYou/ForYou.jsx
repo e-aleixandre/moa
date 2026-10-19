@@ -77,12 +77,16 @@ function KindIcon({ item }) {
   return <MessageCircleQuestionMark size={15} aria-hidden="true" />;
 }
 
-function openConversation(sessionId) {
+// onLeave: the host (the header's sheet) closes itself when an action takes
+// the user to a conversation or to Tasks — also when it is the one already
+// on screen, where nothing else would change and the sheet would stay over it.
+function openConversation(sessionId, onLeave) {
+  onLeave?.();
   navigate(null);
   openTaskSession(sessionId);
 }
 
-function Answer({ row, phone, onDone }) {
+function Answer({ row, phone, onDone, onLeave }) {
   const { item } = row;
   const [busy, setBusy] = useState(false);
   if (item.kind === "question") {
@@ -102,7 +106,7 @@ function Answer({ row, phone, onDone }) {
       <div class="fy-secret">
         {item.description && <p class="fy-ctx">{item.description}</p>}
         <div class="fy-actions">
-          <button type="button" class={`fy-btn is-primary${phone ? " is-wide" : ""}`} onClick={() => { navigate(null); openTasksView({ sessionId: item.session_id }); }}>
+          <button type="button" class={`fy-btn is-primary${phone ? " is-wide" : ""}`} onClick={() => { onLeave?.(); navigate(null); openTasksView({ sessionId: item.session_id }); }}>
             <ListChecks size={15} aria-hidden="true" />Open request
           </button>
         </div>
@@ -133,7 +137,7 @@ function Answer({ row, phone, onDone }) {
     <div class="fy-secret">
       {item.command && <pre class="fy-cmd zl-data">{item.command}</pre>}
       <div class="fy-actions">
-        <button type="button" class={`fy-btn is-primary${phone ? " is-wide" : ""}`} onClick={() => openConversation(item.session_id)}>
+        <button type="button" class={`fy-btn is-primary${phone ? " is-wide" : ""}`} onClick={() => openConversation(item.session_id, onLeave)}>
           <KeyRound size={15} aria-hidden="true" />Enter password
         </button>
       </div>
@@ -141,7 +145,7 @@ function Answer({ row, phone, onDone }) {
   );
 }
 
-export function Row({ row, open, phone, onToggle }) {
+export function Row({ row, open, phone, onToggle, onLeave }) {
   const { item, owner } = row;
   const more = (item.questions?.length || 0) - 1;
   const done = (outcome) => {
@@ -175,9 +179,9 @@ export function Row({ row, open, phone, onToggle }) {
       {open && (
         <div class={`fy-body${(item.questions?.length || 0) === 1 ? " is-single" : ""}`}>
           {item.requires_tap && phone && <span class="fy-chip"><Lock size={12} aria-hidden="true" />Needs your tap</span>}
-          <Answer row={row} phone={phone} onDone={done} />
+          <Answer row={row} phone={phone} onDone={done} onLeave={onLeave} />
           <StopQuestionCall item={item} />
-          <button type="button" class="fy-open" onClick={() => openConversation(item.session_id)}>
+          <button type="button" class="fy-open" onClick={() => openConversation(item.session_id, onLeave)}>
             Open conversation<ArrowUpRight size={14} aria-hidden="true" />
           </button>
         </div>
@@ -197,7 +201,7 @@ function whoOf(sessionId, sessions, owners) {
 
 const NEWS_ICON = { done: Check, deployed: ArrowUp, problem: TriangleAlert, info: Info };
 
-function NewsRow({ n, open, phone, onToggle }) {
+function NewsRow({ n, open, phone, onToggle, onLeave }) {
   const sessions = useStore((s) => s.sessions);
   const owners = useStore((s) => ownersSlice(s).list);
   const { owner, who } = whoOf(n.session_id, sessions, owners);
@@ -223,7 +227,7 @@ function NewsRow({ n, open, phone, onToggle }) {
       {open && (
         <div class="fy-body">
           {n.body && <p class="fy-news-body">{n.body}</p>}
-          <button type="button" class="fy-open" onClick={() => openConversation(n.session_id)}>
+          <button type="button" class="fy-open" onClick={() => openConversation(n.session_id, onLeave)}>
             Open conversation<ArrowUpRight size={14} aria-hidden="true" />
           </button>
         </div>
@@ -235,7 +239,7 @@ function NewsRow({ n, open, phone, onToggle }) {
 // News — what sessions chose to tell the user. Opening an item reads it,
 // which archives it; it stays in place until the screen is left, so it does
 // not jump away under the finger.
-function News({ phone, scope }) {
+function News({ phone, scope, onLeave }) {
   const allNews = useStore((s) => forYouSlice(s).news);
   const news = useMemo(() => (scope ? allNews.filter((n) => scope.has(n.session_id)) : allNews), [allNews, scope]);
   const [openId, setOpenId] = useState(null);
@@ -259,7 +263,7 @@ function News({ phone, scope }) {
         {unread > 0 && <button type="button" class="fy-sec-act" onClick={() => markNewsRead(news.filter((n) => !n.read_at))}>Mark all read</button>}
       </div>
       <ul class="fy-list">
-        {fresh.map((n) => <NewsRow key={n.id} n={n} phone={phone} open={openId === n.id} onToggle={() => toggle(n)} />)}
+        {fresh.map((n) => <NewsRow key={n.id} n={n} phone={phone} onLeave={onLeave} open={openId === n.id} onToggle={() => toggle(n)} />)}
       </ul>
       {old.length > 0 && (
         <>
@@ -268,7 +272,7 @@ function News({ phone, scope }) {
           </button>
           {earlier && (
             <ul class="fy-list">
-              {old.map((n) => <NewsRow key={n.id} n={n} phone={phone} open={openId === n.id} onToggle={() => toggle(n)} />)}
+              {old.map((n) => <NewsRow key={n.id} n={n} phone={phone} onLeave={onLeave} open={openId === n.id} onToggle={() => toggle(n)} />)}
             </ul>
           )}
         </>
@@ -279,7 +283,7 @@ function News({ phone, scope }) {
 
 // List — the whole For you, or with `scope` (a Set of session ids) one
 // conversation's share of it: the same rows and News, filtered, never a copy.
-function List({ phone, scope, onOpenAll }) {
+function List({ phone, scope, onOpenAll, onLeave }) {
   const { rows, loaded } = useRows(scope);
   const newsHere = useStore((s) => (scope ? forYouSlice(s).news.some((n) => scope.has(n.session_id)) : true));
   const [openId, setOpenId] = useState(null);
@@ -307,13 +311,14 @@ function List({ phone, scope, onOpenAll }) {
             key={r.item.id}
             row={r}
             phone={phone}
+            onLeave={onLeave}
             open={openId === r.item.id}
             onToggle={() => setOpenId(openId === r.item.id ? "" : r.item.id)}
           />
         ))}
       </ul>
       </section>
-      <News phone={phone} scope={scope} />
+      <News phone={phone} scope={scope} onLeave={onLeave} />
     </>
   );
 }
@@ -348,9 +353,9 @@ export function MobileForYouView({ onBack }) {
 
 // SessionForYouList — the body of the header's sheet: what ONE conversation
 // (and, for an owner, its sessions) waits on the user for, plus its News.
-export function SessionForYouList({ sessionId, phone, onOpenAll }) {
+export function SessionForYouList({ sessionId, phone, onOpenAll, onLeave }) {
   const sessions = useStore((s) => s.sessions);
   const owners = useStore((s) => ownersSlice(s).list);
   const scope = useMemo(() => forYouScopeIds(sessionId, sessions, owners), [sessionId, sessions, owners]);
-  return <List phone={phone} scope={scope} onOpenAll={onOpenAll} />;
+  return <List phone={phone} scope={scope} onOpenAll={onOpenAll} onLeave={onLeave} />;
 }
