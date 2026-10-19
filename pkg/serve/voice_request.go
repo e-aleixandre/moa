@@ -25,8 +25,11 @@ import (
 // Requests live in memory. A restart ends the owner's run that waits on one,
 // exactly as it ends a pending ask_user, so there is nothing to rebuild.
 
-// Call request states. The first four are live.
+// Call request states. The first five are live.
 const (
+	// crAdmitting holds the line for a placement whose Opened check has not
+	// passed yet: nobody sees it, nobody can answer it, a withdraw ends it.
+	crAdmitting  = "admitting"
 	crRinging    = "ringing"    // announced; missed after the ring time
 	crHeld       = "held"       // the user is on a call: waits for Call or Cancel
 	crAccepted   = "accepted"   // Call chosen on a held request; the call is being switched
@@ -139,8 +142,9 @@ type callPlacement struct {
 	QuestionID string
 	// Now is the time the policy is read at (allowed hours, pause).
 	Now time.Time
-	// Opened runs once the request is live, before it is announced; false
-	// withdraws it unannounced.
+	// Opened runs while the request holds the line but before anyone can
+	// see or answer it; false withdraws it unannounced. A withdraw that lands
+	// after Opened looked still finds the request (see admit).
 	Opened func(req *callRequest) bool
 }
 
@@ -159,11 +163,11 @@ func (r *callRequestRegistry) place(ctx context.Context, p callPlacement) (req *
 	// opening included: a withdrawn request never becomes a call (see
 	// callAnswer).
 	stop := context.AfterFunc(ctx, func() {
-		r.resolve(id, []string{crRinging, crHeld, crAccepted, crConnecting}, crCancelled, "")
+		r.resolve(id, liveStates, crCancelled, "")
 	})
 	defer stop()
-	if p.Opened != nil && !p.Opened(req) {
-		r.resolve(id, []string{crRinging, crHeld, crAccepted, crConnecting}, crCancelled, "")
+	if p.Opened != nil {
+		r.admit(req, p.Opened(req))
 	}
 	if r.isState(id, crRinging) && r.announced != nil {
 		r.announced(req)
@@ -178,8 +182,33 @@ func (r *callRequestRegistry) place(ctx context.Context, p callPlacement) (req *
 // closed, or its session stopped). Unknown or ended ids are left alone.
 func (r *callRequestRegistry) withdraw(id string) {
 	if id != "" {
-		r.resolve(id, []string{crRinging, crHeld, crAccepted, crConnecting}, crCancelled, "")
+		r.resolve(id, liveStates, crCancelled, "")
 	}
+}
+
+// liveStates are the states a withdraw ends.
+var liveStates = []string{crAdmitting, crRinging, crHeld, crAccepted, crConnecting}
+
+// admit ends a request's admission: ok makes it ring (or wait, held, if the
+// user is on a call now), otherwise it is withdrawn. A request withdrawn
+// while it was admitted is already gone and stays gone.
+func (r *callRequestRegistry) admit(req *callRequest, ok bool) {
+	if !ok {
+		r.resolve(req.ID, []string{crAdmitting}, crCancelled, "")
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cur, live := r.live[req.ID]; !live || cur.State != crAdmitting {
+		return
+	}
+	if onCall, _ := r.m.voiceCallState(req.SessionID); onCall {
+		req.State = crHeld
+	} else {
+		req.State = crRinging
+		r.arm(req, r.ringTime())
+	}
+	r.changedLocked()
 }
 
 // open applies the policy to a request_call at the current time.
@@ -225,12 +254,17 @@ func (r *callRequestRegistry) openFor(p callPlacement) (*callRequest, string) {
 		QuestionID: p.QuestionID, provider: provider, question: question, done: make(chan struct{}),
 	}
 	req.withdrawCtx, req.withdraw = context.WithCancelCause(context.Background())
+	r.live[req.ID] = req
+	if p.Opened != nil {
+		// Hold the line, unseen, until admit.
+		req.State = crAdmitting
+		return req, ""
+	}
 	if onCall {
 		req.State = crHeld
 	} else {
 		r.arm(req, r.ringTime())
 	}
-	r.live[req.ID] = req
 	r.changedLocked()
 	return req, ""
 }
@@ -484,6 +518,9 @@ func (r *callRequestRegistry) snapshot() []callRequest {
 	defer r.mu.Unlock()
 	out := make([]callRequest, 0, len(r.live))
 	for _, req := range r.live {
+		if req.State == crAdmitting {
+			continue
+		}
 		c := *req
 		c.done, c.stop = nil, nil
 		out = append(out, c)

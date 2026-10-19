@@ -241,7 +241,8 @@ func (m *Manager) fireQuestionCall(ctx context.Context, q tasks.Question) {
 		ID: attempt, SessionID: sess.ID, Owner: own, Reason: cutRunes(reason, callIntroMax), Urgency: "urgent",
 		Question: text, QuestionID: q.ID, Now: m.clock.Now(),
 		// The question may have been answered between the claim and the
-		// request going live, before anything could withdraw it: look again.
+		// request holding the line, before anything could withdraw it: look
+		// again before anyone can see or answer the request.
 		Opened: func(*callRequest) bool {
 			cur, err := m.tasks.GetQuestion(callCtx, q.ID)
 			return err == nil && cur.State == tasks.QuestionOpen && cur.CallState == tasks.CallCalling && cur.CallAttempt == attempt
