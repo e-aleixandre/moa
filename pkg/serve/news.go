@@ -200,3 +200,97 @@ func handleNewsRead(m *Manager) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]int{"marked": n})
 	}
 }
+
+// The recent-news block bounds: what the model reads to avoid reporting
+// something as new, never a report itself.
+const (
+	recentNewsMaxItems = 10
+	recentNewsMaxText  = 200
+	recentNewsMaxBytes = 2048
+	recentNewsWindow   = tasks.NewsKeep
+)
+
+// recentNewsBlock lists what this session already notified in the last week,
+// newest first, with whether the user read it. "" when there is nothing (or
+// it cannot be read: the block is advice, never a reason to fail a request).
+func (m *Manager) recentNewsBlock(ctx context.Context, sessionID string) string {
+	if m.tasks == nil {
+		return ""
+	}
+	list, err := m.tasks.ListNews(ctx)
+	if err != nil {
+		return ""
+	}
+	cutoff := m.clock.Now().Add(-recentNewsWindow).UnixMilli()
+	var mine []tasks.News
+	for _, n := range list {
+		if n.SessionID == sessionID && n.UpdatedAt >= cutoff {
+			mine = append(mine, n)
+		}
+	}
+	if len(mine) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("<recent_news>\nWhat you already told the user in For you › News. When they ask about one of these, point to it instead of reporting it as new; use notify with a key to update it.\n")
+	const closing = "</recent_news>"
+	const more = "(and 99999 more)\n"
+	for i, n := range mine {
+		read := "unread"
+		if n.ReadAt != 0 {
+			read = "read"
+		}
+		line := fmt.Sprintf("- %s [%s, %s, %s]: %s\n", n.ID, n.Kind, time.UnixMilli(n.UpdatedAt).UTC().Format(time.RFC3339), read,
+			escapedPrefix(n.Title, recentNewsMaxText))
+		if i == recentNewsMaxItems || b.Len()+len(line)+len(more)+len(closing) > recentNewsMaxBytes {
+			fmt.Fprintf(&b, "(and %d more)\n", len(mine)-i)
+			break
+		}
+		b.WriteString(line)
+	}
+	b.WriteString(closing)
+	return b.String()
+}
+
+// composeEphemeral joins the per-request blocks into the one message the
+// agent appends: the open questions first, exactly as they were, then the
+// news. Without news it is the questions message itself.
+func composeEphemeral(questions func() *core.Message, news func() string) func() *core.Message {
+	return func() *core.Message {
+		var q *core.Message
+		if questions != nil {
+			q = questions()
+		}
+		n := news()
+		if n == "" {
+			return q
+		}
+		if q == nil {
+			msg := core.NewUserMessage(n)
+			return &msg
+		}
+		msg := *q
+		msg.Content = append([]core.Content(nil), q.Content...)
+		last := len(msg.Content) - 1
+		if last >= 0 && msg.Content[last].Type == "text" {
+			msg.Content[last].Text += "\n" + n
+		} else {
+			msg.Content = append(msg.Content, core.TextContent(n))
+		}
+		return &msg
+	}
+}
+
+// ephemeralContext is the session's per-request block: the open-questions
+// inventory and, for a session that publishes News, its recent news.
+func (m *Manager) ephemeralContext(askAsync bool, sessionID string, notifyOn *bool, session func() *ManagedSession) func() *core.Message {
+	questions := m.questions.inventory(askAsync, session)
+	return composeEphemeral(questions, func() string {
+		if !*notifyOn {
+			return ""
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return m.recentNewsBlock(ctx, sessionID)
+	})
+}

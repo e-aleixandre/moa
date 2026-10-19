@@ -307,6 +307,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	// Forward-declare for closures.
 	var sess *ManagedSession
+	// notifyOn is decided once the build knows whether the codebase has an
+	// owner, before the session's first request.
+	var notifyOn bool
 
 	var extraMCPServers map[string]core.MCPServer
 	var creatorTZ string
@@ -329,7 +332,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Ctx:                 sessionCtx,
 		EnableAskUser:       true,
 		AsyncQuestions:      askAsync,
-		EphemeralContext:    m.questions.inventory(askAsync, func() *ManagedSession { return sess }),
+		EphemeralContext:    m.ephemeralContext(askAsync, id, &notifyOn, func() *ManagedSession { return sess }),
 		EnableSecretActions: true,
 		OwnerSession:        opts != nil && opts.ownerSession,
 		CreatorTZ:           creatorTZ,
@@ -587,7 +590,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		bs.ToolReg.Unregister("ask_user")
 		core.RegisterOrLog(bs.ToolReg, m.newAsyncAskTool(id, func() *ManagedSession { return sess }))
 	}
-	if notifyAllowed(opts != nil && opts.ownerSession, bs.HasProjectOwner) {
+	if notifyOn = notifyAllowed(opts != nil && opts.ownerSession, bs.HasProjectOwner); notifyOn {
 		core.RegisterOrLog(bs.ToolReg, m.newNotifyTool(id))
 	}
 	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, artifactStore))
