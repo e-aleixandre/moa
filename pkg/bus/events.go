@@ -858,6 +858,7 @@ type SecretResolved struct {
 // AskQuestion is a user-facing question with optional predefined answers.
 type AskQuestion struct {
 	Text    string   `json:"question"`
+	Context string   `json:"context,omitempty"`
 	Options []string `json:"options,omitempty"`
 	// Multiple: several options may be chosen; the answer joins them with "; ".
 	Multiple bool `json:"multiple,omitempty"`

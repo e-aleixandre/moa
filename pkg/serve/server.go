@@ -144,6 +144,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))
 	mux.HandleFunc("GET /api/for-you", handleForYou(manager))
+	mux.HandleFunc("POST /api/for-you/news/read", handleNewsRead(manager))
 	mux.HandleFunc("GET /api/sessions", withGzip(handleListSessions(manager)))
 	mux.HandleFunc("GET /api/owners", handleListOwners(manager))
 	mux.HandleFunc("GET /api/share/destinations", handleShareDestinations(manager))

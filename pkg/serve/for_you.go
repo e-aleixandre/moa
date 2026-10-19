@@ -85,7 +85,7 @@ func (m *Manager) ForYou(ctx context.Context) []ForYouItem {
 			if a := pending.Ask; a != nil && !a.Async {
 				qs := make([]askuser.Question, 0, len(a.Questions))
 				for _, q := range a.Questions {
-					qs = append(qs, askuser.Question{Text: q.Text, Options: q.Options, Multiple: q.Multiple})
+					qs = append(qs, askuser.Question{Text: q.Text, Context: q.Context, Options: q.Options, Multiple: q.Multiple})
 				}
 				items = append(items, ForYouItem{
 					Kind: "question", ID: a.ID, SessionID: s.ID, Since: a.RequestedAt,
@@ -119,7 +119,7 @@ func (m *Manager) ForYou(ctx context.Context) []ForYouItem {
 // handleForYou serves GET /api/for-you: read-only, additive.
 func handleForYou(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body := map[string]any{"items": m.ForYou(r.Context())}
+		body := map[string]any{"items": m.ForYou(r.Context()), "news": m.newsStore().List(m.clock.Now())}
 		if _, err := json.Marshal(body); err != nil {
 			http.Error(w, "encode for-you: "+err.Error(), http.StatusInternalServerError)
 			return

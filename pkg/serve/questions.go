@@ -792,7 +792,7 @@ func (q *questionService) seed(sess *ManagedSession) {
 func busQuestions(qs []askuser.Question) []bus.AskQuestion {
 	out := make([]bus.AskQuestion, len(qs))
 	for i, q := range qs {
-		out[i] = bus.AskQuestion{Text: q.Text, Options: q.Options, Multiple: q.Multiple}
+		out[i] = bus.AskQuestion{Text: q.Text, Context: q.Context, Options: q.Options, Multiple: q.Multiple}
 	}
 	return out
 }

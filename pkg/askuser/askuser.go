@@ -32,7 +32,11 @@ const (
 
 // Question describes a single question with optional predefined choices.
 type Question struct {
-	Text    string   `json:"question"`
+	Text string `json:"question"`
+	// Context lets the user answer without reading the conversation: what is
+	// going on, why it is asked, what each option changes. Optional and
+	// additive; an older client simply does not show it.
+	Context string   `json:"context,omitempty"`
 	Options []string `json:"options,omitempty"`
 	// Multiple lets the user tick several options. The answer is still one
 	// string per question: the chosen options joined by MultiSeparator, then
@@ -40,6 +44,9 @@ type Question struct {
 	// same []string contract.
 	Multiple bool `json:"multiple,omitempty"`
 }
+
+// MaxContextBytes bounds a question's context: a few lines, not a report.
+const MaxContextBytes = 2000
 
 // MultiSeparator joins the options chosen in a multiple-choice question.
 const MultiSeparator = "; "
@@ -151,7 +158,7 @@ func (b *Bridge) Prompts() <-chan Prompt {
 func NewTool(b *Bridge) core.Tool {
 	return core.Tool{
 		Name:        "ask_user",
-		Description: `Ask the user one or more questions and wait for their responses. Use this when you need clarification, a decision, or information you cannot determine on your own. You can provide predefined options for each question — the user can pick one or write a custom answer. Do not use this for rhetorical questions or confirmations of actions you can take directly. Set requires_tap to true when the question authorizes a deploy, merge, release or permission-like action: only a tap or typed answer may resolve it, never a spoken relay.`,
+		Description: `Ask the user one or more questions and wait for their responses. Use this when you need clarification, a decision, or information you cannot determine on your own. You can provide predefined options for each question — the user can pick one or write a custom answer. Do not use this for rhetorical questions or confirmations of actions you can take directly. Fill each question's context so the user can answer without reading the conversation: what is going on, why you ask, what each option changes. Set requires_tap to true when the question authorizes a deploy, merge, release or permission-like action: only a tap or typed answer may resolve it, never a spoken relay.`,
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -168,6 +175,10 @@ func NewTool(b *Bridge) core.Tool {
 							"question": {
 								"type": "string",
 								"description": "The question text"
+							},
+							"context": {
+								"type": "string",
+								"description": "What the user needs to answer without reading the conversation: 2-5 short lines saying what is going on, why you ask, and what changes with each option. Write it for someone who has just picked up their phone after two hours away."
 							},
 							"options": {
 								"type": "array",
@@ -258,6 +269,13 @@ func parseQuestions(params map[string]any) ([]Question, error) {
 			return nil, fmt.Errorf("question too long, max %d bytes", MaxQuestionBytes)
 		}
 		q := Question{Text: text}
+		if c, ok := m["context"].(string); ok {
+			c = strings.TrimSpace(c)
+			if len(c) > MaxContextBytes {
+				return nil, fmt.Errorf("question context too long, max %d bytes", MaxContextBytes)
+			}
+			q.Context = c
+		}
 		if opts, ok := m["options"].([]any); ok {
 			if len(opts) > MaxOptions {
 				return nil, fmt.Errorf("too many options for one question, max %d", MaxOptions)
