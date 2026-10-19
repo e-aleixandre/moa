@@ -67,7 +67,7 @@ func TestReview2MoaDeleteStatFailureRefusesRemoval(t *testing.T) {
 	r := tasks.New(filepath.Join(dbDir, tasks.DatabaseName))
 	r.SetClock(h.clock.Now)
 	h.repos = append(h.repos, r)
-	m := NewManager(context.Background(), ManagerConfig{
+	m := startTestManager(t, context.Background(), ManagerConfig{
 		Tasks: r, ProviderFactory: func(core.Model) (core.Provider, error) { return h.prov, nil },
 		DefaultModel:  core.Model{ID: "claude-haiku-4-5-20251001", Provider: "anthropic"},
 		WorkspaceRoot: h.root, MoaCfg: noticeTestConfig,

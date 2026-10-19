@@ -221,7 +221,7 @@ func TestAttentionEndpointReturnsCrossSessionBlockingPermissionMetadata(t *testi
 func TestVersionAPI(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := NewManager(ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "0.8.1", Commit: "abc", Date: "today"}})
+	mgr := startTestManager(t, ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "0.8.1", Commit: "abc", Date: "today"}})
 	srv := httptest.NewServer(NewServer(mgr))
 	defer srv.Close()
 	resp := apiReq(t, srv, "GET", "/api/version", "")
@@ -1467,7 +1467,7 @@ func TestResumeEndpoint(t *testing.T) {
 	_ = store.Save(saved)
 
 	prov := newMockProvider(simpleResponseHandler("hello"))
-	mgr := NewManager(ctx, ManagerConfig{
+	mgr := startTestManager(t, ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
@@ -1591,7 +1591,7 @@ func TestDeleteEndpoint_SavedSession(t *testing.T) {
 	_ = store.Save(saved)
 
 	prov := newMockProvider()
-	mgr := NewManager(ctx, ManagerConfig{
+	mgr := startTestManager(t, ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,

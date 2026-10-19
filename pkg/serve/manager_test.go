@@ -113,6 +113,18 @@ func isolatedTestConfigLoader(t *testing.T, cfg core.MoaConfig) func(string) cor
 	return func(string) core.MoaConfig { return cfg }
 }
 
+// startTestManager builds a Manager that is shut down when the test ends.
+// Shutdown joins the Manager's background workers (the task watcher among
+// them): a Manager left running can still write into the test's TempDir while
+// it is removed. Shutdown must run once, so a test that shuts the Manager
+// down itself builds it with NewManager (see TestServeTestsShutDownTheirManagers).
+func startTestManager(t testing.TB, ctx context.Context, cfg ManagerConfig) *Manager {
+	t.Helper()
+	m := NewManager(ctx, cfg)
+	t.Cleanup(m.Shutdown)
+	return m
+}
+
 func newTestManager(t *testing.T, ctx context.Context, provider core.Provider) *Manager {
 	t.Helper()
 	return newTestManagerWithRoot(t, ctx, provider, t.TempDir())
@@ -1415,7 +1427,7 @@ func TestAutoSave_AfterRun(t *testing.T) {
 	dir := t.TempDir()
 	sessionBase := t.TempDir()
 	prov := newMockProvider(simpleResponseHandler("hello back"))
-	mgr := NewManager(ctx, ManagerConfig{
+	mgr := startTestManager(t, ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
@@ -1698,7 +1710,7 @@ func TestList_IncludesSavedSessions(t *testing.T) {
 	_ = store.Save(saved)
 
 	prov := newMockProvider()
-	mgr := NewManager(ctx, ManagerConfig{
+	mgr := startTestManager(t, ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
@@ -1736,7 +1748,7 @@ func TestResumeSession(t *testing.T) {
 	_ = store.Save(saved)
 
 	prov := newMockProvider(simpleResponseHandler("resumed reply"))
-	mgr := NewManager(ctx, ManagerConfig{
+	mgr := startTestManager(t, ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
@@ -1949,7 +1961,7 @@ func TestResumeSession_AlreadyActive(t *testing.T) {
 	_ = store.Save(saved)
 
 	prov := newMockProvider()
-	mgr := NewManager(ctx, ManagerConfig{
+	mgr := startTestManager(t, ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
@@ -1974,7 +1986,7 @@ func TestResumeSession_NotFound(t *testing.T) {
 	defer cancel()
 
 	prov := newMockProvider()
-	mgr := NewManager(ctx, ManagerConfig{
+	mgr := startTestManager(t, ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   t.TempDir(),
@@ -1996,7 +2008,7 @@ func TestDelete_RemovesSavedFile(t *testing.T) {
 	dir := t.TempDir()
 	sessionBase := t.TempDir()
 	prov := newMockProvider()
-	mgr := NewManager(ctx, ManagerConfig{
+	mgr := startTestManager(t, ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,
@@ -2070,7 +2082,7 @@ func TestDelete_SavedOnly(t *testing.T) {
 	_ = store.Save(saved)
 
 	prov := newMockProvider()
-	mgr := NewManager(ctx, ManagerConfig{
+	mgr := startTestManager(t, ctx, ManagerConfig{
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return prov, nil },
 		DefaultModel:    core.Model{ID: "test-model", Provider: "mock"},
 		WorkspaceRoot:   dir,

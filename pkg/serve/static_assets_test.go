@@ -145,7 +145,7 @@ func TestVersionReportsBuildID(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := NewManager(ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "0.8.1"}})
+	mgr := startTestManager(t, ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "0.8.1"}})
 	srv := httptest.NewServer(NewServer(mgr))
 	defer srv.Close()
 
@@ -175,7 +175,7 @@ func TestStaticDirTracksWatchRebuild(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := NewManager(ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "dev"}})
+	mgr := startTestManager(t, ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "dev"}})
 	srv := httptest.NewServer(NewServer(mgr))
 	defer srv.Close()
 
@@ -240,7 +240,7 @@ func TestStaticDirBuildPointerRoutesCompleteTrees(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := NewManager(ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "dev"}})
+	mgr := startTestManager(t, ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "dev"}})
 	srv := httptest.NewServer(NewServer(mgr))
 	defer srv.Close()
 
@@ -303,7 +303,7 @@ func TestVersionOmitsUnstampedBuildID(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := NewManager(ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "0.8.1"}})
+	mgr := startTestManager(t, ctx, ManagerConfig{ReleaseInfo: release.Info{Version: "0.8.1"}})
 	srv := httptest.NewServer(NewServer(mgr))
 	defer srv.Close()
 
