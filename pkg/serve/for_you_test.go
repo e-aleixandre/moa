@@ -151,3 +151,35 @@ func TestAsyncAskEventCarriesContext(t *testing.T) {
 		t.Fatalf("event = %s", b)
 	}
 }
+
+// An agent's open request of the user is in For you, next to the questions;
+// a request already answered, the user's own notes and tasks between owners
+// are not.
+func TestForYouListsOpenTaskRequests(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(), t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off"})
+	a := tasks.Actor{SessionID: "asker", ProjectKey: "p"}
+	open, err := mgr.tasks.AgentAsk(ctx, a, tasks.AgentInput{Title: "Approve the deploy window?", Description: "Friday 22:00"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answered, _ := mgr.tasks.AgentAsk(ctx, a, tasks.AgentInput{Title: "Already answered"})
+	rec, _ := mgr.tasks.Get(ctx, answered.ID)
+	done := tasks.StatusDone
+	if _, err := mgr.tasks.Update(ctx, rec.ID, rec.Revision, tasks.Patch{Status: &done}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.tasks.Create(ctx, tasks.CreateInput{Title: "my own note", Place: tasks.PlaceYou}); err != nil {
+		t.Fatal(err)
+	}
+	var reqs []ForYouItem
+	for _, it := range getForYou(t, mgr).Items {
+		if it.Kind == "task_request" {
+			reqs = append(reqs, it)
+		}
+	}
+	if len(reqs) != 1 || reqs[0].TaskID != int64(open.ID) || reqs[0].SessionID != "asker" ||
+		reqs[0].Title != "Approve the deploy window?" || reqs[0].Blocking || reqs[0].ID == "" {
+		t.Fatalf("task requests = %+v", reqs)
+	}
+}

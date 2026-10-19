@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { ArrowUp, ArrowUpRight, Check, ChevronRight, Info, KeyRound, Lock, MessageCircleQuestionMark, SquareTerminal, TriangleAlert } from "lucide-preact";
+import { ArrowUp, ArrowUpRight, Check, ChevronRight, Info, KeyRound, ListChecks, Lock, MessageCircleQuestionMark, SquareTerminal, TriangleAlert } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { useEdgeSwipeBack } from "../../hooks/useEdgeSwipeBack.js";
 import { forYouSlice, forgetForYouItem, loadForYou, markNewsRead } from "../../data/for-you.js";
@@ -8,6 +8,7 @@ import { navigate } from "../../data/router.js";
 import { resolvePermission } from "../../data/session-actions.js";
 import { addToast } from "../../data/notifications.js";
 import { openTaskSession, BackIcon } from "../Tasks/parts.jsx";
+import { openTasksView } from "../../data/tasks-view.js";
 import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { AskUserPrompt } from "../AskUserCard/AskUserPrompt.jsx";
 import "./ForYou.css";
@@ -34,6 +35,7 @@ function permissionLine(item) {
 function title(item) {
   if (item.kind === "permission") return item.tool === "bash" ? "Run this command?" : `Allow ${item.tool || "this tool"}?`;
   if (item.kind === "secret") return item.label ? `Enter the ${item.label}` : "Enter a password";
+  if (item.kind === "task_request") return item.title || "Request";
   return item.questions?.[0]?.question || "Question";
 }
 
@@ -68,6 +70,7 @@ function useRows() {
 function KindIcon({ item }) {
   if (item.kind === "permission") return <SquareTerminal size={15} aria-hidden="true" />;
   if (item.kind === "secret") return <KeyRound size={15} aria-hidden="true" />;
+  if (item.kind === "task_request") return <ListChecks size={15} aria-hidden="true" />;
   if (item.requires_tap) return <Lock size={15} aria-hidden="true" />;
   return <MessageCircleQuestionMark size={15} aria-hidden="true" />;
 }
@@ -90,6 +93,18 @@ function Answer({ row, phone, onDone }) {
         compact
         onDone={onDone}
       />
+    );
+  }
+  if (item.kind === "task_request") {
+    return (
+      <div class="fy-secret">
+        {item.description && <p class="fy-ctx">{item.description}</p>}
+        <div class="fy-actions">
+          <button type="button" class={`fy-btn is-primary${phone ? " is-wide" : ""}`} onClick={() => { navigate(null); openTasksView({ sessionId: item.session_id }); }}>
+            <ListChecks size={15} aria-hidden="true" />Open request
+          </button>
+        </div>
+      </div>
     );
   }
   if (item.kind === "permission") {

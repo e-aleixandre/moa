@@ -178,7 +178,7 @@ export function SidebarFoot({
           type="button"
           class={`zl-inbox tk-door${tasksOpen ? " is-on" : ""}`}
           aria-pressed={tasksOpen}
-          aria-label={tasksCount > 0 ? `Tasks, ${tasksCount} for you` : "Tasks"}
+          aria-label={tasksCount > 0 ? `Tasks, ${tasksCount} request${tasksCount === 1 ? "" : "s"}` : "Tasks"}
           onClick={onTasks}
         >
           <TasksGlyph />

@@ -687,7 +687,7 @@ export function taskEyebrow(task) {
   if (!task) return "Task";
   if (isScheduled(task) && task.status !== "done") return schedEyebrow(task);
   if (task.status === "done") return "Done";
-  if (isRequest(task)) return "For you";
+  if (isRequest(task)) return "Request";
   if (task.place === "agent") return "Agent task";
   if (task.place === "backlog") return "Backlog";
   return "Your task";

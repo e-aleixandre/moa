@@ -44,7 +44,7 @@ export function PinnedTaskLine({ sessionId, phone = false, onOpenTask }) {
         ) : (
           <div class="tk-pin-bar">
             <span class="tk-pin-ico"><TasksGlyph /></span>
-            <span class="tk-pin-k">For you</span>
+            <span class="tk-pin-k">Request</span>
             <button type="button" class="tk-pin-t" onClick={() => onOpenTask?.(task.id)}>{task.title}</button>
             {pin.more > 0 && <span class="tk-pin-more tk-data" aria-label={`${pin.more} more`}>+{pin.more}</span>}
             {awaitingPermission(task) ? (

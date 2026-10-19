@@ -45,7 +45,7 @@ test("the pinned line shows the first open request and +N for the rest", () => {
 
 test("the session's Tasks row says requests and checklist progress once", () => {
   expect(sessionTasksVerdict({ requests: [{ status: "pending" }], checklist: [{ status: "done" }, { status: "pending" }] }))
-    .toBe("1 for you · 1 open");
+    .toBe("1 request · 1 open");
   expect(sessionTasksVerdict({ requests: [], checklist: [] })).toBe("none");
 });
 
@@ -233,7 +233,7 @@ test("the status line's Tasks item speaks the panel row's words, and is absent w
   expect(sessionTasksStatus({
     requests: [{ id: 1, status: "pending" }],
     checklist: [{ id: 2, status: "done" }, { id: 3, status: "pending" }],
-  })).toEqual({ text: "1 for you · 1 open", forYou: 1, pending: 1, short: "1" });
+  })).toEqual({ text: "1 request · 1 open", forYou: 1, pending: 1, short: "1" });
 });
 
 test("a checklist with work left reads as its progress on a narrow line, and says it is unfinished", async () => {
@@ -288,4 +288,11 @@ test("a note reads as one line: first line, no markdown, 110 characters", () => 
   expect(noteSummary("\n## Heading\nbody")).toBe("Heading");
   expect(noteSummary("w".repeat(200))).toBe(`${"w".repeat(110)}…`);
   expect(noteSummary("")).toBe("");
+});
+
+test("the section and the chip call an agent's asks requests", () => {
+  const data = { requests: [{ id: 1, status: "pending", title: "ok?" }, { id: 2, status: "pending", title: "go?" }], checklist: [] };
+  expect(sessionGroups(data, "S")[0].title).toBe("Requests");
+  expect(sessionTasksStatus({ ...data, requests: [data.requests[0]] }).text).toBe("1 request");
+  expect(sessionTasksStatus(data).text).toBe("2 requests");
 });

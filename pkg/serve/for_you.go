@@ -5,10 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
 	"github.com/e-aleixandre/moa/pkg/bus"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
 // ForYouItem is one thing a session is waiting on the user for: an open
@@ -17,7 +19,7 @@ import (
 // the session's own endpoints (/ask, /questions/{id}/dismiss, /permission),
 // and a password is only ever entered in the session's secure sheet.
 type ForYouItem struct {
-	Kind      string    `json:"kind"` // question | permission | secret
+	Kind      string    `json:"kind"` // question | permission | secret | task_request
 	ID        string    `json:"id"`
 	SessionID string    `json:"session_id"`
 	Since     time.Time `json:"since"`
@@ -33,6 +35,12 @@ type ForYouItem struct {
 	// Secret: what the password is for, never a value.
 	Label   string `json:"label,omitempty"`
 	Command string `json:"command,omitempty"`
+	// Task request: an agent's open request of the user (a task in You with a
+	// requester). TaskID opens it in Tasks; Title and Description say what is
+	// asked. Additive.
+	TaskID      int64  `json:"task_id,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
 	// CallAt is when an unanswered asynchronous question calls the user
 	// (only while that is pending); CallState is pending, calling or missed.
 	// Additive.
@@ -82,6 +90,7 @@ func (m *Manager) ForYou(ctx context.Context) []ForYouItem {
 			}
 		}
 	}
+	items = append(items, m.openTaskRequests(ctx)...)
 	m.mu.RLock()
 	loaded := make([]*ManagedSession, 0, len(m.sessions))
 	for _, s := range m.sessions {
@@ -145,4 +154,31 @@ func handleForYou(m *Manager) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, body)
 	}
+}
+
+// openTaskRequests are the agents' open requests of the user: tasks in You
+// that a session asked (never the user's own notes, scheduled templates or
+// tasks between owners, which have their own flow). They do not stop the
+// session. Best effort, like the question store.
+func (m *Manager) openTaskRequests(ctx context.Context) []ForYouItem {
+	if m.tasks == nil {
+		return nil
+	}
+	res, err := m.tasks.List(ctx, tasks.Filter{})
+	if err != nil {
+		slog.Warn("for you: reading task requests failed", "error", err)
+		return nil
+	}
+	var out []ForYouItem
+	for _, t := range res.Tasks {
+		if t.Place != tasks.PlaceYou || t.RequesterSessionID == "" || t.Status == tasks.StatusDone ||
+			t.When != nil || t.Handoff != nil {
+			continue
+		}
+		out = append(out, ForYouItem{
+			Kind: "task_request", ID: "task:" + strconv.FormatInt(t.ID, 10), SessionID: t.RequesterSessionID,
+			Since: time.UnixMilli(t.CreatedAt), TaskID: t.ID, Title: t.Title, Description: t.Description,
+		})
+	}
+	return out
 }

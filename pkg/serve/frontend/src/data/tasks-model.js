@@ -295,7 +295,7 @@ export function sessionTasksVerdict(data, now = Date.now(), tz = deviceZone(), s
   const reqs = openSessionRequests(data).length;
   const list = Array.isArray(data?.checklist) ? data.checklist : [];
   const parts = [];
-  if (reqs) parts.push(`${reqs} for you`);
+  if (reqs) parts.push(`${reqs} request${reqs === 1 ? '' : 's'}`);
   parts.push(...scheduleVerdict(Array.isArray(data?.scheduled) ? data.scheduled : [], now, tz));
   if (list.length) parts.push(checklistWords(list, since).long);
   return parts.join(' · ') || 'none';
@@ -320,7 +320,7 @@ export function sessionGroups(data, sessionId = "", since = Infinity) {
   const groups = [];
   if (reqs.length) {
     const open = reqs.filter(isOpen);
-    groups.push({ id: 'for-you', title: 'For you', rows: [...open, ...reqs.filter((t) => !isOpen(t))], n: open.length });
+    groups.push({ id: 'for-you', title: 'Requests', rows: [...open, ...reqs.filter((t) => !isOpen(t))], n: open.length });
   }
   const [fresh, fold] = [(g) => g.id.startsWith('done-new'), (g) => g.id === 'done'];
   const done = doneGroups(list.filter((t) => !isOpen(t)), since);
