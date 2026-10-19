@@ -131,6 +131,9 @@ function connect() {
     if (evt?.type === 'call_requests') {
       feedSeq += 1;
       setCallRequests(evt.requests);
+      // A call starting or ending changes a question's call state in For
+      // you; the server records the end just after the feed says so.
+      import('./for-you.js').then((m) => { m.loadForYou(); setTimeout(() => m.loadForYou(), 2000); }).catch(() => {});
     }
   };
   ws.onclose = () => {

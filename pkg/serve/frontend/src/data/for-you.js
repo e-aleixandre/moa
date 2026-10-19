@@ -98,3 +98,33 @@ export function toggleForYouView() {
   if (store.get().view === 'foryou') closeForYouView();
   else openForYouView();
 }
+
+// questionCall says where an open question's call escalation is, for the pin
+// and the For you row: { state: 'pending'|'calling'|'missed', text, tone }
+// or null. pending counts down by the minute to call_at; a live call request
+// about this question (the requests feed) is "calling" at once, before the
+// next refresh says so.
+export function questionCall(item, now = Date.now(), requests = []) {
+  if (!item?.id) return null;
+  if ((requests || []).some((r) => r?.question_id === item.id)) {
+    return { state: 'calling', text: 'Calling you…', tone: 'amber' };
+  }
+  if (item.call_state === 'calling') return { state: 'calling', text: 'Calling you…', tone: 'amber' };
+  if (item.call_state === 'missed') return { state: 'missed', text: 'Missed call', tone: 'red' };
+  if (item.call_state !== 'pending') return null;
+  const at = Date.parse(item.call_at || '');
+  if (!Number.isFinite(at)) return null;
+  const mins = Math.max(1, Math.ceil((at - now) / 60000));
+  if (mins <= 60) return { state: 'pending', text: `Calls you in ${mins} min`, tone: 'amber' };
+  const when = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return { state: 'pending', text: `Calls you at ${when}`, tone: 'amber' };
+}
+
+// callInfoFor merges what For you knows (fresher: refreshed on every call
+// change) over the session's own pending ask.
+export function callInfoFor(state, ask) {
+  if (!ask?.id) return ask;
+  const it = forYouSlice(state).items.find((i) => i.id === ask.id);
+  if (!it) return ask;
+  return { ...ask, call_at: it.call_at, call_state: it.call_state };
+}

@@ -29,6 +29,12 @@ export const RING_MIN = 10;
 export const RING_MAX = 120;
 export const RING_DEFAULT = 45;
 
+// How long an owner's tap-only question waits unanswered before the owner
+// calls about it (server default 15; 5–240).
+export const QUESTION_CALL_MIN = 5;
+export const QUESTION_CALL_MAX = 240;
+export const QUESTION_CALL_DEFAULT = 15;
+
 // An owner without the field is Never: calls are opt-in.
 export function ownerCallLevel(owner) {
   const level = owner?.call_level;
@@ -114,6 +120,14 @@ export function ringSecondsValue(raw) {
   return { seconds: n };
 }
 
+export function questionCallMinutesValue(raw) {
+  const n = Number(raw);
+  const error = `Enter ${QUESTION_CALL_MIN} to ${QUESTION_CALL_MAX} minutes.`;
+  if (raw === '' || raw == null || !Number.isInteger(n)) return { error };
+  if (n < QUESTION_CALL_MIN || n > QUESTION_CALL_MAX) return { error };
+  return { minutes: n };
+}
+
 // pauseUntil: option → RFC3339. "tomorrow" is 08:00 local the next day.
 export const PAUSE_OPTIONS = [
   { id: '1h', label: '1 hour' },
@@ -149,6 +163,7 @@ export function callsPatch(calls, change) {
   if (next.ring_seconds) out.ring_seconds = next.ring_seconds;
   if (next.paused_until) out.paused_until = next.paused_until;
   if (next.hours) out.hours = next.hours;
+  if (next.question_call_minutes) out.question_call_minutes = next.question_call_minutes;
   return { calls: out };
 }
 

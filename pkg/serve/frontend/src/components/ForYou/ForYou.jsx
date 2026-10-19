@@ -11,6 +11,7 @@ import { openTaskSession, BackIcon } from "../Tasks/parts.jsx";
 import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { AskUserPrompt } from "../AskUserCard/AskUserPrompt.jsx";
 import "./ForYou.css";
+import { QuestionCall } from "./QuestionCall.jsx";
 
 function age(since) {
   const t = Date.parse(since || "");
@@ -147,6 +148,7 @@ function Row({ row, open, phone, onToggle }) {
             {item.blocking
               ? <span class="fy-block">{item.kind === "secret" ? "Stopped until you enter it" : "Stopped until you answer"}</span>
               : <span class="fy-keeps">Keeps working</span>}
+            {item.call_state && <><span class="fy-sep">·</span><QuestionCall item={item} /></>}
           </span>
         </span>
         {item.requires_tap && !phone && <span class="fy-chip"><Lock size={12} aria-hidden="true" />Needs your tap</span>}

@@ -5,8 +5,8 @@ import { useStore } from "../../hooks/useStore.js";
 import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { ownerState } from "../../data/owners-model.js";
 import {
-  PAUSE_OPTIONS, RING_DEFAULT, RING_MAX, RING_MIN, deviceTimeZone, hoursBlock,
-  ownerCallsRow, pauseUntil, pausedLabel, pausedNow, ringSecondsValue,
+  PAUSE_OPTIONS, QUESTION_CALL_DEFAULT, QUESTION_CALL_MAX, QUESTION_CALL_MIN, RING_DEFAULT, RING_MAX, RING_MIN,
+  deviceTimeZone, hoursBlock, ownerCallsRow, pauseUntil, pausedLabel, pausedNow, questionCallMinutesValue, ringSecondsValue,
 } from "../../data/owner-calls.js";
 import "./OwnerCallsSettings.css";
 
@@ -131,6 +131,42 @@ function RingFor({ calls, saveCalls, loaded }) {
   );
 }
 
+// QuestionCallAfter — how long an owner's question that needs your tap waits
+// unanswered before the owner calls you about it. Same write discipline as
+// Ring for.
+function QuestionCallAfter({ calls, saveCalls, loaded }) {
+  const saved = calls.question_call_minutes || QUESTION_CALL_DEFAULT;
+  const [draft, setDraft] = useState(String(saved));
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const commit = () => {
+    if (busy) return;
+    const r = questionCallMinutesValue(draft);
+    if (r.error) { setError(r.error); return; }
+    setError("");
+    if (r.minutes !== saved) {
+      setBusy(true);
+      saveCalls({ question_call_minutes: r.minutes })
+        .then((res) => setDraft(String(res.calls?.question_call_minutes || QUESTION_CALL_DEFAULT)))
+        .finally(() => setBusy(false));
+    }
+  };
+  return (
+    <>
+      <span class="zl-set-k is-page">Call about an unanswered question after</span>
+      <label class="oc-ring">
+        <Field variant="box" class="oc-ring-f" type="number" inputmode="numeric" min={QUESTION_CALL_MIN} max={QUESTION_CALL_MAX} value={draft} disabled={!loaded || busy}
+          aria-label="Call about an unanswered question after, in minutes"
+          onInput={(e) => setDraft(e.currentTarget.value)} onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(); }} />
+        <span>minutes</span>
+      </label>
+      <p class="ow-hint oc-help">For questions that need your tap. An owner can ask for a call sooner when it is urgent.</p>
+      {error && <p class="oc-fail" role="alert">{error}</p>}
+    </>
+  );
+}
+
 export function OwnerCallsSettings({ state, onEditOwner }) {
   const { status, loaded, saveCalls } = state;
   const owners = useStore((s) => s.owners.list);
@@ -165,6 +201,7 @@ export function OwnerCallsSettings({ state, onEditOwner }) {
           <Hours calls={calls} saveCalls={saveCalls} loaded />
           <Pause calls={calls} saveCalls={saveCalls} loaded />
           <RingFor calls={calls} saveCalls={saveCalls} loaded />
+          <QuestionCallAfter calls={calls} saveCalls={saveCalls} loaded />
         </>
       )}
     </>

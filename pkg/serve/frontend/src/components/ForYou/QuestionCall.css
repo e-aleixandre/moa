@@ -1,0 +1,6 @@
+.qc-call {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  white-space: nowrap; font-size: var(--zl-fs-meta);
+}
+.qc-call.is-amber { color: var(--zl-yellow); }
+.qc-call.is-red { color: var(--zl-red); font-weight: 600; }

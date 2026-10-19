@@ -70,3 +70,19 @@ test("on the phone the pin answers in a bottom sheet; on the desktop it opens in
   const desktop = descendants(AsyncAskPin({ session }));
   expect(desktop.some((n) => n.type === MobileSheet)).toBe(false);
 });
+
+test("the pin and the For you row say the question's call; the settings field is at least 16px", async () => {
+  const { AsyncAskPin } = await import("./AsyncAskPin.jsx");
+  const { QuestionCall } = await import("../ForYou/QuestionCall.jsx");
+  const ask = { id: "q1", async: true, call_state: "pending", call_at: "2026-10-19T08:20:00Z", questions: [{ question: "Ship?" }] };
+  const bar = descendants(AsyncAskPin({ session: { id: "s1", pendingAsk: ask } }));
+  const call = bar.find((n) => n.type === QuestionCall);
+  expect(call?.props.item).toMatchObject({ id: "q1", call_state: "pending", call_at: "2026-10-19T08:20:00Z" });
+  const row = readFileSync(new URL("../ForYou/ForYou.jsx", import.meta.url), "utf8");
+  expect(row).toContain("<QuestionCall item={item} />");
+  const css = readFileSync(new URL("../ForYou/QuestionCall.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\.qc-call\.is-red \{[^}]*var\(--zl-red\)/);
+  const settings = readFileSync(new URL("../GlobalSettings/OwnerCallsSettings.jsx", import.meta.url), "utf8");
+  expect(settings).toContain("Call about an unanswered question after");
+  expect(settings).toMatch(/QuestionCallAfter[\s\S]*<Field variant="box" class="oc-ring-f"/);
+});
