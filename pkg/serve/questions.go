@@ -52,6 +52,10 @@ type questionService struct {
 	// accepted answer of that session is admitted or continued in this
 	// process. Guarded by the session's lock.
 	unfenced sync.Map
+	// journalUnread is set while the fence journal could not be read at
+	// startup: which sessions it bars is unknown, so every session's answers
+	// stay barred until it is read (loadJournalLocked).
+	journalUnread atomic.Bool
 	// gone marks the sessions Delete has settled for the last time; a post
 	// for one of them refuses to commit. Written under the session's lock.
 	gone sync.Map
@@ -378,7 +382,11 @@ func (q *questionService) deletedSaved(sessionID string) {
 // nothing is left to fence, and nothing must be written for it afterwards.
 func (q *questionService) forgetFenceLocked(sessionID string) {
 	q.unfenced.Delete(sessionID)
-	q.journalRemove(sessionID)
+	if err := q.journalRemove(sessionID); err != nil {
+		// Left behind, the file is reapplied at the next start to a session
+		// with nothing left to fence, and removed then.
+		slog.Error("questions: removing a deleted session's fence journal failed", "session", sessionID, "error", err)
+	}
 }
 
 // cleared settles the questions of a session whose conversation was emptied
@@ -482,10 +490,21 @@ func (q *questionService) Fence(ctx context.Context, sessionID string, stopRun b
 		}
 		return fmt.Errorf("%w: %w", errFenceNotSaved, err)
 	}
-	q.unfenced.Delete(sessionID)
+	return q.settledLocked(sessionID, stopRun)
+}
+
+// settledLocked lifts a saved fence's barrier, but only once a Stop's journal
+// file is durably gone (see journalRemove); until then the session stays barred
+// and the error says why.
+func (q *questionService) settledLocked(sessionID string, stopRun bool) error {
 	if stopRun {
-		q.journalRemove(sessionID)
+		if err := q.journalRemove(sessionID); err != nil {
+			q.unfenced.Store(sessionID, true)
+			slog.Error("questions: the fence is saved but its journal file cannot be removed; answers stay barred", "session", sessionID, "error", err)
+			return fmt.Errorf("%w: %w", errFenceNotSaved, err)
+		}
 	}
+	q.unfenced.Delete(sessionID)
 	return nil
 }
 
@@ -518,6 +537,9 @@ var errFenceNotSaved = errors.New("the answers accepted before this stop could n
 // barredLocked reports whether the session still has a fence that never
 // reached the database, retrying it first. Callers hold the session's lock.
 func (q *questionService) barredLocked(ctx context.Context, sessionID string) bool {
+	if q.journalUnread.Load() && !q.loadJournalLocked() {
+		return true
+	}
 	stopRun, ok := q.unfenced.Load(sessionID)
 	if !ok {
 		return false
@@ -525,11 +547,7 @@ func (q *questionService) barredLocked(ctx context.Context, sessionID string) bo
 	if err := q.fenceLocked(ctx, sessionID, stopRun.(bool)); err != nil {
 		return true
 	}
-	q.unfenced.Delete(sessionID)
-	if stopRun.(bool) {
-		q.journalRemove(sessionID)
-	}
-	return false
+	return q.settledLocked(sessionID, stopRun.(bool)) != nil
 }
 
 // admittedEvents returns the session's owed answers whose message is already

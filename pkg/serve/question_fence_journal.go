@@ -107,40 +107,41 @@ func (q *questionService) journalWrite(sessionID string) error {
 }
 
 // journalRemove drops the session's file once its fence is saved, or the
-// session is gone. A file that is not there is the common case.
-func (q *questionService) journalRemove(sessionID string) {
+// session is gone, and reports whether that removal is durable. Until it is,
+// the file still claims a Stop over the session's answers, so callers keep the
+// session barred: an answer accepted now would be stopped by the stale file at
+// the next start. A file already gone is still synced away, in case its unlink
+// was not.
+func (q *questionService) journalRemove(sessionID string) error {
 	path := q.journalPath(sessionID)
 	if path == "" {
-		return
+		return nil
 	}
-	if err := os.Remove(path); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			slog.Warn("questions: removing a fence journal failed", "session", sessionID, "error", err)
-		}
-		return
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
-	if err := syncJournalDir(filepath.Dir(path)); err != nil {
-		slog.Warn("questions: syncing the fence journal directory failed", "session", sessionID, "error", err)
+	err := syncJournalDir(filepath.Dir(path))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil // no journal directory: there never was a file
 	}
+	return err
 }
 
-// replayJournal runs when the Manager starts, before the dispatcher, a
-// continuation or a seed can touch an answer: every Stop fence a previous
-// process could not save is applied now. A fence that still cannot be saved
-// leaves its file and bars the session, as the failed Stop did. Synchronous: it
-// owns no goroutine that could write after Shutdown.
-func (q *questionService) replayJournal() {
+// readJournal lists the sessions with a pending Stop fence. A directory that
+// does not exist means none; one that cannot be read is an error, never "none".
+func (q *questionService) readJournal() ([]string, error) {
 	dir := q.journalDir()
 	if dir == "" {
-		return
+		return nil, nil
 	}
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			slog.Warn("questions: reading the fence journal failed", "error", err)
-		}
-		return
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || strings.HasPrefix(name, ".") {
@@ -149,17 +150,47 @@ func (q *questionService) replayJournal() {
 			}
 			continue
 		}
+		ids = append(ids, name)
+	}
+	return ids, nil
+}
+
+// replayJournal runs when the Manager starts, before the dispatcher, a
+// continuation or a seed can touch an answer: every session with a pending
+// Stop fence is barred, then its fence is applied and its file removed where
+// the stores allow it (barredLocked). A journal that cannot be read bars every
+// session's answers (journalUnread) until it can. Synchronous: it owns no
+// goroutine that could write after Shutdown.
+func (q *questionService) replayJournal() {
+	ids, err := q.readJournal()
+	if err != nil {
+		q.journalUnread.Store(true)
+		slog.Error("questions: the fence journal cannot be read; answers stay barred until it can", "error", err)
+		return
+	}
+	for _, id := range ids {
 		func() {
-			unlock := q.lock(name)
+			unlock := q.lock(id)
 			defer unlock()
-			if err := q.fenceLocked(q.m.baseCtx, name, true); err != nil {
-				slog.Warn("questions: reapplying a Stop fence failed; the session stays barred", "session", name, "error", err)
-				q.unfenced.Store(name, true)
-				return
-			}
-			q.journalRemove(name)
+			q.unfenced.Store(id, true)
+			q.barredLocked(q.m.baseCtx, id)
 		}()
 	}
+}
+
+// loadJournalLocked turns a journal that could not be read into per-session
+// barriers once it can be. Callers hold some session's lock; other sessions
+// are only marked, and settle on their own next barredLocked.
+func (q *questionService) loadJournalLocked() bool {
+	ids, err := q.readJournal()
+	if err != nil {
+		return false
+	}
+	for _, id := range ids {
+		q.unfenced.Store(id, true)
+	}
+	q.journalUnread.Store(false)
+	return true
 }
 
 // syncJournalDir flushes a directory's entries; file systems that cannot are
