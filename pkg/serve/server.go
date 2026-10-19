@@ -1383,11 +1383,17 @@ func handleCancelSteers(mgr *Manager) http.HandlerFunc {
 			for i, steer := range steers {
 				ids[i] = steer.ID
 			}
-			writeJSON(w, http.StatusOK, map[string]any{
+			reply := map[string]any{
 				"discarded_steer_ids": ids,
 				"discarded_steers":    steers,
 				"recall_id":           op.RecallID,
-			})
+			}
+			// The recall happened; only the decision about accepted answers is
+			// not saved. The client has to be able to tell its user.
+			if fenceErr != nil {
+				reply["fence_error"] = fenceErr.Error()
+			}
+			writeJSON(w, http.StatusOK, reply)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

@@ -1745,6 +1745,24 @@ test('a recall with only a task notice queued leaves the composer alone', async 
   expect(store.get().composerDrops.s1).toBeUndefined();
 });
 
+test('recallQueuedSteers tells the user when the answers\' fence could not be saved, and still restores the queue', async () => {
+  setState({ composerDrops: {} });
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
+    discarded_steer_ids: ['recall-f1'],
+    discarded_steers: [{ id: 'recall-f1', text: 'first' }],
+    fence_error: 'answers accepted before the recall were not saved',
+  }), { status: 200 }));
+  setState({ sessions: { s1: { id: 's1', state: 'running', pendingSteers: [{ id: 'recall-f1', text: 'first' }] } } });
+
+  expect(recallQueuedSteers('s1')).toBe(true);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(store.get().composerDrops.s1).toMatchObject({ text: 'first', focus: true });
+  expect(getToasts().filter((t) => t.type === 'error').map((t) => t.title)).toEqual([
+    'Recalled, but answers already given could not be saved. Retry the recall.',
+  ]);
+});
+
 test('recallQueuedSteers does nothing without a queue, and never twice at once', async () => {
   setState({ composerDrops: {} });
   let inflight;

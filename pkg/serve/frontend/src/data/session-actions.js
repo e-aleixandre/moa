@@ -949,6 +949,15 @@ export function recallQueuedSteers(id) {
       endOperation(recallId);
       applyDiscardReply(id, result);
       if (queuedRecalls.get(id) === recall) queuedRecalls.delete(id);
+      // The queue came back, but the server could not save what becomes of the
+      // answers already given: say so, or it is silent.
+      if (result?.fence_error) {
+        addToast({
+          sessionId: id,
+          title: 'Recalled, but answers already given could not be saved. Retry the recall.',
+          type: 'error',
+        });
+      }
     })
     .catch((e) => {
       recall.pending = false;
