@@ -184,6 +184,13 @@ func (r *Repo) OpenQuestions(ctx context.Context, sessionID string) ([]Question,
 	return r.readQuestions(ctx, "session_id = ? AND state = 'open' ORDER BY asked_at, rowid", sessionID)
 }
 
+// AllOpenQuestions returns every open question of every session, oldest
+// first: what a cross-session view ("For you", the roster's marks) reads, so
+// a question stays visible whether or not its session is loaded.
+func (r *Repo) AllOpenQuestions(ctx context.Context) ([]Question, error) {
+	return r.readQuestions(ctx, "state = 'open' ORDER BY asked_at, rowid")
+}
+
 // SessionQuestions returns every question of the session, oldest first.
 func (r *Repo) SessionQuestions(ctx context.Context, sessionID string) ([]Question, error) {
 	return r.readQuestions(ctx, "session_id = ? ORDER BY asked_at, rowid", sessionID)

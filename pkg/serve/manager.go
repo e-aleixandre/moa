@@ -380,6 +380,11 @@ type SessionInfo struct {
 	// roster is all a client has for a session it holds no socket to, and the
 	// id is what tells a new request from one it already announced.
 	PendingSecretIDs []string `json:"pending_secret_ids,omitempty"`
+	// OpenQuestionIDs names the session's open asynchronous questions, read
+	// from the question store, so a client marks a session that asked even
+	// when it holds no socket to it or the session is not loaded. IDs only,
+	// like PendingSecretIDs; the text is GET /api/for-you's.
+	OpenQuestionIDs []string `json:"open_question_ids,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
 	// exist and turn red when one has failed or exited. The full per-server
@@ -1628,6 +1633,12 @@ func (m *Manager) ListWith(opts ListOptions) []SessionInfo {
 			Unseen:         m.isUnseen(sum.ID),
 			ServerInstance: m.serverInstance,
 		}))
+	}
+
+	if open := m.openQuestionIDsBySession(); len(open) > 0 {
+		for i := range list {
+			list[i].OpenQuestionIDs = open[list[i].ID]
+		}
 	}
 
 	// The ID tie-break keeps the order (and so the roster's ETag) stable when

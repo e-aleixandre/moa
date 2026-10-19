@@ -62,6 +62,9 @@ type OwnerInfo struct {
 	// CallCostAckProvider is the paid provider whose cost the user accepted
 	// for this owner's calls, if any.
 	CallCostAckProvider string `json:"call_cost_ack_provider,omitempty"`
+	// OpenQuestionIDs names the open asynchronous questions of the owner's own
+	// conversation (see SessionInfo.OpenQuestionIDs).
+	OpenQuestionIDs []string `json:"open_question_ids,omitempty"`
 }
 
 // ListOwners returns every owner with the state of its conversation.
@@ -111,6 +114,7 @@ func (m *Manager) ownerInfo(own owner.Owner) OwnerInfo {
 	if own.SessionID == "" {
 		return info
 	}
+	info.OpenQuestionIDs = m.openQuestionIDsBySession()[own.SessionID]
 	if sess, ok := m.Get(own.SessionID); ok {
 		info.SessionState = sess.info().State
 		return info
