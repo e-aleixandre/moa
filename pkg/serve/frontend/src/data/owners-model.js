@@ -1,4 +1,4 @@
-import { sessionDisplayDotState, sessionDotState, sessionTitle } from "./util/format.js";
+import { sessionDisplayDotState, sessionDotState, sessionTitle, waitsForYou } from "./util/format.js";
 import { sessionRowReason } from "../layout/Sidebar/sessions.js";
 
 // owners-model — the only logic the Owners surface needs, kept out of the
@@ -300,9 +300,14 @@ export function ownerRows(owners = [], sessions = {}, now = Date.now(), wantsToT
     // paints instead. Same projection as a session row, one place, so the two
     // can never describe the same stopped conversation differently.
     const reason = mine ? sessionRowReason({ ...mine, kind: "" }, now) : null;
+    const state = mine?.state || own.session_state;
+    // An open asynchronous question of the owner's own conversation asks the
+    // user just like a blocking one, whether or not that conversation is
+    // loaded: the roster names it (open_question_ids).
+    const asks = state !== "error" && (own.open_question_ids?.length > 0 || waitsForYou(mine));
     return {
       ...own,
-      session_state: mine?.state || own.session_state,
+      session_state: asks ? "permission" : state,
       children: byOwner.get(own.id) || [],
       unseen: mine ? !!mine.unseen : !!own.unseen,
       ownReason: reason?.text || "",

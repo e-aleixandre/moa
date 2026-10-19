@@ -586,10 +586,19 @@ export function sessionDotState(sess) {
 // list and pane: urgent blocks first, then a completed result the user has not
 // seen, then any current work. `unseen` is deliberately limited to active
 // idle/running sessions; saved sessions retain their grey saved state.
+// waitsForYou — the session wants something from the user: a blocking
+// question, a permission, a password, or an open asynchronous question. The
+// last one comes from the roster (open_question_ids), so it marks sessions
+// that hold no socket, are not loaded, or outlived a restart.
+export function waitsForYou(sess) {
+  return !!(sess && (sess.state === 'permission' || sess.pendingPerm || sess.pendingAsk
+    || sess.pendingSecrets?.length || sess.questionIds?.length));
+}
+
 export function sessionDisplayDotState(sess, unseen = sess?.unseen) {
   if (!sess) return 'idle';
   if (sess.state === 'error') return 'error';
-  if (sess.state === 'permission' || sess.pendingPerm || sess.pendingAsk || sess.pendingSecrets?.length) return 'permission';
+  if (waitsForYou(sess)) return 'permission';
 
   const state = sessionDotState(sess);
   if (unseen && (state === 'idle' || state === 'running')) return 'unseen';

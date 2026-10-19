@@ -35,6 +35,7 @@ import { addToast } from "../../data/notifications.js";
 import { configureSession, openPersistedSubagent, openBashJob, rewindToMessage, setSessionFast, daybreakSelectorProps, stopRun } from "../../data/session-actions.js";
 import { toggleSessionPanel, sessionPanelView, openSessionPanel, taskPanelPage } from "../../data/session-panel.js";
 import { PinnedTaskLine } from "../../components/Tasks/PinnedTaskLine.jsx";
+import { AsyncAskPin } from "../../components/AskUserCard/AsyncAskPin.jsx";
 import { useOwnerStatusItem } from "../../components/Owners/OwnerChipEntry.jsx";
 import { useSessionTasksStatus } from "../../components/Tasks/useSessionTasksStatus.js";
 import { cacheAlertLabel } from "../../data/cache-usage.js";
@@ -319,6 +320,7 @@ export function ConversationScreen() {
                   session (session.dockOpen). flex:none, so it pushes the stream
                   up instead of overlaying the composer. Above it, what the
                   session asked of you, pinned so it does not sink. */}
+              <AsyncAskPin session={session} />
               <PinnedTaskLine
                 sessionId={session.id}
                 onOpenTask={(id) => openSessionPanel(session.id, taskPanelPage(id))}

@@ -19,6 +19,7 @@ import { loadOwners } from "./data/owners.js";
 import { loadProviderStatus } from "./data/providers.js";
 import { startTasksSync, resumeTasksSync } from "./data/tasks.js";
 import { TasksScreen } from "./components/Tasks/TasksScreen.jsx";
+import { ForYouScreen } from "./components/ForYou/ForYou.jsx";
 import { IncomingCall } from "./components/IncomingCall/IncomingCall.jsx";
 import { startCallRequestsSync, resumeCallRequestsSync, openCallRequestLink } from "./data/call-requests.js";
 import { requestIdFromSearch } from "./data/call-requests-model.js";
@@ -405,7 +406,7 @@ function App() {
   return (
     <>
       <DesktopShell version={version}>
-        {view === "grid" ? <PaneGridScreen /> : view === "tasks" ? <TasksScreen /> : <ConversationScreen />}
+        {view === "grid" ? <PaneGridScreen /> : view === "tasks" ? <TasksScreen /> : view === "foryou" ? <ForYouScreen /> : <ConversationScreen />}
       </DesktopShell>
       <GlobalPalette />
       <GlobalSharePicker />

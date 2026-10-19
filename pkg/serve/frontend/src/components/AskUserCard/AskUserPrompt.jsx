@@ -20,8 +20,13 @@ import "./AskUserPrompt.css";
 // other, a counter with up/down steppers, Continue/Submit jumps to the first
 // unanswered question, Skip fills the blanks with '(skipped)', and picking an
 // option auto-advances to the next question.
-export function AskUserPrompt({ session }) {
-  const ask = session.pendingAsk;
+// `ask` and `sessionId` let a view that is not the session's own (For you)
+// drive the same card for a question it read elsewhere; `compact` drops the
+// card's own frame and note when it sits inside a pinned bar; `onDone` hears
+// the outcome ("answered" | "dismissed").
+export function AskUserPrompt({ session, ask: askProp = null, sessionId = null, compact = false, onDone }) {
+  const ask = askProp || session?.pendingAsk;
+  const sid = sessionId || session?.id;
   const questions = ask?.questions || [];
 
   const [current, setCurrent] = useState(0);
@@ -186,7 +191,8 @@ export function AskUserPrompt({ session }) {
     resolvingRef.current = true;
     setSubmitting(true);
     try {
-      await resolveAskUser(session.id, ask.id, finalAnswers);
+      await resolveAskUser(sid, ask.id, finalAnswers);
+      onDone?.("answered");
     } catch (e) {
       console.error("Ask user resolve failed:", e);
       resolvingRef.current = false;
@@ -210,7 +216,8 @@ export function AskUserPrompt({ session }) {
     setSubmitting(true);
     setDismissing(true);
     try {
-      await dismissAskUser(session.id, ask.id);
+      await dismissAskUser(sid, ask.id);
+      onDone?.("dismissed");
     } catch (e) {
       console.error("Ask user dismiss failed:", e);
       resolvingRef.current = false;
@@ -248,7 +255,7 @@ export function AskUserPrompt({ session }) {
   };
 
   return (
-    <div class="ask-user-prompt" ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown}>
+    <div class={`ask-user-prompt${compact ? " is-compact" : ""}`} ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown}>
       <AskUserCard
         question={q.question}
         options={options}
@@ -264,7 +271,7 @@ export function AskUserPrompt({ session }) {
       {voiceError && (
         <div class="ask-user-prompt-voice-error" role="alert">{voiceError}</div>
       )}
-      {ask.async && (
+      {ask.async && !compact && (
         <div class="ask-user-prompt-async">Stop keeps this question open. Answer now or later, or Dismiss it.</div>
       )}
       <div class="ask-user-prompt-foot">

@@ -22,6 +22,8 @@ import { OwnerAvatarFor } from "../../components/Owners/OwnerAvatar.jsx";
 import { OwnerRow, SectionHead } from "../../components/Owners/OwnerRow.jsx";
 import { TasksGlyph } from "../../components/Tasks/TasksGlyph.jsx";
 import { attentionLabel, useProviderStatus } from "../../data/providers.js";
+import { forYouCount, toggleForYouView } from "../../data/for-you.js";
+import { ForYouDoor } from "../../components/ForYou/ForYouDoor.jsx";
 import "./Sidebar.css";
 
 // Sidebar — the other sessions. Markup and CSS are the catalogue's
@@ -326,6 +328,9 @@ export function Sidebar({
   tasksCount = 0,
   tasksOpen = false,
   onTasks,
+  // For you: the first row of the list. The phone's drawer passes its own
+  // handler, which closes the drawer before the page opens.
+  onForYou,
   // The owners. They are a SECTION of this list rather than a mode of the
   // column: above everything in Recent, and the first row of their group in By
   // project. The column supplies the head and the foot either way.
@@ -348,6 +353,8 @@ export function Sidebar({
   const [showAllSaved, setShowAllSaved] = useState(false);
   const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
   const voiceCall = useStore((s) => s.voiceCall);
+  const forYouN = useStore(forYouCount);
+  const forYouOn = useStore((s) => s.view === "foryou");
   const ownerCall = (owner) => (!voiceCall?.active ? ""
     : voiceCall.sessionId === owner.session_id ? "here" : "elsewhere");
   const callable = !!onCallOwner && voiceCallSupported();
@@ -371,8 +378,17 @@ export function Sidebar({
   /* Saved sessions are deliberately not offered to the attention split: a saved
      session is parked on purpose, so it belongs under Saved even if it ended
      badly. */
-  const { needs: needsAttention, rest: restActive } = partitionByAttention(shownActive);
-  const savedPreview = previewSavedSessions(shownSaved, { expanded: showAllSaved, searching: false });
+  /* The exception is a saved session with an open question: it is not parked
+     at all, it is waiting for an answer that will wake it, and after a restart
+     every session is saved. It rises like an active one. */
+  const savedAsking = shownSaved.filter((s) => s.state === "permission");
+  const { needs: needsAttention, rest: restActive } = partitionByAttention(
+    savedAsking.length ? [...shownActive, ...savedAsking] : shownActive,
+  );
+  const savedPreview = previewSavedSessions(
+    savedAsking.length ? shownSaved.filter((s) => s.state !== "permission") : shownSaved,
+    { expanded: showAllSaved, searching: false },
+  );
   // The section accordion, and what a folded OWNERS heading shows beside its
   // count: the most urgent thing it is hiding, and nothing else.
   const sectionOpen = (key) => !sectionCollapsed(key, collapsedSections);
@@ -520,6 +536,7 @@ export function Sidebar({
         </div>
       ) : (
         <div class="zl-list" ref={listRef}>
+          <ForYouDoor n={forYouN} on={forYouOn} phone={phone} onOpen={onForYou || toggleForYouView} />
 
           {hitCount === 0 && (
             <button type="button" class="zl-empty-new" onClick={onNewSession}>

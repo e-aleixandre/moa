@@ -77,10 +77,11 @@ export function adoptAttentionNamespace(id, namespace) {
 
 export function handleWsAskUser(id, data, seq = 0) {
   updateSession(id, {
-    pendingAsk: { id: data.id, questions: data.questions, ...(data.async ? { async: true } : {}) },
+    pendingAsk: { id: data.id, questions: data.questions, ...(data.async ? { async: true } : {}), ...(data.requires_tap ? { requires_tap: true } : {}) },
   });
   markUnseen(id, seq, true);
   acknowledgeVisibleLiveAttention(id, seq);
+  import('../for-you.js').then((m) => m.loadForYou()).catch(() => {});
   const state = store.get();
   if (!visibleSessionIds(state).includes(id)) {
     flashSession(id, 'attention');
@@ -156,6 +157,7 @@ export function handleWsSecretResolved(id, data) {
 }
 
 export function handleWsAskResolved(id, data) {
+  import('../for-you.js').then((m) => (data?.id ? m.forgetForYouItem(data.id) : m.loadForYou())).catch(() => {});
   const ask = store.get().sessions[id]?.pendingAsk;
   if (!ask) return;
   if (data?.id && data.id !== ask.id) return;

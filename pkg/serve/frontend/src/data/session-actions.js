@@ -278,6 +278,7 @@ function normalizeSessionInfo(info, existing, visible) {
     // Open password requests as the server names them: the only word on them
     // for a session no socket watches.
     secretIds: sameIds(existing?.secretIds, info.pending_secret_ids),
+    questionIds: sameIds(existing?.questionIds, info.open_question_ids),
     briefAttempting: info.brief_attempting ?? (existing ? existing.briefAttempting : ''),
     briefProgress: info.brief_progress ?? (existing ? existing.briefProgress : ''),
     briefUpdated: info.brief_updated ? Date.parse(info.brief_updated) : (existing ? existing.briefUpdated : 0),
@@ -287,6 +288,7 @@ function normalizeSessionInfo(info, existing, visible) {
 }
 
 export async function loadSessions() {
+  import('./for-you.js').then((m) => m.loadForYou()).catch(() => {});
   const request = ++nextRosterRequest;
   try {
     // WITH the owners: an owner's conversation is a session you open, stream
@@ -1097,9 +1099,17 @@ export async function resolveSecretAction(sessionId, reqId, body) {
   }
 }
 
+// withoutQuestion clears an answered question from the roster's marks at once,
+// instead of leaving "Needs your answer" until the next poll.
+function withoutQuestion(sessionId, askId) {
+  const ids = store.get().sessions[sessionId]?.questionIds;
+  if (!ids?.includes(askId)) return {};
+  return { questionIds: ids.filter((id) => id !== askId) };
+}
+
 export async function resolveAskUser(sessionId, askId, answers) {
   await api('POST', `/api/sessions/${sessionId}/ask`, { id: askId, answers });
-  updateSession(sessionId, { pendingAsk: null });
+  updateSession(sessionId, { pendingAsk: null, ...withoutQuestion(sessionId, askId) });
 }
 
 // dismissAskUser discards an open asynchronous question without answering it.
@@ -1113,6 +1123,7 @@ export async function dismissAskUser(sessionId, askId) {
   }
   const ask = store.get().sessions[sessionId]?.pendingAsk;
   if (ask && ask.id === askId) updateSession(sessionId, { pendingAsk: null });
+  updateSession(sessionId, withoutQuestion(sessionId, askId));
 }
 
 // closeCount counts the closes of each session, so a resume that was in flight

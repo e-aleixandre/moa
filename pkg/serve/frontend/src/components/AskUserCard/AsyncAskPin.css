@@ -1,0 +1,33 @@
+/* AsyncAskPin — the pinned line of an open asynchronous question. It borrows
+   the Tasks pin (.tk-pin*, components/Tasks/Tasks.css) and only adds the
+   amber "waiting on you" ink and the card folded inside it. */
+.aq-pin-ico { flex: none; display: inline-flex; color: var(--zl-yellow); }
+.aq-pin .tk-pin-bar { cursor: pointer; }
+.aq-pin:not(.is-open) { box-shadow: var(--zl-rim-2), inset 2px 0 0 color-mix(in srgb, var(--zl-yellow) 70%, transparent); }
+.aq-pin-tap {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--zl-yellow) 12%, transparent);
+  color: var(--zl-yellow); font-size: var(--zl-fs-meta); white-space: nowrap;
+}
+.aq-pin-answer { color: var(--zl-yellow); }
+
+.aq-pin.is-open { padding: 6px 10px 12px; }
+.aq-pin-head { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 0 4px 2px; }
+.aq-pin-spring { flex: 1 1 auto; }
+.aq-pin-later {
+  display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px;
+  border: 0; border-radius: var(--zl-r-sm); background: transparent;
+  color: var(--zl-t3); font-family: inherit; font-size: var(--zl-fs-meta); cursor: pointer;
+}
+.aq-pin-later:hover { background: var(--zl-hi); color: var(--zl-t1); }
+.aq-pin.is-phone .aq-pin-later { height: 36px; }
+/* The card is capped so the transcript above keeps most of the screen; a long
+   batch scrolls inside the pin. */
+.aq-pin-body { max-height: min(56vh, 520px); overflow: auto; overscroll-behavior: contain; }
+
+/* The card loses its own frame inside the pin: the pin already is one. */
+.ask-user-prompt.is-compact { max-width: none; }
+.ask-user-prompt.is-compact .ask { max-width: none; padding: 0; background: none; box-shadow: none; }
+.ask-user-prompt.is-compact .ask .ask-head { display: none; }
+.ask-user-prompt.is-compact .ask .ask-q { margin-top: 0; }

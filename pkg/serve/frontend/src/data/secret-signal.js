@@ -26,6 +26,9 @@ const raised = new Map(); // session id -> { key, toast } of the toast on screen
 // looking at that conversation" (rendered, history landed, page visible), less
 // the phone drawer, which presence does not know covers the conversation.
 function cardShown(state, id) {
+  // For you lists every password request with its Enter: the toast would
+  // only cover the row that already says it.
+  if (state.view === 'foryou') return true;
   return isPresent(state, id) && !(state.isMobile && state.drawerOpen);
 }
 

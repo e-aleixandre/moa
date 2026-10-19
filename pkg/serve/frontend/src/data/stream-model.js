@@ -448,7 +448,7 @@ export function projectStream(session) {
       // completed row after resolution, but do not repeat the question while
       // the card is asking it.
       const liveAskShownAsCard = msg.tool_name?.toLowerCase() === 'ask_user'
-        && session.pendingAsk
+        && session.pendingAsk && !session.pendingAsk.async
         && ((msg.status === 'running' || msg.status === 'generating')
           || (msg.openQuestionId && msg.openQuestionId === session.pendingAsk.id));
       if (!file && !sessionMessage && !liveAskShownAsCard) {

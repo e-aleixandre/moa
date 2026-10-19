@@ -147,3 +147,7 @@
     opacity: 0;
   }
 }
+
+/* For you: the amber count of what waits on you, beside New. */
+.zl-chrome .zl-cap-foryou { gap: 6px; padding: 0 12px; color: var(--zl-yellow); }
+.zl-cap-foryou-n { font-size: var(--zl-fs-body); font-weight: 600; }

@@ -1,4 +1,4 @@
-import { projectKey, projectLabel, shortPath } from "./format.js";
+import { projectKey, projectLabel, shortPath, waitsForYou } from "./format.js";
 
 export const PROJECT_SAVED_PREVIEW_LIMIT = 5;
 
@@ -68,7 +68,7 @@ export function landingOrder(sessions = {}, owners = []) {
 
 const updated = (session) => session.updated || 0;
 const isSaved = (session) => session.state === "saved" || session.saved;
-const attention = (session) => session.state === "permission" ? "permission" : session.state === "error" ? "error" : null;
+const attention = (session) => waitsForYou(session) ? "permission" : session.state === "error" ? "error" : null;
 
 function sessionOrder(a, b) {
   // Unseen is a needs-you state in the list (attentionKind), so it rises to
@@ -257,7 +257,7 @@ export function attentionKind(session) {
      lists — this is the same rule stated where the split is made, so a caller
      that hands over a raw roster cannot promote one. */
   if ((session.kind || "") === "owner") return null;
-  if (session.state === 'permission' || session.pendingPerm || session.pendingAsk || session.pendingSecrets?.length) return 'permission';
+  if (waitsForYou(session)) return 'permission';
   if (session.state === 'error') return 'error';
   if (session.unseen && !isSaved(session)) return 'unseen';
   return null;

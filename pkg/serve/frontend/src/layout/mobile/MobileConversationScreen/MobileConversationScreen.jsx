@@ -28,7 +28,10 @@ import { panelAccessibleName, sessionPanelBack, sessionPanelView, closeSessionPa
 import { tasksSlice } from "../../../data/tasks.js";
 import { attentionCount } from "../../../data/schedule-model.js";
 import { closeTasksView, openTasksView } from "../../../data/tasks-view.js";
+import { closeForYouView, forYouCount, openForYouView } from "../../../data/for-you.js";
+import { MobileForYouView } from "../../../components/ForYou/ForYou.jsx";
 import { PinnedTaskLine } from "../../../components/Tasks/PinnedTaskLine.jsx";
+import { AsyncAskPin } from "../../../components/AskUserCard/AsyncAskPin.jsx";
 import { MobileTasksView } from "../../../components/Tasks/MobileTasksView.jsx";
 import { cacheAlertLabel } from "../../../data/cache-usage.js";
 import { consumeProviderSettings, subscribeProviderSettings } from "../../../data/providers.js";
@@ -329,6 +332,7 @@ function MobileConversationBody({ forceMobile = false }) {
         <MobileComposer key={session.id} session={session} usage={usage} onSecret={setSecretAliases}>
           {/* What this session asked of you, pinned where you would answer
               it, in the gap above the live bar. */}
+          <AsyncAskPin phone session={session} />
           <PinnedTaskLine
             phone
             sessionId={session.id}
@@ -500,6 +504,11 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   // Tasks is the same handoff as the inbox: the drawer closes, then the Tasks
   // screen is pushed.
   const tasksPendingRef = useRef(false);
+  const forYouPendingRef = useRef(false);
+  const onForYouFromDrawer = () => {
+    forYouPendingRef.current = true;
+    closeDrawer();
+  };
   const onTasksFromDrawer = () => {
     tasksPendingRef.current = true;
     closeDrawer();
@@ -524,6 +533,11 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
       openInbox();
       return;
     }
+    if (forYouPendingRef.current) {
+      forYouPendingRef.current = false;
+      openForYouView();
+      return;
+    }
     if (tasksPendingRef.current) {
       tasksPendingRef.current = false;
       openTasksView();
@@ -542,6 +556,8 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   const inboxCount = inboxPendingCount(chrome.inbox);
   const tasksCount = useStore((s) => attentionCount(tasksSlice(s)));
   const tasksOpen = useStore((s) => s.view === "tasks");
+  const forYouOpen = useStore((s) => s.view === "foryou");
+  const forYouN = useStore(forYouCount);
   // The session the header is about, for the Owner chip. Read here rather than
   // taken from `chrome`: the chrome snapshot is deliberately the ROSTER, and
   // adding a whole session to it would rebuild the header on every token.
@@ -549,7 +565,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
 
   return (
     <>
-      {chrome.showChip && !chrome.inboxOpen && !tasksOpen && (
+      {chrome.showChip && !chrome.inboxOpen && !tasksOpen && !forYouOpen && (
         <MobileChrome
           title={chrome.title}
           attention={chrome.attention}
@@ -561,6 +577,8 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           onNew={() => openPalette("create")}
           inboxCount={inboxCount}
           owner={chrome.titleOwner}
+          forYouCount={forYouN}
+          onForYou={openForYouView}
         />
       )}
       {chrome.inboxOpen && (
@@ -578,6 +596,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         />
       )}
       {tasksOpen && !chrome.inboxOpen && <MobileTasksView onBack={closeTasksView} />}
+      {forYouOpen && !chrome.inboxOpen && <MobileForYouView onBack={closeForYouView} />}
       <SessionDrawer
         open={chrome.drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -597,6 +616,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         // would hide the failure with it.
         inboxVisible={chrome.inbox.length > 0 || chrome.inboxHealth?.status === "error"}
         onTasks={onTasksFromDrawer}
+        onForYou={onForYouFromDrawer}
         tasksCount={tasksCount}
         version={version}
         onCloseSession={(id) => { closeSession(id).catch(() => {}); }}

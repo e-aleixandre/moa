@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState, useEffect, useLayoutEffect } from "preact/hooks";
+import { AsyncAskPin } from "../../components/AskUserCard/AsyncAskPin.jsx";
 import { createPortal } from "preact/compat";
 import { MessageSquarePlus } from "lucide-preact";
 import { Pane } from "../Pane/Pane.jsx";
@@ -344,7 +345,9 @@ export function ConnectedPane({ node, tileIndex, onSecret }) {
       {session.untrustedMcp && <McpBanner key={session.id} sessionId={session.id} />}
       {session.pendingPerm && <PermissionPrompt key={session.id} session={session} />}
       {session.pendingSecrets?.length > 0 && <SecretActionPrompt key={session.id} session={session} />}
-      {session.pendingAsk && <AskUserPrompt key={session.id} session={session} />}
+      {session.pendingAsk && (session.pendingAsk.async
+        ? <AsyncAskPin key={session.id} session={session} />
+        : <AskUserPrompt key={session.id} session={session} />)}
     </>
   ) : null;
 

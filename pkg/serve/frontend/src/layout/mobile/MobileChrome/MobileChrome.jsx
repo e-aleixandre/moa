@@ -1,4 +1,5 @@
 import { useRef } from "preact/hooks";
+import { Inbox } from "lucide-preact";
 import {
   mobileSessionsDoorLabel,
   mobileTitleChipPresentation,
@@ -56,6 +57,10 @@ export function MobileChrome({
   // chip: it belongs with the header (it is about this conversation) but not
   // INSIDE the capsule row, which already does three jobs (CRITERIO §3).
   below,
+  // forYou — how much is waiting on you across every session. The capsule
+  // only exists while something waits: one tap to For you from anywhere.
+  forYouCount = 0,
+  onForYou,
 }) {
   const presentation = mobileTitleChipPresentation(attention);
   const arrivalRef = useRef(0);
@@ -86,6 +91,17 @@ export function MobileChrome({
         alert={alert}
         owner={owner}
       />
+      {forYouCount > 0 && onForYou && (
+        <button
+          type="button"
+          class="zl-cap zl-cap-right zl-cap-foryou"
+          onClick={onForYou}
+          aria-label={`For you, ${forYouCount} waiting`}
+        >
+          <Inbox size={18} aria-hidden="true" />
+          <span class="zl-cap-foryou-n zl-data">{forYouCount > 99 ? "99+" : forYouCount}</span>
+        </button>
+      )}
       <button
         type="button"
         class="zl-cap zl-cap-right"

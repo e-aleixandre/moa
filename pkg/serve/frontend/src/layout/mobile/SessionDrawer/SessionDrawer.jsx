@@ -52,6 +52,7 @@ export function SessionDrawer({
   inboxCount = 0,
   inboxVisible = false,
   onTasks,
+  onForYou,
   tasksCount = 0,
   version = null,
   onCloseSession,
@@ -234,6 +235,7 @@ export function SessionDrawer({
             inboxVisible={inboxVisible}
             onInbox={onInbox}
             onTasks={onTasks}
+            onForYou={onForYou}
             tasksCount={tasksCount}
           />
         )}
