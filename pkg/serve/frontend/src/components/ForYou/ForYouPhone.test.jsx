@@ -43,7 +43,7 @@ test("on the phone the pin says Needs your tap in words", () => {
   expect(text(bar)).toContain("Needs your tap");
 });
 
-test("on the phone the pin never cuts the question to one line: it wraps, with its needs below", async () => {
+test("on the phone the pin never cuts the question to one line: it takes two lines, clamped on a span (WebKit ignores the clamp on a button), with its needs in one row below", async () => {
   const { readFileSync } = await import("node:fs");
   const session = { id: "s1", pendingAsk: { id: "q1", async: true, requires_tap: true, questions: tapItem.questions } };
   const nodes = descendants(AsyncAskPin({ session, phone: true }));
@@ -52,8 +52,13 @@ test("on the phone the pin never cuts the question to one line: it wraps, with i
   const inMain = descendants(main);
   expect(inMain.some((n) => n.props?.class === "tk-pin-t")).toBe(true);
   expect(inMain.some((n) => n.props?.class === "aq-pin-meta")).toBe(true);
+  // The text lives in a span inside the button, and the clamp is on the span.
+  const button = inMain.find((n) => n.props?.class === "tk-pin-t");
+  expect(descendants(button.props.children).some((n) => n.props?.class === "aq-pin-q")).toBe(true);
   const css = readFileSync(new URL("../AskUserCard/AsyncAskPin.css", import.meta.url), "utf8");
-  expect(css).toMatch(/\.aq-pin\.is-phone \.tk-pin-t \{[^}]*white-space: normal[^}]*-webkit-line-clamp: 3/);
+  expect(css).toMatch(/\.aq-pin-q \{[^}]*-webkit-line-clamp: 2/);
+  expect(css).not.toMatch(/\.tk-pin-t \{[^}]*-webkit-line-clamp/);
+  expect(css).toMatch(/\.aq-pin-meta \{[^}]*flex-wrap: nowrap/);
 });
 
 test("the meta has no separator elements of its own: each item carries its dot, clipped at a line start", async () => {

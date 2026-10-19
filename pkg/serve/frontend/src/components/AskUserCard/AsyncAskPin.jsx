@@ -54,11 +54,13 @@ export function AsyncAskPin({ session, phone = false }) {
           <div class="tk-pin-bar" onClick={() => setOpen(true)}>
             <span class="aq-pin-ico"><MessageCircleQuestionMark size={15} aria-hidden="true" /></span>
             {phone ? (
-              // The phone has one column: the question wraps (the sheet shows
-              // it whole) and what it needs goes on the line below it.
+              // The phone has one column: the question takes two lines at
+              // most (the sheet shows it whole) and what it needs goes in one
+              // row below it. The clamp is on the span: WebKit ignores
+              // -webkit-line-clamp on a <button>.
               <span class="aq-pin-main">
                 <button type="button" class="tk-pin-t" onClick={(e) => { e.stopPropagation(); setOpen(true); }}>
-                  {first.question}
+                  <span class="aq-pin-q">{first.question}</span>
                 </button>
                 {(more > 0 || tap || call?.call_state) && (
                   <span class="aq-pin-meta">
