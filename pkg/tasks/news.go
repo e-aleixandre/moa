@@ -134,8 +134,13 @@ func (r *Repo) PublishNews(ctx context.Context, in NewsInput) (NewsPublished, er
 			now-NewsKeep.Milliseconds()); err != nil {
 			return false, err
 		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM news_origins WHERE news_id NOT IN (SELECT id FROM news)`); err != nil {
+			return false, err
+		}
 		if in.Origin != "" {
-			n, found, err := queryOneNews(ctx, tx, "session_id = ? AND origin = ?", in.SessionID, in.Origin)
+			// Any invocation that ever wrote an item, not only its latest:
+			// a retry of an older one must not undo a later update.
+			n, found, err := queryOneNews(ctx, tx, "id = (SELECT news_id FROM news_origins WHERE session_id = ? AND origin = ?)", in.SessionID, in.Origin)
 			if err != nil {
 				return false, err
 			}
@@ -157,6 +162,9 @@ func (r *Repo) PublishNews(ctx context.Context, in NewsInput) (NewsPublished, er
 				}
 				n.Kind, n.Title, n.Body, n.UpdatedAt, n.ReadAt = in.Kind, in.Title, in.Body, now, 0
 				n.Revision++
+				if err := recordNewsOrigin(ctx, tx, in, n.ID); err != nil {
+					return false, err
+				}
 				out = NewsPublished{News: n, Outcome: NewsUpdated}
 				return true, nil
 			}
@@ -167,6 +175,9 @@ func (r *Repo) PublishNews(ctx context.Context, in NewsInput) (NewsPublished, er
 			VALUES (?,?,?,?,?,?,?,1,?,?)`, n.ID, n.SessionID, n.Key, in.Origin, n.Kind, n.Title, n.Body, now, now); err != nil {
 			return false, err
 		}
+		if err := recordNewsOrigin(ctx, tx, in, n.ID); err != nil {
+			return false, err
+		}
 		out = NewsPublished{News: n, Outcome: NewsCreated}
 		return true, nil
 	})
@@ -174,6 +185,16 @@ func (r *Repo) PublishNews(ctx context.Context, in NewsInput) (NewsPublished, er
 		return NewsPublished{}, err
 	}
 	return out, nil
+}
+
+// recordNewsOrigin remembers that in's invocation wrote item id.
+func recordNewsOrigin(ctx context.Context, tx *sql.Tx, in NewsInput, id string) error {
+	if in.Origin == "" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO news_origins(session_id, origin, news_id) VALUES (?,?,?)`,
+		in.SessionID, in.Origin, id)
+	return err
 }
 
 // ListNews returns the unread items and those read less than NewsKeep ago,

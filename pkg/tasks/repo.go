@@ -502,6 +502,18 @@ ALTER TABLE questions ADD COLUMN call_state TEXT NOT NULL DEFAULT ''
   CHECK(call_state IN ('','pending','calling','missed','interrupted','cancelled','done'));
 ALTER TABLE questions ADD COLUMN call_attempt TEXT NOT NULL DEFAULT '';
 CREATE INDEX questions_call_due ON questions(call_due_at) WHERE call_state = 'pending';`,
+	// 5: every invocation that published or updated a News item, so a retry
+	// of an older one is told duplicate even after a keyed update replaced
+	// the item's origin (news.go). Its own table only, as in 3.
+	`CREATE TABLE news_origins (
+  session_id TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  news_id TEXT NOT NULL,
+  PRIMARY KEY(session_id, origin)
+);
+CREATE INDEX news_origins_news ON news_origins(news_id);
+INSERT OR IGNORE INTO news_origins(session_id, origin, news_id)
+  SELECT session_id, origin, id FROM news WHERE origin <> '';`,
 }
 
 // newsCompatLevel is the compat migration that created the news table.
