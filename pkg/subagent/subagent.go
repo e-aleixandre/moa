@@ -65,6 +65,8 @@ var excludedTools = map[string]bool{
 	// read_session is authorized by the human mentions of the parent's own
 	// conversation; a child that inherited the closure would inherit them.
 	"read_session": true,
+	// News is the parent's report to the user; a child reports to its parent.
+	"notify": true,
 }
 
 type readOnlyFilesKey struct{}

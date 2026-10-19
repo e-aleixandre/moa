@@ -2,7 +2,7 @@ package serve
 
 import (
 	"context"
-	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sort"
 	"time"
@@ -54,8 +54,8 @@ func (m *Manager) openQuestionIDsBySession() map[string][]string {
 	return out
 }
 
-// ForYou lists everything waiting on the user across every session, oldest
-// first. Blocking requests come from the loaded sessions' live state; open
+// ForYou lists everything waiting on the user across every session: what
+// stopped a session first, then the rest, each group oldest first. Blocking requests come from the loaded sessions' live state; open
 // asynchronous questions come from the question store, so they are listed
 // whether or not their session is loaded and survive a restart.
 func (m *Manager) ForYou(ctx context.Context) []ForYouItem {
@@ -112,17 +112,25 @@ func (m *Manager) ForYou(ctx context.Context) []ForYouItem {
 			}
 		}
 	}
-	sort.SliceStable(items, func(i, j int) bool { return items[i].Since.Before(items[j].Since) })
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Blocking != items[j].Blocking {
+			return items[i].Blocking
+		}
+		return items[i].Since.Before(items[j].Since)
+	})
 	return items
 }
 
-// handleForYou serves GET /api/for-you: read-only, additive.
+// handleForYou serves GET /api/for-you: read-only, additive. News that cannot
+// be read leaves the field out, so a client keeps what it showed instead of
+// emptying it, and the waiting items are still served.
 func handleForYou(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body := map[string]any{"items": m.ForYou(r.Context()), "news": m.newsStore().List(m.clock.Now())}
-		if _, err := json.Marshal(body); err != nil {
-			http.Error(w, "encode for-you: "+err.Error(), http.StatusInternalServerError)
-			return
+		body := map[string]any{"items": m.ForYou(r.Context())}
+		if news, err := m.listNews(r.Context()); err != nil {
+			slog.Warn("for you: reading the news failed", "error", err)
+		} else {
+			body["news"] = news
 		}
 		writeJSON(w, http.StatusOK, body)
 	}

@@ -471,7 +471,27 @@ DROP TABLE task_notifications;
 ALTER TABLE task_notifications_new RENAME TO task_notifications;
 CREATE INDEX task_notifications_task ON task_notifications(task_id, created_at);
 CREATE INDEX task_notifications_open ON task_notifications(state, created_at);`,
+	// 3: News, what a session deliberately told the user (news.go). Its own
+	// table and indexes only: an older binary never reads it, and deleting a
+	// task or a session there leaves nothing that points at it.
+	`CREATE TABLE news (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL CHECK(session_id <> ''),
+  key TEXT NOT NULL DEFAULT '',
+  origin TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL CHECK(kind IN ('done','deployed','problem','info')),
+  title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+  body TEXT NOT NULL DEFAULT '',
+  revision INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, read_at INTEGER
+);
+CREATE UNIQUE INDEX news_key ON news(session_id, key) WHERE key <> '';
+CREATE INDEX news_origin ON news(session_id, origin) WHERE origin <> '';
+CREATE INDEX news_read ON news(read_at);`,
 }
+
+// newsCompatLevel is the compat migration that created the news table.
+const newsCompatLevel = 3
 
 // migrateWith brings the schema to the latest version: base migrations count
 // in user_version, compat ones in tasks_compat. A database from a newer moa

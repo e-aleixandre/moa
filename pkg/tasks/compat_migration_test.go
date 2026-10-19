@@ -138,7 +138,7 @@ func TestCompatMigrationKeepsUserVersionAndData(t *testing.T) {
 	if v := pragmaInt(t, path, "PRAGMA user_version"); v != 4 {
 		t.Fatalf("user_version = %d, want 4", v)
 	}
-	if v := compatVersion(t, path); v != 2 {
+	if v := compatVersion(t, path); v != len(compatMigrations) {
 		t.Fatalf("compat version = %d, want 2", v)
 	}
 	if after := snapshot(t, path); after != before {
@@ -189,7 +189,7 @@ func TestCompatMigrationOnNewDatabase(t *testing.T) {
 	if v := pragmaInt(t, path, "PRAGMA user_version"); v != 4 {
 		t.Fatalf("user_version = %d", v)
 	}
-	if v := compatVersion(t, path); v != 2 {
+	if v := compatVersion(t, path); v != len(compatMigrations) {
 		t.Fatalf("compat = %d", v)
 	}
 	if _, err := os.Stat(path + ".pre-compat1.bak"); !os.IsNotExist(err) {
@@ -232,7 +232,7 @@ func TestCompatMigrationIdempotentAndConcurrent(t *testing.T) {
 	if again := snapshot(t, path); again != once {
 		t.Fatalf("second open changed the database")
 	}
-	if compatVersion(t, path) != 2 {
+	if compatVersion(t, path) != len(compatMigrations) {
 		t.Fatal("compat version moved")
 	}
 	b2, _ := os.ReadFile(bak)

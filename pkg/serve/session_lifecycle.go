@@ -587,7 +587,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		bs.ToolReg.Unregister("ask_user")
 		core.RegisterOrLog(bs.ToolReg, m.newAsyncAskTool(id, func() *ManagedSession { return sess }))
 	}
-	core.RegisterOrLog(bs.ToolReg, m.newNotifyTool(id))
+	if notifyAllowed(opts != nil && opts.ownerSession, bs.HasProjectOwner) {
+		core.RegisterOrLog(bs.ToolReg, m.newNotifyTool(id))
+	}
 	core.RegisterOrLog(bs.ToolReg, newSendFileTool(tool.ToolConfig{WorkspaceRoot: bs.CWD, PathPolicy: bs.PathPolicy}, id, artifactStore))
 
 	bs.BindTranscript(func(fn func(*core.AgentMessage)) error {

@@ -24,6 +24,7 @@ const (
 	KindEvent       Kind = "event"        // a wake-on-event source delivered something
 	KindCall        Kind = "call"         // an incoming voice call invitation (VoIP destinations only)
 	KindCallRequest Kind = "call_request" // an owner asks to talk (request_call); an ordinary urgent notification, never VoIP
+	KindProblem     Kind = "problem"      // a session published a problem in For you › News
 )
 
 // Level is how hard a notification should interrupt.
@@ -266,6 +267,13 @@ func (p *Policy) decide(s Signal) decision {
 		}
 		setTitle("moa failed")
 		n.Level, n.Tag = LevelActive, "run:"+s.SessionID
+		return decision{send: true, n: n}
+	case KindProblem:
+		// News the session chose to flag as a problem: the user should know
+		// even if they are looking at it elsewhere, since News is read in For
+		// you, not in the conversation. One per session, the next replacing it.
+		setTitle("moa reported a problem")
+		n.Level, n.Tag = LevelActive, "news:"+s.SessionID
 		return decision{send: true, n: n}
 	case KindDigest:
 		if s.Watched || p.summaries == SummariesOff {

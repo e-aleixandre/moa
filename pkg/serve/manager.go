@@ -907,10 +907,7 @@ type Manager struct {
 	// tasks is the shared task database (also written by the CLI). taskHub fans
 	// its changes out to /api/tasks/ws; projectKeys memoizes CodebaseKey, which
 	// runs git.
-	tasks *tasks.Repo
-	// news is For you › News (news.go), created on first use.
-	news        *newsStore
-	newsOnce    sync.Once
+	tasks       *tasks.Repo
 	taskHub     *tasksHub
 	projectKeys sync.Map
 	tasksCancel context.CancelFunc

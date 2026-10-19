@@ -2,25 +2,23 @@ package serve
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/push"
+	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
-// NewsItem is something a session deliberately told the user (For you ›
-// News): done, deployed, a problem. It is written on purpose with the notify
-// tool, never derived from every message, and its read state lives on the
-// server so a second device does not show it again.
+// NewsItem is the API form of a tasks.News: something a session deliberately
+// told the user (For you › News). It is written on purpose with the notify
+// tool, never derived from every message; its read state lives in the task
+// database so a second device does not show it again.
 type NewsItem struct {
 	ID        string     `json:"id"`
 	SessionID string     `json:"session_id"`
@@ -28,125 +26,71 @@ type NewsItem struct {
 	Kind      string     `json:"kind"` // done | deployed | problem | info
 	Title     string     `json:"title"`
 	Body      string     `json:"body,omitempty"`
+	Revision  int64      `json:"revision"`
 	Created   time.Time  `json:"created"`
 	Updated   time.Time  `json:"updated"`
 	ReadAt    *time.Time `json:"read_at,omitempty"`
 }
 
-// newsKeep is how long a read item stays listed under Earlier.
-const newsKeep = 7 * 24 * time.Hour
-
-// newsStore keeps the news in one JSON file beside the session store.
-// PROTOTYPE: a file rather than a tasks.sqlite table, so the schema version
-// does not move; where it lives for real is a persistence decision for review.
-type newsStore struct {
-	mu     sync.Mutex
-	path   string
-	items  []NewsItem
-	loaded bool
+func newsItem(n tasks.News) NewsItem {
+	it := NewsItem{
+		ID: n.ID, SessionID: n.SessionID, Key: n.Key, Kind: n.Kind, Title: n.Title, Body: n.Body,
+		Revision: n.Revision, Created: time.UnixMilli(n.CreatedAt).UTC(), Updated: time.UnixMilli(n.UpdatedAt).UTC(),
+	}
+	if n.ReadAt != 0 {
+		t := time.UnixMilli(n.ReadAt).UTC()
+		it.ReadAt = &t
+	}
+	return it
 }
 
-func (s *newsStore) loadLocked() {
-	if s.loaded {
-		return
+// listNews is the current news, unread and read within tasks.NewsKeep.
+func (m *Manager) listNews(ctx context.Context) ([]NewsItem, error) {
+	out := []NewsItem{}
+	if m.tasks == nil {
+		return out, nil
 	}
-	s.loaded = true
-	if b, err := os.ReadFile(s.path); err == nil {
-		_ = json.Unmarshal(b, &s.items)
-	}
-}
-
-func (s *newsStore) saveLocked() error {
-	b, err := json.MarshalIndent(s.items, "", "  ")
+	list, err := m.tasks.ListNews(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return err
+	for _, n := range list {
+		out = append(out, newsItem(n))
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return out, nil
 }
 
-// Publish adds an item or, with a key the session already used, updates it
-// and makes it unread again ("in preflight" then "deployed" is one item).
-func (s *newsStore) Publish(it NewsItem, now time.Time) (NewsItem, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.loadLocked()
-	if it.Key != "" {
-		for i := range s.items {
-			old := &s.items[i]
-			if old.SessionID == it.SessionID && old.Key == it.Key {
-				old.Kind, old.Title, old.Body, old.Updated, old.ReadAt = it.Kind, it.Title, it.Body, now, nil
-				return *old, true, s.saveLocked()
-			}
+// publishNews commits an item and only then announces a problem: a push
+// for something the database does not hold would point at nothing. A retry
+// of the same invocation does not announce it again.
+func (m *Manager) publishNews(ctx context.Context, in tasks.NewsInput) (tasks.NewsPublished, error) {
+	if m.tasks == nil {
+		return tasks.NewsPublished{}, fmt.Errorf("%w: no task database", tasks.ErrUnavailable)
+	}
+	p, err := m.tasks.PublishNews(ctx, in)
+	if err != nil {
+		return tasks.NewsPublished{}, err
+	}
+	if p.Kind == tasks.NewsProblem && p.Outcome != tasks.NewsDuplicate && m.pushPolicy != nil {
+		// Per the push contract the lock screen shows the kind and the
+		// session title, never the item's own title or body.
+		s := push.Signal{Kind: push.KindProblem, SessionID: p.SessionID}
+		if sess, ok := m.Get(p.SessionID); ok {
+			s.Title = sess.title()
 		}
+		m.pushPolicy.Handle(s)
 	}
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	it.ID = "news_" + hex.EncodeToString(b[:])
-	it.Created, it.Updated = now, now
-	s.items = append(s.items, it)
-	return it, false, s.saveLocked()
+	return p, nil
 }
 
-// List returns the unread items and the read ones younger than newsKeep,
-// newest first; older read items are dropped from the file.
-func (s *newsStore) List(now time.Time) []NewsItem {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.loadLocked()
-	kept := make([]NewsItem, 0, len(s.items))
-	for _, it := range s.items {
-		if it.ReadAt != nil && now.Sub(*it.ReadAt) > newsKeep {
-			continue
-		}
-		kept = append(kept, it)
-	}
-	if len(kept) != len(s.items) {
-		s.items = kept
-		_ = s.saveLocked()
-	}
-	out := append([]NewsItem(nil), kept...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Updated.After(out[j].Updated) })
-	return out
+// notifyAllowed is who publishes News: an owner's own conversation and a
+// session in a codebase without an owner. A session working under an owner
+// reports to it instead, and its owner decides what reaches the user.
+func notifyAllowed(ownerSession, hasProjectOwner bool) bool {
+	return ownerSession || !hasProjectOwner
 }
 
-// MarkRead archives items (read is archived); no ids marks every item.
-func (s *newsStore) MarkRead(ids []string, now time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.loadLocked()
-	want := map[string]bool{}
-	for _, id := range ids {
-		want[id] = true
-	}
-	changed := false
-	for i := range s.items {
-		if (len(ids) == 0 || want[s.items[i].ID]) && s.items[i].ReadAt == nil {
-			t := now
-			s.items[i].ReadAt = &t
-			changed = true
-		}
-	}
-	if !changed {
-		return nil
-	}
-	return s.saveLocked()
-}
-
-func (m *Manager) newsStore() *newsStore {
-	m.newsOnce.Do(func() {
-		m.news = &newsStore{path: filepath.Join(filepath.Dir(m.sessionBaseDir), "news.json")}
-	})
-	return m.news
-}
-
-const notifyDescription = `Tell the user something worth keeping, outside this conversation: it lands in their For you › News, unread until they read it, and it survives restarts. Use it on purpose, for what a project lead would report: something finished that matters, a deploy, a problem, or a short digest of several changes. Not for every step, and never for a question (use ask_user). Title: the fact in one line ("Webhook retries fix deployed to production"). Body: 2-4 short lines of what happened and why it matters. Pass a key to update the same item later instead of adding another (e.g. "deploy/webhook-retries": "in preflight", then "deployed"). When the user later asks about something you already notified, say so and point to it ("I left it in For you at 10:40: ...") instead of reporting it as new. Action "list" shows what this session already notified and whether the user read it.`
+const notifyDescription = `Tell the user something worth keeping, outside this conversation: it lands in their For you › News, unread until they read it, and it survives restarts. Use it on purpose, for what a project lead would report: something finished that matters, a deploy, a problem, or a short digest of several changes. Not for every step, and never for a question (use ask_user). Title: the fact in one line ("Webhook retries fix deployed to production"). Body: 2-4 short lines of what happened and why it matters. Pass a key to update the same item later instead of adding another (e.g. "deploy/webhook-retries": "in preflight", then "deployed"). Kind "problem" also sends a notification to the user's phone; use it only for something they need to act on. When the user later asks about something you already notified, say so and point to it ("I left it in For you at 10:40: ...") instead of reporting it as new. Action "list" shows what this session already notified and whether the user read it.`
 
 func (m *Manager) newNotifyTool(sessionID string) core.Tool {
 	return core.Tool{
@@ -164,12 +108,14 @@ func (m *Manager) newNotifyTool(sessionID string) core.Tool {
 			}
 		}`),
 		Effect: core.EffectReadOnly,
-		Execute: func(_ context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
-			store := m.newsStore()
-			now := m.clock.Now()
+		Execute: func(ctx context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
 			if action, _ := params["action"].(string); action == "list" {
+				list, err := m.listNews(ctx)
+				if err != nil {
+					return core.ErrorResult("could not read the news: " + err.Error()), nil
+				}
 				var b strings.Builder
-				for _, it := range store.List(now) {
+				for _, it := range list {
 					if it.SessionID != sessionID {
 						continue
 					}
@@ -189,7 +135,7 @@ func (m *Manager) newNotifyTool(sessionID string) core.Tool {
 			if title == "" {
 				return core.ErrorResult("title is required"), nil
 			}
-			if len(title) > 160 {
+			if len(title) > 160 || strings.ContainsAny(title, "\r\n") {
 				return core.ErrorResult("title too long: one line, max 120 characters"), nil
 			}
 			body, _ := params["body"].(string)
@@ -198,39 +144,59 @@ func (m *Manager) newNotifyTool(sessionID string) core.Tool {
 			}
 			kind, _ := params["kind"].(string)
 			switch kind {
-			case "done", "deployed", "problem", "info":
+			case tasks.NewsDone, tasks.NewsDeployed, tasks.NewsProblem, tasks.NewsInfo:
 			default:
-				kind = "info"
+				kind = tasks.NewsInfo
 			}
 			key, _ := params["key"].(string)
-			it, updated, err := store.Publish(NewsItem{SessionID: sessionID, Key: key, Kind: kind, Title: title, Body: strings.TrimSpace(body)}, now)
+			origin := ""
+			if callID := core.ToolCallIDFromContext(ctx); callID != "" {
+				origin = core.ToolCallMessageIDFromContext(ctx) + "/" + callID
+			}
+			p, err := m.publishNews(ctx, tasks.NewsInput{SessionID: sessionID, Key: key, Kind: kind, Title: title, Body: body, Origin: origin})
 			if err != nil {
 				return core.ErrorResult("could not save the news: " + err.Error()), nil
 			}
 			verb := "Published"
-			if updated {
+			if p.Outcome == tasks.NewsUpdated {
 				verb = "Updated"
 			}
-			return core.TextResult(fmt.Sprintf("%s in the user's For you as %s. If they ask about it later, point to it instead of repeating it as new.", verb, it.ID)), nil
+			return core.TextResult(fmt.Sprintf("%s in the user's For you as %s. If they ask about it later, point to it instead of repeating it as new.", verb, p.ID)), nil
 		},
 	}
 }
 
-// handleNewsRead serves POST /api/for-you/news/read {"ids":[...]}; an empty
-// list marks everything read.
+// handleNewsRead serves POST /api/for-you/news/read
+// {"items":[{"id":"news_…","revision":2}]}: each item is marked read at the
+// revision the client showed. "Mark all read" sends every item it showed; an
+// empty list is refused.
 func handleNewsRead(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			IDs []string `json:"ids"`
+			Items []struct {
+				ID       string `json:"id"`
+				Revision int64  `json:"revision"`
+			} `json:"items"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "bad body", http.StatusBadRequest)
+		if !decodeStrict(w, r, &body) {
 			return
 		}
-		if err := m.newsStore().MarkRead(body.IDs, m.clock.Now()); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if m.tasks == nil {
+			writeTaskError(w, tasks.ErrUnavailable)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		acks := make([]tasks.NewsAck, 0, len(body.Items))
+		for _, it := range body.Items {
+			acks = append(acks, tasks.NewsAck{ID: it.ID, Revision: it.Revision})
+		}
+		n, err := m.tasks.ReadNews(r.Context(), acks)
+		if err != nil {
+			if !errors.Is(err, tasks.ErrInvalid) {
+				slog.Warn("news: marking read failed", "error", err)
+			}
+			writeTaskError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int{"marked": n})
 	}
 }

@@ -244,6 +244,10 @@ type Session struct {
 	// correctly even when Gate is nil (yolo mode).
 	Headless bool
 
+	// HasProjectOwner is true when the session's codebase has an owner, as
+	// resolved when the session was built.
+	HasProjectOwner bool
+
 	// agentHolder stores the atomic agent pointer for subagent closures.
 	// Set by BuildSession; updated internally on reconfiguration.
 	agentHolder atomic.Pointer[agent.Agent]
@@ -649,6 +653,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		CWD:               cfg.CWD,
 		UntrustedMCP:      untrustedMCP,
 		Headless:          cfg.Headless,
+		HasProjectOwner:   projectOwner.ID != "",
 	}
 
 	// The session's own transcript, read-only, for every principal session

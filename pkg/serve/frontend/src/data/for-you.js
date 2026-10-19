@@ -21,9 +21,10 @@ export function loadForYou() {
   inflight = api('GET', '/api/for-you')
     .then((res) => {
       const items = Array.isArray(res?.items) ? res.items : [];
-      const news = Array.isArray(res?.news) ? res.news : [];
       setState((s) => {
         const prev = forYouSlice(s);
+        // No news field: the server could not read them; keep what is shown.
+        const news = Array.isArray(res?.news) ? res.news : prev.news;
         if (prev.loaded && JSON.stringify(prev.items) === JSON.stringify(items)
           && JSON.stringify(prev.news) === JSON.stringify(news)) return null;
         return { forYou: { items, news, loaded: true } };
@@ -50,16 +51,22 @@ export function unreadNewsCount(state) {
   return forYouSlice(state).news.filter((n) => !n.read_at).length;
 }
 
-// markNewsRead archives news on the server (read is archived); no ids marks
-// all. The local copy flips at once so the dot goes with the tap.
-export function markNewsRead(ids = []) {
+// markNewsRead archives the given news items on the server (read is
+// archived), each at the revision this client showed: an update published
+// meanwhile stays unread. "Mark all read" passes every unread item shown.
+// The local copy flips at once so the dot goes with the tap.
+export function markNewsRead(shown) {
+  const acks = (shown || []).filter((n) => n?.id).map((n) => ({ id: n.id, revision: n.revision }));
+  if (!acks.length) return Promise.resolve();
   const now = new Date().toISOString();
+  const key = (n) => `${n.id}@${n.revision}`;
+  const want = new Set(acks.map(key));
   setState((s) => {
     const prev = forYouSlice(s);
-    const news = prev.news.map((n) => (!n.read_at && (!ids.length || ids.includes(n.id)) ? { ...n, read_at: now } : n));
+    const news = prev.news.map((n) => (!n.read_at && want.has(key(n)) ? { ...n, read_at: now } : n));
     return { forYou: { ...prev, news } };
   });
-  return api('POST', '/api/for-you/news/read', { ids }).catch(() => {}).finally(() => loadForYou());
+  return api('POST', '/api/for-you/news/read', { items: acks }).catch(() => {}).finally(() => loadForYou());
 }
 
 export function forYouCount(state) {

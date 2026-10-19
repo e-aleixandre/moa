@@ -224,14 +224,14 @@ function News({ phone }) {
   const unread = news.filter((n) => !n.read_at).length;
   if (news.length === 0) return null;
   const toggle = (n) => {
-    if (!n.read_at) markNewsRead([n.id]);
+    if (!n.read_at) markNewsRead([n]);
     setOpenId(openId === n.id ? null : n.id);
   };
   return (
     <section class="fy-sec">
       <div class="fy-sec-head">
         <span class="fy-sec-t">News{unread > 0 && <span class="fy-sec-new"> · {unread} new</span>}</span>
-        {unread > 0 && <button type="button" class="fy-sec-act" onClick={() => markNewsRead([])}>Mark all read</button>}
+        {unread > 0 && <button type="button" class="fy-sec-act" onClick={() => markNewsRead(news.filter((n) => !n.read_at))}>Mark all read</button>}
       </div>
       <ul class="fy-list">
         {fresh.map((n) => <NewsRow key={n.id} n={n} phone={phone} open={openId === n.id} onToggle={() => toggle(n)} />)}

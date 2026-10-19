@@ -65,7 +65,7 @@ func TestQuestionsCompatMigrationFromCompat1KeepsData(t *testing.T) {
 	if _, err := r.Revision(bg); err != nil {
 		t.Fatal(err)
 	}
-	if v := compatVersion(t, path); v != 2 {
+	if v := compatVersion(t, path); v != len(compatMigrations) {
 		t.Fatalf("compat = %d, want 2", v)
 	}
 	if v := pragmaInt(t, path, "PRAGMA user_version"); v != 4 {

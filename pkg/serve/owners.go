@@ -78,8 +78,9 @@ func (m *Manager) ListOwners() ([]OwnerInfo, error) {
 		return nil, err
 	}
 	out := make([]OwnerInfo, 0, len(owners))
+	open := m.openQuestionIDsBySession()
 	for _, own := range owners {
-		out = append(out, m.ownerInfo(own))
+		out = append(out, m.ownerInfoWith(own, open))
 	}
 	return out, nil
 }
@@ -101,6 +102,12 @@ func (m *Manager) GetOwner(id string) (OwnerInfo, error) {
 }
 
 func (m *Manager) ownerInfo(own owner.Owner) OwnerInfo {
+	return m.ownerInfoWith(own, m.openQuestionIDsBySession())
+}
+
+// ownerInfoWith is ownerInfo with the open questions of every session already
+// read, so a list reads them once rather than once per owner.
+func (m *Manager) ownerInfoWith(own owner.Owner, openQuestions map[string][]string) OwnerInfo {
 	// The avatar is always answered, never left for the client to guess: an
 	// owner created before avatars existed has none on disk, and two clients
 	// computing their own default would only agree as long as both implement
@@ -114,7 +121,7 @@ func (m *Manager) ownerInfo(own owner.Owner) OwnerInfo {
 	if own.SessionID == "" {
 		return info
 	}
-	info.OpenQuestionIDs = m.openQuestionIDsBySession()[own.SessionID]
+	info.OpenQuestionIDs = openQuestions[own.SessionID]
 	if sess, ok := m.Get(own.SessionID); ok {
 		info.SessionState = sess.info().State
 		return info
