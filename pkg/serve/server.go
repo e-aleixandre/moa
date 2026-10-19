@@ -791,6 +791,10 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: body.ID, Answers: body.Answers, Responder: responder}); err != nil {
+			if errors.Is(err, errFenceBarred) {
+				writeFenceBarred(w)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -812,7 +816,8 @@ func handleDismissQuestion(mgr *Manager) http.HandlerFunc {
 
 // writeQuestionResult maps the question store's outcomes to the status the
 // contract names: 204 done (or already done the same way), 404 unknown or
-// another session's, 409 closed otherwise, 400 refused.
+// another session's, 409 closed otherwise, 400 refused, 503 retry (the
+// session's last Stop is not saved yet).
 func writeQuestionResult(w http.ResponseWriter, err error) {
 	var conflict *tasks.ErrQuestionConflict
 	switch {
@@ -824,10 +829,19 @@ func writeQuestionResult(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, askuser.ErrRequiresTap), errors.Is(err, tasks.ErrAnswerCount):
 		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, errFenceBarred):
+		writeFenceBarred(w)
 	default:
 		slog.Warn("questions: request failed", "error", err)
 		http.Error(w, "question store error", http.StatusInternalServerError)
 	}
+}
+
+// writeFenceBarred answers a request refused because the session's last Stop is
+// not saved yet: the same request succeeds once it is.
+func writeFenceBarred(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "2")
+	http.Error(w, "The last Stop is not saved yet; retry the answer in a moment.", http.StatusServiceUnavailable)
 }
 
 func handleConfig(mgr *Manager) http.HandlerFunc {

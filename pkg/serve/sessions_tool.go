@@ -530,11 +530,17 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 			if errors.Is(err, tasks.ErrQuestionNotFound) {
 				return core.ErrorResult(fmt.Sprintf("session %s is not loaded and has no question %s", id, askID))
 			}
+			if errors.Is(err, errFenceBarred) {
+				return core.ErrorResult(fmt.Sprintf("cannot answer %s yet: the last Stop of session %s is not saved; try again in a moment", askID, id))
+			}
 			return core.ErrorResult(fmt.Sprintf("cannot answer %s: %v (it may already have been answered)", askID, err))
 		}
 		return core.TextResult(fmt.Sprintf("Answered %s in session %s.", askID, id))
 	}
 	if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: askID, Answers: answers, Responder: ownerResponder(own)}); err != nil {
+		if errors.Is(err, errFenceBarred) {
+			return core.ErrorResult(fmt.Sprintf("cannot answer %s yet: the last Stop of session %s is not saved; try again in a moment", askID, id))
+		}
 		// The user may have answered it in the UI first; the approval manager
 		// forgets a resolved ask, so this is the same error as an unknown one.
 		return core.ErrorResult(fmt.Sprintf("cannot answer %s: %v (it may already have been answered)", askID, err))

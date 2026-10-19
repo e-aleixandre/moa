@@ -143,6 +143,9 @@ func (c *voiceCall) answerQuestion(toolID, askID string, answers []string) voice
 		// check above, so each layer stays observable on its own.
 		return voiceErrorResult(toolID, "this question requires the owner's tap; it cannot be answered by voice")
 	}
+	if errors.Is(err, errFenceBarred) {
+		return voiceErrorResult(toolID, "the session's last Stop is not saved yet; try the answer again in a moment")
+	}
 	if err != nil {
 		return voiceErrorResult(toolID, "the question could not be answered; it may have been answered already")
 	}

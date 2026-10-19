@@ -103,6 +103,11 @@ func (q *questionService) lock(sessionID string) func() {
 func (q *questionService) Answer(ctx context.Context, sessionID, id string, answers []string, responder askuser.Responder) error {
 	unlock := q.lock(sessionID)
 	defer unlock()
+	// An answer accepted after a Stop whose fence is not saved would be covered
+	// by that fence once it is: refuse it until the fence is on disk.
+	if q.barredLocked(ctx, sessionID) {
+		return errFenceBarred
+	}
 	if err := q.checkOrigin(ctx, sessionID, id); err != nil {
 		return err
 	}

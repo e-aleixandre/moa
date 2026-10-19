@@ -26,6 +26,11 @@ import (
 
 const questionFenceDir = "question-fences"
 
+// errFenceBarred is what answering a session whose Stop fence is not saved
+// returns: the answer would otherwise be accepted after the Stop, and the fence
+// that is eventually saved would cover it.
+var errFenceBarred = errors.New("this session's last Stop could not be saved yet")
+
 // fenceJournalEntry is the journal's content. Only the file name names the
 // session; the rest is for whoever inspects the file.
 type fenceJournalEntry struct {
