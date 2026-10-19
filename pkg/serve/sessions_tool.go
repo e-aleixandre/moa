@@ -438,6 +438,12 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 		}
 		return core.ErrorResult(fmt.Sprintf("session %s was started by the user and is waiting on their question (ask_id %s): %q. Ask the user to answer it; a send would sit unread until they do.", id, ask.ID, strings.Join(questions, " / ")))
 	}
+	// A question that requires a tap can only be resolved by the human, so the
+	// skip below would fail and the message would sit queued behind a session
+	// that stays blocked. Refuse before queueing anything.
+	if ask != nil && ask.RequiresTap {
+		return core.ErrorResult(tapQuestionMessage(id, ask))
+	}
 	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", ownerPromptCustom(own), func(sess *ManagedSession) error {
 		return ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load())
 	})
@@ -460,6 +466,16 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 		return core.TextResult(fmt.Sprintf("Queued for %s (it is working; it will read this at its next step).", id))
 	}
 	return core.TextResult(fmt.Sprintf("Sent to %s (%s).", id, msgID))
+}
+
+// tapQuestionMessage tells the owner that a question needs the user's own tap
+// or typed confirmation, so it asks the user instead of resending.
+func tapQuestionMessage(id string, ask *bus.PendingAskInfo) string {
+	questions := make([]string, len(ask.Questions))
+	for i, q := range ask.Questions {
+		questions[i] = q.Text
+	}
+	return fmt.Sprintf("session %s is waiting on a confirmation (ask_id %s) that only the user can give by tap or typed confirmation: %q. You cannot answer or skip it, and nothing was queued. Ask the user to answer it in that session (in their chat, or with request_call if it is urgent); do not resend.", id, ask.ID, strings.Join(questions, " / "))
 }
 
 func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.Result {
@@ -540,6 +556,9 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 	if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: askID, Answers: answers, Responder: ownerResponder(own)}); err != nil {
 		if errors.Is(err, errFenceBarred) {
 			return core.ErrorResult(fmt.Sprintf("cannot answer %s yet: the last Stop of session %s is not saved; try again in a moment", askID, id))
+		}
+		if errors.Is(err, askuser.ErrRequiresTap) {
+			return core.ErrorResult(fmt.Sprintf("cannot answer %s: it needs a confirmation that only the user can give by tap or typed confirmation. Ask the user to answer it in session %s (in their chat, or with request_call if it is urgent); do not resend.", askID, id))
 		}
 		// The user may have answered it in the UI first; the approval manager
 		// forgets a resolved ask, so this is the same error as an unknown one.
