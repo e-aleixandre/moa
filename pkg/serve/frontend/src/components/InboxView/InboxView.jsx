@@ -194,7 +194,7 @@ function InboxLoading() {
 function InboxError({ detail, retrying, onRetry }) {
   return (
     <div class="zi-state is-error" role="alert">
-      <span class="zi-state-t"><span class="zi-dot is-error" aria-hidden="true" />Can't reach the inbox</span>
+      <span class="zi-state-t"><span class="zi-dot is-error" aria-hidden="true" />Can't reach Events</span>
       {detail && <span class="zi-state-d zi-data">{detail}</span>}
       <span class="zi-state-p">Try again, or check that moa is running.</span>
       {onRetry && (
@@ -465,9 +465,9 @@ export function InboxView({
     ? () => (step === "model" ? setStep("route") : close())
     : onBack;
   const headBackLabel = card && variant === "column"
-    ? (step === "model" ? "Back to destinations" : "Back to inbox")
+    ? (step === "model" ? "Back to destinations" : "Back to Events")
     : "Back to sessions";
-  const headTitle = card && variant === "column" ? decideTitle(card, step) : "Inbox";
+  const headTitle = card && variant === "column" ? decideTitle(card, step) : "Events";
 
   // The decision sheet is an overlay: registered, and Escape (the native Back
   // button sends one) walks its model page back, then dismisses it.

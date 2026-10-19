@@ -73,7 +73,7 @@ export function mobileTitleChipLabel(title, inboxCount = 0) {
   const parts = [`${title} — this session`];
   // The chip is the only place the inbox count is legible without opening the
   // drawer, so the accessible label has to name it too.
-  if (inboxCount > 0) parts.push(`${inboxCount} event${inboxCount === 1 ? "" : "s"} waiting in the inbox`);
+  if (inboxCount > 0) parts.push(`${inboxCount} event${inboxCount === 1 ? "" : "s"} waiting in Events`);
   return parts.join("; ");
 }
 

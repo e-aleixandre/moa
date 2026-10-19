@@ -78,7 +78,7 @@ function SearchIcon() {
 function InboxIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M2 9.5V12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5M2 9.5h3.2l.8 1.5h4l.8-1.5H14M2 9.5l1.6-5.2A1 1 0 0 1 4.6 3.5h6.8a1 1 0 0 1 1 .8L14 9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+      <path d="M9 1.8 3.5 9h3.7L6.6 14.2 12.5 7H8.7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
     </svg>
   );
 }
@@ -165,11 +165,11 @@ export function SidebarFoot({
           type="button"
           class={`zl-inbox${inboxOpen ? " is-on" : ""}`}
           aria-pressed={inboxOpen}
-          aria-label={inboxCount > 0 ? `Inbox, ${inboxCount} waiting` : "Inbox"}
+          aria-label={inboxCount > 0 ? `Events, ${inboxCount} waiting` : "Events"}
           onClick={onInbox}
         >
           <InboxIcon />
-          Inbox
+          Events
           {inboxCount > 0 && <span class="zl-inbox-n zl-data">{inboxCount > 9 ? "9+" : inboxCount}</span>}
         </button>
       )}
@@ -537,7 +537,7 @@ export function Sidebar({
         </div>
       ) : (
         <div class="zl-list" ref={listRef}>
-          <ForYouDoor n={forYouN} news={forYouNews} on={forYouOn} phone={phone} onOpen={onForYou || toggleForYouView} />
+          {!phone && <ForYouDoor n={forYouN} news={forYouNews} on={forYouOn} phone={phone} onOpen={onForYou || toggleForYouView} />}
 
           {hitCount === 0 && (
             <button type="button" class="zl-empty-new" onClick={onNewSession}>

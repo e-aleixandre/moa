@@ -209,7 +209,7 @@ test("a pending arrival is announced as waiting in the inbox, and opens it", () 
   announceArrivals([event()]);
   const [toast] = getToasts();
   expect(toast.title).toBe("sentry-tienda · Checkout 500s");
-  expect(toast.detail).toBe("waiting in Inbox");
+  expect(toast.detail).toBe("waiting in Events");
   expect(typeof toast.onOpen).toBe("function");
   expect(toast.sessionId).toBeUndefined();
 });
@@ -275,7 +275,7 @@ test("bulk dismissal uses the server source endpoint and settles local pending r
 
 test("pending reason tokens map to a short muted phrase, unknowns stay hidden", () => {
   expect(pendingReasonLabel("many_sessions")).toBe("several sessions are open");
-  expect(pendingReasonLabel("inbox")).toBe("this source always waits in the inbox");
+  expect(pendingReasonLabel("inbox")).toBe("this source always waits in Events");
   expect(pendingReasonLabel("nope")).toBe("");
 });
 

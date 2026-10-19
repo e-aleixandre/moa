@@ -261,7 +261,7 @@ test("a failed first load says so, and never claims the inbox is empty", () => {
     health: { status: "error", error: "GET /api/events · 502: upstream is down" },
   });
   const body = text(nodes);
-  expect(body).toContain("Can't reach the inbox");
+  expect(body).toContain("Can't reach Events");
   expect(body).toContain("GET /api/events · 502: upstream is down");
   expect(body).not.toContain("Nothing waiting.");
   expect(body).not.toContain("Nothing has arrived yet.");

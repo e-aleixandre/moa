@@ -58,7 +58,7 @@ export function toggleInbox() { setState({ inboxOpen: !store.get().inboxOpen });
 // PENDING_REASON_COPY is why a row is still waiting. Tokens match
 // events.PendingReason on the server; unknown values are hidden, not shown raw.
 export const PENDING_REASON_COPY = {
-  inbox: 'this source always waits in the inbox',
+  inbox: 'this source always waits in Events',
   no_session: 'no session open in this project',
   many_sessions: 'several sessions are open',
   session_unavailable: 'the target session is missing or unavailable',
@@ -131,7 +131,7 @@ export function announceArrivals(arrivals, { visible = [], now = Date.now() } = 
   if (count > 1) {
     const toastId = addToast({
       title: `${count} new events`,
-      detail: 'waiting in Inbox',
+      detail: 'waiting in Events',
       type: 'info',
       onOpen: openInbox,
     });
@@ -144,7 +144,7 @@ export function announceArrivals(arrivals, { visible = [], now = Date.now() } = 
   const target = delivered ? store.get().sessions?.[event.routed_to] : null;
   const toastId = addToast({
     title: `${event.source} · ${event.title || 'event'}`,
-    detail: delivered ? `→ ${target ? sessionTitle(target) : 'session'}` : 'waiting in Inbox',
+    detail: delivered ? `→ ${target ? sessionTitle(target) : 'session'}` : 'waiting in Events',
     type: 'info',
     ...(delivered ? { sessionId: event.routed_to } : { onOpen: openInbox }),
   });
