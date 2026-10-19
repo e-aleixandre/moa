@@ -233,6 +233,15 @@ func (m *Manager) fireQuestionCall(ctx context.Context, q tasks.Question) {
 	if h := m.questionCallHooks.afterClaim; h != nil && !h(q.ID, attempt) {
 		return
 	}
+	// The owner is read again: its level may have changed since the claim
+	// began (Never must not ring).
+	if own, err = m.callingOwner(sess.ID); err != nil {
+		if _, err := m.tasks.FinishCallEscalation(ctx, q.ID, attempt, tasks.CallCancelled); err != nil {
+			slog.Warn("question calls: cancelling failed", "question", q.ID, "error", err)
+		}
+		m.questions.reproject(sess)
+		return
+	}
 	m.questions.reproject(sess)
 	text := questionCallText(q)
 	reason := "Waiting for your answer: " + text
