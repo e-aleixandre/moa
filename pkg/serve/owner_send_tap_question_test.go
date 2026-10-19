@@ -84,7 +84,7 @@ func TestOwnerSendToSyncTapQuestionAdmitsNoMessage(t *testing.T) {
 		if !res.IsError {
 			t.Errorf("send %d did not fail: %s", i, toolText(res))
 		}
-		if msg := toolText(res); !strings.Contains(msg, ask.ID) || !strings.Contains(msg, "only the user") {
+		if msg := toolText(res); !strings.Contains(msg, ask.ID) || !strings.Contains(msg, "only the user") || !strings.Contains(msg, "never authorizes") {
 			t.Errorf("send %d error does not name the ask and the user: %s", i, msg)
 		}
 		assertStillBlockedOnTap(t, child, ask, fmt.Sprintf("send %d", i))
@@ -100,8 +100,8 @@ func TestOwnerSendToSyncTapQuestionAdmitsNoMessage(t *testing.T) {
 	if !res.IsError {
 		t.Errorf("owner answer on the tap question did not fail: %s", toolText(res))
 	}
-	if msg := toolText(res); !strings.Contains(msg, "only the user") {
-		t.Errorf("answer error does not say only the user can answer: %s", msg)
+	if msg := toolText(res); !strings.Contains(msg, "only the user") || !strings.Contains(msg, "never authorizes") || !strings.Contains(msg, ask.Questions[0].Text) {
+		t.Errorf("answer error lacks the user-only notice, the call caveat or the literal question: %s", msg)
 	}
 	assertStillBlockedOnTap(t, child, ask, "owner answer")
 	if got := len(pendingSteers(t, child)) - base; got != 0 {

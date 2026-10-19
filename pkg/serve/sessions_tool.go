@@ -475,7 +475,20 @@ func tapQuestionMessage(id string, ask *bus.PendingAskInfo) string {
 	for i, q := range ask.Questions {
 		questions[i] = q.Text
 	}
-	return fmt.Sprintf("session %s is waiting on a confirmation (ask_id %s) that only the user can give by tap or typed confirmation: %q. You cannot answer or skip it, and nothing was queued. Ask the user to answer it in that session (in their chat, or with request_call if it is urgent); do not resend.", id, ask.ID, strings.Join(questions, " / "))
+	return fmt.Sprintf("session %s is waiting on a confirmation (ask_id %s) that only the user can give by tap or typed confirmation: %q. You cannot answer or skip it, and nothing was queued. Ask the user to answer it in that session (in their chat, or with request_call if it is urgent: a call only reaches the user, it never authorizes anything); do not resend.", id, ask.ID, strings.Join(questions, " / "))
+}
+
+// askQuestionsSuffix quotes the literal pending question of sess, if any.
+func askQuestionsSuffix(sess *ManagedSession) string {
+	p, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
+	if p.Ask == nil {
+		return ""
+	}
+	questions := make([]string, len(p.Ask.Questions))
+	for i, q := range p.Ask.Questions {
+		questions[i] = q.Text
+	}
+	return fmt.Sprintf(": %q", strings.Join(questions, " / "))
 }
 
 func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.Result {
@@ -558,7 +571,7 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 			return core.ErrorResult(fmt.Sprintf("cannot answer %s yet: the last Stop of session %s is not saved; try again in a moment", askID, id))
 		}
 		if errors.Is(err, askuser.ErrRequiresTap) {
-			return core.ErrorResult(fmt.Sprintf("cannot answer %s: it needs a confirmation that only the user can give by tap or typed confirmation. Ask the user to answer it in session %s (in their chat, or with request_call if it is urgent); do not resend.", askID, id))
+			return core.ErrorResult(fmt.Sprintf("cannot answer %s: it needs a confirmation that only the user can give by tap or typed confirmation%s. Ask the user to answer it in session %s (in their chat, or with request_call if it is urgent: a call only reaches the user, it never authorizes anything); do not resend.", askID, askQuestionsSuffix(sess), id))
 		}
 		// The user may have answered it in the UI first; the approval manager
 		// forgets a resolved ask, so this is the same error as an unknown one.
