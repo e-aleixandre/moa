@@ -35,6 +35,11 @@ export function loadForYou() {
   return inflight;
 }
 
+// __resetForYouForTests forgets a load another test left in flight.
+export function __resetForYouForTests() {
+  inflight = null;
+}
+
 // forgetForYouItem drops an item the user just answered, so the row leaves at
 // once instead of at the next poll; the refresh that follows confirms it.
 export function forgetForYouItem(id) {

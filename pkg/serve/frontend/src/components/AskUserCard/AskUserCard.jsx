@@ -191,7 +191,7 @@ function renderVoiceSubmit(voice, free) {
 
 // AskContext — what the agent says the user needs to answer without the
 // conversation. Folded after four lines; More unfolds it in place.
-function AskContext({ text }) {
+export function AskContext({ text }) {
   const [open, setOpen] = useState(false);
   const long = text.length > 280 || text.split("\n").length > 4;
   return (
