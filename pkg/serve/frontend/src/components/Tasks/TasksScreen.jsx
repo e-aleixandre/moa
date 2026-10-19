@@ -4,7 +4,7 @@ import { useStore } from "../../hooks/useStore.js";
 import { hasBlockingOverlay } from "../../data/overlays.js";
 import { addToast } from "../../data/notifications.js";
 import {
-  listMark, loadTaskProjects, markListSeen, markTasksSeen, patchTask, selectSessionDirectory, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
+  endListVisit, listMark, loadTaskProjects, markListSeen, patchTask, rawMark, selectSessionDirectory, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
 } from "../../data/tasks.js";
 import {
   errorText, flatRows, groupTasks, isTypingTarget, movePatch, nextSelection, openOwnCount, projectOptions, sessionGroups, sessionName,
@@ -36,7 +36,7 @@ export function TasksScreen() {
   const only = slice.session;
   // Each list keeps its own "last looked": opening a session's list leaves the
   // global one as it was, and the other way round.
-  useEffect(() => { if (only) markListSeen(only); else markTasksSeen(); }, [only]);
+  useEffect(() => { markListSeen(only || ""); return () => endListVisit(only || ""); }, [only]);
   const since = slice.visits[only || ""] ?? listMark(slice.marks, only || "");
   useEffect(() => (only ? watchSessionTasks(only) : undefined), [only]);
   const onlyData = only ? slice.bySession[only] : null;
@@ -121,7 +121,7 @@ export function TasksScreen() {
               onSelect={open}
               sessions={sessions}
               lookup={lookup}
-              newSince={slice.newSince}
+              newSince={slice.rawVisits[only || ""] ?? rawMark(only || "")}
               completingId={checks.completingId}
               setCompletingId={checks.setCompletingId}
               onCheck={checks.onCheck}

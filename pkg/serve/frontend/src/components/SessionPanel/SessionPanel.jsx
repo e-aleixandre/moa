@@ -5,7 +5,7 @@ import {
   artifactsVerdict, closeSessionPanel, mcpVerdict, panelPageParent, panelPageTitle, parsePanelPage, runFacts,
   focusPanelSubpage, panelAccessibleName, setSessionPanelPage, usageVerdict,
 } from "../../data/session-panel.js";
-import { listMark, selectSessionTasks, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
+import { endListVisit, listMark, markListSeen, selectSessionTasks, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
 import { sessionTasksVerdict } from "../../data/tasks-model.js";
 import { SessionTasksPage } from "../Tasks/SessionTasksPage.jsx";
 import { artifactsSlice, listArtifactsInPanel, openArtifactsList } from "../../data/artifacts.js";
@@ -187,6 +187,14 @@ export function SessionPanel({
   const panelRef = useRef(null);
   const backRef = useRef(null);
   const sub = page !== "root";
+  // One visit to this session's Tasks, from the first Tasks page to leaving
+  // them: the pages inside (a task's detail) remount, the visit does not.
+  const inTasks = open && sub && TASK_PAGE_KINDS.has(parsePanelPage(page).kind);
+  useEffect(() => {
+    if (!inTasks) return undefined;
+    markListSeen(session.id);
+    return () => endListVisit(session.id);
+  }, [inTasks, session.id]);
   const parent = panelPageParent(page);
   const close = onClose || closeSessionPanel;
   const goPage = onPage || setSessionPanelPage;

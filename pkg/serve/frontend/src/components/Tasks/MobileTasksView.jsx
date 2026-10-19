@@ -5,7 +5,7 @@ import { useEdgeSwipeBack } from "../../hooks/useEdgeSwipeBack.js";
 import { addToast } from "../../data/notifications.js";
 import { ownersSlice } from "../../data/owners.js";
 import {
-  loadTask, listMark, loadTaskProjects, markListSeen, markTasksSeen, patchTask, peekDraft, selectSessionDirectory, setDraftDest, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
+  loadTask, endListVisit, listMark, loadTaskProjects, markListSeen, patchTask, rawMark, peekDraft, selectSessionDirectory, setDraftDest, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
 } from "../../data/tasks.js";
 import { errorText, groupTasks, movePatch, projectOptions, sessionGroups, sessionName } from "../../data/tasks-model.js";
 import { projectLabels } from "../../data/tasks-move.js";
@@ -44,7 +44,7 @@ export function MobileTasksView({ onBack }) {
   const only = slice.session;
   useEffect(() => (only ? watchSessionTasks(only) : undefined), [only]);
   const onlyData = only ? slice.bySession[only] : null;
-  useEffect(() => { if (only) markListSeen(only); else markTasksSeen(); }, [only]);
+  useEffect(() => { markListSeen(only || ""); return () => endListVisit(only || ""); }, [only]);
   const since = slice.visits[only || ""] ?? listMark(slice.marks, only || "");
   const groups = useMemo(
     () => (only ? sessionGroups(onlyData, only, since).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions, since })),
@@ -88,7 +88,7 @@ export function MobileTasksView({ onBack }) {
             phone
             sessions={sessions}
             lookup={lookup}
-            newSince={slice.newSince}
+            newSince={slice.rawVisits[only || ""] ?? rawMark(only || "")}
             onSelect={(id) => push({ kind: "task", id })}
             completingId={checks.completingId}
             setCompletingId={checks.setCompletingId}

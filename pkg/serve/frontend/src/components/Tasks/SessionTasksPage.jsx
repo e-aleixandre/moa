@@ -3,7 +3,7 @@ import { useStore } from "../../hooks/useStore.js";
 import { ownersSlice } from "../../data/owners.js";
 import { addToast } from "../../data/notifications.js";
 import { parsePanelPage, taskDepsPanelPage, taskMovePanelPage, taskPanelPage } from "../../data/session-panel.js";
-import { listMark, loadTask, loadTaskProjects, markListSeen, patchTask, peekDraft, selectSessionDirectory, setDraftDest, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
+import { listMark, loadTask, loadTaskProjects, patchTask, peekDraft, selectSessionDirectory, setDraftDest, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
 import { errorText, movePatch, projectOptions, sessionGroups } from "../../data/tasks-model.js";
 import { EmptyState, MoveList, TaskGroups, openTaskSession, useRowChecks, completesInline } from "./parts.jsx";
 import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
@@ -25,9 +25,7 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
   useEffect(() => { if (kind === "taskMove" || kind === "taskNewMove") loadTaskProjects(); }, [kind]);
 
   const data = slice.bySession[session.id];
-  // The panel's list is this session's list: the same "last looked" mark as the
-  // Tasks view narrowed to it, taken once per visit.
-  useEffect(() => { markListSeen(session.id); }, [session.id]);
+  // The visit (the mark) is the panel's: it spans this list and its details.
   const since = slice.visits[session.id] ?? listMark(slice.marks, session.id);
   const [doneOpen, setDoneOpen] = useState({});
   const groups = useMemo(() => sessionGroups(data, session.id, since), [data, session.id, since]);

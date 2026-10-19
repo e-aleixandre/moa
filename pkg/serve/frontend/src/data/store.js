@@ -67,6 +67,9 @@ export const TASKS_INITIAL = Object.freeze({
   // line counts from); visits are what the open list counted from.
   marks: {},
   visits: {},
+  // The stored mark each visit started from, raw (0: never opened), which the
+  // dots of new requests count from.
+  rawVisits: {},
 });
 
 // The share picker's closed slice (see data/share.js). Same reason it lives

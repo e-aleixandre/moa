@@ -359,8 +359,7 @@ function readSeen() {
 // markTasksSeen — opening the global view: what arrived before now stops
 // being new the NEXT time, so the dots survive the visit that shows them.
 export function markTasksSeen() {
-  patch({ newSince: readSeen() });
-  markListSeen('');
+  return markListSeen('');
 }
 
 // ── Done since you last looked ───────────────────────────────────────────
@@ -382,13 +381,37 @@ export function listMark(marks, listId = '', now = Date.now()) {
   return marks?.[listId] || readMark(listId) || now - DAY;
 }
 
-// markListSeen — opening a list. Returns the mark the visit counts from.
+// rawMark — the stored mark as it is (0 when never opened): what the dots of
+// new requests count from.
+export function rawMark(listId = '') {
+  return readMark(listId);
+}
+
+// A visit lasts from opening a list until leaving it: the pages it walks (a
+// task's detail and back) are the same visit, so what was new stays new.
+const activeVisits = new Set();
+
+// markListSeen — opening a list. Returns the mark the visit counts from; asked
+// again inside the same visit it changes nothing.
 export function markListSeen(listId = '') {
+  if (activeVisits.has(listId)) return tasksSlice(store.get()).visits[listId];
+  activeVisits.add(listId);
   const now = Date.now();
-  const before = readMark(listId) || now - DAY;
+  const raw = readMark(listId);
+  const before = raw || now - DAY;
   try { localStorage.setItem(markKey(listId), String(now)); } catch (_) { /* ignore */ }
-  patch((t) => ({ marks: { ...t.marks, [listId]: now }, visits: { ...t.visits, [listId]: before } }));
+  patch((t) => ({
+    marks: { ...t.marks, [listId]: now },
+    visits: { ...t.visits, [listId]: before },
+    rawVisits: { ...t.rawVisits, [listId]: raw },
+    ...(listId === '' ? { newSince: raw } : {}),
+  }));
   return before;
+}
+
+// endListVisit — leaving the list: the next opening starts a new visit.
+export function endListVisit(listId = '') {
+  activeVisits.delete(listId);
 }
 
 export function isNewRequest(task, newSince) {
