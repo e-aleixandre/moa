@@ -38,7 +38,9 @@ func TestForYouListsEverythingWaitingBlockingFirst(t *testing.T) {
 		toolCallHandlerFor("tc-ask", "ask_user", map[string]any{
 			"questions": []any{map[string]any{"question": "Ship it?", "context": "Staging is green.", "options": []any{"yes", "no"}}},
 		}),
-		func(context.Context, core.Request) (<-chan core.AssistantEvent, error) { return simpleResponse("ok"), nil },
+		func(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+			return simpleResponse("ok"), nil
+		},
 	), t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off"})
 
 	asyncID := insertOpenQuestion(t, mgr.tasks, "saved-session", askuser.Question{Text: "Which plan?", Context: "Two options."})
