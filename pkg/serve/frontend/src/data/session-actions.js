@@ -288,7 +288,6 @@ function normalizeSessionInfo(info, existing, visible) {
 }
 
 export async function loadSessions() {
-  import('./for-you.js').then((m) => m.loadForYou()).catch(() => {});
   const request = ++nextRosterRequest;
   try {
     // WITH the owners: an owner's conversation is a session you open, stream
@@ -390,6 +389,8 @@ export function startPolling() {
     // An event or a report can wake a closed owner; the owners roster is the
     // only place the client learns it.
     import('./owners.js').then((m) => m.loadOwners()).catch(() => {});
+    // For you rides the same tick: what waits on the user, across sessions.
+    import('./for-you.js').then((m) => m.loadForYou()).catch(() => {});
   }), interval);
 }
 

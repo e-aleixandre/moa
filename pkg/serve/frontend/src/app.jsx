@@ -20,6 +20,7 @@ import { loadProviderStatus } from "./data/providers.js";
 import { startTasksSync, resumeTasksSync } from "./data/tasks.js";
 import { TasksScreen } from "./components/Tasks/TasksScreen.jsx";
 import { ForYouScreen } from "./components/ForYou/ForYou.jsx";
+import { loadForYou } from "./data/for-you.js";
 import { IncomingCall } from "./components/IncomingCall/IncomingCall.jsx";
 import { startCallRequestsSync, resumeCallRequestsSync, openCallRequestLink } from "./data/call-requests.js";
 import { requestIdFromSearch } from "./data/call-requests-model.js";
@@ -125,6 +126,7 @@ function useBootstrap() {
     // Both lists before deciding between the empty state and a landing: a
     // live child only points at its owner once the owners have answered.
     // loadOwners never rejects — a failed owners load lands as before.
+    loadForYou();
     Promise.all([loadSessions(), loadOwners()])
       .then(() => {
         if (!mounted) return; // unmounted mid-flight: don't touch the store/view
@@ -223,6 +225,7 @@ function useBootstrap() {
         afterPendingInits("foreground", () => {
           if (document.visibilityState !== "visible") return;
           loadSessions();
+          loadForYou();
           loadEvents(); // wake-on-event: an event may have arrived while away
           loadProviderStatus();
           resumeTasksSync();
@@ -251,6 +254,7 @@ function useBootstrap() {
       afterPendingInits("online", () => {
         if (document.visibilityState !== "visible") return;
         loadSessions();
+        loadForYou();
         resumeTasksSync();
         ensureModelCatalog();
       });

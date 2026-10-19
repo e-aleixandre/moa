@@ -39,10 +39,10 @@ test('the acknowledgement is not an answer', () => {
   expect(row.out).toBe('');
 });
 
-test('while the card shows the question the acknowledgement row is hidden; afterwards it stays as asked', () => {
+test('an open async question keeps its asked row: the question is the pin over the composer, not a card in the transcript', () => {
   const messages = normalizeHistory([call, ack]);
-  const withCard = projectStream({ messages, pendingAsk: { id: 'q1', questions, async: true } });
-  expect(withCard.flatMap((b) => b.blocks || []).filter((b) => b.type === 'ledger')).toHaveLength(0);
+  const withPin = projectStream({ messages, pendingAsk: { id: 'q1', questions, async: true } });
+  expect(withPin[0].blocks[0].rows).toHaveLength(1);
   const without = projectStream({ messages });
   expect(without[0].blocks[0].rows).toHaveLength(1);
 });
