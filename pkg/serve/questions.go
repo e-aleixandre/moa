@@ -20,11 +20,16 @@ import (
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
-// askUserAsyncDefault is what ask_user_async means when the config leaves it
-// unset. The asynchronous contract is a pilot, so the build's default is off;
-// the package tests turn it on (testmain_test.go) and pin the legacy tests that
-// exercise the blocking path to false.
+// askUserAsyncBuildDefault is what ask_user_async means when the config
+// leaves it unset: on. "ask_user_async": false still turns it off.
+const askUserAsyncBuildDefault = true
+
+// askUserAsyncDefault holds the default the sessions read, so the package
+// tests can pin the blocking path (pinSyncAskUser) or run the whole suite with
+// it off (MOA_TEST_ASK_ASYNC=0, testmain_test.go).
 var askUserAsyncDefault atomic.Bool
+
+func init() { askUserAsyncDefault.Store(askUserAsyncBuildDefault) }
 
 // questionContract names the version of the asynchronous contract in the
 // metadata a transcript carries, so an acknowledgement is never mistaken for a

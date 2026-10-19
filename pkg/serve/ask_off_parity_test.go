@@ -7,8 +7,8 @@ import (
 	"github.com/e-aleixandre/moa/pkg/bus"
 )
 
-// The owner's decision: with ask_user_async off (the production default) the
-// build behaves as it did before the pilot existed. These tests pin the places
+// The owner's decision: with ask_user_async off ("ask_user_async": false) the
+// build behaves as it did before the asynchronous ask_user existed. These tests pin the places
 // that sit on paths every deployment runs.
 
 func TestOffParityNothingEngagesTheQuestionMachinery(t *testing.T) {

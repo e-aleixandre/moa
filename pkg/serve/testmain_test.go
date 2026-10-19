@@ -13,13 +13,13 @@ import (
 // The suite runs the asynchronous ask_user: it is the contract these tests
 // specify. The ones that exercise the blocking path call pinSyncAskUser.
 //
-// MOA_TEST_ASK_ASYNC=0 runs the whole package with the build's default
-// instead (off): what production runs until the pilot is enabled. The tests
-// that only make sense with the pilot on pin it with pinAsyncAskUser.
+// MOA_TEST_ASK_ASYNC=0 runs the whole package with it off instead: what a
+// config with "ask_user_async": false runs. The tests that only make sense with
+// it on pin it with pinAsyncAskUser.
 func TestMain(m *testing.M) {
 	// The crash children of the asynchronous tests are asynchronous whatever
 	// the suite's mode: they are re-executions of those tests.
-	askUserAsyncDefault.Store(os.Getenv("MOA_TEST_ASK_ASYNC") != "0" || os.Getenv(f1CrashChildEnv) != "")
+	askUserAsyncDefault.Store(askUserAsyncBuildDefault && os.Getenv("MOA_TEST_ASK_ASYNC") != "0" || os.Getenv(f1CrashChildEnv) != "")
 	os.Exit(testenv.Run(m))
 }
 

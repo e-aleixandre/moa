@@ -100,7 +100,7 @@ type MoaConfig struct {
 	AutoVerify             *bool                 `json:"auto_verify,omitempty"`                   // nil = false (disabled by default)
 	PersistentShell        *bool                 `json:"persistent_shell,omitempty"`              // nil = true (enabled by default)
 	UpdateCheck            *bool                 `json:"update_check,omitempty"`                  // nil = true (check stable releases at most every 6h)
-	AskUserAsync           *bool                 `json:"ask_user_async,omitempty"`                // Pilot: ask_user posts a durable question and returns at once; the answer arrives later as an event. nil = the build's default (off).
+	AskUserAsync           *bool                 `json:"ask_user_async,omitempty"`                // Pilot: ask_user posts a durable question and returns at once; the answer arrives later as an event. nil = the build's default (on); false turns it off.
 	PushSummaries          string                `json:"push_summaries,omitempty"`                // How owner digests and event notifications are announced: "passive" (default: no sound, one per project replacing the last), "active" or "off".
 	PushRelayURL           string                `json:"push_relay_url,omitempty"`                // Origin of the native push relay (default https://moa-push-relay.ealeixandre.workers.dev, provisional until push.letmoa.run exists). Only for an app built with its own APNs key and relay. Global config only.
 	CacheTTL               string                `json:"cache_ttl,omitempty"`                     // Interactive prompt-cache TTL: "1h" (default) or "5m". Only "5m" changes behavior.
