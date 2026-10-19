@@ -60,6 +60,7 @@ export function MobileChrome({
   // forYou — how much is waiting on you across every session. The capsule
   // only exists while something waits: one tap to For you from anywhere.
   forYouCount = 0,
+  forYouNews = 0,
   onForYou,
 }) {
   const presentation = mobileTitleChipPresentation(attention);
@@ -91,15 +92,16 @@ export function MobileChrome({
         alert={alert}
         owner={owner}
       />
-      {forYouCount > 0 && onForYou && (
+      {(forYouCount > 0 || forYouNews > 0) && onForYou && (
         <button
           type="button"
           class="zl-cap zl-cap-right zl-cap-foryou"
           onClick={onForYou}
-          aria-label={`For you, ${forYouCount} waiting`}
+          aria-label={`For you${forYouCount > 0 ? `, ${forYouCount} waiting` : ""}${forYouNews > 0 ? `, ${forYouNews} new` : ""}`}
         >
           <Inbox size={18} aria-hidden="true" />
-          <span class="zl-cap-foryou-n zl-data">{forYouCount > 99 ? "99+" : forYouCount}</span>
+          {forYouCount > 0 && <span class="zl-cap-foryou-n zl-data">{forYouCount > 99 ? "99+" : forYouCount}</span>}
+          {forYouNews > 0 && <span class="zl-cap-foryou-dot" aria-hidden="true" />}
         </button>
       )}
       <button

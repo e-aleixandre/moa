@@ -151,3 +151,5 @@
 /* For you: the amber count of what waits on you, beside New. */
 .zl-chrome .zl-cap-foryou { gap: 6px; padding: 0 12px; color: var(--zl-yellow); }
 .zl-cap-foryou-n { font-size: var(--zl-fs-body); font-weight: 600; }
+.zl-cap-foryou-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--zl-accent); }
+.zl-chrome .zl-cap-foryou:not(:has(.zl-cap-foryou-n)) { color: var(--zl-t2); }

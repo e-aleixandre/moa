@@ -28,7 +28,7 @@ import { panelAccessibleName, sessionPanelBack, sessionPanelView, closeSessionPa
 import { tasksSlice } from "../../../data/tasks.js";
 import { attentionCount } from "../../../data/schedule-model.js";
 import { closeTasksView, openTasksView } from "../../../data/tasks-view.js";
-import { closeForYouView, forYouCount, openForYouView } from "../../../data/for-you.js";
+import { closeForYouView, forYouCount, openForYouView, unreadNewsCount } from "../../../data/for-you.js";
 import { MobileForYouView } from "../../../components/ForYou/ForYou.jsx";
 import { PinnedTaskLine } from "../../../components/Tasks/PinnedTaskLine.jsx";
 import { AsyncAskPin } from "../../../components/AskUserCard/AsyncAskPin.jsx";
@@ -558,6 +558,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   const tasksOpen = useStore((s) => s.view === "tasks");
   const forYouOpen = useStore((s) => s.view === "foryou");
   const forYouN = useStore(forYouCount);
+  const forYouNews = useStore(unreadNewsCount);
   // The session the header is about, for the Owner chip. Read here rather than
   // taken from `chrome`: the chrome snapshot is deliberately the ROSTER, and
   // adding a whole session to it would rebuild the header on every token.
@@ -578,6 +579,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           inboxCount={inboxCount}
           owner={chrome.titleOwner}
           forYouCount={forYouN}
+          forYouNews={forYouNews}
           onForYou={openForYouView}
         />
       )}

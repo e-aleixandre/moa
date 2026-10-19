@@ -258,6 +258,7 @@ export function AskUserPrompt({ session, ask: askProp = null, sessionId = null, 
     <div class={`ask-user-prompt${compact ? " is-compact" : ""}`} ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown}>
       <AskUserCard
         question={q.question}
+        context={q.context || ""}
         options={options}
         currentAnswer={currentAnswer}
         multiple={multiple}

@@ -101,3 +101,30 @@
 
 /* One question: the row's title already is the question. */
 .fy-body.is-single .ask .ask-q { display: none; }
+
+/* Sections: what waits on you, then what you were told. */
+.fy-sec + .fy-sec { margin-top: 28px; }
+.fy-sec-head { display: flex; align-items: baseline; gap: 10px; padding: 8px 4px 10px; }
+.fy-phone .fy-sec-head { padding: 8px 16px 10px; }
+.fy-sec-t { color: var(--zl-t3); font-size: var(--zl-fs-meta); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.fy-sec-new { color: var(--zl-accent); }
+.fy-sec-head .fy-sum { padding: 0; }
+.fy-sec-act { margin-left: auto; padding: 4px 0; border: 0; background: none; color: var(--zl-t3); font-family: inherit; font-size: var(--zl-fs-meta); cursor: pointer; }
+.fy-sec-act:hover { color: var(--zl-t1); }
+.fy-empty { padding: 20px 4px; text-align: left; }
+
+/* One line of the context (or a news body) under the title. */
+.fy-ctx { color: var(--zl-t3); font-size: var(--zl-fs-meta); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.fy-phone .fy-ctx { -webkit-line-clamp: 2; font-size: 13px; }
+
+.fy-unread { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--zl-accent); }
+.fy-news.is-read .fy-title { color: var(--zl-t2); font-weight: 400; }
+.fy-ico.is-news-done { color: var(--zl-green, #a6e3a1); }
+.fy-ico.is-news-deployed { color: var(--zl-blue, #89b4fa); }
+.fy-ico.is-news-problem { color: var(--zl-red, #f38ba8); }
+.fy-news-body { margin: 0; color: var(--zl-t2); font-size: var(--zl-fs-body); line-height: 1.55; white-space: pre-line; max-width: 620px; }
+.fy-earlier { display: inline-flex; align-items: center; gap: 4px; margin: 10px 4px 0; padding: 6px 0; border: 0; background: none; color: var(--zl-t3); font-family: inherit; font-size: var(--zl-fs-meta); cursor: pointer; }
+.fy-phone .fy-earlier { margin: 10px 16px 0; min-height: 44px; }
+.fy-earlier .is-open { transform: rotate(90deg); }
+
+.fy-door-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--zl-accent); }

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { ArrowUpRight, ChevronRight, KeyRound, Lock, MessageCircleQuestionMark, SquareTerminal } from "lucide-preact";
+import { ArrowUp, ArrowUpRight, Check, ChevronRight, Info, KeyRound, Lock, MessageCircleQuestionMark, SquareTerminal, TriangleAlert } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { useEdgeSwipeBack } from "../../hooks/useEdgeSwipeBack.js";
-import { forYouSlice, forgetForYouItem, loadForYou } from "../../data/for-you.js";
+import { forYouSlice, forgetForYouItem, loadForYou, markNewsRead } from "../../data/for-you.js";
 import { ownersSlice } from "../../data/owners.js";
 import { navigate } from "../../data/router.js";
 import { resolvePermission } from "../../data/session-actions.js";
@@ -136,6 +136,7 @@ function Row({ row, open, phone, onToggle }) {
         <span class={`fy-ico is-${item.kind}`}><KindIcon item={item} /></span>
         <span class="fy-main">
           <span class="fy-title">{title(item)}</span>
+          {!open && item.questions?.[0]?.context && <span class="fy-ctx">{item.questions[0].context}</span>}
           <span class="fy-meta">
             {owner && <OwnerAvatarFor owner={owner} size={16} />}
             <span class="fy-who">{row.ownConversation ? row.session : owner ? `${owner.name} · ${row.session}` : row.session}</span>
@@ -164,6 +165,93 @@ function Row({ row, open, phone, onToggle }) {
   );
 }
 
+function whoOf(sessionId, sessions, owners) {
+  const own = owners.find((o) => o.session_id === sessionId);
+  if (own) return { owner: own, who: own.name };
+  const sess = sessions[sessionId];
+  const owner = sess?.ownerId ? owners.find((o) => o.id === sess.ownerId) : null;
+  const title = sess?.title || "A session";
+  return { owner, who: owner ? `${owner.name} · ${title}` : title };
+}
+
+const NEWS_ICON = { done: Check, deployed: ArrowUp, problem: TriangleAlert, info: Info };
+
+function NewsRow({ n, open, phone, onToggle }) {
+  const sessions = useStore((s) => s.sessions);
+  const owners = useStore((s) => ownersSlice(s).list);
+  const { owner, who } = whoOf(n.session_id, sessions, owners);
+  const Icon = NEWS_ICON[n.kind] || Info;
+  return (
+    <li class={`fy-row fy-news is-${n.kind}${open ? " is-open" : ""}${n.read_at ? " is-read" : " is-unread"}`} data-news={n.id}>
+      <button type="button" class="fy-row-head" aria-expanded={open} onClick={onToggle}>
+        <span class={`fy-ico is-news-${n.kind}`}><Icon size={15} aria-hidden="true" /></span>
+        <span class="fy-main">
+          <span class="fy-title">{n.title}</span>
+          {!open && n.body && <span class="fy-ctx">{n.body}</span>}
+          <span class="fy-meta">
+            {owner && <OwnerAvatarFor owner={owner} size={16} />}
+            <span class="fy-who">{who}</span>
+            <span class="fy-sep">·</span>
+            <span class="fy-age zl-data">{age(n.updated)}</span>
+          </span>
+        </span>
+        {!n.read_at && <span class="fy-unread" aria-label="Unread" />}
+        <ChevronRight size={16} class="fy-chev" aria-hidden="true" />
+      </button>
+      {open && (
+        <div class="fy-body">
+          {n.body && <p class="fy-news-body">{n.body}</p>}
+          <button type="button" class="fy-open" onClick={() => openConversation(n.session_id)}>
+            Open conversation<ArrowUpRight size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+// News — what sessions chose to tell the user. Opening an item reads it,
+// which archives it; it stays in place until the screen is left, so it does
+// not jump away under the finger.
+function News({ phone }) {
+  const news = useStore((s) => forYouSlice(s).news);
+  const [openId, setOpenId] = useState(null);
+  const [kept] = useState(() => new Set());
+  const [earlier, setEarlier] = useState(false);
+  for (const n of news) if (!n.read_at) kept.add(n.id);
+  const fresh = news.filter((n) => kept.has(n.id));
+  const old = news.filter((n) => !kept.has(n.id));
+  const unread = news.filter((n) => !n.read_at).length;
+  if (news.length === 0) return null;
+  const toggle = (n) => {
+    if (!n.read_at) markNewsRead([n.id]);
+    setOpenId(openId === n.id ? null : n.id);
+  };
+  return (
+    <section class="fy-sec">
+      <div class="fy-sec-head">
+        <span class="fy-sec-t">News{unread > 0 && <span class="fy-sec-new"> · {unread} new</span>}</span>
+        {unread > 0 && <button type="button" class="fy-sec-act" onClick={() => markNewsRead([])}>Mark all read</button>}
+      </div>
+      <ul class="fy-list">
+        {fresh.map((n) => <NewsRow key={n.id} n={n} phone={phone} open={openId === n.id} onToggle={() => toggle(n)} />)}
+      </ul>
+      {old.length > 0 && (
+        <>
+          <button type="button" class="fy-earlier" aria-expanded={earlier} onClick={() => setEarlier(!earlier)}>
+            Earlier · {old.length}<ChevronRight size={14} class={earlier ? "is-open" : ""} aria-hidden="true" />
+          </button>
+          {earlier && (
+            <ul class="fy-list">
+              {old.map((n) => <NewsRow key={n.id} n={n} phone={phone} open={openId === n.id} onToggle={() => toggle(n)} />)}
+            </ul>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function List({ phone }) {
   const { rows, loaded } = useRows();
   const [openId, setOpenId] = useState(null);
@@ -174,15 +262,14 @@ function List({ phone }) {
     setOpenId(rows[0]?.item.id || null);
   }, [rows, openId]);
   const blocking = rows.filter((r) => r.item.blocking).length;
-  if (loaded && rows.length === 0) {
-    return <div class="fy-empty">Nothing is waiting on you.</div>;
-  }
   return (
     <>
-      <div class="fy-sum">
-        <span class="fy-sum-n">{rows.length} waiting</span>
-        {blocking > 0 && <span class="fy-sum-b"> · {blocking} stopped</span>}
+      <section class="fy-sec">
+      <div class="fy-sec-head">
+        <span class="fy-sec-t">Waiting on you</span>
+        {rows.length > 0 && <span class="fy-sum"><span class="fy-sum-n">{rows.length} waiting</span>{blocking > 0 && <span class="fy-sum-b"> · {blocking} stopped</span>}</span>}
       </div>
+      {loaded && rows.length === 0 && <div class="fy-empty">Nothing is waiting on you.</div>}
       <ul class="fy-list">
         {rows.map((r) => (
           <Row
@@ -194,6 +281,8 @@ function List({ phone }) {
           />
         ))}
       </ul>
+      </section>
+      <News phone={phone} />
     </>
   );
 }

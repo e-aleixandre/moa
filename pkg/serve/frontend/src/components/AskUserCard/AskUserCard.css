@@ -294,3 +294,10 @@
   box-shadow: 0 0 0 1px var(--zl-yellow);
   color: var(--zl-yellow);
 }
+
+/* The question's context: quieter than the question, folded when long. */
+.ask .ask-ctx { margin: 6px 0 12px; }
+.ask .ask-ctx-t { margin: 0; color: var(--zl-t2); font-size: var(--zl-fs-body); line-height: 1.5; white-space: pre-line; }
+.ask .ask-ctx.is-folded .ask-ctx-t { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.ask .ask-ctx-more { margin-top: 2px; padding: 4px 0; border: 0; background: none; color: var(--zl-t3); font-family: inherit; font-size: var(--zl-fs-meta); cursor: pointer; }
+.ask .ask-ctx-more:hover { color: var(--zl-t1); }

@@ -22,7 +22,7 @@ import { OwnerAvatarFor } from "../../components/Owners/OwnerAvatar.jsx";
 import { OwnerRow, SectionHead } from "../../components/Owners/OwnerRow.jsx";
 import { TasksGlyph } from "../../components/Tasks/TasksGlyph.jsx";
 import { attentionLabel, useProviderStatus } from "../../data/providers.js";
-import { forYouCount, toggleForYouView } from "../../data/for-you.js";
+import { forYouCount, toggleForYouView, unreadNewsCount } from "../../data/for-you.js";
 import { ForYouDoor } from "../../components/ForYou/ForYouDoor.jsx";
 import "./Sidebar.css";
 
@@ -354,6 +354,7 @@ export function Sidebar({
   const hasMenu = !!(onCloseSession || onReopenSession || onDeleteSession);
   const voiceCall = useStore((s) => s.voiceCall);
   const forYouN = useStore(forYouCount);
+  const forYouNews = useStore(unreadNewsCount);
   const forYouOn = useStore((s) => s.view === "foryou");
   const ownerCall = (owner) => (!voiceCall?.active ? ""
     : voiceCall.sessionId === owner.session_id ? "here" : "elsewhere");
@@ -536,7 +537,7 @@ export function Sidebar({
         </div>
       ) : (
         <div class="zl-list" ref={listRef}>
-          <ForYouDoor n={forYouN} on={forYouOn} phone={phone} onOpen={onForYou || toggleForYouView} />
+          <ForYouDoor n={forYouN} news={forYouNews} on={forYouOn} phone={phone} onOpen={onForYou || toggleForYouView} />
 
           {hitCount === 0 && (
             <button type="button" class="zl-empty-new" onClick={onNewSession}>

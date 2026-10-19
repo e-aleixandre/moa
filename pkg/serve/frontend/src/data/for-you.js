@@ -9,7 +9,7 @@ import { api } from './api.js';
 import { setState, store } from './store.js';
 import { navigate } from './router.js';
 
-const EMPTY = { items: [], loaded: false };
+const EMPTY = { items: [], news: [], loaded: false };
 
 export function forYouSlice(state) {
   return state?.forYou || EMPTY;
@@ -21,10 +21,12 @@ export function loadForYou() {
   inflight = api('GET', '/api/for-you')
     .then((res) => {
       const items = Array.isArray(res?.items) ? res.items : [];
+      const news = Array.isArray(res?.news) ? res.news : [];
       setState((s) => {
         const prev = forYouSlice(s);
-        if (prev.loaded && JSON.stringify(prev.items) === JSON.stringify(items)) return null;
-        return { forYou: { items, loaded: true } };
+        if (prev.loaded && JSON.stringify(prev.items) === JSON.stringify(items)
+          && JSON.stringify(prev.news) === JSON.stringify(news)) return null;
+        return { forYou: { items, news, loaded: true } };
       });
     })
     .catch(() => {})
@@ -41,6 +43,23 @@ export function forgetForYouItem(id) {
     return items.length === prev.items.length ? null : { forYou: { ...prev, items } };
   });
   loadForYou();
+}
+
+// unreadNewsCount — what sessions told the user that he has not read.
+export function unreadNewsCount(state) {
+  return forYouSlice(state).news.filter((n) => !n.read_at).length;
+}
+
+// markNewsRead archives news on the server (read is archived); no ids marks
+// all. The local copy flips at once so the dot goes with the tap.
+export function markNewsRead(ids = []) {
+  const now = new Date().toISOString();
+  setState((s) => {
+    const prev = forYouSlice(s);
+    const news = prev.news.map((n) => (!n.read_at && (!ids.length || ids.includes(n.id)) ? { ...n, read_at: now } : n));
+    return { forYou: { ...prev, news } };
+  });
+  return api('POST', '/api/for-you/news/read', { ids }).catch(() => {}).finally(() => loadForYou());
 }
 
 export function forYouCount(state) {

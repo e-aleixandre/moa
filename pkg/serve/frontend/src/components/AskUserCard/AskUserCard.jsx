@@ -33,6 +33,7 @@ const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 // send, which is what the gallery renders.
 export function AskUserCard({
   question,
+  context = "",
   options = [],
   currentAnswer = "",
   multiple = false,
@@ -93,6 +94,7 @@ export function AskUserCard({
         <span class="who">moa asks</span>
       </div>
       <p class="ask-q">{question}</p>
+      {context && <AskContext text={context} />}
       {multiple && <p class="ask-hint">Pick one or more, then confirm.</p>}
       <div class="ask-opts">
         {options.map((opt, i) => {
@@ -183,6 +185,23 @@ function renderVoiceSubmit(voice, free) {
       >
         {icon}
       </button>
+    </div>
+  );
+}
+
+// AskContext — what the agent says the user needs to answer without the
+// conversation. Folded after four lines; More unfolds it in place.
+function AskContext({ text }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 280 || text.split("\n").length > 4;
+  return (
+    <div class={`ask-ctx${long && !open ? " is-folded" : ""}`}>
+      <p class="ask-ctx-t">{text}</p>
+      {long && (
+        <button type="button" class="ask-ctx-more" onClick={() => setOpen(!open)}>
+          {open ? "Less" : "More"}
+        </button>
+      )}
     </div>
   );
 }
