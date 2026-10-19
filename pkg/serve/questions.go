@@ -378,6 +378,8 @@ func (q *questionService) deleted(sess *ManagedSession) {
 	if err := q.repo.SettleDeletedSessionQuestions(q.m.baseCtx, sessionID); err != nil {
 		slog.Warn("questions: settling a deleted session's questions failed", "session", sessionID, "error", err)
 	}
+	// Their escalations were cancelled with them: one ringing stops.
+	q.m.callRequests().withdrawEscalations(sessionID)
 }
 
 // deletedSaved is deleted for a session that was not loaded: it has no runtime

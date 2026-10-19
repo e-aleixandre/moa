@@ -187,6 +187,22 @@ func (r *callRequestRegistry) withdraw(id string) {
 	}
 }
 
+// withdrawEscalations withdraws every live request of sessionID that
+// escalates a question (its session was deleted).
+func (r *callRequestRegistry) withdrawEscalations(sessionID string) {
+	r.mu.Lock()
+	var ids []string
+	for id, req := range r.live {
+		if req.SessionID == sessionID && req.QuestionID != "" {
+			ids = append(ids, id)
+		}
+	}
+	r.mu.Unlock()
+	for _, id := range ids {
+		r.withdraw(id)
+	}
+}
+
 // liveStates are the states a withdraw ends.
 var liveStates = []string{crAdmitting, crRinging, crHeld, crAccepted, crConnecting}
 
