@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,6 +90,24 @@ func (cfg *loopConfig) appendState(msgs ...core.AgentMessage) {
 	}
 	cfg.state.Messages = append(cfg.state.Messages, msgs...)
 	cfg.stateMu.Unlock()
+}
+
+// stateSnapshot returns the state as of now. The loop is not the only writer
+// while it runs: AppendRecord may append a record at any moment, under
+// stateMu, so every read of the history goes through here instead of reading
+// *state directly. The capacity is clipped so a reader that appends to the
+// snapshot copies it instead of writing into the slot the next record fills.
+func (cfg *loopConfig) stateSnapshot() AgentState {
+	cfg.stateMu.Lock()
+	defer cfg.stateMu.Unlock()
+	st := *cfg.state
+	st.Messages = slices.Clip(st.Messages)
+	return st
+}
+
+// history is the conversation part of stateSnapshot.
+func (cfg *loopConfig) history() []core.AgentMessage {
+	return cfg.stateSnapshot().Messages
 }
 
 // toolCallOrigin returns the MsgID of the assistant message that carries the
@@ -349,7 +368,7 @@ func contextExceeds(cfg *loopConfig, s requestSettings, toolSpecs []core.ToolSpe
 	if c == nil || !c.Enabled || s.model.MaxInput <= 0 {
 		return false
 	}
-	estimate := core.EstimateContextTokens(cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
+	estimate := core.EstimateContextTokens(cfg.history(), cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
 	return core.ShouldCompact(estimate.Tokens+extra, c.EffectiveWindow(s.model.MaxInput), *c)
 }
 
@@ -600,7 +619,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 		if !justPaused && compactionSettings != nil && compactionSettings.Enabled && cfg.model.MaxInput > 0 {
 			estimate := core.EstimateContextTokens(
-				cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
+				cfg.history(), cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
 			)
 			estimate.Tokens += ephemeralTokens
 			window := compactionSettings.EffectiveWindow(cfg.model.MaxInput)
@@ -613,7 +632,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			// The notice states what to do, not just the number: told only how
 			// many tokens remained, the model carried on as if nothing had
 			// changed in every measured run.
-			if strategyAllowsNotice(cfg) && !alreadyWarned(cfg.state.Messages, cfg.state.CompactionEpoch) {
+			if strategyAllowsNotice(cfg) && !alreadyWarned(cfg.history(), cfg.state.CompactionEpoch) {
 				if warn, remaining := core.ShouldWarnBeforeCompact(estimate.Tokens, window, *compactionSettings); warn {
 					// appendState, not a bare append: it takes stateMu and
 					// assigns the MsgID the tree needs to sync this message
@@ -699,16 +718,14 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				}
 
 				var originals []core.AgentMessage
+				cfg.stateMu.Lock()
 				if cfg.commitCompaction != nil {
 					// The commit records these as the originals the kept
 					// messages are cut from, so their identities must be final.
-					cfg.stateMu.Lock()
 					ensureMsgIDs(cfg.state.Messages)
-					cfg.stateMu.Unlock()
 					originals = append([]core.AgentMessage(nil), cfg.state.Messages...)
 				}
-				cfg.stateMu.Lock()
-				captured := cfg.state.Messages
+				captured := slices.Clip(cfg.state.Messages)
 				cfg.stateMu.Unlock()
 				result, compacted, sumModel, fallbackNotice, err := compactWithSessionFallback(
 					ctx, sumProvider, sumModel, compactOpts, fallbackNotice, cfg.provider, cfg.model, sessionOpts,
@@ -780,7 +797,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// the window minus the reserve, stop instead of sending it oversized.
 		if justPaused && cfg.background && cfg.settings != nil {
 			if c := cfg.settings().compaction; c != nil && c.Enabled && cfg.model.MaxInput > 0 {
-				estimate := core.EstimateContextTokens(cfg.state.Messages, cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
+				estimate := core.EstimateContextTokens(cfg.history(), cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
 				if estimate.Tokens+ephemeralTokens > cfg.model.MaxInput-c.ReserveTokens {
 					loopErr = fmt.Errorf("%w: a continuation cannot be compacted", ErrContextCapacity)
 					return loopErr
@@ -802,7 +819,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 
 		// Fire context hooks (can modify message list for this turn)
-		messages := cfg.hooks.FireContext(ctx, cfg.state.Messages)
+		messages := cfg.hooks.FireContext(ctx, cfg.history())
 
 		// Convert to LLM messages (filter custom messages)
 		var llmMessages []core.Message
@@ -972,7 +989,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			}
 
 			if ka := cfg.keepAlive(); ka != nil {
-				ka.sending(req, cfg.provider, cfg.state, cfg.requestRevision)
+				st := cfg.stateSnapshot()
+				ka.sending(req, cfg.provider, &st, cfg.requestRevision)
 			}
 			ch, err := cfg.provider.Stream(ctx, req)
 			if err != nil {

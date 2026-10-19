@@ -11,23 +11,28 @@ import (
 // AppendRecord may land while the loop prepares a request: a voice call that
 // ends records its minutes while the owner's run estimates and converts its
 // history. Run under -race. The gate parks the loop in the ephemeral context
-// callback, which runs right before the compaction estimate reads the history;
-// the record is appended while the loop sleeps there, after the release, so no
-// channel orders the write before the loop's reads: only the state lock may.
-// Both shapes of append are covered: into the backing array's spare capacity,
-// and through a reallocation.
+// callback, which runs right before the compaction estimate reads the history
+// or, with compaction off, right before the context hooks and the conversion
+// read it. The record is appended while the loop sleeps there, after the
+// release, so no channel orders the write before the loop's reads: only the
+// state lock may. Both shapes of append are covered: into the backing array's
+// spare capacity, and through a reallocation.
 func TestAppendRecordWhileLoopReadsHistory(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		spare int // free slots left after Send appends the prompt
+		name    string
+		spare   int // free slots left after Send appends the prompt
+		compact bool
 	}{
-		{"spare_capacity", 2},
-		{"realloc", 0},
+		{"estimate/spare_capacity", 2, true},
+		{"estimate/realloc", 0, true},
+		{"convert/spare_capacity", 2, false},
+		{"convert/realloc", 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			entered := make(chan int, 1)
 			release := make(chan struct{})
 			first := true
+			compaction := &core.CompactionSettings{Enabled: tc.compact, ReserveTokens: 1000, KeepRecent: 1000}
 			var ag *Agent
 			ag, err := New(AgentConfig{
 				Provider:     &alwaysProvider{text: "done"},
@@ -35,7 +40,7 @@ func TestAppendRecordWhileLoopReadsHistory(t *testing.T) {
 				SystemPrompt: "You are a test agent.",
 				Tools:        core.NewRegistry(),
 				MaxTurns:     10,
-				Compaction:   &core.CompactionSettings{Enabled: true, ReserveTokens: 1000, KeepRecent: 1000},
+				Compaction:   compaction,
 				EphemeralContext: func() *core.Message {
 					if !first {
 						return nil
@@ -58,8 +63,7 @@ func TestAppendRecordWhileLoopReadsHistory(t *testing.T) {
 
 			const n = 4
 			hist := make([]core.AgentMessage, 0, n+1+tc.spare)
-			for i := range n / 2 {
-				_ = i
+			for range n / 2 {
 				hist = append(hist,
 					core.WrapMessage(core.NewUserMessage("earlier question")),
 					core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("earlier answer")}, StopReason: "end_turn"}),

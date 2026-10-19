@@ -2,6 +2,7 @@ package agent
 
 import (
 	"log/slog"
+	"slices"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -16,7 +17,7 @@ func tryTrim(cfg *loopConfig, settings *core.CompactionSettings, estimateBefore,
 	// Plan over the same message slice the request would use, and from the
 	// watermark already reached: a trim only ever moves forward.
 	cfg.stateMu.Lock()
-	captured := cfg.state.Messages
+	captured := slices.Clip(cfg.state.Messages)
 	cfg.stateMu.Unlock()
 	plan, ok := core.PlanTrim(captured, settings.KeepRecent, cfg.state.TrimWatermarkMsgID)
 	if !ok {
@@ -44,10 +45,9 @@ func tryTrim(cfg *loopConfig, settings *core.CompactionSettings, estimateBefore,
 	// never have reached the tree. Handing over the originals lets the syncer
 	// persist them BEFORE the marker, which is what keeps the transcript
 	// showing what actually happened instead of the placeholders.
+	cfg.stateMu.Lock()
 	pre := make([]core.AgentMessage, len(cfg.state.Messages))
 	copy(pre, cfg.state.Messages)
-
-	cfg.stateMu.Lock()
 	cfg.state.Messages = keepAppendedRecords(plan.Messages, captured, cfg.state.Messages)
 	cfg.state.TrimWatermarkMsgID = plan.WatermarkMsgID
 	// Same epoch as a compaction: the anchored usage describes a request that

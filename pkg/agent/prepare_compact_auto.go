@@ -47,10 +47,11 @@ func runAutoPrepare(ctx context.Context, cfg *loopConfig, slot *sessioncheckpoin
 
 	// A copy: the preparation turn must not land in the conversation the
 	// summarizer is about to read, and must not outlive this call.
+	st := cfg.stateSnapshot()
 	scratch := &AgentState{
-		Messages:        append(append([]core.AgentMessage{}, cfg.state.Messages...), msg),
-		Model:           cfg.state.Model,
-		CompactionEpoch: cfg.state.CompactionEpoch,
+		Messages:        append(append([]core.AgentMessage{}, st.Messages...), msg),
+		Model:           st.Model,
+		CompactionEpoch: st.CompactionEpoch,
 	}
 
 	sub := *cfg
