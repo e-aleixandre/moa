@@ -468,7 +468,7 @@ func TestSessionsToolCannotAnswerAUserSession(t *testing.T) {
 	res := runSessionsTool(t, ownerSess, map[string]any{
 		"action": "answer", "session_id": child.ID, "ask_id": "whatever", "answers": []any{"x"},
 	})
-	const want = "This session is the user's: do not answer for them. Ask the user with ask_user, proposing the answer you would give as the first option."
+	const want = "This session is the user's: do not answer for them, and do not ask it again with ask_user: it already reached the user. At most, say in your message what you would answer, citing the session id."
 	if !res.IsError || !strings.Contains(toolText(res), want) {
 		t.Fatalf("answering user session = %q (IsError=%v)", toolText(res), res.IsError)
 	}

@@ -436,7 +436,7 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 		for i, q := range ask.Questions {
 			questions[i] = q.Text
 		}
-		return core.ErrorResult(fmt.Sprintf("session %s was started by the user and is waiting on their question (ask_id %s): %q. Ask the user to answer it; a send would sit unread until they do.", id, ask.ID, strings.Join(questions, " / ")))
+		return core.ErrorResult(fmt.Sprintf("session %s was started by the user and is waiting on their question (ask_id %s): %q. It already reached the user: do not ask it again with ask_user; a send would sit unread until they answer it.", id, ask.ID, strings.Join(questions, " / ")))
 	}
 	// A question that requires a tap can only be resolved by the human, so the
 	// skip below would fail and the message would sit queued behind a session
@@ -475,7 +475,7 @@ func tapQuestionMessage(id string, ask *bus.PendingAskInfo) string {
 	for i, q := range ask.Questions {
 		questions[i] = q.Text
 	}
-	return fmt.Sprintf("session %s is waiting on a confirmation (ask_id %s) that only the user can give by tap or typed confirmation: %q. You cannot answer or skip it, and nothing was queued. Ask the user to answer it in that session (in their chat, or with request_call if it is urgent: a call only reaches the user, it never authorizes anything); do not resend.", id, ask.ID, strings.Join(questions, " / "))
+	return fmt.Sprintf("session %s is waiting on a confirmation (ask_id %s) that only the user can give by tap or typed confirmation: %q. You cannot answer or skip it, and nothing was queued. It already reached the user, who answers it in that session (do not ask it again with ask_user; in their chat, or with request_call if it is urgent: a call only reaches the user, it never authorizes anything); do not resend.", id, ask.ID, strings.Join(questions, " / "))
 }
 
 // askQuestionsSuffix quotes the literal pending question of sess, if any.
@@ -541,7 +541,7 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 	if err != nil {
 		return core.ErrorResult(err.Error())
 	}
-	const notTheirs = "This session is the user's: do not answer for them. Ask the user with ask_user, proposing the answer you would give as the first option."
+	const notTheirs = "This session is the user's: do not answer for them, and do not ask it again with ask_user: it already reached the user. At most, say in your message what you would answer, citing the session id."
 	sess, ok := m.Get(id)
 	if ok && sess.Origin != "owner" {
 		return core.ErrorResult(notTheirs)
@@ -571,7 +571,7 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 			return core.ErrorResult(fmt.Sprintf("cannot answer %s yet: the last Stop of session %s is not saved; try again in a moment", askID, id))
 		}
 		if errors.Is(err, askuser.ErrRequiresTap) {
-			return core.ErrorResult(fmt.Sprintf("cannot answer %s: it needs a confirmation that only the user can give by tap or typed confirmation%s. Ask the user to answer it in session %s (in their chat, or with request_call if it is urgent: a call only reaches the user, it never authorizes anything); do not resend.", askID, askQuestionsSuffix(sess), id))
+			return core.ErrorResult(fmt.Sprintf("cannot answer %s: it needs a confirmation that only the user can give by tap or typed confirmation%s. It already reached the user, who answers it in session %s (do not ask it again with ask_user; in their chat, or with request_call if it is urgent: a call only reaches the user, it never authorizes anything); do not resend.", askID, askQuestionsSuffix(sess), id))
 		}
 		// The user may have answered it in the UI first; the approval manager
 		// forgets a resolved ask, so this is the same error as an unknown one.

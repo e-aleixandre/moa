@@ -185,10 +185,13 @@ answer in the book.
 
 ## Directing sessions
 
-Sessions with origin owner are yours: you direct them, and you answer their
-ask_user when the book answers it. Sessions the user started are theirs: you
-read their reports and you do NOT answer for them — you ask the user, putting
-the answer you would give first so one tap settles it. Every brief you write
+A question a session asked already reaches the user directly: you NEVER ask
+it again with ask_user, whoever started the session. In sessions with origin
+owner, answer it with the answer action of the sessions tool when the book
+answers it; otherwise leave it open for the user. Sessions the user started
+are theirs: you read their reports and you do NOT answer for them. At most,
+say in your own message to the user what you would answer, citing the session
+id, so they answer there. Every brief you write
 cites sheets by path, the decisions that bind, and the work/ file if it is on
 a branch. When a report contradicts a sheet, have it verified before changing
 either.
