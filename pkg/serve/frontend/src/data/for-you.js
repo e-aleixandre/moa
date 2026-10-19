@@ -16,10 +16,16 @@ export function forYouSlice(state) {
 }
 
 let inflight = null;
+// changes counts this client's own changes (an answer, a read): a GET that
+// started before one may describe the state before it, so its response is
+// dropped and a fresh GET follows it (reloadAfterChange).
+let changes = 0;
 export function loadForYou() {
   if (inflight) return inflight;
+  const seen = changes;
   inflight = api('GET', '/api/for-you')
     .then((res) => {
+      if (seen !== changes) return;
       const items = Array.isArray(res?.items) ? res.items : [];
       setState((s) => {
         const prev = forYouSlice(s);
@@ -35,6 +41,13 @@ export function loadForYou() {
   return inflight;
 }
 
+// reloadAfterChange marks a change of this client's and reads For you
+// again with a GET that starts after it, never one already in flight.
+function reloadAfterChange() {
+  changes++;
+  return inflight ? inflight.then(() => loadForYou()) : loadForYou();
+}
+
 // __resetForYouForTests forgets a load another test left in flight.
 export function __resetForYouForTests() {
   inflight = null;
@@ -48,7 +61,7 @@ export function forgetForYouItem(id) {
     const items = prev.items.filter((it) => it.id !== id);
     return items.length === prev.items.length ? null : { forYou: { ...prev, items } };
   });
-  loadForYou();
+  reloadAfterChange();
 }
 
 // unreadNewsCount — what sessions told the user that he has not read.
@@ -71,7 +84,8 @@ export function markNewsRead(shown) {
     const news = prev.news.map((n) => (!n.read_at && want.has(key(n)) ? { ...n, read_at: now } : n));
     return { forYou: { ...prev, news } };
   });
-  return api('POST', '/api/for-you/news/read', { items: acks }).catch(() => {}).finally(() => loadForYou());
+  changes++;
+  return api('POST', '/api/for-you/news/read', { items: acks }).catch(() => {}).finally(() => reloadAfterChange());
 }
 
 export function forYouCount(state) {
@@ -130,7 +144,7 @@ export function canStopQuestionCall(item, session) {
 
 // stopQuestionCall is that Stop: the call is cancelled, the question stays.
 export function stopQuestionCall(sessionId) {
-  return api('POST', `/api/sessions/${sessionId}/cancel`).finally(() => loadForYou());
+  return api('POST', `/api/sessions/${sessionId}/cancel`).finally(() => reloadAfterChange());
 }
 
 // callInfoFor merges what For you knows (fresher: refreshed on every call
