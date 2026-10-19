@@ -35,3 +35,13 @@
 /* On the phone the card opens in a bottom sheet; the sheet is the frame. */
 .aq-sheet-body { display: flex; flex-direction: column; gap: 8px; padding: 0 2px 8px; }
 .aq-sheet-body .aq-pin-tap { align-self: flex-start; }
+
+/* Phone: the question is never cut to a fragment. It wraps to three lines
+   (the sheet shows it whole) and its tap and call needs sit under it. */
+.aq-pin.is-phone .tk-pin-bar { align-items: center; padding-top: 8px; padding-bottom: 8px; }
+.aq-pin-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.aq-pin.is-phone .tk-pin-t {
+  white-space: normal; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.aq-pin-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: var(--zl-fs-meta); }

@@ -52,12 +52,31 @@ export function AsyncAskPin({ session, phone = false }) {
         ) : (
           <div class="tk-pin-bar" onClick={() => setOpen(true)}>
             <span class="aq-pin-ico"><MessageCircleQuestionMark size={15} aria-hidden="true" /></span>
-            <button type="button" class="tk-pin-t" onClick={(e) => { e.stopPropagation(); setOpen(true); }}>
-              {first.question}
-            </button>
-            {more > 0 && <span class="tk-pin-more tk-data" aria-label={`${more} more`}>+{more}</span>}
-            {tap && <span class="aq-pin-tap"><Lock size={12} aria-hidden="true" />Needs your tap</span>}
-            <QuestionCall item={call} />
+            {phone ? (
+              // The phone has one column: the question wraps (the sheet shows
+              // it whole) and what it needs goes on the line below it.
+              <span class="aq-pin-main">
+                <button type="button" class="tk-pin-t" onClick={(e) => { e.stopPropagation(); setOpen(true); }}>
+                  {first.question}
+                </button>
+                {(more > 0 || tap || call?.call_state) && (
+                  <span class="aq-pin-meta">
+                    {more > 0 && <span class="tk-pin-more tk-data" aria-label={`${more} more`}>+{more}</span>}
+                    {tap && <span class="aq-pin-tap"><Lock size={12} aria-hidden="true" />Needs your tap</span>}
+                    <QuestionCall item={call} />
+                  </span>
+                )}
+              </span>
+            ) : (
+              <>
+                <button type="button" class="tk-pin-t" onClick={(e) => { e.stopPropagation(); setOpen(true); }}>
+                  {first.question}
+                </button>
+                {more > 0 && <span class="tk-pin-more tk-data" aria-label={`${more} more`}>+{more}</span>}
+                {tap && <span class="aq-pin-tap"><Lock size={12} aria-hidden="true" />Needs your tap</span>}
+                <QuestionCall item={call} />
+              </>
+            )}
             <button type="button" class="tk-pin-done aq-pin-answer" onClick={(e) => { e.stopPropagation(); setOpen(true); }}>
               Answer
             </button>
