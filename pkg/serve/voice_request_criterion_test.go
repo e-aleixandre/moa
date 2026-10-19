@@ -13,13 +13,13 @@ import (
 func TestRequestCall_CriterionInDescriptionAndOwnerPrompt(t *testing.T) {
 	want := []string{
 		"like a PM who directs developers and keeps the person in charge informed",
-		"a blocker that needs their decision",
-		"a pile of news they should know",
-		"something has to be deployed",
-		"an important feature is finished",
-		"Do not call every time a turn ends",
-		"Everything else goes in writing",
-		"urgent only for an urgent blocker or something broken",
+		"a deployment or a decision blocks work and the user has not answered in writing for a while",
+		"something is broken in production",
+		"an OK that cuts work in progress",
+		"at the end of every turn",
+		"or about what you already asked recently",
+		"is work stopped or at risk until they answer",
+		"urgent only for broken production or a real time window",
 		"A call never authorizes anything",
 		"deployments and permissions still need the user's tap on screen",
 	}
