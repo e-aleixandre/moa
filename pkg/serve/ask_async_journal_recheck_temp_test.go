@@ -70,7 +70,7 @@ func TestRecheckRuntimeJournalRecoveryDoesNotRemoveAnActiveWrite(t *testing.T) {
 		go func() {
 			defer close(stopped)
 			resp := apiReq(t, e.srv, "POST", "/api/sessions/"+bid+"/cancel-and-recall", "")
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			var body map[string]any
 			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || resp.StatusCode != 200 || body["fence_error"] == nil {
 				t.Errorf("Stop did not report its failed SQLite fence: %d %+v %v", resp.StatusCode, body, err)
