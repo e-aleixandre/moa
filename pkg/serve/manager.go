@@ -928,6 +928,9 @@ type Manager struct {
 	// firing (see escalateQuestions); questionCallHooks are its test seams.
 	questionCalls     sync.Map
 	questionCallHooks questionCallHooks
+	// escalationCalls holds, by attempt, the calls the user answered for an
+	// escalation, while they last: Stop hangs them up.
+	escalationCalls sync.Map
 	// reports batches the run outcomes of a project's sessions and delivers
 	// them to its owner. nil when owners are unavailable (no config dir).
 	reports *reportCoordinator

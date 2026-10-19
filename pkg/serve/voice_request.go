@@ -83,6 +83,7 @@ type callRequest struct {
 	question   string           // the written fallback, what the call is about
 	invite     string           // the iPhones' ringing invitation (Ring), if any
 	why        string
+	call       *voiceCall // the call that answered it, once answered
 	stop       func() bool
 	// withdrawCtx ends, with errRequestWithdrawn, when the request is
 	// withdrawn; withdraw ends it.
@@ -337,13 +338,13 @@ var errRequestWithdrawn = errors.New("call request withdrawn")
 // never told before the call is registered.
 type callAnswer struct {
 	withdrawn context.Context
-	publish   func(register func() bool) (registered, withdrawn bool)
+	publish   func(c *voiceCall, register func() bool) (registered, withdrawn bool)
 }
 
 func (r *callRequestRegistry) answering(req *callRequest) *callAnswer {
 	return &callAnswer{
 		withdrawn: req.withdrawCtx,
-		publish: func(register func() bool) (bool, bool) {
+		publish: func(c *voiceCall, register func() bool) (bool, bool) {
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			if cur, ok := r.live[req.ID]; !ok || cur.State != crConnecting {
@@ -352,6 +353,7 @@ func (r *callRequestRegistry) answering(req *callRequest) *callAnswer {
 			if !register() {
 				return false, false
 			}
+			req.call = c
 			r.moveLocked(req, crAnswered, "")
 			return true, false
 		},

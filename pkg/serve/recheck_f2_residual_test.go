@@ -87,10 +87,10 @@ func TestRecheckF2_CommitAnsweredBeforeRegisterFails(t *testing.T) {
 	// Close wins and registration fails inside the decision.
 	answerTo := *invite.answerTo
 	publish := answerTo.publish
-	answerTo.publish = func(register func() bool) (bool, bool) {
+	answerTo.publish = func(c *voiceCall, register func() bool) (bool, bool) {
 		committed <- true
 		<-gate
-		return publish(register)
+		return publish(c, register)
 	}
 	invite.answerTo = &answerTo
 	table.mu.Unlock()

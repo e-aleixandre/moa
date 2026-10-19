@@ -45,7 +45,9 @@ type questionCallHooks struct {
 	// afterClaim runs once the attempt is committed, before anything rings.
 	// Returning false stops there, as if the process died.
 	afterClaim func(questionID, attempt string) bool
-	// finished sees how each attempt that rang (or would have) ended.
+	// finished sees how each attempt that rang (or would have) ended its
+	// ringing: done for an answered call, told when it is answered, while
+	// the call goes on.
 	finished func(questionID string, state tasks.CallState)
 }
 
@@ -138,6 +140,9 @@ func (m *Manager) cancelQuestionCalls(ctx context.Context, sessionID string) err
 	attempts, err := m.tasks.CancelSessionCalls(ctx, sessionID)
 	for _, a := range attempts {
 		m.callRequests().withdraw(a)
+		if c, ok := m.escalationCalls.Load(a); ok {
+			c.(*voiceCall).requestEnd("hangup")
+		}
 	}
 	if err != nil {
 		return err
@@ -267,6 +272,13 @@ func (m *Manager) fireQuestionCall(ctx context.Context, q tasks.Question) {
 	case state == crWritten:
 		end = tasks.CallMissed
 	}
+	onCall := state == crAnswered && req.call != nil
+	if onCall {
+		if h := m.questionCallHooks.finished; h != nil {
+			h(q.ID, end)
+		}
+		m.awaitQuestionCall(callCtx, q.ID, attempt, req.call)
+	}
 	if _, err := m.tasks.FinishCallEscalation(callCtx, q.ID, attempt, end); err != nil {
 		slog.Warn("question calls: recording the end failed", "question", q.ID, "state", end, "error", err)
 	}
@@ -274,9 +286,22 @@ func (m *Manager) fireQuestionCall(ctx context.Context, q tasks.Question) {
 		m.missedQuestionCall(sess, q.ID, own.Name)
 	}
 	m.questions.reproject(sess)
-	if h := m.questionCallHooks.finished; h != nil {
+	if h := m.questionCallHooks.finished; h != nil && !onCall {
 		h(q.ID, end)
 	}
+}
+
+// awaitQuestionCall waits for the call the user answered to end. Until then
+// the attempt stays calling: Stop finds it and hangs the call up, and a
+// process that dies meanwhile leaves it for the next one to mark interrupted.
+func (m *Manager) awaitQuestionCall(ctx context.Context, id, attempt string, c *voiceCall) {
+	m.escalationCalls.Store(attempt, c)
+	defer m.escalationCalls.Delete(attempt)
+	// A Stop that committed before the call was stored here did not see it.
+	if cur, err := m.tasks.GetQuestion(ctx, id); err == nil && cur.State == tasks.QuestionOpen && cur.CallState == tasks.CallCancelled && cur.CallAttempt == attempt {
+		c.requestEnd("hangup")
+	}
+	<-c.done
 }
 
 // deferQuestionCall puts an attempt that could not ring back to pending at

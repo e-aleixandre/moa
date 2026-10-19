@@ -16,6 +16,8 @@ import (
 //   - answering, closing or Stop moves pending or calling to cancelled in the
 //     same transaction as the change that made the call pointless, and hands
 //     back the attempt so a ringing call is withdrawn;
+//   - a call the user answered stays calling until the call itself ends, then
+//     done: while it lasts, Stop and a restart still see it;
 //   - a call that ends unanswered is missed, terminal: never rearmed;
 //   - a call claimed by a process that died is interrupted, terminal: whether
 //     it rang is unknown, so it is never replayed.

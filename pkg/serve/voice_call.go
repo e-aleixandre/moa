@@ -388,7 +388,7 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 	}
 	registered, lost := false, false
 	if answer != nil {
-		registered, lost = answer.publish(func() bool { return r.register(c, plan, model) })
+		registered, lost = answer.publish(c, func() bool { return r.register(c, plan, model) })
 	} else {
 		registered = r.register(c, plan, model)
 	}
