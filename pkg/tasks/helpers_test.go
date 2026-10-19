@@ -69,3 +69,8 @@ func afterArchive(r *Repo) func() time.Time {
 	at := r.now().Add(8 * 24 * time.Hour)
 	return func() time.Time { return at }
 }
+
+// agentDone closes an agent's own task with a valid closing note.
+func agentDone(r *Repo, a Actor, id int64) (AgentTask, error) {
+	return r.AgentClose(bg, a, id, "", "Done.")
+}

@@ -220,13 +220,20 @@ func TestCommentNeverNotifiesAuthor(t *testing.T) {
 		t.Fatalf("comment_count = %d", got.CommentCount)
 	}
 
-	// D8: no thread on a plain checklist task, and a stranger cannot comment.
+	// A checklist task has a thread (its log); a stranger cannot comment.
 	own, _ := r.AgentCreate(bg, actor("s1", "p"), AgentInput{Title: "mine"})
-	if _, err := r.AgentComment(bg, actor("s1", "p"), own.ID, "x"); !errors.Is(err, ErrInvalid) {
+	if _, err := r.AgentComment(bg, actor("s1", "p"), own.ID, "x"); err != nil {
 		t.Fatalf("comment on a checklist task: %v", err)
 	}
-	if _, err := r.HumanComment(bg, own.ID, "x"); !errors.Is(err, ErrInvalid) {
+	if _, err := r.AgentComment(bg, actor("s2", "p"), own.ID, "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a stranger commented on a checklist task: %v", err)
+	}
+	if _, err := r.HumanComment(bg, own.ID, "x"); err != nil {
 		t.Fatalf("user comment on a checklist task: %v", err)
+	}
+	backlog, _ := r.Create(bg, CreateInput{Title: "later", Place: PlaceBacklog, ProjectKey: "p"})
+	if _, err := r.HumanComment(bg, backlog.ID, "x"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("comment on a backlog task: %v", err)
 	}
 	if _, err := r.AgentComment(bg, actor("s-other", "pinfra"), rec.ID, "x"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("stranger comment: %v", err)
@@ -293,7 +300,7 @@ func TestHandoffDoneRequiresNote(t *testing.T) {
 			t.Fatalf("close %q without a note: %v", outcome, err)
 		}
 	}
-	if _, err := r.AgentDone(bg, ownerActor(infra), rec.ID); !errors.Is(err, ErrInvalid) {
+	if _, err := r.AgentClose(bg, ownerActor(infra), rec.ID, "", ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("plain done on a task between owners: %v", err)
 	}
 	if _, err := r.AgentClose(bg, ownerActor(infra), rec.ID, "maybe", "x"); !errors.Is(err, ErrInvalid) {
@@ -448,7 +455,7 @@ func TestSenderCannotEditOrClose(t *testing.T) {
 	if _, err := r.AgentUpdate(bg, a, rec.ID, AgentPatch{Title: ptr("changed")}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("sender edit: %v", err)
 	}
-	if _, err := r.AgentDone(bg, a, rec.ID); !errors.Is(err, ErrForbidden) {
+	if _, err := agentDone(r, a, rec.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("sender done: %v", err)
 	}
 	if _, err := r.AgentClose(bg, a, rec.ID, OutcomeDone, "x"); !errors.Is(err, ErrForbidden) {

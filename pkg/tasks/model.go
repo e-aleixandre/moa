@@ -103,6 +103,9 @@ type Task struct {
 	DependsOn   []int  `json:"depends_on,omitempty"`
 	CreatedAt   int64  `json:"created_at,omitempty"`   // unix millis
 	CompletedAt int64  `json:"completed_at,omitempty"` // unix millis
+	// The closing note: the summary of what was done (omitempty, like all
+	// additions to this projection).
+	CompletionNote string `json:"completion_note,omitempty"`
 
 	// Set only on a task between owners (or one with a thread); names and
 	// state only, never a session or project of the other owner.

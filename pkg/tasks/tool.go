@@ -5,7 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -84,12 +89,24 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 				},
 				"note": {
 					"type": "string",
-					"description": "For done: the result, or the reason for cant_do. Required on a task another owner sent you"
+					"description": "For done, required: 1-4 lines. The first says what is true now (\"Deployed X at 22:25 UTC\"); the next ones, how you checked it and the evidence (commit, PR, time). For a task another owner sent you: the result, or the reason for cant_do"
+				},
+				"search": {
+					"type": "string",
+					"description": "For list: only tasks whose title, description, subtasks or closing note contain this text (accents and case ignored). Also finds done and archived tasks"
+				},
+				"limit": {
+					"type": "integer",
+					"description": "For list: at most this many tasks (default 50, maximum 200)"
+				},
+				"archived": {
+					"type": "boolean",
+					"description": "For list: also include archived tasks (done more than 7 days ago); default false"
 				},` + toParam(ownerSession) + `
 				"status": {
 					"type": "string",
-					"enum": ["pending", "in_progress"],
-					"description": "New status for update; use done to complete"
+					"enum": ["pending", "in_progress", "open", "done", "all"],
+					"description": "For update: pending or in_progress (use the done action to complete). For list: open, done or all (omitted: open tasks plus those done in the last 24 hours, one line each)"
 				},
 				"depends_on": {
 					"type": "array",
@@ -144,7 +161,7 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 			case "claim":
 				res, err = toolClaim(ctx, repo, actor, params)
 			case "list":
-				res, err = toolList(ctx, repo, actor)
+				res, err = toolList(ctx, repo, actor, params)
 			case "get":
 				res, err = toolGet(ctx, repo, actor, params)
 			default:
@@ -164,7 +181,10 @@ const toolDescription = "Your task checklist, your requests to the owner, and yo
 	"create with when schedules the task to run later or repeat, in this session only; only when the user asks to schedule, otherwise omit when. when is plain text such as " +
 	"\"in 20m\", \"tomorrow at 09:00\", \"monday at 09:00\", \"2026-10-05 15:30\" or \"every weekday at 08:30\" " +
 	"(use 09:00-style hours: a bare \"at 9\" is ambiguous and nothing is scheduled). Each run arrives in this session as a new task. " +
-	"comment writes in the thread of a task between owners or of your request; a task another owner sent you is closed with done, an outcome and a note. " +
+	"list shows what is open and what was done in the last 24 hours, one line each; use status, search, limit or archived to look further and get for one task in full. " +
+	"done needs a note of 1-4 lines: the first says what is true now, the next ones how you checked it and the evidence (commit, PR, time). " +
+	"comment writes in the thread of any task on your checklist, of a task between owners or of your request: use it for milestones the user would want to read later (a decision, a deploy, a check), not every step. " +
+	"A task another owner sent you is closed with done, an outcome and a note. " +
 	"You only ever see your own checklist and requests plus the project's backlog and the tasks you scheduled."
 
 const toolOwnerDescription = " send gives a task to another project's owner (to, title, description, subtasks); " +
@@ -491,47 +511,232 @@ func joinIDs(ids []int64) string {
 	return strings.Join(parts, ", ")
 }
 
-func toolList(ctx context.Context, repo *Repo, actor Actor) (core.Result, error) {
-	view, err := repo.AgentList(ctx, actor)
+const (
+	listDefaultLimit = 50
+	listMaxLimit     = 200
+	listOpenDescCut  = 200
+	listNoteCut      = 110
+	listRecent       = 24 * time.Hour
+)
+
+// listQuery is list's optional filters. The zero value is the default view:
+// what is open plus what was done in the last 24 hours.
+type listQuery struct {
+	status   string // "", "open", "done" or "all"
+	search   string // folded; also reaches archived tasks
+	limit    int
+	archived bool
+}
+
+func parseListQuery(params map[string]any) (listQuery, error) {
+	q := listQuery{limit: listDefaultLimit}
+	if v, _ := params["status"].(string); strings.TrimSpace(v) != "" {
+		q.status = strings.ToLower(strings.TrimSpace(v))
+		switch q.status {
+		case "open", "done", "all":
+		case "pending", "in_progress":
+			// update's values, which a strict-schema model fills in for
+			// every action: no filter.
+			q.status = ""
+		default:
+			return q, invalid("status must be %q, %q or %q (or omitted: open tasks plus those done in the last 24 hours)", "open", "done", "all")
+		}
+	}
+	if v, _ := params["search"].(string); strings.TrimSpace(v) != "" {
+		q.search = fold(v)
+	}
+	if n, ok := toInt(params["limit"]); ok && n > 0 {
+		q.limit = min(n, listMaxLimit)
+	}
+	q.archived, _ = params["archived"].(bool)
+	return q, nil
+}
+
+// fold lower-cases and strips accents, so "ALBARAN" finds "Albarán".
+func fold(s string) string {
+	var sb strings.Builder
+	for _, r := range norm.NFD.String(strings.ToLower(s)) {
+		if !unicode.Is(unicode.Mn, r) {
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
+}
+
+func (q listQuery) matches(t AgentTask) bool {
+	if q.search == "" {
+		return true
+	}
+	hay := []string{t.Title, t.Description, t.CompletionNote}
+	for _, s := range t.Subtasks {
+		hay = append(hay, s.Title)
+	}
+	return strings.Contains(fold(strings.Join(hay, "\n")), q.search)
+}
+
+// shows says whether a task of the checklist, requests or sent lists is in
+// the view: now is the clock, for the 24-hour window of the default.
+func (q listQuery) shows(t AgentTask, now time.Time) bool {
+	open := t.Status != StatusDone
+	if t.Archived && !q.archived && q.search == "" {
+		return false
+	}
+	switch q.status {
+	case "open":
+		if !open {
+			return false
+		}
+	case "done":
+		if open {
+			return false
+		}
+	case "":
+		if q.search == "" && !open && now.UnixMilli()-t.CompletedAt > listRecent.Milliseconds() {
+			return false
+		}
+	}
+	return q.matches(t)
+}
+
+// cut shortens s to n runes with an ellipsis.
+func cut(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+// noteSummary is the first line of a closing note, without markdown marks.
+func noteSummary(note string) string {
+	for _, l := range strings.Split(note, "\n") {
+		l = strings.TrimSpace(strings.NewReplacer("**", "", "__", "", "`", "").Replace(l))
+		l = strings.TrimLeft(l, "#> ")
+		if l != "" {
+			return cut(l, listNoteCut)
+		}
+	}
+	return ""
+}
+
+// writeDoneLine is a done task in list: one line, whatever it holds.
+func writeDoneLine(sb *strings.Builder, t AgentTask) {
+	fmt.Fprintf(sb, "\n☑ #%d: %s", t.ID, t.Title)
+	if t.Archived {
+		sb.WriteString(" [archived]")
+	}
+	if sum := noteSummary(t.CompletionNote); sum != "" {
+		fmt.Fprintf(sb, " — %s", sum)
+	}
+	switch t.CommentCount {
+	case 0:
+	case 1:
+		sb.WriteString(" (1 comment)")
+	default:
+		fmt.Fprintf(sb, " (%d comments)", t.CommentCount)
+	}
+}
+
+func writeListed(sb *strings.Builder, t AgentTask) {
+	if t.Status == StatusDone {
+		writeDoneLine(sb, t)
+		return
+	}
+	t.Description = cut(t.Description, listOpenDescCut)
+	t.CompletionNote = ""
+	writeTask(sb, t)
+	if t.CommentCount > 0 {
+		fmt.Fprintf(sb, "\n    (%d comment%s)", t.CommentCount, map[bool]string{true: "", false: "s"}[t.CommentCount == 1])
+	}
+}
+
+func toolList(ctx context.Context, repo *Repo, actor Actor, params map[string]any) (core.Result, error) {
+	q, err := parseListQuery(params)
+	if err != nil {
+		return core.Result{}, err
+	}
+	view, err := repo.agentList(ctx, actor, q.archived || q.search != "")
 	if err != nil {
 		return core.Result{}, err
 	}
 	if len(view.Checklist)+len(view.Requests)+len(view.Backlog)+len(view.Scheduled)+len(view.Sent) == 0 {
 		return core.TextResult("No tasks yet."), nil
 	}
+	now := repo.now()
+	hiddenDone := 0
+	pick := func(list []AgentTask) []AgentTask {
+		var out []AgentTask
+		var done []AgentTask
+		for _, t := range list {
+			if q.shows(t, now) {
+				if t.Status == StatusDone {
+					done = append(done, t)
+				} else {
+					out = append(out, t)
+				}
+			} else if t.Status == StatusDone && !t.Archived && q.status == "" && q.search == "" {
+				hiddenDone++
+			}
+		}
+		sort.SliceStable(done, func(i, j int) bool { return done[i].CompletedAt > done[j].CompletedAt })
+		return append(out, done...)
+	}
+	// Backlog and templates are never done: they show unless the view is
+	// only done tasks, and a search narrows them like the rest.
+	rest := func(list []AgentTask) []AgentTask {
+		if q.status == "done" {
+			return nil
+		}
+		var out []AgentTask
+		for _, t := range list {
+			if q.matches(t) {
+				out = append(out, t)
+			}
+		}
+		return out
+	}
+	checklist, requests, sent := pick(view.Checklist), pick(view.Requests), pick(view.Sent)
+	backlog, scheduled := rest(view.Backlog), rest(view.Scheduled)
+
 	var sb strings.Builder
-	if len(view.Checklist) > 0 {
+	budget, over := q.limit, 0
+	section := func(head string, list []AgentTask, write func(AgentTask)) {
+		if len(list) == 0 {
+			return
+		}
+		sb.WriteString(head)
+		for _, t := range list {
+			if budget == 0 {
+				over++
+				continue
+			}
+			budget--
+			write(t)
+		}
+	}
+	if len(checklist) > 0 {
 		done, total := progress(view.Checklist)
-		fmt.Fprintf(&sb, "Tasks (%d/%d done):\n", done, total)
-		for _, t := range view.Checklist {
-			writeTask(&sb, t)
-		}
+		section(fmt.Sprintf("Tasks (%d/%d done):", done, total), checklist, func(t AgentTask) { writeListed(&sb, t) })
 	}
-	if len(view.Requests) > 0 {
-		sb.WriteString("\n\nYour requests to the owner:")
-		for _, t := range view.Requests {
-			writeTask(&sb, t)
-		}
+	section("\n\nYour requests to the owner:", requests, func(t AgentTask) { writeListed(&sb, t) })
+	section("\n\nBacklog you can claim (your project):", backlog, func(t AgentTask) { writeTask(&sb, t) })
+	section("\n\nSent to other owners:", sent, func(t AgentTask) {
+		fmt.Fprintf(&sb, "\n- #%d → %s: %s — %s", t.ID, t.To, t.Title, handoffStatus(t))
+	})
+	section("\n\nYour scheduled tasks (each run arrives here as a new task):", scheduled, func(t AgentTask) {
+		fmt.Fprintf(&sb, "\n- #%d: %s — %s", t.ID, t.Title, describeSchedule(t))
+	})
+	if over > 0 {
+		fmt.Fprintf(&sb, "\n\n%d more — narrow with search or status (limit is %d, at most %d).", over, q.limit, listMaxLimit)
 	}
-	if len(view.Backlog) > 0 {
-		sb.WriteString("\n\nBacklog you can claim (your project):")
-		for _, t := range view.Backlog {
-			writeTask(&sb, t)
-		}
+	if hiddenDone > 0 {
+		fmt.Fprintf(&sb, "\n\n%d older done task%s hidden — list with status \"done\" or search to see %s; get shows one in full.",
+			hiddenDone, map[bool]string{true: "", false: "s"}[hiddenDone == 1], map[bool]string{true: "it", false: "them"}[hiddenDone == 1])
 	}
-	if len(view.Sent) > 0 {
-		sb.WriteString("\n\nSent to other owners:")
-		for _, t := range view.Sent {
-			fmt.Fprintf(&sb, "\n- #%d → %s: %s — %s", t.ID, t.To, t.Title, handoffStatus(t))
-		}
+	out := strings.TrimSpace(sb.String())
+	if out == "" {
+		out = "No tasks match."
 	}
-	if len(view.Scheduled) > 0 {
-		sb.WriteString("\n\nYour scheduled tasks (each run arrives here as a new task):")
-		for _, t := range view.Scheduled {
-			fmt.Fprintf(&sb, "\n- #%d: %s — %s", t.ID, t.Title, describeSchedule(t))
-		}
-	}
-	return core.TextResult(strings.TrimSpace(sb.String())), nil
+	return core.TextResult(out), nil
 }
 
 func handoffStatus(t AgentTask) string {

@@ -43,7 +43,7 @@ func TestAgentSeesItsRequestButNotNotesOrOtherRequests(t *testing.T) {
 	if _, err := r.AgentUpdate(bg, a, private.ID, AgentPatch{Title: ptr("mine now")}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("update of a private note: %v", err)
 	}
-	if _, err := r.AgentDone(bg, a, private.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := agentDone(r, a, private.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("done of a private note: %v", err)
 	}
 	if got, _ := r.Get(bg, private.ID); got.Title != "private plan: fire the contractor" || got.Status != StatusPending {
@@ -108,10 +108,10 @@ func TestSeeingIsNotEditing(t *testing.T) {
 	}
 	// …but A can neither finish the backlog task without claiming it, nor its
 	// own request to the owner.
-	if _, err := r.AgentDone(bg, a, bl.ID); !errors.Is(err, ErrForbidden) {
+	if _, err := agentDone(r, a, bl.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("done on backlog: %v", err)
 	}
-	if _, err := r.AgentDone(bg, a, req.ID); !errors.Is(err, ErrForbidden) {
+	if _, err := agentDone(r, a, req.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("done on own request: %v", err)
 	}
 	if _, err := r.AgentUpdate(bg, a, bl.ID, AgentPatch{Title: ptr("hijacked")}); !errors.Is(err, ErrForbidden) {
@@ -236,15 +236,15 @@ func TestDoneTasksReachTheAgentUntilArchived(t *testing.T) {
 	r := newRepo(t)
 	a := actor("A", "p")
 	tk, _ := r.AgentCreate(bg, a, AgentInput{Title: "ship"})
-	if _, err := r.AgentDone(bg, a, tk.ID); err != nil {
+	if _, err := agentDone(r, a, tk.ID); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := r.AgentList(bg, a); len(v.Checklist) != 1 || v.Checklist[0].Status != StatusDone {
 		t.Fatalf("done task should stay listed: %+v", v.Checklist)
 	}
-	// Completing twice is a no-op, and an agent cannot reach an archived task.
+	// Completing twice is a no-op, and an archived task is out of the list but still readable by its owner with get.
 	before, _ := r.Revision(bg)
-	if _, err := r.AgentDone(bg, a, tk.ID); err != nil {
+	if _, err := agentDone(r, a, tk.ID); err != nil {
 		t.Fatal(err)
 	}
 	if after, _ := r.Revision(bg); after != before {
@@ -254,8 +254,11 @@ func TestDoneTasksReachTheAgentUntilArchived(t *testing.T) {
 	if v, _ := r.AgentList(bg, a); len(v.Checklist) != 0 {
 		t.Fatalf("archived task still listed: %+v", v.Checklist)
 	}
-	if _, err := r.AgentGet(bg, a, tk.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("archived get: %v", err)
+	if got, err := r.AgentGet(bg, a, tk.ID); err != nil || got.ID != tk.ID || !got.Archived {
+		t.Fatalf("an agent still gets its own archived task: %+v %v", got, err)
+	}
+	if _, err := r.AgentGet(bg, actor("stranger", "p"), tk.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("archived get by a stranger: %v", err)
 	}
 }
 

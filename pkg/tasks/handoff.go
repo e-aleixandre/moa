@@ -264,10 +264,13 @@ func threadParties(t *Record) []string {
 	return out
 }
 
-// hasThread says whether a task takes comments: tasks between owners and an
-// agent's requests to the user. Checklists, assignments and notes do not.
+// hasThread says whether a task takes comments: tasks between owners, an
+// agent's requests to the user, and the tasks on an agent's checklist, where
+// the thread is the task's log. Backlog and private notes do not.
 func hasThread(t *Record) bool {
-	return t.Handoff != nil || (t.Place == PlaceYou && t.RequesterSessionID != "" && !t.template)
+	return t.Handoff != nil ||
+		(t.Place == PlaceYou && t.RequesterSessionID != "" && !t.template) ||
+		(t.Place == PlaceAgent && t.AssigneeSessionID != "")
 }
 
 // AgentComment writes in the thread of a task the agent reads and takes part
@@ -278,7 +281,7 @@ func (r *Repo) AgentComment(ctx context.Context, a Actor, id int64, body string)
 			return Comment{}, notAvailable(id)
 		}
 		if !hasThread(cur) {
-			return Comment{}, invalid("comments are for tasks between owners and for your requests to the user")
+			return Comment{}, invalid("comments are for the tasks on your checklist, tasks between owners and your requests to the user")
 		}
 		c := Comment{AuthorKind: AuthorSession, AuthorSessionID: a.SessionID}
 		if h := cur.Handoff; h != nil {
@@ -295,7 +298,7 @@ func (r *Repo) AgentComment(ctx context.Context, a Actor, id int64, body string)
 func (r *Repo) HumanComment(ctx context.Context, id int64, body string) (Comment, error) {
 	return r.comment(ctx, id, body, func(cur *Record) (Comment, error) {
 		if !hasThread(cur) {
-			return Comment{}, invalid("comments are for tasks between owners and for requests from agents")
+			return Comment{}, invalid("comments are for tasks on an agent's checklist, tasks between owners and requests from agents")
 		}
 		return Comment{AuthorKind: AuthorHuman}, nil
 	})
@@ -412,6 +415,23 @@ func agentThread(ctx context.Context, q querier, a Actor, id int64) ([]ThreadEnt
 	return out, nil
 }
 
+// checkClosingNote holds the closing note of an agent's own task to the format
+// the user reads later as the task's summary: 1 to 4 lines, the first saying
+// what is true now.
+func checkClosingNote(id int64, note string) error {
+	lines := 0
+	for _, l := range strings.Split(note, "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines++
+		}
+	}
+	if lines >= 1 && lines <= 4 {
+		return nil
+	}
+	return invalid("task #%d: close it with a note of 1–4 lines. The first says what is true now (\"Deployed X at 22:25 UTC\", \"Fixed Y\"); "+
+		"the next ones say how you checked it and the evidence (commit, PR, time), not the steps. Add a comment for a milestone, not for every step", id)
+}
+
 // AgentClose completes a task on the agent's checklist. A task another owner
 // sent needs an outcome (done by default) and a note, which the sender reads;
 // on anything else only the default outcome (done) is accepted, and ignored. The sender of a task can read it
@@ -441,7 +461,12 @@ func (r *Repo) AgentClose(ctx context.Context, a Actor, id int64, outcome, note 
 				return false, invalid("task #%d was sent by %s: close it with a note (the result for done, the reason for cant_do)",
 					id, cur.Handoff.FromOwnerName)
 			}
-		} else if outcome != "" && outcome != OutcomeDone {
+		} else if cur.Status != StatusDone {
+			if err := checkClosingNote(id, note); err != nil {
+				return false, err
+			}
+		}
+		if cur.Handoff == nil && outcome != "" && outcome != OutcomeDone {
 			// "done" is the schema default that models fill in; it carries
 			// nothing here. cant_do cannot be represented on an own task.
 			return false, invalid("outcome %q is only for tasks sent by another owner: this task is your own, so drop outcome, or delete or leave it open if you cannot do it", outcome)

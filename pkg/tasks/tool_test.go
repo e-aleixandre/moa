@@ -49,7 +49,7 @@ func TestToolChecklistFlowKeepsTheFamiliarShape(t *testing.T) {
 	if out != "Updated task #1: write more tests" {
 		t.Fatalf("update: %q", out)
 	}
-	out, _ = run(t, sc, map[string]any{"action": "done", "id": float64(1)})
+	out, _ = run(t, sc, map[string]any{"action": "done", "id": float64(1), "note": "Wrote them."})
 	if !strings.Contains(out, "Marked task #1 as done (1/3 complete)") {
 		t.Fatalf("done: %q", out)
 	}
@@ -169,14 +169,14 @@ func TestScopeProjectionKeepsTheOldJSONFields(t *testing.T) {
 	sc := scopeFor(r, "A", "p")
 	run(t, sc, map[string]any{"action": "create", "title": "one", "description": "d"})
 	run(t, sc, map[string]any{"action": "create", "title": "two", "depends_on": []any{float64(1)}})
-	run(t, sc, map[string]any{"action": "done", "id": float64(1)})
+	run(t, sc, map[string]any{"action": "done", "id": float64(1), "note": "ok"})
 
 	b, _ := json.Marshal(sc.Checklist())
 	var raw []map[string]any
 	if err := json.Unmarshal(b, &raw); err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{"id": true, "title": true, "description": true, "status": true, "depends_on": true, "created_at": true, "completed_at": true}
+	allowed := map[string]bool{"id": true, "title": true, "description": true, "status": true, "depends_on": true, "created_at": true, "completed_at": true, "completion_note": true}
 	for _, item := range raw {
 		for k := range item {
 			if !allowed[k] {
@@ -192,7 +192,7 @@ func TestScopeProjectionKeepsTheOldJSONFields(t *testing.T) {
 	if _, changed := sc.ChangedChecklist(); changed {
 		t.Fatal("no change since Checklist(), yet reported")
 	}
-	run(t, sc, map[string]any{"action": "done", "id": float64(2)})
+	run(t, sc, map[string]any{"action": "done", "id": float64(2), "note": "ok"})
 	if _, changed := sc.ChangedChecklist(); !changed {
 		t.Fatal("change not reported")
 	}

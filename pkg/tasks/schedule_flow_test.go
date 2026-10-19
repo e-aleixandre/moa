@@ -154,7 +154,7 @@ func TestScheduleTemplateVisibility(t *testing.T) {
 	if _, err := r.AgentUpdate(bg, me, tmpl.ID, AgentPatch{Title: ptr("renamed")}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("agent edited a template: %v", err)
 	}
-	if _, err := r.AgentDone(bg, me, tmpl.ID); !errors.Is(err, ErrForbidden) {
+	if _, err := agentDone(r, me, tmpl.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("agent completed a template: %v", err)
 	}
 	ov, err := r.AgentList(bg, other)
@@ -750,7 +750,7 @@ func TestScheduleAssignmentOutboxRollback(t *testing.T) {
 // completePaths completes a run's child through each status path.
 var completePaths = map[string]func(r *Repo, child Record) error{
 	"agent done": func(r *Repo, child Record) error {
-		_, err := r.AgentDone(bg, actor(child.AssigneeSessionID, child.ProjectKey), child.ID)
+		_, err := agentDone(r, actor(child.AssigneeSessionID, child.ProjectKey), child.ID)
 		return err
 	},
 	"owner update": func(r *Repo, child Record) error {
@@ -796,7 +796,7 @@ func TestScheduleChildCompletionAtomic(t *testing.T) {
 			// Done again is a no-op everywhere.
 			rev = mustRev(t, r)
 			_ = r.CompleteForSession(bg, "s1", child.ID)
-			if _, err := r.AgentDone(bg, actor("s1", "p"), child.ID); err != nil {
+			if _, err := agentDone(r, actor("s1", "p"), child.ID); err != nil {
 				t.Fatal(err)
 			}
 			if mustRev(t, r) != rev || mustOcc(t, r, o.ID).Revision != got.Revision {

@@ -10,13 +10,18 @@ import (
 // involved, and never the identity of a task it cannot read. A dependency on
 // such a task is only a count.
 type AgentTask struct {
-	ID             int64     `json:"id"`
-	Title          string    `json:"title"`
-	Description    string    `json:"description,omitempty"`
-	Status         string    `json:"status"`
-	Place          Place     `json:"place"`
-	CompletionNote string    `json:"completion_note,omitempty"`
-	Subtasks       []Subtask `json:"subtasks,omitempty"`
+	ID             int64  `json:"id"`
+	Title          string `json:"title"`
+	Description    string `json:"description,omitempty"`
+	Status         string `json:"status"`
+	Place          Place  `json:"place"`
+	CompletionNote string `json:"completion_note,omitempty"`
+	CompletedAt    int64  `json:"completed_at,omitempty"`
+	// Archived marks a task past the archive window; only list's archived and
+	// search options (and get) reach it.
+	Archived     bool      `json:"archived,omitempty"`
+	CommentCount int       `json:"comment_count,omitempty"`
+	Subtasks     []Subtask `json:"subtasks,omitempty"`
 	// WaitsFor lists readable tasks this one waits for.
 	WaitsFor []int64 `json:"waits_for,omitempty"`
 	// PrivateBlockers counts open tasks this one waits for that the agent
@@ -81,7 +86,13 @@ type AgentPatch struct {
 // reads reports whether the actor may read the task. The rule is here, in one
 // place, and applied inside the same transaction as the operation.
 func (a Actor) reads(t *Record) bool {
-	if t.ArchivedAt != 0 || a.SessionID == "" {
+	return t.ArchivedAt == 0 && a.readsArchived(t)
+}
+
+// readsArchived is reads without the archive window: the same ownership rule,
+// for the tasks an agent looks up (search, get) after they were archived.
+func (a Actor) readsArchived(t *Record) bool {
+	if a.SessionID == "" {
 		return false
 	}
 	switch t.Place {
@@ -159,7 +170,8 @@ func (a Actor) project(ctx context.Context, q querier, recs []Record) ([]AgentTa
 	for _, t := range recs {
 		at := AgentTask{
 			ID: t.ID, Title: t.Title, Description: t.Description, Status: t.Status, Place: t.Place,
-			CompletionNote: t.CompletionNote, Subtasks: t.Subtasks,
+			CompletionNote: t.CompletionNote, CompletedAt: t.CompletedAt, Archived: t.ArchivedAt != 0,
+			CommentCount: t.CommentCount, Subtasks: t.Subtasks,
 			When: t.When, TZ: t.TZ, Next: t.Next, ScheduleState: t.ScheduleState,
 		}
 		if h := t.Handoff; h != nil {
@@ -193,6 +205,16 @@ func (a Actor) project(ctx context.Context, q querier, recs []Record) ([]AgentTa
 // archived), its own requests to the owner, the tasks it sent to other owners,
 // and the pending backlog of its project. Nothing else.
 func (r *Repo) AgentList(ctx context.Context, a Actor) (AgentView, error) {
+	return r.agentList(ctx, a, false)
+}
+
+// agentList is AgentList; withArchived also loads what was archived (the
+// agent's own checklist, requests and sent tasks: never the backlog).
+func (r *Repo) agentList(ctx context.Context, a Actor, withArchived bool) (AgentView, error) {
+	live := "archived_at IS NULL"
+	if withArchived {
+		live = "1 = 1"
+	}
 	view := AgentView{Checklist: []AgentTask{}, Requests: []AgentTask{}, Backlog: []AgentTask{}}
 	if a.SessionID == "" {
 		return view, nil
@@ -214,14 +236,14 @@ func (r *Repo) AgentList(ctx context.Context, a Actor) (AgentView, error) {
 		}
 		return a.project(ctx, tx, recs)
 	}
-	if view.Checklist, err = load("place = 'agent' AND assignee_session_id = ? AND archived_at IS NULL", a.SessionID); err != nil {
+	if view.Checklist, err = load("place = 'agent' AND assignee_session_id = ? AND "+live, a.SessionID); err != nil {
 		return view, err
 	}
-	if view.Requests, err = load(`place = 'you' AND requester_session_id = ? AND archived_at IS NULL
+	if view.Requests, err = load(`place = 'you' AND requester_session_id = ? AND `+live+`
 		AND id NOT IN (SELECT task_id FROM task_handoffs)`, a.SessionID); err != nil {
 		return view, err
 	}
-	if view.Sent, err = load(`archived_at IS NULL
+	if view.Sent, err = load(live+`
 		AND id IN (SELECT task_id FROM task_handoffs WHERE from_session_id = ?)`, a.SessionID); err != nil {
 		return view, err
 	}
@@ -251,7 +273,7 @@ func (r *Repo) AgentGet(ctx context.Context, a Actor, id int64) (AgentTask, erro
 	if err != nil {
 		return AgentTask{}, err
 	}
-	if !a.reads(&rec) {
+	if !a.readsArchived(&rec) {
 		return AgentTask{}, notAvailable(id)
 	}
 	pr, err := a.project(ctx, rd, []Record{rec})
@@ -419,13 +441,6 @@ func hiddenWaits(ctx context.Context, q querier, a Actor, id int64) ([]int64, er
 	return hidden, nil
 }
 
-// AgentDone completes a task of the agent's own checklist. Not a backlog
-// task it merely sees, and never a request to the owner: only the owner
-// answers those. A task from another owner needs AgentClose's note.
-func (r *Repo) AgentDone(ctx context.Context, a Actor, id int64) (AgentTask, error) {
-	return r.AgentClose(ctx, a, id, "", "")
-}
-
 // AgentClaim takes a pending backlog task of the agent's own project. It is
 // the only write an agent has on the backlog. Of two sessions claiming at
 // once, one wins and the others get "not available", the same answer as for
@@ -527,7 +542,7 @@ func (r *Repo) flat(ctx context.Context, where, sessionID string) ([]Task, error
 	for _, t := range recs {
 		a := Actor{SessionID: sessionID, ProjectKey: t.ProjectKey}
 		ft := Task{ID: int(t.ID), Title: t.Title, Description: t.Description, Status: t.Status,
-			CreatedAt: t.CreatedAt, CompletedAt: t.CompletedAt, CommentCount: t.CommentCount}
+			CreatedAt: t.CreatedAt, CompletedAt: t.CompletedAt, CommentCount: t.CommentCount, CompletionNote: t.CompletionNote}
 		if h := t.Handoff; h != nil {
 			ft.Handoff = &TaskHandoff{State: h.State, Outcome: h.Outcome, FromOwnerName: h.FromOwnerName, ToOwnerName: h.ToOwnerName}
 		}

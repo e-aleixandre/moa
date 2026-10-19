@@ -110,7 +110,7 @@ func TestAgentWorkOnItsOwnTasksNeverNotifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.AgentDone(bg, a, mine.ID); err != nil {
+	if _, err := agentDone(r, a, mine.ID); err != nil {
 		t.Fatal(err)
 	}
 	ask, err := r.AgentAsk(bg, a, AgentInput{Title: "need a key"})

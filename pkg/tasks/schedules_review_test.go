@@ -86,7 +86,7 @@ func TestScheduleReviewOldCompletionKeepsNewOnceDate(t *testing.T) {
 	if _, err = r.Update(bg, cur.ID, cur.Revision, Patch{Schedule: onceDef(utc("2026-10-02T09:00:00Z"), "")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = r.AgentDone(bg, actor("s1", "p"), first.ChildTaskID); err != nil {
+	if _, err = agentDone(r, actor("s1", "p"), first.ChildTaskID); err != nil {
 		t.Fatal(err)
 	}
 	after := mustGet(t, r, tmpl.ID)
@@ -96,7 +96,7 @@ func TestScheduleReviewOldCompletionKeepsNewOnceDate(t *testing.T) {
 		t.Fatalf("old completion canceled the accepted new date: status=%s next=%d; new runs=%d", after.Status, after.Next, len(os))
 	}
 	second := mustAssign(t, r, os[0].ID, "s1")
-	if _, err = r.AgentDone(bg, actor("s1", "p"), second.ChildTaskID); err != nil {
+	if _, err = agentDone(r, actor("s1", "p"), second.ChildTaskID); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustGet(t, r, tmpl.ID); got.Status != StatusDone {
@@ -120,7 +120,7 @@ func TestScheduleReviewOnceSecondRunNotPrematurelyDone(t *testing.T) {
 	}
 	clock.Set(utc("2026-10-02T09:00:00Z"))
 	second := mustAssign(t, r, materializeOne(t, r).ID, "s1")
-	if _, err := r.AgentDone(bg, actor("s1", "p"), first.ChildTaskID); err != nil {
+	if _, err := agentDone(r, actor("s1", "p"), first.ChildTaskID); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustGet(t, r, tmpl.ID); got.Status == StatusDone && mustOcc(t, r, second.ID).State == OccAssigned {
