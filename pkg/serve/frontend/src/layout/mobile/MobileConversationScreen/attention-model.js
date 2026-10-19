@@ -82,3 +82,9 @@ export function nextMobileTitleRipple(previousArrival, previousRipple, attention
   if (arrival > previousArrival) return { arrival, ripple: previousRipple + 1 };
   return { arrival: previousArrival, ripple: previousRipple };
 }
+
+// The label of the header's For you button, which is always there: the bare
+// name when nothing waits, then what waits on you and what is new.
+export function mobileForYouLabel(waiting = 0, news = 0) {
+  return `For you${waiting > 0 ? `, ${waiting} waiting` : ""}${news > 0 ? `, ${news} new` : ""}`;
+}

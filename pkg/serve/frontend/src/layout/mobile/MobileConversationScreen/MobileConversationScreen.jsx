@@ -575,7 +575,6 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           panelOpen={panel.open}
           alert={cacheAlert}
           onPanel={() => toggleSessionPanel(chrome.activeId, cacheAlert ? "usage" : "root")}
-          onNew={() => openPalette("create")}
           inboxCount={inboxCount}
           owner={chrome.titleOwner}
           forYouCount={forYouN}

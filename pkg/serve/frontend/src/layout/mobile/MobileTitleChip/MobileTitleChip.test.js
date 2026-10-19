@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
   mobileSessionsDoorLabel,
+  mobileForYouLabel,
   mobileTitleChipLabel,
   mobileTitleChipPresentation,
 } from '../MobileConversationScreen/attention-model.js';
@@ -97,4 +98,35 @@ test('the production app does not import the design catalog', () => {
   expect(app).not.toMatch(/import\(["']\.\/catalog-entry/);
   const catalog = readFileSync(new URL('../../../catalog-app.jsx', import.meta.url), 'utf8');
   expect(catalog).toContain('./catalog/catalog.jsx');
+});
+
+// The header's right slot is For you, always: the + moved to the drawer.
+test('the header For you button is never hidden and has three states', () => {
+  const source = readFileSync(new URL('../MobileChrome/MobileChrome.jsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../MobileChrome/MobileChrome.css', import.meta.url), 'utf8');
+  // never gated on the counts, only on the handler existing
+  expect(source).not.toContain('(forYouCount > 0 || forYouNews > 0) && onForYou');
+  expect(source).toContain('onForYou && (');
+  // the + is gone from the header
+  expect(source).not.toContain('aria-label="New session"');
+  expect(source).not.toContain('onClick={onNew}');
+  // amber with number
+  expect(source).toContain('forYouCount > 0 && <span class="zl-cap-foryou-n');
+  // violet dot for News
+  expect(source).toContain('forYouNews > 0 && <span class="zl-cap-foryou-dot"');
+  expect(css).toContain('.zl-cap-foryou-dot');
+  // neutral when nothing waits
+  expect(css).toMatch(/\.zl-cap-foryou:not\(:has\(\.zl-cap-foryou-n\)\)\s*\{\s*color:\s*var\(--zl-t2\)/);
+});
+
+test('For you header label covers the three states', () => {
+  expect(mobileForYouLabel(0, 0)).toBe('For you');
+  expect(mobileForYouLabel(3, 0)).toBe('For you, 3 waiting');
+  expect(mobileForYouLabel(0, 2)).toBe('For you, 2 new');
+  expect(mobileForYouLabel(3, 2)).toBe('For you, 3 waiting, 2 new');
+});
+
+test('the For you button stays at least 44px and is wired to the label helper', () => {
+  const source = readFileSync(new URL('../MobileChrome/MobileChrome.jsx', import.meta.url), 'utf8');
+  expect(source).toContain('aria-label={mobileForYouLabel(forYouCount, forYouNews)}');
 });
