@@ -489,7 +489,7 @@ func (q *questionService) Fence(ctx context.Context, sessionID string, stopRun b
 		stopRun = true
 	}
 	if err := q.fenceLocked(ctx, sessionID, stopRun); err != nil {
-		q.unfenced.Store(sessionID, stopRun)
+		q.barLocked(sessionID, stopRun)
 		slog.Warn("questions: fencing the accepted answers failed", "session", sessionID, "error", err)
 		if stopRun {
 			q.journalStopLocked(sessionID)
@@ -499,12 +499,37 @@ func (q *questionService) Fence(ctx context.Context, sessionID string, stopRun b
 	return q.settledLocked(sessionID, stopRun)
 }
 
+// barLocked records a fence that could not be saved. Decided under journalMu,
+// against what a concurrent journal load may have published: a recall's
+// barrier never replaces a pending Stop.
+func (q *questionService) barLocked(sessionID string, stopRun bool) {
+	q.journalMu.Lock()
+	defer q.journalMu.Unlock()
+	if !stopRun && q.stopPendingLocked(sessionID) {
+		return
+	}
+	q.unfenced.Store(sessionID, stopRun)
+}
+
+// stopPendingLocked reports a Stop barrier on the session. Callers hold
+// journalMu, under which Stop barriers are published and lifted.
+func (q *questionService) stopPendingLocked(sessionID string) bool {
+	v, ok := q.unfenced.Load(sessionID)
+	return ok && v.(bool)
+}
+
 // settledLocked lifts a saved fence's barrier, but only once a Stop's journal
 // file is durably gone (see journalRemove); until then the session stays barred
 // and the error says why.
 func (q *questionService) settledLocked(sessionID string, stopRun bool) error {
 	q.journalMu.Lock()
 	defer q.journalMu.Unlock()
+	if !stopRun && q.stopPendingLocked(sessionID) {
+		// A journal load published a Stop for this session after this recall
+		// decided: the recall's fence does not cover it, so its barrier stays
+		// for the next barredLocked to settle as a Stop.
+		return nil
+	}
 	if stopRun {
 		if err := q.journalRemove(sessionID); err != nil {
 			q.unfenced.Store(sessionID, true)
