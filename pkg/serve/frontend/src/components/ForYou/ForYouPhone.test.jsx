@@ -106,6 +106,13 @@ test("an idle owner's question call can be stopped from the pin and the For you 
 // The header's sheet must close when an action takes the user to a
 // conversation, also the one already open (the P2 of the review): the row's
 // buttons are pressed here, not read from the source.
+// The buttons really navigate; the global store is put back so no other test
+// sees the session they open.
+async function untouched(run) {
+  const { store, setState } = await import("../../data/store.js");
+  const before = store.get();
+  try { run(); } finally { setState(before); }
+}
 function press(tree, match) {
   const b = descendants(tree).find((n) => n.type === "button" && match(n));
   expect(b).toBeTruthy();
@@ -113,7 +120,7 @@ function press(tree, match) {
 }
 const rendered = (node) => (typeof node.type === "function" ? node.type(node.props) : node);
 
-test("Open conversation and Enter password close the sheet through onLeave", () => {
+test("Open conversation and Enter password close the sheet through onLeave", () => untouched(() => {
   const secret = { kind: "secret", id: "s1", session_id: "s1", since: new Date().toISOString(), blocking: true, label: "token" };
   const row = { item: secret, owner: null, ownConversation: false, session: "Tienda" };
   let left = 0;
@@ -123,9 +130,9 @@ test("Open conversation and Enter password close the sheet through onLeave", () 
   const answer = descendants(tree).find((n) => typeof n.type === "function" && n.props.row);
   press(rendered(answer), (n) => String(n.props.class).includes("is-primary"));
   expect(left).toBe(2);
-});
+}));
 
-test("a task request's Open request closes the sheet too", () => {
+test("a task request's Open request closes the sheet too", () => untouched(() => {
   const item = { kind: "task_request", id: "task:1", session_id: "s1", since: new Date().toISOString(), title: "Review" };
   const row = { item, owner: null, ownConversation: false, session: "Tienda" };
   let left = 0;
@@ -133,4 +140,4 @@ test("a task request's Open request closes the sheet too", () => {
   const answer = descendants(tree).find((n) => typeof n.type === "function" && n.props.row);
   press(rendered(answer), (n) => String(n.props.class).includes("is-primary"));
   expect(left).toBe(1);
-});
+}));
