@@ -139,17 +139,17 @@ export function Row({ row, open, phone, onToggle }) {
           <span class="fy-title">{title(item)}</span>
           {!open && item.questions?.[0]?.context && <span class="fy-ctx">{item.questions[0].context}</span>}
           <span class="fy-meta">
-            {owner && <OwnerAvatarFor owner={owner} size={16} />}
-            <span class="fy-who">{row.ownConversation ? row.session : owner ? `${owner.name} · ${row.session}` : row.session}</span>
-            <span class="fy-sep">·</span>
-            <span class="fy-age zl-data">{age(item.since)}</span>
-            {more > 0 && <><span class="fy-sep">·</span><span>+{more} question{more > 1 ? "s" : ""}</span></>}
-            <span class="fy-sep">·</span>
+            <span class="fy-mi fy-mi-who">
+              {owner && <OwnerAvatarFor owner={owner} size={16} />}
+              <span class="fy-who">{row.ownConversation ? row.session : owner ? `${owner.name} · ${row.session}` : row.session}</span>
+            </span>
+            <span class="fy-mi fy-age zl-data">{age(item.since)}</span>
+            {more > 0 && <span class="fy-mi">+{more} question{more > 1 ? "s" : ""}</span>}
             {item.blocking
-              ? <span class="fy-block">{item.kind === "secret" ? "Stopped until you enter it" : "Stopped until you answer"}</span>
-              : <span class="fy-keeps">Keeps working</span>}
-            {item.call_state && <><span class="fy-sep">·</span><QuestionCall item={item} /></>}
-            {item.requires_tap && phone && <><span class="fy-sep">·</span><span class="fy-tap"><Lock size={12} aria-hidden="true" />Needs your tap</span></>}
+              ? <span class="fy-mi fy-block">{item.kind === "secret" ? "Stopped until you enter it" : "Stopped until you answer"}</span>
+              : <span class="fy-mi fy-keeps">Keeps working</span>}
+            {item.call_state && <span class="fy-mi"><QuestionCall item={item} /></span>}
+            {item.requires_tap && phone && <span class="fy-mi fy-tap"><Lock size={12} aria-hidden="true" />Needs your tap</span>}
           </span>
         </span>
         {item.requires_tap && !phone && <span class="fy-chip"><Lock size={12} aria-hidden="true" />Needs your tap</span>}
@@ -192,10 +192,11 @@ function NewsRow({ n, open, phone, onToggle }) {
           <span class="fy-title">{n.title}</span>
           {!open && n.body && <span class="fy-ctx">{n.body}</span>}
           <span class="fy-meta">
-            {owner && <OwnerAvatarFor owner={owner} size={16} />}
-            <span class="fy-who">{who}</span>
-            <span class="fy-sep">·</span>
-            <span class="fy-age zl-data">{age(n.updated)}</span>
+            <span class="fy-mi fy-mi-who">
+              {owner && <OwnerAvatarFor owner={owner} size={16} />}
+              <span class="fy-who">{who}</span>
+            </span>
+            <span class="fy-mi fy-age zl-data">{age(n.updated)}</span>
           </span>
         </span>
         {!n.read_at && <span class="fy-unread" aria-label="Unread" />}

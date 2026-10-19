@@ -131,3 +131,11 @@
 
 /* The phone has no room for the chip: the tap requirement reads in the meta. */
 .fy-tap { display: inline-flex; align-items: center; gap: 4px; color: var(--zl-yellow); white-space: nowrap; }
+
+/* Meta items carry their own leading "·". The meta is pulled left by one
+   separator's width and clipped there, so whichever item starts a line —
+   the first, or one the wrap moved down — shows no dangling dot. */
+.fy-row-head .fy-meta { column-gap: 0; margin-left: -14px; clip-path: inset(0 0 0 14px); }
+.fy-mi { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.fy-mi::before { content: "·"; flex: none; width: 14px; text-align: center; color: var(--zl-t4); }
+.fy-mi-who { overflow: hidden; }

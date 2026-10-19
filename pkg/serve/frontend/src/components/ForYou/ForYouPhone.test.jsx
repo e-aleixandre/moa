@@ -55,3 +55,16 @@ test("on the phone the pin never cuts the question to one line: it wraps, with i
   const css = readFileSync(new URL("../AskUserCard/AsyncAskPin.css", import.meta.url), "utf8");
   expect(css).toMatch(/\.aq-pin\.is-phone \.tk-pin-t \{[^}]*white-space: normal[^}]*-webkit-line-clamp: 3/);
 });
+
+test("the meta has no separator elements of its own: each item carries its dot, clipped at a line start", async () => {
+  const { readFileSync } = await import("node:fs");
+  const item = { ...tapItem, call_state: "pending", call_at: new Date(Date.now() + 8 * 60000).toISOString(), questions: [...tapItem.questions, { question: "Second?" }] };
+  const tree = Row({ row: { item, owner: null, ownConversation: false, session: "Tienda" }, phone: true, open: false });
+  const meta = descendants(tree).find((n) => n.props?.class === "fy-meta");
+  const kids = [meta.props.children].flat(Infinity).filter(Boolean);
+  expect(kids.every((k) => typeof k === "object" && /\bfy-mi\b/.test(k.props?.class || ""))).toBe(true);
+  expect(text(meta)).not.toMatch(/^·|·\s*$/);
+  const css = readFileSync(new URL("./ForYou.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\.fy-mi::before \{[^}]*content: "·"/);
+  expect(css).toMatch(/\.fy-row-head \.fy-meta \{[^}]*margin-left: -14px;[^}]*clip-path: inset\(0 0 0 14px\)/);
+});
