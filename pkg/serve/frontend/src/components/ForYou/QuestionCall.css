@@ -4,3 +4,11 @@
 }
 .qc-call.is-amber { color: var(--zl-yellow); }
 .qc-call.is-red { color: var(--zl-red); font-weight: 600; }
+.qc-stop {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px;
+  border: 0; border-radius: var(--zl-r-sm); background: transparent;
+  color: var(--zl-t3); font-family: inherit; font-size: var(--zl-fs-meta); cursor: pointer; white-space: nowrap;
+}
+.qc-stop:hover { background: var(--zl-hi); color: var(--zl-t1); }
+.qc-stop:disabled { opacity: 0.5; cursor: default; }
+.aq-sheet-body .qc-stop, .fy-phone .qc-stop { height: 44px; font-size: var(--zl-fs-body); }

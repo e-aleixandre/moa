@@ -132,12 +132,13 @@ func (m *Manager) withdrawQuestionCall(q tasks.Question) {
 }
 
 // cancelQuestionCalls is Stop's part: the session's escalations are
-// cancelled, a ringing one stops, and the questions stay open.
-func (m *Manager) cancelQuestionCalls(ctx context.Context, sessionID string) error {
+// cancelled, a ringing one stops, and the questions stay open. It reports
+// whether it cancelled any.
+func (m *Manager) cancelQuestionCalls(ctx context.Context, sessionID string) (bool, error) {
 	if !m.questions.engaged() {
-		return nil
+		return false, nil
 	}
-	attempts, err := m.tasks.CancelSessionCalls(ctx, sessionID)
+	attempts, cancelled, err := m.tasks.CancelSessionCalls(ctx, sessionID)
 	for _, a := range attempts {
 		m.callRequests().withdraw(a)
 		if c, ok := m.escalationCalls.Load(a); ok {
@@ -145,12 +146,12 @@ func (m *Manager) cancelQuestionCalls(ctx context.Context, sessionID string) err
 		}
 	}
 	if err != nil {
-		return err
+		return cancelled, err
 	}
 	if sess, ok := m.Get(sessionID); ok {
 		m.questions.reproject(sess)
 	}
-	return nil
+	return cancelled, nil
 }
 
 // interruptQuestionCalls marks interrupted the attempts a previous process

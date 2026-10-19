@@ -120,6 +120,19 @@ export function questionCall(item, now = Date.now(), requests = []) {
   return { state: 'pending', text: `Calls you at ${when}`, tone: 'amber' };
 }
 
+// canStopQuestionCall: an idle session's pending or ringing question call can
+// be stopped on its own: Stop, with no run to abort. A running session has
+// Stop in its live bar, which stops the call too.
+export function canStopQuestionCall(item, session) {
+  if (!item?.session_id || (item.call_state !== 'pending' && item.call_state !== 'calling')) return false;
+  return session?.state !== 'running' && session?.state !== 'permission';
+}
+
+// stopQuestionCall is that Stop: the call is cancelled, the question stays.
+export function stopQuestionCall(sessionId) {
+  return api('POST', `/api/sessions/${sessionId}/cancel`).finally(() => loadForYou());
+}
+
 // callInfoFor merges what For you knows (fresher: refreshed on every call
 // change) over the session's own pending ask.
 export function callInfoFor(state, ask) {

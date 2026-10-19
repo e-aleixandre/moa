@@ -120,11 +120,12 @@ func (r *Repo) CancelPendingCall(ctx context.Context, id string) (bool, error) {
 
 // CancelSessionCalls is Stop: every live escalation of the session's open
 // questions is cancelled, the questions stay open. It returns the attempts
-// that were calling, for the caller to withdraw.
-func (r *Repo) CancelSessionCalls(ctx context.Context, sessionID string) ([]string, error) {
+// that were calling, for the caller to withdraw, and whether it cancelled any.
+func (r *Repo) CancelSessionCalls(ctx context.Context, sessionID string) ([]string, bool, error) {
 	var attempts []string
+	cancelled := false
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
-		attempts = nil
+		attempts, cancelled = nil, false
 		rows, err := tx.QueryContext(ctx, `SELECT call_attempt FROM questions
 			WHERE session_id = ? AND state = 'open' AND call_state = 'calling'`, sessionID)
 		if err != nil {
@@ -145,9 +146,10 @@ func (r *Repo) CancelSessionCalls(ctx context.Context, sessionID string) ([]stri
 			return false, err
 		}
 		n, _ := res.RowsAffected()
-		return n > 0, nil
+		cancelled = n > 0
+		return cancelled, nil
 	})
-	return attempts, err
+	return attempts, cancelled, err
 }
 
 // InterruptCallEscalations marks interrupted every attempt still calling. Only

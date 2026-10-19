@@ -11,7 +11,7 @@ import { openTaskSession, BackIcon } from "../Tasks/parts.jsx";
 import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { AskUserPrompt } from "../AskUserCard/AskUserPrompt.jsx";
 import "./ForYou.css";
-import { QuestionCall } from "./QuestionCall.jsx";
+import { QuestionCall, StopQuestionCall } from "./QuestionCall.jsx";
 
 function age(since) {
   const t = Date.parse(since || "");
@@ -159,6 +159,7 @@ export function Row({ row, open, phone, onToggle }) {
         <div class={`fy-body${(item.questions?.length || 0) === 1 ? " is-single" : ""}`}>
           {item.requires_tap && phone && <span class="fy-chip"><Lock size={12} aria-hidden="true" />Needs your tap</span>}
           <Answer row={row} phone={phone} onDone={done} />
+          <StopQuestionCall item={item} />
           <button type="button" class="fy-open" onClick={() => openConversation(item.session_id)}>
             Open conversation<ArrowUpRight size={14} aria-hidden="true" />
           </button>

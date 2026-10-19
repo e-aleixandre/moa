@@ -174,14 +174,19 @@ func (m *Manager) Cancel(sessionID string) error {
 // CancelWithDiscardedSteers aborts the running agent and returns the queued
 // steers atomically discarded by that operation.
 func (m *Manager) CancelWithDiscardedSteers(sessionID, stopID string) ([]core.SteerItem, error) {
+	// Stop cancels the call an open question was escalating to (and stops it
+	// ringing), whether or not a run is going or the session is loaded; the
+	// question stays open. That alone is a successful Stop of an idle owner.
+	callsCancelled, err := m.cancelQuestionCalls(m.baseCtx, sessionID)
+	if err != nil {
+		slog.Warn("stop: cancelling the session's question calls failed", "session", sessionID, "error", err)
+	}
 	sess, ok := m.Get(sessionID)
 	if !ok {
+		if callsCancelled {
+			return nil, nil
+		}
 		return nil, ErrNotFound
-	}
-	// Stop cancels the call an open question was escalating to (and stops it
-	// ringing), whether or not a run is going; the question stays open.
-	if err := m.cancelQuestionCalls(m.baseCtx, sessionID); err != nil {
-		slog.Warn("stop: cancelling the session's question calls failed", "session", sessionID, "error", err)
 	}
 
 	state := sess.runtime.State.Current()
@@ -192,7 +197,7 @@ func (m *Manager) CancelWithDiscardedSteers(sessionID, stopID string) ([]core.St
 		if err := sess.runtime.Bus.Execute(bus.CancelBackgroundCompaction{Cancelled: &cancelled}); err != nil {
 			return nil, err
 		}
-		if cancelled {
+		if cancelled || callsCancelled {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("session is not running")

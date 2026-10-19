@@ -354,26 +354,26 @@ func TestReviewForYouCalls_StartupInterruptsEstablishedEscalation(t *testing.T) 
 	}
 }
 
-func TestReviewForYouCalls_IdleCancelReportsErrorAfterCancellingEscalation(t *testing.T) {
+// R3: Stop of an idle owner with a pending call is the way to cancel that
+// call alone; it succeeds, keeps the question and wakes nothing.
+func TestReviewForYouCalls_IdleStopCancelsEscalationAndSucceeds(t *testing.T) {
 	for _, via := range []string{"direct", "http"} {
 		t.Run(via, func(t *testing.T) {
 			f := qcNewFixture(t, "2026-10-19T08:00:00Z", "ring", qcArgs(map[string]any{"call_after_minutes": 10}))
 			q := f.post() // post waits for the owner to become idle
 			if via == "direct" {
-				err := f.mgr.Cancel(f.osess.ID)
-				if err == nil || err.Error() != "session is not running" {
+				if err := f.mgr.Cancel(f.osess.ID); err != nil {
 					t.Fatalf("idle Cancel error=%v", err)
 				}
-				t.Logf("idle Cancel returned %q", err)
 			} else {
-				body := f.mustRequest(http.MethodPost, "/api/sessions/"+f.osess.ID+"/cancel", nil, f.owner(), http.StatusBadRequest)
-				if string(body) != "session is not running\n" {
-					t.Fatalf("idle cancel HTTP body=%q", body)
-				}
-				t.Logf("idle cancel HTTP=400 body=%q", body)
+				f.mustRequest(http.MethodPost, "/api/sessions/"+f.osess.ID+"/cancel", nil, f.owner(), http.StatusNoContent)
 			}
 			if got := f.question(q.ID); got.State != tasks.QuestionOpen || got.CallState != tasks.CallCancelled {
 				t.Fatalf("idle cancellation result: question=%s call_state=%s", got.State, got.CallState)
+			}
+			// Nothing left to cancel: an idle Stop is refused again.
+			if err := f.mgr.Cancel(f.osess.ID); err == nil || err.Error() != "session is not running" {
+				t.Fatalf("second idle Cancel error=%v", err)
 			}
 		})
 	}

@@ -277,7 +277,7 @@ func TestCallEscalationStopCancelsAndKeepsTheQuestionOpen(t *testing.T) {
 	scanAndClaim(t, a, clock, "att-1")
 
 	for _, sess := range []string{"s1", "s2"} {
-		attempts, err := b.CancelSessionCalls(bg, sess)
+		attempts, _, err := b.CancelSessionCalls(bg, sess)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -68,3 +68,37 @@ test("the meta has no separator elements of its own: each item carries its dot, 
   expect(css).toMatch(/\.fy-mi::before \{[^}]*content: "·"/);
   expect(css).toMatch(/\.fy-row-head \.fy-meta \{[^}]*margin-left: -14px;[^}]*clip-path: inset\(0 0 0 14px\)/);
 });
+
+test("an idle owner's question call can be stopped from the pin and the For you row; the question stays", async () => {
+  const { StopQuestionCall } = await import("./QuestionCall.jsx");
+  const { setState } = await import("../../data/store.js");
+  const calling = { ...tapItem, call_state: "pending", call_at: new Date(Date.now() + 8 * 60000).toISOString() };
+  const row = { item: calling, owner: null, ownConversation: true, session: "Infra" };
+  const inRow = descendants(Row({ row, phone: true, open: true })).find((n) => n.type === StopQuestionCall);
+  expect(inRow?.props.item).toMatchObject({ id: "q1", session_id: "s1" });
+  const session = { id: "s1", pendingAsk: { id: "q1", async: true, call_state: "pending", call_at: calling.call_at, questions: tapItem.questions } };
+  const inPin = descendants(AsyncAskPin({ session })).find((n) => n.type === StopQuestionCall);
+  expect(inPin?.props.item).toMatchObject({ id: "q1", session_id: "s1", call_state: "pending" });
+
+  setState({ sessions: { s1: { id: "s1", state: "idle" } } });
+  const posts = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = (path, opts = {}) => {
+    if (opts.method === "POST") posts.push(path);
+    return Promise.resolve(new Response(opts.method === "POST" ? null : JSON.stringify({ items: [], news: [] }), { status: opts.method === "POST" ? 204 : 200 }));
+  };
+  try {
+    const button = StopQuestionCall({ item: calling });
+    expect(text(button)).toContain("Don't call");
+    button.props.onClick({ stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(posts).toEqual(["/api/sessions/s1/cancel"]);
+    setState({ sessions: { s1: { id: "s1", state: "running" } } });
+    expect(StopQuestionCall({ item: calling })).toBeNull();
+    setState({ sessions: { s1: { id: "s1", state: "idle" } } });
+    expect(StopQuestionCall({ item: { ...calling, call_state: "missed" } })).toBeNull();
+  } finally {
+    globalThis.fetch = original;
+    setState({ sessions: {} });
+  }
+});
