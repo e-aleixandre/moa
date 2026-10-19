@@ -79,6 +79,11 @@ type Question struct {
 	AskedAt   int64
 	ClosedAt  int64
 	UpdatedAt int64
+	// CallDueAt (UTC milliseconds, 0 = none), CallState and CallAttempt are
+	// the question's escalation to a call (question_calls.go).
+	CallDueAt   int64
+	CallState   CallState
+	CallAttempt string
 }
 
 // QuestionAck is the tool result of a post: text for the model, metadata for
@@ -117,17 +122,21 @@ func NewQuestionID() string {
 }
 
 const questionCols = `id, session_id, origin_msg_id, origin_tool_call_id, origin_tool, questions_json, requires_tap,
-	state, reason, ack_json, answers_json, responder_json, event_id, work, asked_at, closed_at, updated_at`
+	state, reason, ack_json, answers_json, responder_json, event_id, work, asked_at, closed_at, updated_at,
+	call_due_at, call_state, call_attempt`
 
 func scanQuestion(sc interface{ Scan(...any) error }) (Question, error) {
 	var q Question
 	var qsJSON, ackJSON, ansJSON, respJSON, state string
 	var tap int
-	var closed sql.NullInt64
+	var closed, callDue sql.NullInt64
+	var callState string
 	if err := sc.Scan(&q.ID, &q.SessionID, &q.OriginMsgID, &q.OriginToolCallID, &q.OriginTool, &qsJSON, &tap,
-		&state, &q.Reason, &ackJSON, &ansJSON, &respJSON, &q.EventID, &q.Work, &q.AskedAt, &closed, &q.UpdatedAt); err != nil {
+		&state, &q.Reason, &ackJSON, &ansJSON, &respJSON, &q.EventID, &q.Work, &q.AskedAt, &closed, &q.UpdatedAt,
+		&callDue, &callState, &q.CallAttempt); err != nil {
 		return Question{}, err
 	}
+	q.CallDueAt, q.CallState = callDue.Int64, CallState(callState)
 	q.State = QuestionState(state)
 	q.RequiresTap = tap != 0
 	q.ClosedAt = closed.Int64
@@ -304,11 +313,16 @@ func (r *Repo) InsertQuestion(ctx context.Context, q Question) (Question, bool, 
 			return false, &ErrQuestionOpen{ID: open[0].ID}
 		}
 		now := r.now().UnixMilli()
+		var callDue any
+		q.CallState, q.CallAttempt = CallNone, ""
+		if q.CallDueAt > 0 {
+			callDue, q.CallState = q.CallDueAt, CallPending
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO questions(id, session_id, origin_msg_id, origin_tool_call_id,
-			origin_tool, questions_json, requires_tap, state, ack_json, asked_at, updated_at)
-			VALUES (?,?,?,?,?,?,?,'open',?,?,?)`,
+			origin_tool, questions_json, requires_tap, state, ack_json, asked_at, updated_at, call_due_at, call_state)
+			VALUES (?,?,?,?,?,?,?,'open',?,?,?,?,?)`,
 			q.ID, q.SessionID, q.OriginMsgID, q.OriginToolCallID, q.OriginTool, string(qsJSON), boolInt(q.RequiresTap),
-			string(ackJSON), now, now); err != nil {
+			string(ackJSON), now, now, callDue, string(q.CallState)); err != nil {
 			return false, err
 		}
 		q.State, q.AskedAt, q.UpdatedAt = QuestionOpen, now, now
@@ -406,10 +420,11 @@ func (r *Repo) AnswerQuestion(ctx context.Context, sessionID, id string, answers
 			return false, err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE questions SET state = 'answered', answers_json = ?, responder_json = ?,
-			event_id = ?, work = 'due', closed_at = ?, updated_at = ? WHERE id = ? AND state = 'open'`,
+			event_id = ?, work = 'due', closed_at = ?, updated_at = ?, `+cancelCallSet+` WHERE id = ? AND state = 'open'`,
 			string(ansJSON), string(respJSON), eventID, now, now, id); err != nil {
 			return false, err
 		}
+		q.CallState = cancelledCall(q.CallState)
 		res = QuestionAnswerResult{Question: q}
 		return true, nil
 	})
@@ -449,11 +464,12 @@ func (r *Repo) CloseQuestion(ctx context.Context, sessionID, id string, to Quest
 			r.hookBeforeQuestionClose()
 		}
 		now := r.now().UnixMilli()
-		if _, err := tx.ExecContext(ctx, `UPDATE questions SET state = ?, reason = ?, closed_at = ?, updated_at = ?
-			WHERE id = ? AND state = 'open'`, string(to), reason, now, now, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE questions SET state = ?, reason = ?, closed_at = ?, updated_at = ?,
+			`+cancelCallSet+` WHERE id = ? AND state = 'open'`, string(to), reason, now, now, id); err != nil {
 			return false, err
 		}
 		out.State, out.Reason, out.ClosedAt, out.UpdatedAt = to, reason, now, now
+		out.CallState = cancelledCall(out.CallState)
 		changed = true
 		return true, nil
 	})
@@ -483,7 +499,7 @@ func settleDeletedQuestions(ctx context.Context, tx *sql.Tx, sessionID string, n
 		changed = changed || n > 0
 		return nil
 	}
-	if err := run(`UPDATE questions SET state = 'invalidated', reason = ?, closed_at = ?, updated_at = ?
+	if err := run(`UPDATE questions SET state = 'invalidated', reason = ?, closed_at = ?, updated_at = ?, `+cancelCallSet+`
 		WHERE session_id = ? AND state = 'open'`, ReasonSessionDeleted, now, now, sessionID); err != nil {
 		return false, err
 	}

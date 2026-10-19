@@ -181,6 +181,10 @@ type Repo struct {
 	// hookBeforeQuestionClose, when set by a test, holds a close inside its
 	// transaction, after the question was read as open and before it is closed.
 	hookBeforeQuestionClose func()
+	// hookBeforeCallClaim, when set by a test, runs before a call claim's
+	// transaction: the scan has read the question as due, the claim has not
+	// written yet.
+	hookBeforeCallClaim func()
 	// questionsEmpty caches that the questions table held no row; questionsSeen
 	// that this process wrote one. See HasQuestions.
 	questionsEmpty atomic.Bool
@@ -488,6 +492,16 @@ CREATE INDEX task_notifications_open ON task_notifications(state, created_at);`,
 CREATE UNIQUE INDEX news_key ON news(session_id, key) WHERE key <> '';
 CREATE INDEX news_origin ON news(session_id, origin) WHERE origin <> '';
 CREATE INDEX news_read ON news(read_at);`,
+	// 4: a question can escalate to a call when it stays unanswered
+	// (question_calls.go). Columns with defaults only: an older binary never
+	// names them, so it reads and writes questions as before; a question it
+	// answers or closes simply leaves its escalation pending, and the claim
+	// only ever takes an open question.
+	`ALTER TABLE questions ADD COLUMN call_due_at INTEGER;
+ALTER TABLE questions ADD COLUMN call_state TEXT NOT NULL DEFAULT ''
+  CHECK(call_state IN ('','pending','calling','missed','interrupted','cancelled','done'));
+ALTER TABLE questions ADD COLUMN call_attempt TEXT NOT NULL DEFAULT '';
+CREATE INDEX questions_call_due ON questions(call_due_at) WHERE call_state = 'pending';`,
 }
 
 // newsCompatLevel is the compat migration that created the news table.
