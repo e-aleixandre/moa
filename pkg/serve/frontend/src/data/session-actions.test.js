@@ -1412,6 +1412,8 @@ test('stopRun restores only the discarded steers, as a focused composer drop', a
   expect(getToasts().some((t) => t.title === 'Queued images dropped')).toBe(true);
 });
 
+const FENCE_ERROR_DETAIL = "Answers given before it are held until moa can save this. If it persists, check the server's disk.";
+
 test('stopRun tells the user when the stop could not be saved, and still restores the discards', async () => {
   globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({
     discarded_steer_ids: ['q2'],
@@ -1421,8 +1423,10 @@ test('stopRun tells the user when the stop could not be saved, and still restore
 
   await stopRun('s1');
 
-  expect(getToasts().filter((t) => t.type === 'error').map((t) => t.title)).toEqual([
-    'Stopped, but answers already given could not be saved as stopped. Retry Stop.',
+  // The title is one truncated line: it names the failure, the detail (which
+  // wraps) gives the next step. Stop itself cannot be retried once it stopped.
+  expect(getToasts().filter((t) => t.type === 'error').map((t) => [t.title, t.detail])).toEqual([
+    ['Stop not fully saved', FENCE_ERROR_DETAIL],
   ]);
   expect(store.get().composerDrops.s1).toMatchObject({ text: 'still queued' });
 });
@@ -1758,8 +1762,8 @@ test('recallQueuedSteers tells the user when the answers\' fence could not be sa
 
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(store.get().composerDrops.s1).toMatchObject({ text: 'first', focus: true });
-  expect(getToasts().filter((t) => t.type === 'error').map((t) => t.title)).toEqual([
-    'Recalled, but answers already given could not be saved. Retry the recall.',
+  expect(getToasts().filter((t) => t.type === 'error').map((t) => [t.title, t.detail])).toEqual([
+    ['Recall not fully saved', FENCE_ERROR_DETAIL],
   ]);
 });
 

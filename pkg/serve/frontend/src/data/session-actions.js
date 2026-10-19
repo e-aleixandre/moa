@@ -861,6 +861,11 @@ export async function cancelRun(id, stopId) {
 // textarea, and the composer may be re-mounted by the time the abort answers.
 // Queued images cannot be pulled back (only their count was ever tracked
 // client-side), so they are reported instead.
+// After a partly saved Stop or recall there is nothing to retry: the run has
+// stopped and the queue is back. The title fits one line; the detail says what
+// happens and where to look.
+const FENCE_ERROR_DETAIL = "Answers given before it are held until moa can save this. If it persists, check the server's disk.";
+
 export async function stopRun(id) {
   const stopId = beginOperation('stop');
   let result;
@@ -877,7 +882,8 @@ export async function stopRun(id) {
   if (result?.fence_error) {
     addToast({
       sessionId: id,
-      title: 'Stopped, but answers already given could not be saved as stopped. Retry Stop.',
+      title: 'Stop not fully saved',
+      detail: FENCE_ERROR_DETAIL,
       type: 'error',
     });
   }
@@ -954,7 +960,8 @@ export function recallQueuedSteers(id) {
       if (result?.fence_error) {
         addToast({
           sessionId: id,
-          title: 'Recalled, but answers already given could not be saved. Retry the recall.',
+          title: 'Recall not fully saved',
+      detail: FENCE_ERROR_DETAIL,
           type: 'error',
         });
       }
