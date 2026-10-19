@@ -1481,6 +1481,11 @@ func (m *Manager) Shutdown() {
 	// Voice calls first: their minutes are written into sessions that are
 	// still alive, and no call keeps a provider open past shutdown.
 	m.closeVoiceCalls()
+	// Close News admission and wait for reads in flight, including those of
+	// runs whose session Delete already removed from the map.
+	m.newsGate.Lock()
+	m.newsClosed = true
+	m.newsGate.Unlock()
 	if m.tasksCancel != nil {
 		m.tasksCancel()
 	}

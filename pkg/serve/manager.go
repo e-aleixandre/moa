@@ -915,6 +915,12 @@ type Manager struct {
 	// never started): cancelling it only asks it to stop, and until it returns
 	// it may still open the task database.
 	tasksWatcherDone chan struct{}
+	// newsGate admits the per-request News reads of the agent runs. A run
+	// can outlive Delete (the session leaves m.sessions without a join), so
+	// Shutdown closes the gate and waits for the reads in flight instead of
+	// relying on WaitSettled, which no longer sees that session.
+	newsGate   sync.RWMutex
+	newsClosed bool
 	// notices delivers task notices; one dispatcher per serve process.
 	notices *noticeDispatcher
 	// questions owns the sessions' asynchronous ask_user questions; nil when

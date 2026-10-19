@@ -289,8 +289,22 @@ func (m *Manager) ephemeralContext(askAsync bool, sessionID string, notifyOn *bo
 		if !*notifyOn {
 			return ""
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		return m.recentNewsBlock(ctx, sessionID)
+		return m.readNews(func() string {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			return m.recentNewsBlock(ctx, sessionID)
+		})
 	})
+}
+
+// readNews runs a per-request News read while the Manager is open. Once
+// Shutdown has closed the gate it returns "" without touching storage: the
+// block is advice, never a reason to fail a request.
+func (m *Manager) readNews(read func() string) string {
+	m.newsGate.RLock()
+	defer m.newsGate.RUnlock()
+	if m.newsClosed {
+		return ""
+	}
+	return read()
 }
