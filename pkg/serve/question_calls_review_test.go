@@ -265,6 +265,7 @@ func TestReviewForYouCalls_TwoConcurrentFiresRingExactlyOnce(t *testing.T) {
 func TestReviewForYouCalls_CancelWhileDeliveringLeavesNoInvitation(t *testing.T) {
 	for _, how := range []string{"answer", "dismiss", "stop"} {
 		t.Run(how, func(t *testing.T) {
+			pinAsyncAskUser(t)
 			var hs []mockHandler
 			for range 24 {
 				hs = append(hs, qcHandler(qcArgs(map[string]any{"call_after_minutes": 10})))

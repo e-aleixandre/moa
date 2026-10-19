@@ -60,6 +60,8 @@ type qcFix struct {
 
 func qcNewFixture(t *testing.T, at, level string, args map[string]any) *qcFix {
 	t.Helper()
+	// Escalation needs the asynchronous ask_user, whatever the suite's mode.
+	pinAsyncAskUser(t)
 	clock := newFakeTaskClock(mustUTC(at))
 	limits := vpDefaultLimits()
 	limits.clock = clock
