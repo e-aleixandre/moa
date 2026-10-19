@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -130,5 +131,21 @@ func TestForYouOmitsAbsentContext(t *testing.T) {
 	rec := getForYouRaw(t, mgr)
 	if strings.Contains(rec, `"context"`) {
 		t.Fatalf("body carries an empty context: %s", rec)
+	}
+}
+
+// The asynchronous ask event (what the WebSocket sends) carries the context.
+func TestAsyncAskEventCarriesContext(t *testing.T) {
+	ev := bus.AskUserRequested{ID: "q_1", Async: true, Questions: busQuestions([]askuser.Question{{Text: "Ship?", Context: "Staging is green."}, {Text: "Plain?"}})}
+	wsEv, ok := wsEventFromBus(ev)
+	if !ok {
+		t.Fatal("the ask event is not sent on the socket")
+	}
+	b, err := json.Marshal(wsEv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"context":"Staging is green."`) || strings.Count(string(b), `"context"`) != 1 {
+		t.Fatalf("event = %s", b)
 	}
 }
