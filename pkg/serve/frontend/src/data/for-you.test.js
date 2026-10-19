@@ -85,3 +85,15 @@ test('a session waits for you with a blocking request or an open async question 
   expect(waitsForYou({ state: 'permission' })).toBe(true);
   expect(waitsForYou({ state: 'idle', pendingSecrets: [{ id: 'x' }] })).toBe(true);
 });
+
+test('opening a session from the sidebar while For you shows leaves For you', async () => {
+  const { openSession } = await import('./tile-actions.js');
+  const { openForYouView } = await import('./for-you.js');
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({ items: [], news: [] }), { status: 200 }));
+  setState({ isMobile: true, view: null, sessions: { s1: { id: 's1', title: 'One', messages: [] } } });
+  openForYouView();
+  expect(store.get().view).toBe('foryou');
+  expect(openSession('s1')).toBe(true);
+  expect(store.get().view).not.toBe('foryou');
+  setState({ isMobile: false, sessions: {} });
+});
