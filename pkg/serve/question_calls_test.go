@@ -503,3 +503,12 @@ func TestQuestionCall_OnlyOwnersHaveIt(t *testing.T) {
 		t.Fatal("a non-owner's question got a call time")
 	}
 }
+
+// The Settings wait is validated like the other call settings.
+func TestQuestionCall_SettingsMinutesAreValidated(t *testing.T) {
+	for n, want := range map[int]string{0: "", 5: "", 240: "", 4: "invalid_question_call_minutes", 241: "invalid_question_call_minutes"} {
+		if got := validCallsSettings(core.VoiceCallsConfig{QuestionCallMinutes: n}); got != want {
+			t.Errorf("question_call_minutes %d = %q, want %q", n, got, want)
+		}
+	}
+}
