@@ -70,7 +70,7 @@ function Phone({ conv, pinned = "bottom" }) {
   return (
     <div class="mconv tools-screen" ref={hostRef}>
       <MobileStream session={conv.session} blocks={blocks} onOpenSubagent={noop} />
-      <MobileChrome title={conv.session.title} onToggle={noop} onNew={noop} />
+      <MobileChrome title={conv.session.title} onToggle={noop} />
     </div>
   );
 }
@@ -202,7 +202,7 @@ export function ToolsPhone() {
   return (
     <div class="mconv tools-alone">
       <MobileStream session={conv.session} blocks={blocks} onOpenSubagent={noop} />
-      <MobileChrome title={conv.session.title} onToggle={noop} onNew={noop} />
+      <MobileChrome title={conv.session.title} onToggle={noop} />
       <nav class="tools-pick" aria-label="Conversation">
         {CONVERSATIONS.map((c) => (
           <button

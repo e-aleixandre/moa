@@ -28,8 +28,9 @@ import { panelAccessibleName, sessionPanelBack, sessionPanelView, closeSessionPa
 import { tasksSlice } from "../../../data/tasks.js";
 import { attentionCount } from "../../../data/schedule-model.js";
 import { closeTasksView, openTasksView } from "../../../data/tasks-view.js";
-import { closeForYouView, forYouCount, openForYouView, unreadNewsCount } from "../../../data/for-you.js";
+import { closeForYouView, openForYouView } from "../../../data/for-you.js";
 import { MobileForYouView } from "../../../components/ForYou/ForYou.jsx";
+import { SessionForYouSheet, useSessionForYou } from "../../../components/ForYou/SessionForYou.jsx";
 import { PinnedTaskLine } from "../../../components/Tasks/PinnedTaskLine.jsx";
 import { AsyncAskPin } from "../../../components/AskUserCard/AsyncAskPin.jsx";
 import { MobileTasksView } from "../../../components/Tasks/MobileTasksView.jsx";
@@ -557,8 +558,10 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   const tasksCount = useStore((s) => attentionCount(tasksSlice(s)));
   const tasksOpen = useStore((s) => s.view === "tasks");
   const forYouOpen = useStore((s) => s.view === "foryou");
-  const forYouN = useStore(forYouCount);
-  const forYouNews = useStore(unreadNewsCount);
+  // For you OF THIS conversation, top right; the id (not a flag) so that
+  // changing conversation closes its sheet.
+  const sessionForYou = useSessionForYou(chrome.activeId);
+  const [forYouSheetId, setForYouSheetId] = useState(null);
   // The session the header is about, for the Owner chip. Read here rather than
   // taken from `chrome`: the chrome snapshot is deliberately the ROSTER, and
   // adding a whole session to it would rebuild the header on every token.
@@ -575,12 +578,12 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           panelOpen={panel.open}
           alert={cacheAlert}
           onPanel={() => toggleSessionPanel(chrome.activeId, cacheAlert ? "usage" : "root")}
-          onNew={() => openPalette("create")}
           inboxCount={inboxCount}
           owner={chrome.titleOwner}
-          forYouCount={forYouN}
-          forYouNews={forYouNews}
-          onForYou={openForYouView}
+          forYouCount={sessionForYou.waiting}
+          forYouNews={sessionForYou.unread}
+          forYouOpen={forYouSheetId === chrome.activeId}
+          onForYou={() => setForYouSheetId(chrome.activeId)}
         />
       )}
       {chrome.inboxOpen && (
@@ -599,6 +602,13 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
       )}
       {tasksOpen && !chrome.inboxOpen && <MobileTasksView onBack={closeTasksView} />}
       {forYouOpen && !chrome.inboxOpen && <MobileForYouView onBack={closeForYouView} />}
+      <SessionForYouSheet
+        phone
+        open={!!chrome.activeId && forYouSheetId === chrome.activeId}
+        onClose={() => setForYouSheetId(null)}
+        sessionId={chrome.activeId}
+        scope={chrome.titleOwner ? "This owner" : "This session"}
+      />
       <SessionDrawer
         open={chrome.drawerOpen}
         onClose={() => setDrawerOpen(false)}

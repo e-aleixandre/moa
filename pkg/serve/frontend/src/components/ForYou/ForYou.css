@@ -139,3 +139,15 @@
 .fy-mi { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
 .fy-mi::before { content: "·"; flex: none; width: 14px; text-align: center; color: var(--zl-t4); }
 .fy-mi-who { overflow: hidden; }
+
+/* For you of one conversation: the head's button and its sheet. */
+.zl-desk-act.fy-hd { width: auto; min-width: 36px; gap: 5px; padding: 0 8px; }
+.zl-desk-act.fy-hd.has-items { color: var(--zl-yellow); }
+.zl-desk-act.fy-hd .zl-cap-foryou-n { font-size: var(--zl-fs-meta); font-weight: 600; }
+.zl-desk-act.fy-hd .zl-cap-foryou-dot { width: 6px; height: 6px; }
+.fy-dsheet { max-width: 640px; }
+.fy-dsheet .sheet-body { padding: 0 20px 24px; }
+/* MobileSheet's body already pads 18px; the rows bring their own 16. */
+.fy-sheet { margin: 0 -18px; }
+.fy-sheet .fy-empty { padding: 4px 16px 8px; }
+.fy-sheet .fy-all { margin: 0 0 0 16px; }

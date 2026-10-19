@@ -1,5 +1,5 @@
 import { useRef } from "preact/hooks";
-import { Inbox } from "lucide-preact";
+import { SessionForYouButton } from "../../../components/ForYou/SessionForYou.jsx";
 import {
   mobileSessionsDoorLabel,
   mobileTitleChipPresentation,
@@ -29,14 +29,6 @@ import "./MobileChrome.css";
 // so it belongs on the button that goes to them rather than on the name of
 // the one you are already reading.
 
-function PlusIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-    </svg>
-  );
-}
-
 export function MobileChrome({
   title,
   attention = {},
@@ -44,7 +36,7 @@ export function MobileChrome({
   onToggle,
   panelOpen = false,
   onPanel,
-  onNew,
+  forYouOpen = false,
   inboxCount = 0,
   // alert — THIS session's alarm, on the capsule that opens this session's
   // panel. Distinct from `attention`, which is about the OTHER sessions and
@@ -57,8 +49,9 @@ export function MobileChrome({
   // chip: it belongs with the header (it is about this conversation) but not
   // INSIDE the capsule row, which already does three jobs (CRITERIO §3).
   below,
-  // forYou — how much is waiting on you across every session. The capsule
-  // only exists while something waits: one tap to For you from anywhere.
+  // forYou — For you OF THIS conversation (an owner's includes its sessions):
+  // how much waits on you and how much News is unread. Always there, top
+  // right, quiet when empty; one tap opens the sheet with its items.
   forYouCount = 0,
   forYouNews = 0,
   onForYou,
@@ -92,26 +85,9 @@ export function MobileChrome({
         alert={alert}
         owner={owner}
       />
-      {(forYouCount > 0 || forYouNews > 0) && onForYou && (
-        <button
-          type="button"
-          class="zl-cap zl-cap-right zl-cap-foryou"
-          onClick={onForYou}
-          aria-label={`For you${forYouCount > 0 ? `, ${forYouCount} waiting` : ""}${forYouNews > 0 ? `, ${forYouNews} new` : ""}`}
-        >
-          <Inbox size={18} aria-hidden="true" />
-          {forYouCount > 0 && <span class="zl-cap-foryou-n zl-data">{forYouCount > 99 ? "99+" : forYouCount}</span>}
-          {forYouNews > 0 && <span class="zl-cap-foryou-dot" aria-hidden="true" />}
-        </button>
+      {onForYou && (
+        <SessionForYouButton phone waiting={forYouCount} unread={forYouNews} open={forYouOpen} onClick={onForYou} />
       )}
-      <button
-        type="button"
-        class="zl-cap zl-cap-right"
-        onClick={onNew}
-        aria-label="New session"
-      >
-        <PlusIcon />
-      </button>
       {below && <div class="zl-chrome-below">{below}</div>}
     </div>
   );

@@ -18,6 +18,7 @@ import { LivePreview } from "../../components/LivePreview/LivePreview.jsx";
 import { Button, Kbd } from "../../primitives/index.js";
 import { updateSession } from "../../data/store.js";
 import { ownersSlice } from "../../data/owners.js";
+import { SessionForYouSheet, useSessionForYou } from "../../components/ForYou/SessionForYou.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import { usePresence } from "../../hooks/usePresence.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
@@ -145,6 +146,10 @@ export function ConversationScreen() {
   // --- Rewind timeline sheet ---
   const [rewindOpen, setRewindOpen] = useState(false);
   const [secretAliases, setSecretAliases] = useState(null);
+  // For you of THIS conversation, in its head; the id so that moving to
+  // another conversation closes the sheet.
+  const sessionForYou = useSessionForYou(session?.id);
+  const [forYouSheetId, setForYouSheetId] = useState(null);
   useEffect(() => { setRewindOpen(false); }, [activeId]);
   useEffect(() => { setSecretAliases(null); }, [activeId]);
 
@@ -272,6 +277,7 @@ export function ConversationScreen() {
           previewOpen={!!session.previewOpen}
           onPreviewToggle={() => updateSession(session.id, { previewOpen: !session.previewOpen })}
           headExtra={<ArtifactsEntry sessionId={session.id} />}
+          forYou={{ ...sessionForYou, open: forYouSheetId === session.id, onOpen: () => setForYouSheetId(session.id) }}
         />
         {viewingSub ? (
           <SubagentView
@@ -395,6 +401,13 @@ export function ConversationScreen() {
         <RewindTimeline
           open={rewindOpen}
           onClose={() => setRewindOpen(false)}
+          sessionId={session.id}
+        />
+      )}
+      {session && (
+        <SessionForYouSheet
+          open={forYouSheetId === session.id}
+          onClose={() => setForYouSheetId(null)}
           sessionId={session.id}
         />
       )}

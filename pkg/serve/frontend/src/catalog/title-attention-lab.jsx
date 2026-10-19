@@ -123,7 +123,6 @@ function ChipSpecimen({ variant, fixture, width, replay }) {
           title="ws race fix"
           attention={fixture.attn}
           onToggle={noop}
-          onNew={noop}
         />
       </div>
     </article>
@@ -147,7 +146,6 @@ function DrawerSpecimen({ variant, width, replay }) {
           attention={DRAWER_ATTN}
           open
           onToggle={noop}
-          onNew={noop}
         />
         <SessionDrawer
           open
@@ -184,7 +182,6 @@ function KeyboardSpecimen({ variant, replay }) {
           title="ws race fix"
           attention={{ unseen: 1, urgent: 0 }}
           onToggle={noop}
-          onNew={noop}
         />
         <div class="talab-composer">
           <textarea

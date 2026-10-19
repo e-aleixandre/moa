@@ -288,7 +288,7 @@ function Phone({ preset, state }) {
       <div class="owl-phone">
         <div class="mconv owl-mconv">
           <MobileStream session={CHILD_SESSION} blocks={blocks} onOpenSubagent={noop} />
-          <MobileChrome title={CHILD_SESSION.title} open onToggle={noop} onNew={noop} />
+          <MobileChrome title={CHILD_SESSION.title} open onToggle={noop} />
           <div class="sdrawer-veil is-open">
             <div class="sdrawer is-open" role="dialog" aria-modal="true" aria-label="Sessions">
               <OwnersSidebar density="phone" {...sidebarProps(preset, state)} />

@@ -1,4 +1,5 @@
 import { formatShortcut } from "../../data/util/shortcut.js";
+import { SessionForYouButton } from "../../components/ForYou/SessionForYou.jsx";
 import "./ChatHead.css";
 
 // ChatHead — the conversation's name, the crumb that opens this session's
@@ -56,9 +57,12 @@ export function ChatHead({
   // headExtra — extra head actions (the Artifacts entry), rendered as a
   // neighbour of the existing ones rather than as a second bar.
   headExtra,
+  // forYou — { waiting, unread, open, onOpen }: For you of THIS conversation,
+  // top right of its head. Always drawn, quiet when empty.
+  forYou,
 }) {
   const Crumb = onTitleClick ? "button" : "div";
-  const hasActions = !!(headExtra || onPreviewToggle || onGridToggle);
+  const hasActions = !!(forYou || headExtra || onPreviewToggle || onGridToggle);
   return (
     <header class="zl-desk-head">
       <Crumb
@@ -76,6 +80,9 @@ export function ChatHead({
 
       {hasActions && (
         <div class="zl-desk-acts">
+          {forYou && (
+            <SessionForYouButton waiting={forYou.waiting} unread={forYou.unread} open={forYou.open} onClick={forYou.onOpen} />
+          )}
           {headExtra}
           {onPreviewToggle && (
             <button

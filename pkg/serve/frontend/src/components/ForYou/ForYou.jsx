@@ -3,6 +3,7 @@ import { ArrowUp, ArrowUpRight, Check, ChevronRight, Info, KeyRound, ListChecks,
 import { useStore } from "../../hooks/useStore.js";
 import { useEdgeSwipeBack } from "../../hooks/useEdgeSwipeBack.js";
 import { forYouSlice, forgetForYouItem, loadForYou, markNewsRead } from "../../data/for-you.js";
+import { forYouScopeIds } from "../../data/for-you-session.js";
 import { ownersSlice } from "../../data/owners.js";
 import { navigate } from "../../data/router.js";
 import { resolvePermission } from "../../data/session-actions.js";
@@ -41,8 +42,9 @@ function title(item) {
 
 // joinItems puts each item next to who asked it: the session's title and the
 // project owner it reports to, from the roster and the owners list.
-function useRows() {
-  const items = useStore((s) => forYouSlice(s).items);
+function useRows(scope) {
+  const all = useStore((s) => forYouSlice(s).items);
+  const items = useMemo(() => (scope ? all.filter((it) => scope.has(it.session_id)) : all), [all, scope]);
   const loaded = useStore((s) => forYouSlice(s).loaded);
   const sessions = useStore((s) => s.sessions);
   const owners = useStore((s) => ownersSlice(s).list);
@@ -233,11 +235,14 @@ function NewsRow({ n, open, phone, onToggle }) {
 // News — what sessions chose to tell the user. Opening an item reads it,
 // which archives it; it stays in place until the screen is left, so it does
 // not jump away under the finger.
-function News({ phone }) {
-  const news = useStore((s) => forYouSlice(s).news);
+function News({ phone, scope }) {
+  const allNews = useStore((s) => forYouSlice(s).news);
+  const news = useMemo(() => (scope ? allNews.filter((n) => scope.has(n.session_id)) : allNews), [allNews, scope]);
   const [openId, setOpenId] = useState(null);
   const [kept] = useState(() => new Set());
-  const [earlier, setEarlier] = useState(false);
+  // In one session's sheet the read News are the point of opening it with
+  // nothing new, so they start unfolded when nothing else is shown.
+  const [earlier, setEarlier] = useState(() => !!scope && !news.some((n) => !n.read_at));
   for (const n of news) if (!n.read_at) kept.add(n.id);
   const fresh = news.filter((n) => kept.has(n.id));
   const old = news.filter((n) => !kept.has(n.id));
@@ -272,8 +277,11 @@ function News({ phone }) {
   );
 }
 
-function List({ phone }) {
-  const { rows, loaded } = useRows();
+// List — the whole For you, or with `scope` (a Set of session ids) one
+// conversation's share of it: the same rows and News, filtered, never a copy.
+function List({ phone, scope, onOpenAll }) {
+  const { rows, loaded } = useRows(scope);
+  const newsHere = useStore((s) => (scope ? forYouSlice(s).news.some((n) => scope.has(n.session_id)) : true));
   const [openId, setOpenId] = useState(null);
   useEffect(() => { loadForYou(); }, []);
   // The first row opens by itself: the screen exists to answer it.
@@ -289,7 +297,10 @@ function List({ phone }) {
         <span class="fy-sec-t">Waiting on you</span>
         {rows.length > 0 && <span class="fy-sum"><span class="fy-sum-n">{rows.length} waiting</span>{blocking > 0 && <span class="fy-sum-b"> · {blocking} stopped</span>}</span>}
       </div>
-      {loaded && rows.length === 0 && <div class="fy-empty">Nothing is waiting on you.</div>}
+      {loaded && rows.length === 0 && <div class="fy-empty">{scope ? "Nothing is waiting on you here." : "Nothing is waiting on you."}</div>}
+      {scope && loaded && rows.length === 0 && !newsHere && onOpenAll && (
+        <button type="button" class="fy-open fy-all" onClick={onOpenAll}>See everything in For you<ArrowUpRight size={14} aria-hidden="true" /></button>
+      )}
       <ul class="fy-list">
         {rows.map((r) => (
           <Row
@@ -302,7 +313,7 @@ function List({ phone }) {
         ))}
       </ul>
       </section>
-      <News phone={phone} />
+      <News phone={phone} scope={scope} />
     </>
   );
 }
@@ -333,4 +344,13 @@ export function MobileForYouView({ onBack }) {
       </div>
     </div>
   );
+}
+
+// SessionForYouList — the body of the header's sheet: what ONE conversation
+// (and, for an owner, its sessions) waits on the user for, plus its News.
+export function SessionForYouList({ sessionId, phone, onOpenAll }) {
+  const sessions = useStore((s) => s.sessions);
+  const owners = useStore((s) => ownersSlice(s).list);
+  const scope = useMemo(() => forYouScopeIds(sessionId, sessions, owners), [sessionId, sessions, owners]);
+  return <List phone={phone} scope={scope} onOpenAll={onOpenAll} />;
 }

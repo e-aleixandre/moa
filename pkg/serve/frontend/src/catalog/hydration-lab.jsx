@@ -237,7 +237,6 @@ function Screen({ variant, resolved }) {
         title="deploy pulse api"
         attention={waiting ? PENDING_ATTENTION : RESOLVED_ATTENTION}
         onToggle={noop}
-        onNew={noop}
       />
     </div>
   );
