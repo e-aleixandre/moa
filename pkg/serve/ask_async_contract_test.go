@@ -534,6 +534,12 @@ func TestF1BisREDAckBeforeAnswer(t *testing.T) {
 		if strings.TrimSpace(text) == "" || strings.HasPrefix(text, "[Answered") {
 			t.Fatalf("ack text %q must acknowledge the post, not read as an answer", text)
 		}
+		// The bus delivers events asynchronously: the ack can reach the model
+		// before the catcher's subscriber runs. Wait for the delivery, then
+		// require the published ID to be the ack's.
+		if !f1Eventually(f1Guard, func() bool { return asked.ask() != "" }) {
+			t.Fatalf("AskUserRequested was never delivered within %s (ack question_id = %q)", f1Guard, qid)
+		}
 		if got := asked.ask(); got != qid {
 			t.Fatalf("AskUserRequested.ID = %q, ack question_id = %q: the ID must be preserved", got, qid)
 		}
