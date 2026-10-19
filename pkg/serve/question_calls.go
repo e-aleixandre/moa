@@ -308,7 +308,9 @@ func (m *Manager) awaitQuestionCall(ctx context.Context, id, attempt string, c *
 	m.escalationCalls.Store(attempt, c)
 	defer m.escalationCalls.Delete(attempt)
 	// A Stop that committed before the call was stored here did not see it.
-	if cur, err := m.tasks.GetQuestion(ctx, id); err == nil && cur.State == tasks.QuestionOpen && cur.CallState == tasks.CallCancelled && cur.CallAttempt == attempt {
+	// The question may have been answered or dismissed since, which is one
+	// more reason to hang up, so its state is not checked.
+	if cur, err := m.tasks.GetQuestion(ctx, id); err == nil && cur.CallState == tasks.CallCancelled && cur.CallAttempt == attempt {
 		c.requestEnd("hangup")
 	}
 	<-c.done
