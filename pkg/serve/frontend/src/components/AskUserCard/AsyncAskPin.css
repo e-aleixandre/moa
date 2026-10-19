@@ -32,3 +32,6 @@
 .ask-user-prompt.is-compact .ask .ask-head { display: none; }
 .ask-user-prompt.is-compact .ask .ask-q { margin-top: 0; }
 .aq-pin.is-phone .aq-pin-body { max-height: 44dvh; }
+/* On the phone the card opens in a bottom sheet; the sheet is the frame. */
+.aq-sheet-body { display: flex; flex-direction: column; gap: 8px; padding: 0 2px 8px; }
+.aq-sheet-body .aq-pin-tap { align-self: flex-start; }
