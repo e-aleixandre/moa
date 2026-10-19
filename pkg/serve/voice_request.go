@@ -583,8 +583,8 @@ func callWindowWhy(calls core.VoiceCallsConfig, now time.Time) string {
 // nextCallWindow is the first instant at or after now when a call may be
 // announced: after the pause, inside the allowed hours. The hours are read in
 // their own zone day by day, so a daylight-saving change moves the instant
-// with the wall clock; a start that falls in a skipped hour is normalized
-// forward by time.Date.
+// with the wall clock; a start that falls in a skipped hour starts at the
+// end of the gap, the first instant whose wall clock is past it.
 func nextCallWindow(calls core.VoiceCallsConfig, now time.Time) time.Time {
 	t := now
 	if until, err := time.Parse(time.RFC3339, calls.PausedUntil); err == nil && t.Before(until) {
@@ -599,6 +599,16 @@ func nextCallWindow(calls core.VoiceCallsConfig, now time.Time) time.Time {
 	local := t.In(loc)
 	for d := 0; d <= 2; d++ {
 		start := time.Date(local.Year(), local.Month(), local.Day()+d, from/60, from%60, 0, 0, loc)
+		if wall := start.Hour()*60 + start.Minute(); wall != from {
+			// The wall clock does not exist that day: time.Date normalized it
+			// to one side of the gap, whose edge is the zone change.
+			zoneStart, zoneEnd := start.ZoneBounds()
+			if wall < from {
+				start = zoneEnd
+			} else {
+				start = zoneStart
+			}
+		}
 		if !start.Before(t) && callHoursAllow(h, start) {
 			return start
 		}
