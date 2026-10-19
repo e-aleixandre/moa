@@ -65,7 +65,6 @@ func TestAskAsyncStopWithUnsavedFenceDoesNotResumeAfterRestart(t *testing.T) {
 		f1CrashNow(t, s.ID, qid)
 		return
 	}
-	t.Skip("RED: a failed Stop fence is lost on a crash, so the restart replays the answer accepted before Stop (activation condition, see the fence journal proposal)")
 	d := f1NewCrashDirs(t)
 	t.Setenv("MOA_CONFIG_DIR", d.config)
 	manifest := f1RunCrashChild(t, "^TestAskAsyncStopWithUnsavedFenceDoesNotResumeAfterRestart$", "stop-unfenced", d)

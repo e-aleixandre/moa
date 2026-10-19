@@ -959,6 +959,7 @@ func (m *Manager) deleteSession(id string) (err error) {
 		// Not active — its file went with the settlement, still under m.mu
 		// so a Resume cannot load a file the settlement already gave up on.
 		m.mu.Unlock()
+		m.questions.deletedSaved(id)
 		err := session.RemoveSideFiles(savedDir, id)
 		m.invalidateSavedCache()
 		if err != nil {

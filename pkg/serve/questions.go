@@ -352,9 +352,28 @@ func (q *questionService) deleted(sess *ManagedSession) {
 	unlock := q.lock(sessionID)
 	defer unlock()
 	q.gone.Store(sessionID, struct{}{})
+	q.forgetFenceLocked(sessionID)
 	if err := q.repo.SettleDeletedSessionQuestions(q.m.baseCtx, sessionID); err != nil {
 		slog.Warn("questions: settling a deleted session's questions failed", "session", sessionID, "error", err)
 	}
+}
+
+// deletedSaved is deleted for a session that was not loaded: it has no runtime
+// to drain, but a pending Stop fence of a previous process may still be on disk.
+func (q *questionService) deletedSaved(sessionID string) {
+	if q == nil {
+		return
+	}
+	unlock := q.lock(sessionID)
+	defer unlock()
+	q.forgetFenceLocked(sessionID)
+}
+
+// forgetFenceLocked drops what a deleted session's unsaved Stop left behind:
+// nothing is left to fence, and nothing must be written for it afterwards.
+func (q *questionService) forgetFenceLocked(sessionID string) {
+	q.unfenced.Delete(sessionID)
+	q.journalRemove(sessionID)
 }
 
 // cleared settles the questions of a session whose conversation was emptied
@@ -453,10 +472,29 @@ func (q *questionService) Fence(ctx context.Context, sessionID string, stopRun b
 	if err := q.fenceLocked(ctx, sessionID, stopRun); err != nil {
 		q.unfenced.Store(sessionID, stopRun)
 		slog.Warn("questions: fencing the accepted answers failed", "session", sessionID, "error", err)
+		if stopRun {
+			q.journalStopLocked(sessionID)
+		}
 		return fmt.Errorf("%w: %w", errFenceNotSaved, err)
 	}
 	q.unfenced.Delete(sessionID)
+	if stopRun {
+		q.journalRemove(sessionID)
+	}
 	return nil
+}
+
+// journalStopLocked records a Stop whose fence failed (see question_fence_journal.go).
+// If the journal cannot be written either, both stores failed: the in-memory
+// barrier is all that is left, and a crash before the fence is saved can replay
+// the answers the Stop cut. That residual is reported by the caller's error.
+func (q *questionService) journalStopLocked(sessionID string) {
+	if _, gone := q.gone.Load(sessionID); gone {
+		return
+	}
+	if err := q.journalWrite(sessionID); err != nil {
+		slog.Error("questions: the Stop fence could not be journaled either; a crash before it is saved can replay the answers this Stop cut", "session", sessionID, "error", err)
+	}
 }
 
 func (q *questionService) fenceLocked(ctx context.Context, sessionID string, stopRun bool) error {
@@ -483,6 +521,9 @@ func (q *questionService) barredLocked(ctx context.Context, sessionID string) bo
 		return true
 	}
 	q.unfenced.Delete(sessionID)
+	if stopRun.(bool) {
+		q.journalRemove(sessionID)
+	}
 	return false
 }
 

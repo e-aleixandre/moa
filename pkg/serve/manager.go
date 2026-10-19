@@ -1216,6 +1216,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	}
 	if m.tasks != nil {
 		m.questions = newQuestionService(m)
+		// Before anything can admit or continue an answer: a Stop the last
+		// process could not fence is applied first.
+		m.questions.replayJournal()
 		m.notices = newNoticeDispatcher(m)
 		m.planner = newTaskScheduler(m, m.clock, cfg.schedulerHooks)
 		m.recoverScheduledTasks(tasksCtx)
