@@ -23,10 +23,10 @@ const noUpdate = { current: "v0.44.0", latest: "v0.44.0", update_available: fals
 const foot = (version) => SidebarFoot({ inboxVisible: true, onInbox() {}, onTasks() {}, onSettings() {}, version });
 const gear = (tree) => elements(tree).find((n) => cls(n).includes("zl-gear"));
 
-test("the foot holds Inbox, Tasks and Settings and never the version text", () => {
+test("the foot holds Events, Tasks and Settings and never the version text", () => {
   const tree = foot(withUpdate);
   const labels = elements(tree).filter((n) => n.type === "button").map((n) => n.props["aria-label"]);
-  expect(labels).toEqual(["Inbox", "Tasks", "Settings, update available: v0.44.0"]);
+  expect(labels).toEqual(["Events", "Tasks", "Settings, update available: v0.44.0"]);
   const all = texts(tree);
   expect(all).not.toContain("v0.42.0");
   expect(all).not.toContain("v0.44.0");

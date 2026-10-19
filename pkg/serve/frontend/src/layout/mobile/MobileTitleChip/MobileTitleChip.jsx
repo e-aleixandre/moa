@@ -1,4 +1,4 @@
-import { Inbox } from "lucide-preact";
+import { Zap } from "lucide-preact";
 import { mobileTitleChipLabel } from "../MobileConversationScreen/attention-model.js";
 import { OwnerAvatarFor } from "../../../components/Owners/OwnerAvatar.jsx";
 import "./MobileTitleChip.css";
@@ -43,7 +43,7 @@ export function MobileTitleChip({ title, open = false, onToggle, inboxCount = 0,
       {alert && <span class="zl-chip-alert" aria-hidden="true" />}
       {inboxCount > 0 && (
         <span class="zl-chip-inbox" aria-hidden="true">
-          <Inbox size={12} />
+          <Zap size={12} />
           {inboxCount > 9 ? "9+" : inboxCount}
         </span>
       )}
