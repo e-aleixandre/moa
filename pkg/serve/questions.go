@@ -56,6 +56,10 @@ type questionService struct {
 	// startup: which sessions it bars is unknown, so every session's answers
 	// stay barred until it is read (loadJournalLocked).
 	journalUnread atomic.Bool
+	// journalMu orders the fence journal's file operations with what they
+	// publish: a write, a removal with the barrier it lifts, and a load of the
+	// whole journal. Taken under a session's lock, never the other way round.
+	journalMu sync.Mutex
 	// gone marks the sessions Delete has settled for the last time; a post
 	// for one of them refuses to commit. Written under the session's lock.
 	gone sync.Map
@@ -381,6 +385,8 @@ func (q *questionService) deletedSaved(sessionID string) {
 // forgetFenceLocked drops what a deleted session's unsaved Stop left behind:
 // nothing is left to fence, and nothing must be written for it afterwards.
 func (q *questionService) forgetFenceLocked(sessionID string) {
+	q.journalMu.Lock()
+	defer q.journalMu.Unlock()
 	q.unfenced.Delete(sessionID)
 	if err := q.journalRemove(sessionID); err != nil {
 		// Left behind, the file is reapplied at the next start to a session
@@ -497,6 +503,8 @@ func (q *questionService) Fence(ctx context.Context, sessionID string, stopRun b
 // file is durably gone (see journalRemove); until then the session stays barred
 // and the error says why.
 func (q *questionService) settledLocked(sessionID string, stopRun bool) error {
+	q.journalMu.Lock()
+	defer q.journalMu.Unlock()
 	if stopRun {
 		if err := q.journalRemove(sessionID); err != nil {
 			q.unfenced.Store(sessionID, true)
@@ -516,6 +524,8 @@ func (q *questionService) journalStopLocked(sessionID string) {
 	if _, gone := q.gone.Load(sessionID); gone {
 		return
 	}
+	q.journalMu.Lock()
+	defer q.journalMu.Unlock()
 	if err := q.journalWrite(sessionID); err != nil {
 		slog.Error("questions: the Stop fence could not be journaled either; a crash before it is saved can replay the answers this Stop cut", "session", sessionID, "error", err)
 	}

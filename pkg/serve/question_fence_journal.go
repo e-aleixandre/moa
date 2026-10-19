@@ -78,6 +78,7 @@ func (q *questionService) journalWrite(sessionID string) error {
 		return err
 	}
 	tmpName := tmp.Name()
+	reviewObserveWrite(q, sessionID, tmpName)
 	fail := func(err error) error {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
@@ -120,16 +121,17 @@ func (q *questionService) journalRemove(sessionID string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	err := syncJournalDir(filepath.Dir(path))
+	err := reviewSyncJournalDir(filepath.Dir(path))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil // no journal directory: there never was a file
 	}
 	return err
 }
 
-// readJournal lists the sessions with a pending Stop fence. A directory that
+// readJournal lists the sessions with a pending Stop fence (cleanTemps only
+// before any Stop can be writing: at startup). A directory that
 // does not exist means none; one that cannot be read is an error, never "none".
-func (q *questionService) readJournal() ([]string, error) {
+func (q *questionService) readJournal(cleanTemps bool) ([]string, error) {
 	dir := q.journalDir()
 	if dir == "" {
 		return nil, nil
@@ -145,8 +147,10 @@ func (q *questionService) readJournal() ([]string, error) {
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || strings.HasPrefix(name, ".") {
-			if strings.HasPrefix(name, ".fence-") {
-				_ = os.Remove(filepath.Join(dir, name)) // a write that never reached its rename
+			// At startup no Stop is writing, so a temp is a write that never
+			// reached its rename. Later, it may be a Stop writing right now.
+			if cleanTemps && strings.HasPrefix(name, ".fence-") {
+				_ = os.Remove(filepath.Join(dir, name))
 			}
 			continue
 		}
@@ -162,7 +166,7 @@ func (q *questionService) readJournal() ([]string, error) {
 // session's answers (journalUnread) until it can. Synchronous: it owns no
 // goroutine that could write after Shutdown.
 func (q *questionService) replayJournal() {
-	ids, err := q.readJournal()
+	ids, err := q.readJournal(true)
 	if err != nil {
 		q.journalUnread.Store(true)
 		slog.Error("questions: the fence journal cannot be read; answers stay barred until it can", "error", err)
@@ -180,12 +184,20 @@ func (q *questionService) replayJournal() {
 
 // loadJournalLocked turns a journal that could not be read into per-session
 // barriers once it can be. Callers hold some session's lock; other sessions
-// are only marked, and settle on their own next barredLocked.
+// are only marked, and settle on their own next barredLocked. Under journalMu,
+// like every write and removal: a list read here cannot be published after a
+// session retired its file, and only one load clears journalUnread.
 func (q *questionService) loadJournalLocked() bool {
-	ids, err := q.readJournal()
+	q.journalMu.Lock()
+	defer q.journalMu.Unlock()
+	if !q.journalUnread.Load() {
+		return true // another load finished first
+	}
+	ids, err := q.readJournal(false)
 	if err != nil {
 		return false
 	}
+	reviewObserveLoad(q, ids)
 	for _, id := range ids {
 		q.unfenced.Store(id, true)
 	}
