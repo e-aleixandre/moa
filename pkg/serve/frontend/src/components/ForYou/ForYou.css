@@ -128,3 +128,6 @@
 .fy-earlier .is-open { transform: rotate(90deg); }
 
 .fy-door-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--zl-accent); }
+
+/* The phone has no room for the chip: the tap requirement reads in the meta. */
+.fy-tap { display: inline-flex; align-items: center; gap: 4px; color: var(--zl-yellow); white-space: nowrap; }

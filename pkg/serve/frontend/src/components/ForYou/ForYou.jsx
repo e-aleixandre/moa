@@ -124,7 +124,7 @@ function Answer({ row, phone, onDone }) {
   );
 }
 
-function Row({ row, open, phone, onToggle }) {
+export function Row({ row, open, phone, onToggle }) {
   const { item, owner } = row;
   const more = (item.questions?.length || 0) - 1;
   const done = (outcome) => {
@@ -149,6 +149,7 @@ function Row({ row, open, phone, onToggle }) {
               ? <span class="fy-block">{item.kind === "secret" ? "Stopped until you enter it" : "Stopped until you answer"}</span>
               : <span class="fy-keeps">Keeps working</span>}
             {item.call_state && <><span class="fy-sep">·</span><QuestionCall item={item} /></>}
+            {item.requires_tap && phone && <><span class="fy-sep">·</span><span class="fy-tap"><Lock size={12} aria-hidden="true" />Needs your tap</span></>}
           </span>
         </span>
         {item.requires_tap && !phone && <span class="fy-chip"><Lock size={12} aria-hidden="true" />Needs your tap</span>}

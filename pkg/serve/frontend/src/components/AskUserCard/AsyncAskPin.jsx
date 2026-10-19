@@ -56,7 +56,7 @@ export function AsyncAskPin({ session, phone = false }) {
               {first.question}
             </button>
             {more > 0 && <span class="tk-pin-more tk-data" aria-label={`${more} more`}>+{more}</span>}
-            {tap && !phone && <span class="aq-pin-tap"><Lock size={12} aria-hidden="true" />Needs your tap</span>}
+            {tap && <span class="aq-pin-tap"><Lock size={12} aria-hidden="true" />Needs your tap</span>}
             <QuestionCall item={call} />
             <button type="button" class="tk-pin-done aq-pin-answer" onClick={(e) => { e.stopPropagation(); setOpen(true); }}>
               Answer
