@@ -28,6 +28,13 @@ func getForYou(t *testing.T, mgr *Manager) forYouBody {
 	return decode[forYouBody](t, rec.Result())
 }
 
+func getForYouRaw(t *testing.T, mgr *Manager) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	handleForYou(mgr)(rec, httptest.NewRequest("GET", "/api/for-you", nil))
+	return rec.Body.String()
+}
+
 func postNewsRead(t *testing.T, mgr *Manager, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
