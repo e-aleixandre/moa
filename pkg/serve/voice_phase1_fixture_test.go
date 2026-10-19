@@ -37,6 +37,9 @@ var vpAllProviders = []string{"grok-plan", "xai-api", "chatgpt-plan", "openai-li
 type vpLimits struct {
 	grace, maximum, minutes, teardown time.Duration
 	bufferedBytes, briefChars         int
+	// clock, when set, is the Manager's task clock (scheduler and task
+	// repository).
+	clock taskClock
 }
 
 // Only hookup changes belong here when the voice factory/clock/selector exist.
@@ -562,7 +565,7 @@ func vpBuildFixture(t *testing.T, provider string, limits vpLimits, setup func(*
 	if err := os.MkdirAll(filepath.Join(root, "workspace"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	f.mgr = newTestManagerWithConfig(t, context.Background(), f.voiceText, filepath.Join(root, "workspace"), cfg)
+	f.mgr = newTestManagerWithClock(t, context.Background(), f.voiceText, filepath.Join(root, "workspace"), cfg, limits.clock)
 	if _, err := f.mgr.tasks.Create(context.Background(), tasks.CreateInput{Title: "voice fixture control", Place: tasks.PlaceBacklog, ProjectKey: "voice-tests"}); err != nil {
 		t.Fatal(err)
 	}

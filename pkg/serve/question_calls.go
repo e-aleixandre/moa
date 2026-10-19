@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -39,6 +40,8 @@ const questionCallBusyRetry = 2 * time.Minute
 // questionCallHooks are test seams at the escalation's crash boundaries. All
 // nil in production.
 type questionCallHooks struct {
+	// beforeClaim runs once the question was read as due, before its claim.
+	beforeClaim func(questionID string)
 	// afterClaim runs once the attempt is committed, before anything rings.
 	// Returning false stops there, as if the process died.
 	afterClaim func(questionID, attempt string) bool
@@ -53,8 +56,24 @@ func parseCallAfterMinutes(params map[string]any) (int, error) {
 		return 0, nil
 	}
 	bad := fmt.Errorf("call_after_minutes must be a whole number of minutes between %d and %d", core.MinQuestionCallMinutes, core.MaxQuestionCallMinutes)
-	f, ok := raw.(float64)
-	if !ok || math.Trunc(f) != f || f < core.MinQuestionCallMinutes || f > core.MaxQuestionCallMinutes {
+	var f float64
+	switch v := raw.(type) {
+	case float64:
+		f = v
+	case int:
+		f = float64(v)
+	case int64:
+		f = float64(v)
+	case json.Number:
+		n, err := v.Float64()
+		if err != nil {
+			return 0, bad
+		}
+		f = n
+	default:
+		return 0, bad
+	}
+	if math.Trunc(f) != f || f < core.MinQuestionCallMinutes || f > core.MaxQuestionCallMinutes {
 		return 0, bad
 	}
 	return int(f), nil
@@ -194,6 +213,9 @@ func (m *Manager) fireQuestionCall(ctx context.Context, q tasks.Question) {
 			slog.Warn("question calls: cancelling failed", "question", q.ID, "error", err)
 		}
 		return
+	}
+	if h := m.questionCallHooks.beforeClaim; h != nil {
+		h(q.ID)
 	}
 	attempt := newVoiceCallID()
 	if claimed, err := m.tasks.ClaimCallEscalation(ctx, q.ID, attempt); err != nil || !claimed {

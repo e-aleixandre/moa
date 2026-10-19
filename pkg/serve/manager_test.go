@@ -144,7 +144,15 @@ func newTestManagerWithRoot(t *testing.T, ctx context.Context, provider core.Pro
 
 func newTestManagerWithConfig(t *testing.T, ctx context.Context, provider core.Provider, root string, moaCfg core.MoaConfig) *Manager {
 	t.Helper()
+	return newTestManagerWithClock(t, ctx, provider, root, moaCfg, nil)
+}
+
+// newTestManagerWithClock is newTestManagerWithConfig with the task clock
+// (scheduler and task repository) replaced when clock is not nil.
+func newTestManagerWithClock(t *testing.T, ctx context.Context, provider core.Provider, root string, moaCfg core.MoaConfig, clock taskClock) *Manager {
+	t.Helper()
 	mgr := NewManager(ctx, ManagerConfig{
+		clock:           clock,
 		ProviderFactory: func(_ core.Model) (core.Provider, error) { return provider, nil },
 		AuxiliaryModelResolver: func(spec string) (core.Model, bool, error) {
 			return core.ResolveAuxiliaryModel(spec, func(string) bool { return true })

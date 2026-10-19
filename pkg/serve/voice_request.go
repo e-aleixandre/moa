@@ -63,24 +63,24 @@ var whyText = map[string]string{
 const callAcceptWindow = 30 * time.Second
 
 type callRequest struct {
-	ID        string           `json:"id"`
-	SessionID string           `json:"session_id"`
-	OwnerID   string           `json:"owner_id"`
-	OwnerName string           `json:"owner_name"`
-	Reason    string           `json:"reason"`
-	Urgency   string           `json:"urgency"`
-	Level     string           `json:"level"`
-	State     string           `json:"state"`
-	Created   time.Time        `json:"created"`
-	Expires   *time.Time       `json:"expires_at,omitempty"`
+	ID        string     `json:"id"`
+	SessionID string     `json:"session_id"`
+	OwnerID   string     `json:"owner_id"`
+	OwnerName string     `json:"owner_name"`
+	Reason    string     `json:"reason"`
+	Urgency   string     `json:"urgency"`
+	Level     string     `json:"level"`
+	State     string     `json:"state"`
+	Created   time.Time  `json:"created"`
+	Expires   *time.Time `json:"expires_at,omitempty"`
 	// QuestionID is the open question this call escalates, if any: a client
 	// shows that question as being called about. Additive.
-	QuestionID string `json:"question_id,omitempty"`
-	provider  voice.ProviderID // fixed when asked: answering never picks another
-	question  string           // the written fallback, what the call is about
-	invite    string           // the iPhones' ringing invitation (Ring), if any
-	why       string
-	stop      func() bool
+	QuestionID string           `json:"question_id,omitempty"`
+	provider   voice.ProviderID // fixed when asked: answering never picks another
+	question   string           // the written fallback, what the call is about
+	invite     string           // the iPhones' ringing invitation (Ring), if any
+	why        string
+	stop       func() bool
 	// withdrawCtx ends, with errRequestWithdrawn, when the request is
 	// withdrawn; withdraw ends it.
 	withdrawCtx context.Context
