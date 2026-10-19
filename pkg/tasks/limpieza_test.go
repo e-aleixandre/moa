@@ -77,7 +77,7 @@ func TestListStatusDoneNewestFirstAndEmptyParamsChangeNothing(t *testing.T) {
 	}
 	out, _ := run(t, sc, map[string]any{"action": "list", "status": "done"})
 	i1, i0, i2 := strings.Index(out, "finished 1"), strings.Index(out, "finished 0"), strings.Index(out, "finished 2")
-	if !(i1 >= 0 && i1 < i0 && i0 < i2) || strings.Contains(out, "open 0") {
+	if i1 < 0 || i1 >= i0 || i0 >= i2 || strings.Contains(out, "open 0") {
 		t.Fatalf("done newest first, no open:\n%s", out)
 	}
 	if out, isErr := run(t, sc, map[string]any{"action": "list", "status": "bogus"}); !isErr || !strings.Contains(out, "open") {

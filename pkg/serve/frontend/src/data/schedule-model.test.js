@@ -300,9 +300,9 @@ test('scheduledSessionStatusAndPinnedLine', () => {
   expect(pin.key).toBe('Waiting for you');
   expect(pin.when).toBe('Run now?');
   expect(pin.more).toBe(1);
-  expect(sessionTasksVerdict(mixed, NOW, TZ)).toBe('1 for you · 1 waiting · next 17:00 · 2/3');
+  expect(sessionTasksVerdict(mixed, NOW, TZ)).toBe('1 for you · 1 waiting · next 17:00 · 1 open');
   // Without schedules the words are unchanged.
-  expect(sessionTasksVerdict({ requests: [], checklist: [{ id: 1, status: 'done' }] })).toBe('1/1');
+  expect(sessionTasksVerdict({ requests: [], checklist: [{ id: 1, status: 'done' }] })).toBe('0 open');
 });
 
 // ── scheduledTranscriptRendering ─────────────────────────────────────────

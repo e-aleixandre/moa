@@ -5,7 +5,7 @@ import { useEdgeSwipeBack } from "../../hooks/useEdgeSwipeBack.js";
 import { addToast } from "../../data/notifications.js";
 import { ownersSlice } from "../../data/owners.js";
 import {
-  loadTask, loadTaskProjects, markTasksSeen, patchTask, peekDraft, selectSessionDirectory, setDraftDest, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
+  loadTask, listMark, loadTaskProjects, markListSeen, markTasksSeen, patchTask, peekDraft, selectSessionDirectory, setDraftDest, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
 } from "../../data/tasks.js";
 import { errorText, groupTasks, movePatch, projectOptions, sessionGroups, sessionName } from "../../data/tasks-model.js";
 import { projectLabels } from "../../data/tasks-move.js";
@@ -25,10 +25,10 @@ export function MobileTasksView({ onBack }) {
   const owners = useStore((st) => ownersSlice(st).list);
   const [stack, setStack] = useState([]);
   const [project, setProject] = useState(null);
-  const [doneOpen, setDoneOpen] = useState(false);
+  const [doneOpen, setDoneOpen] = useState({});
   const checks = useRowChecks(completesInline);
   const lookup = useTaskLookup();
-  useEffect(() => { markTasksSeen(); loadTaskProjects(); }, []);
+  useEffect(() => { loadTaskProjects(); }, []);
 
   const top = stack[stack.length - 1] || null;
   useEffect(() => { if (top?.kind === "move") loadTaskProjects(); }, [top?.kind]);
@@ -44,9 +44,11 @@ export function MobileTasksView({ onBack }) {
   const only = slice.session;
   useEffect(() => (only ? watchSessionTasks(only) : undefined), [only]);
   const onlyData = only ? slice.bySession[only] : null;
+  useEffect(() => { if (only) markListSeen(only); else markTasksSeen(); }, [only]);
+  const since = slice.visits[only || ""] ?? listMark(slice.marks, only || "");
   const groups = useMemo(
-    () => (only ? sessionGroups(onlyData, only).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions })),
-    [only, onlyData, slice.list, slice.agents, project, sessions],
+    () => (only ? sessionGroups(onlyData, only, since).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions, since })),
+    [only, onlyData, slice.list, slice.agents, project, sessions, since],
   );
   const projects = projectOptions(slice.projects, slice.list);
   const scheduled = useMemo(

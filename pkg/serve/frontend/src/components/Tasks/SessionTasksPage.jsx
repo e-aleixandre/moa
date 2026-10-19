@@ -1,9 +1,9 @@
-import { useEffect, useMemo } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { useStore } from "../../hooks/useStore.js";
 import { ownersSlice } from "../../data/owners.js";
 import { addToast } from "../../data/notifications.js";
 import { parsePanelPage, taskDepsPanelPage, taskMovePanelPage, taskPanelPage } from "../../data/session-panel.js";
-import { loadTask, loadTaskProjects, patchTask, peekDraft, selectSessionDirectory, setDraftDest, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
+import { listMark, loadTask, loadTaskProjects, markListSeen, patchTask, peekDraft, selectSessionDirectory, setDraftDest, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
 import { errorText, movePatch, projectOptions, sessionGroups } from "../../data/tasks-model.js";
 import { EmptyState, MoveList, TaskGroups, openTaskSession, useRowChecks, completesInline } from "./parts.jsx";
 import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
@@ -25,7 +25,12 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
   useEffect(() => { if (kind === "taskMove" || kind === "taskNewMove") loadTaskProjects(); }, [kind]);
 
   const data = slice.bySession[session.id];
-  const groups = useMemo(() => sessionGroups(data, session.id), [data, session.id]);
+  // The panel's list is this session's list: the same "last looked" mark as the
+  // Tasks view narrowed to it, taken once per visit.
+  useEffect(() => { markListSeen(session.id); }, [session.id]);
+  const since = slice.visits[session.id] ?? listMark(slice.marks, session.id);
+  const [doneOpen, setDoneOpen] = useState({});
+  const groups = useMemo(() => sessionGroups(data, session.id, since), [data, session.id, since]);
 
 
   // On the phone a scheduled task's When, Send to and reroute are pages of
@@ -53,6 +58,8 @@ export function SessionTasksPage({ session, page, sheet, goPage }) {
             completingId={checks.completingId}
             setCompletingId={checks.setCompletingId}
             onCheck={checks.onCheck}
+            doneOpen={doneOpen}
+            setDoneOpen={setDoneOpen}
             onAdd={() => goPage("taskNew")}
           />
         ) : <EmptyState compact text="Loading…" />}

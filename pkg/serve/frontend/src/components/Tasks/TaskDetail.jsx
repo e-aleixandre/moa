@@ -602,7 +602,7 @@ export function TaskDetail({
 
         {done && task.completion_note && (
           <div class={`tk-sent${isCantDo(task) ? " is-cant" : ""}`}>
-            <span class="tk-sent-k">{handoff ? (isCantDo(task) ? "Can't do" : "Result") : "Your note"}</span>
+            <span class="tk-sent-k">{handoff ? (isCantDo(task) ? "Can't do" : "Result") : task.place === "agent" ? "Summary" : "Your note"}</span>
             <p>{task.completion_note}</p>
           </div>
         )}

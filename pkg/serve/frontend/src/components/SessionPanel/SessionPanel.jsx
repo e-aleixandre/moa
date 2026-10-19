@@ -5,7 +5,7 @@ import {
   artifactsVerdict, closeSessionPanel, mcpVerdict, panelPageParent, panelPageTitle, parsePanelPage, runFacts,
   focusPanelSubpage, panelAccessibleName, setSessionPanelPage, usageVerdict,
 } from "../../data/session-panel.js";
-import { selectSessionTasks, watchSessionTasks } from "../../data/tasks.js";
+import { listMark, selectSessionTasks, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
 import { sessionTasksVerdict } from "../../data/tasks-model.js";
 import { SessionTasksPage } from "../Tasks/SessionTasksPage.jsx";
 import { artifactsSlice, listArtifactsInPanel, openArtifactsList } from "../../data/artifacts.js";
@@ -332,8 +332,10 @@ export function SessionPanel({
 // "Tasks done/total" fact, so the count is said once, here.
 function TasksRow({ sessionId, onOpen }) {
   const data = useStore((s) => selectSessionTasks(s, sessionId));
+  const marks = useStore((s) => tasksSlice(s).marks);
   useEffect(() => (sessionId ? watchSessionTasks(sessionId) : undefined), [sessionId]);
-  return <PanelRow id="tasks" title="Tasks" verdict={data ? sessionTasksVerdict(data) : ""} onOpen={onOpen} />;
+  const verdict = data ? sessionTasksVerdict(data, Date.now(), undefined, listMark(marks, sessionId)) : "";
+  return <PanelRow id="tasks" title="Tasks" verdict={verdict} onOpen={onOpen} />;
 }
 
 // The dossier's Artifacts row is a door to the drawer, not to a second list.

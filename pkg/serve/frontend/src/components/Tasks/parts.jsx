@@ -7,7 +7,7 @@ import { useStore } from "../../hooks/useStore.js";
 import { loadTask, patchTask, isNewRequest } from "../../data/tasks.js";
 import {
   canCheck, canMove, handoffOrphan, closeReady, completeNotifies, completePatch, deliverOptions, errorText, isCantDo, isHere, isOpen, isRequest,
-  needsDeliverChoice, noticeStateWords, projectLabelOf, recipientFor, relAge, rowFrom, sessionName, startNotifyGesture, taskProjectName,
+  needsDeliverChoice, noticeStateWords, noteSummary, projectLabelOf, recipientFor, relAge, rowFrom, sessionName, startNotifyGesture, taskProjectName,
 } from "../../data/tasks-model.js";
 import { moveIndex, moveSearch } from "../../data/tasks-move.js";
 import { isTargetHere } from "../../data/schedule-model.js";
@@ -304,7 +304,7 @@ function rowMeta({ task, context, sessions, lookup, owners }) {
   if (waiting && isOpen(task)) meta.push(<span class="tk-meta-wait"><Link2 size={12} aria-hidden="true" />Waits for {waiting.title}</span>);
   const notice = noticeStateWords(task.notice_state);
   if (notice) meta.push(<span class="tk-meta-notice">{notice}</span>);
-  if (task.status === "done" && task.completion_note) meta.push(<span class="tk-meta-note">“{task.completion_note}”</span>);
+  if (task.status === "done" && task.completion_note) meta.push(<span class="tk-meta-note">{noteSummary(task.completion_note)}</span>);
   if (isRequest(task) && !from && context !== "session") meta.push(<span class="tk-meta-from">{sessionName(sessions, task.requester_session_id)}</span>);
   if (context !== "session" && task.place === "you" && task.project_key) meta.push(<span>{taskProjectName(task)}</span>);
   if (task.subtasks?.length) meta.push(<span class="tk-data">{task.subtasks.filter((s) => s.done).length}/{task.subtasks.length}</span>);
@@ -384,7 +384,7 @@ function GroupHead({ g, open, onToggle, dragging, onDrop }) {
 
 // TaskGroups — the list: group heads and their rows. Completing happens in
 // the row itself (CompletionFlow), and drag-and-drop onto a group head moves.
-export function TaskGroups({ groups, selected, onSelect, phone, context, sessions, lookup, newSince, completingId, setCompletingId, onCheck, onAdd, onDropTask, doneOpen, setDoneOpen, draggable }) {
+export function TaskGroups({ groups, selected, onSelect, phone, context, sessions, lookup, newSince, completingId, setCompletingId, onCheck, onAdd, onDropTask, doneOpen = {}, setDoneOpen, draggable }) {
   const [dragging, setDragging] = useState(null);
   const owners = useStore((st) => ownersSlice(st).list);
   const ownersLoaded = useStore((st) => ownersSlice(st).loaded);
@@ -393,13 +393,13 @@ export function TaskGroups({ groups, selected, onSelect, phone, context, session
   return (
     <div class={`tk-list${phone ? " is-phone" : ""}`} role="listbox" aria-label="Tasks">
       {visible.map((g) => {
-        const open = !g.collapsed || doneOpen;
+        const open = !g.collapsed || !!doneOpen[g.id];
         return (
           <section class="tk-sec" key={g.id} aria-label={g.sub ? `${g.title} ${g.sub}` : g.title}>
             <GroupHead
               g={g}
               open={open}
-              onToggle={() => setDoneOpen?.(!doneOpen)}
+              onToggle={() => setDoneOpen?.({ ...doneOpen, [g.id]: !doneOpen[g.id] })}
               dragging={dragging}
               onDrop={(dest) => { const id = dragging; setDragging(null); onDropTask?.(id, dest); }}
             />

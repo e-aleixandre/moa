@@ -16,13 +16,13 @@ const declined = T({ place: "you", status: "done", requester_session_id: "s_moa"
 
 // ── Which tasks have a thread ────────────────────────────────────────────
 
-test("tasks between owners and agents' requests have a thread; nothing else does", () => {
+test("tasks between owners, agents' requests and checklist tasks have a thread; notes and the backlog do not", () => {
   expect(hasThread(sent)).toBe(true);
   expect(hasThread(asking)).toBe(true);
   expect(hasThread(declined)).toBe(true);
   expect(hasThread(T({ requester_session_id: "s_x" }))).toBe(true);
   expect(hasThread(T({}))).toBe(false); // a private note
-  expect(hasThread(T({ place: "agent", assignee_session_id: "s_x" }))).toBe(false);
+  expect(hasThread(T({ place: "agent", assignee_session_id: "s_x" }))).toBe(true); // its log
   expect(hasThread(T({ place: "backlog", project_key: "p" }))).toBe(false);
   expect(hasThread(null)).toBe(false);
 });

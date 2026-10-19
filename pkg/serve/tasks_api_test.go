@@ -253,7 +253,7 @@ func TestSessionWebSocketKeepsTheTasksContractAdditive(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck
 
-	allowed := map[string]bool{"id": true, "title": true, "description": true, "status": true, "depends_on": true, "created_at": true, "completed_at": true}
+	allowed := map[string]bool{"id": true, "title": true, "description": true, "status": true, "depends_on": true, "created_at": true, "completed_at": true, "completion_note": true}
 	check := func(what string, raw json.RawMessage, wantTitles ...string) {
 		t.Helper()
 		if strings.Contains(string(raw), "PRIVATE-NOTE") || strings.Contains(string(raw), "OTHER-REQUEST") {
@@ -290,7 +290,7 @@ func TestSessionWebSocketKeepsTheTasksContractAdditive(t *testing.T) {
 	check("init.tasks", init.Data.Tasks, "before connect")
 
 	// A change by the CLI reaches the open connection as tasks_update.
-	if _, err := cli.AgentDone(ctx, actor, first.ID); err != nil {
+	if _, err := cli.AgentClose(ctx, actor, first.ID, "", "Done."); err != nil {
 		t.Fatal(err)
 	}
 	for {

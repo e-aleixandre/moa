@@ -129,6 +129,16 @@ export function relAge(ms, now = Date.now()) {
   return `${Math.floor(h / 24)}d`;
 }
 
+// noteSummary — a closing note as one row line: its first line, without
+// markdown marks, at most 110 characters.
+export function noteSummary(note, max = 110) {
+  const line = String(note || '').split(/\r?\n/)
+    .map((l) => l.replace(/[*_`]/g, '').replace(/^[\s#>\-]+/, '').trim())
+    .find(Boolean) || '';
+  const chars = [...line];
+  return chars.length > max ? `${chars.slice(0, max).join('').trimEnd()}…` : line;
+}
+
 // ── Grouping (the global view) ─────────────────────────────────────────────
 
 const newestFirst = (a, b) => (b.created_at || 0) - (a.created_at || 0);
@@ -137,7 +147,7 @@ const byId = (a, b) => (a.id || 0) - (b.id || 0);
 // groupTasks lays out the global view: You (requests above notes), one
 // Backlog per project, the agents' checklists only behind their filter, and
 // what is done folded at the end. Empty groups are left out.
-export function groupTasks(list, { agents = false, project = null, sessions = {} } = {}) {
+export function groupTasks(list, { agents = false, project = null, sessions = {}, since = Infinity } = {}) {
   const all = Array.isArray(list) ? list : [];
   // A scheduled task is not the owner's to do: it has its own group
   // (Scheduled) until it is done.
@@ -179,30 +189,48 @@ export function groupTasks(list, { agents = false, project = null, sessions = {}
       return lb - la;
     });
     for (const sid of order) {
-      const rows = bySession.get(sid).sort(byId);
+      const all = bySession.get(sid);
+      const rows = all.filter(isOpen).sort(byId);
       const s = sessions[sid];
+      const name = sessionName(sessions, sid);
       groups.push({
         id: `agent:${sid}`,
-        title: sessionName(sessions, sid),
+        title: name,
         agent: true,
         working: s?.state === 'running',
-        sub: projectName(s?.cwd || rows[0]?.project_cwd || ''),
+        sub: projectName(s?.cwd || all[0]?.project_cwd || ''),
         rows,
-        progress: `${rows.filter((t) => !isOpen(t)).length}/${rows.length}`,
+        progress: rows.length ? `${rows.length} open` : '',
         drop: { place: 'agent', sessionId: sid },
       });
+      // What this session finished stays with it: the new on top of its
+      // own fold, the rest folded.
+      groups.push(...doneGroups(all.filter((t) => !isOpen(t)), since, { key: `:agent:${sid}`, sub: name }));
     }
   }
 
-  const done = scoped.filter((t) => !isOpen(t) && t.place !== 'agent')
-    .sort((a, b) => (b.completed_at || 0) - (a.completed_at || 0));
-  if (done.length) groups.push({ id: 'done', title: 'Done', rows: done, n: done.length, collapsed: true });
+  groups.push(...doneGroups(scoped.filter((t) => !isOpen(t) && t.place !== 'agent'), since));
   return groups;
 }
 
+const byCompleted = (a, b) => (b.completed_at || 0) - (a.completed_at || 0);
+
+// doneGroups folds a list's finished tasks: what was completed after the
+// list's mark stays out of the fold ("Done since you last looked"), the rest
+// goes into Done. Newest first in both.
+export function doneGroups(done, since = Infinity, { key = '', sub = '' } = {}) {
+  const sorted = [...done].sort(byCompleted);
+  const fresh = sorted.filter((t) => (t.completed_at || 0) > since);
+  const older = sorted.filter((t) => (t.completed_at || 0) <= since);
+  const out = [];
+  if (fresh.length) out.push({ id: `done-new${key}`, title: 'Done since you last looked', sub, rows: fresh, n: fresh.length });
+  if (older.length) out.push({ id: `done${key}`, title: 'Done', sub, rows: older, n: older.length, collapsed: true });
+  return out;
+}
+
 // The rows the keyboard walks: every row of an open group, top to bottom.
-export function flatRows(groups, doneOpen = false) {
-  return groups.filter((g) => !g.collapsed || doneOpen).flatMap((g) => g.rows);
+export function flatRows(groups, doneOpen = {}) {
+  return groups.filter((g) => !g.collapsed || doneOpen[g.id]).flatMap((g) => g.rows);
 }
 
 // nextSelection — j/k and the arrows. Nothing selected lands on the first row.
@@ -248,33 +276,45 @@ export function pinnedLine(data) {
   return { task: open[0], more: open.length - 1 };
 }
 
+// checklistWords — what is left of a checklist, and what was finished after
+// the device last opened its list: "17 open · +3 done" (long), "17 · +3"
+// (short). The finished ones already seen are not counted.
+function checklistWords(list, since = Infinity) {
+  const open = list.filter(isOpen).length;
+  const fresh = list.filter((t) => t.status === 'done' && (t.completed_at || 0) > since).length;
+  return {
+    long: `${open} open${fresh ? ` · +${fresh} done` : ''}`,
+    short: `${open}${fresh ? ` · +${fresh}` : ''}`,
+  };
+}
+
 // The session panel's Tasks row. It replaces the old "Tasks done/total" fact,
 // so it carries every number once: requests waiting on you, runs waiting for
 // your OK, the next scheduled run, and the checklist's progress.
-export function sessionTasksVerdict(data, now = Date.now(), tz = deviceZone()) {
+export function sessionTasksVerdict(data, now = Date.now(), tz = deviceZone(), since = Infinity) {
   const reqs = openSessionRequests(data).length;
   const list = Array.isArray(data?.checklist) ? data.checklist : [];
   const parts = [];
   if (reqs) parts.push(`${reqs} for you`);
   parts.push(...scheduleVerdict(Array.isArray(data?.scheduled) ? data.scheduled : [], now, tz));
-  if (list.length) parts.push(`${list.filter((t) => t.status === 'done').length}/${list.length}`);
+  if (list.length) parts.push(checklistWords(list, since).long);
   return parts.join(' · ') || 'none';
 }
 
 // sessionTasksStatus — the status line's Tasks item: the panel row's words,
 // or null when the session has nothing to show.
-export function sessionTasksStatus(data, now = Date.now(), tz = deviceZone()) {
+export function sessionTasksStatus(data, now = Date.now(), tz = deviceZone(), since = Infinity) {
   if (!data) return null;
-  const verdict = sessionTasksVerdict(data, now, tz);
+  const verdict = sessionTasksVerdict(data, now, tz, since);
   if (verdict === 'none') return null;
   const forYou = openSessionRequests(data).length;
   const list = Array.isArray(data?.checklist) ? data.checklist : [];
   const done = list.filter((t) => t.status === 'done').length;
-  const progress = list.length ? `${done}/${list.length}` : verdict;
+  const progress = list.length ? checklistWords(list, since).short : verdict;
   return { text: verdict, forYou, pending: list.length - done, short: forYou ? String(forYou) : progress };
 }
 
-export function sessionGroups(data, sessionId = '') {
+export function sessionGroups(data, sessionId = "", since = Infinity) {
   const { requests: reqs, checklist } = sessionRecords(data, sessionId);
   const list = [...checklist].sort(byId);
   const groups = [];
@@ -282,10 +322,12 @@ export function sessionGroups(data, sessionId = '') {
     const open = reqs.filter(isOpen);
     groups.push({ id: 'for-you', title: 'For you', rows: [...open, ...reqs.filter((t) => !isOpen(t))], n: open.length });
   }
-  groups.push({
-    id: 'session', title: 'This session', rows: list, add: true,
-    progress: list.length ? `${list.filter((t) => t.status === 'done').length}/${list.length}` : '',
-  });
+  const [fresh, fold] = [(g) => g.id.startsWith('done-new'), (g) => g.id === 'done'];
+  const done = doneGroups(list.filter((t) => !isOpen(t)), since);
+  groups.push(...done.filter(fresh));
+  const open = list.filter(isOpen);
+  groups.push({ id: 'session', title: 'This session', rows: open, add: true, progress: open.length ? `${open.length} open` : '' });
+  groups.push(...done.filter(fold));
   return groups;
 }
 
@@ -553,7 +595,7 @@ export const isCantDo = (t) => !!t && t.status === 'done' && t.handoff?.outcome 
 // hasThread — the tasks with a thread: those between owners and the
 // requests an agent made of you. Any other task answers 400 to comments.
 export function hasThread(t) {
-  return isHandoff(t) || isRequest(t);
+  return isHandoff(t) || isRequest(t) || (isAgentTask(t) && !!t.assignee_session_id);
 }
 
 // A task between owners stays with the owner it was sent to: it never moves.
@@ -666,5 +708,6 @@ export function threadPlaceholder(task, { owners = [], sessions = {} } = {}) {
     return `Reply to ${from} and ${handoffSide(task, 'to', owners).name}…`;
   }
   if (isRequest(task)) return `Reply to ${sessionName(sessions, task.requester_session_id)}…`;
+  if (isAgentTask(task) && task.assignee_session_id) return `Tell ${sessionName(sessions, task.assignee_session_id)}…`;
   return 'Write a comment…';
 }

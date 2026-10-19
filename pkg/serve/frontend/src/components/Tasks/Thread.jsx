@@ -33,6 +33,12 @@ function Opened({ task, owners, sessions }) {
     text = task.handoff.state === "sent"
       ? <><b>{from.name}</b> sent this to <b>{to.name}</b></>
       : <><b>{from.name}</b> asked to send this to <b>{to.name}</b></>;
+  } else if (task.place === "agent") {
+    const name = sessionName(sessions, task.assignee_session_id);
+    who = sessions[task.assignee_session_id]?.kind === "owner"
+      ? { kind: "owner", name, owner: owners.find((o) => o.session_id === task.assignee_session_id) || { name } }
+      : { kind: "session", name };
+    text = <><b>{name}</b> created this</>;
   } else {
     const name = sessionName(sessions, task.requester_session_id);
     who = sessions[task.requester_session_id]?.kind === "owner"

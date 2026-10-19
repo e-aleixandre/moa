@@ -62,6 +62,11 @@ export const TASKS_INITIAL = Object.freeze({
   // the foot shows something else (an edit, a closing note).
   threadDrafts: {},
   newSince: 0,
+  // Done since you last looked, per list ('' is the global view, else a
+  // session id): marks are the stored "last opened" moments (what the status
+  // line counts from); visits are what the open list counted from.
+  marks: {},
+  visits: {},
 });
 
 // The share picker's closed slice (see data/share.js). Same reason it lives

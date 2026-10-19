@@ -4,7 +4,7 @@ import { useStore } from "../../hooks/useStore.js";
 import { hasBlockingOverlay } from "../../data/overlays.js";
 import { addToast } from "../../data/notifications.js";
 import {
-  loadTaskProjects, markTasksSeen, patchTask, selectSessionDirectory, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
+  listMark, loadTaskProjects, markListSeen, markTasksSeen, patchTask, selectSessionDirectory, setTasksAgents, setTasksSession, tasksSlice, watchSessionTasks,
 } from "../../data/tasks.js";
 import {
   errorText, flatRows, groupTasks, isTypingTarget, movePatch, nextSelection, openOwnCount, projectOptions, sessionGroups, sessionName,
@@ -25,21 +25,25 @@ export function TasksScreen() {
   const [sel, setSel] = useState(null);
   const [creating, setCreating] = useState(false);
   const [project, setProject] = useState(null);
-  const [doneOpen, setDoneOpen] = useState(false);
+  const [doneOpen, setDoneOpen] = useState({});
   const [dropInit, setDropInit] = useState(null);
   const checks = useRowChecks(completesInline);
   const listRef = useRef(null);
   const lookup = useTaskLookup();
 
-  useEffect(() => { markTasksSeen(); loadTaskProjects(); }, []);
+  useEffect(() => { loadTaskProjects(); }, []);
   // Narrowed to a session: its own tasks, read (and kept fresh) per session.
   const only = slice.session;
+  // Each list keeps its own "last looked": opening a session's list leaves the
+  // global one as it was, and the other way round.
+  useEffect(() => { if (only) markListSeen(only); else markTasksSeen(); }, [only]);
+  const since = slice.visits[only || ""] ?? listMark(slice.marks, only || "");
   useEffect(() => (only ? watchSessionTasks(only) : undefined), [only]);
   const onlyData = only ? slice.bySession[only] : null;
 
   const groups = useMemo(
-    () => (only ? sessionGroups(onlyData, only).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions })),
-    [only, onlyData, slice.list, slice.agents, project, sessions],
+    () => (only ? sessionGroups(onlyData, only, since).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions, since })),
+    [only, onlyData, slice.list, slice.agents, project, sessions, since],
   );
   // Scheduled sits on top of the other groups: the templates the view shows
   // (a session's own, or those filed under the chosen project).

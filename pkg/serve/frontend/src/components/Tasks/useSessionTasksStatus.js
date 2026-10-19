@@ -1,6 +1,6 @@
 import { useEffect } from "preact/hooks";
 import { useStore } from "../../hooks/useStore.js";
-import { selectSessionTasks, watchSessionTasks } from "../../data/tasks.js";
+import { listMark, selectSessionTasks, tasksSlice, watchSessionTasks } from "../../data/tasks.js";
 import { sessionTasksStatus } from "../../data/tasks-model.js";
 import { openTasksView } from "../../data/tasks-view.js";
 
@@ -10,7 +10,8 @@ import { openTasksView } from "../../data/tasks-view.js";
 export function useSessionTasksStatus(sessionId) {
   useEffect(() => (sessionId ? watchSessionTasks(sessionId) : undefined), [sessionId]);
   const data = useStore((state) => (sessionId ? selectSessionTasks(state, sessionId) : null));
-  const tasks = sessionTasksStatus(data);
+  const marks = useStore((state) => tasksSlice(state).marks);
+  const tasks = sessionTasksStatus(data, Date.now(), undefined, sessionId ? listMark(marks, sessionId) : Infinity);
   return {
     tasks,
     onOpenTasks: tasks && sessionId ? () => openTasksView({ sessionId }) : undefined,

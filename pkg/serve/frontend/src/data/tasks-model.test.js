@@ -45,7 +45,7 @@ test("the pinned line shows the first open request and +N for the rest", () => {
 
 test("the session's Tasks row says requests and checklist progress once", () => {
   expect(sessionTasksVerdict({ requests: [{ status: "pending" }], checklist: [{ status: "done" }, { status: "pending" }] }))
-    .toBe("1 for you · 1/2");
+    .toBe("1 for you · 1 open");
   expect(sessionTasksVerdict({ requests: [], checklist: [] })).toBe("none");
 });
 
@@ -233,13 +233,59 @@ test("the status line's Tasks item speaks the panel row's words, and is absent w
   expect(sessionTasksStatus({
     requests: [{ id: 1, status: "pending" }],
     checklist: [{ id: 2, status: "done" }, { id: 3, status: "pending" }],
-  })).toEqual({ text: "1 for you · 1/2", forYou: 1, pending: 1, short: "1" });
+  })).toEqual({ text: "1 for you · 1 open", forYou: 1, pending: 1, short: "1" });
 });
 
 test("a checklist with work left reads as its progress on a narrow line, and says it is unfinished", async () => {
   const { sessionTasksStatus } = await import("./tasks-model.js");
   const list = (...statuses) => ({ requests: [], checklist: statuses.map((status, i) => ({ id: i + 1, status })) });
   expect(sessionTasksStatus(list("pending", "in_progress")))
-    .toEqual({ text: "0/2", forYou: 0, pending: 2, short: "0/2" });
+    .toEqual({ text: "2 open", forYou: 0, pending: 2, short: "2" });
   expect(sessionTasksStatus(list("done", "done")).pending).toBe(0);
+});
+
+// ── Done since you last looked ──────────────────────────────────────────
+
+import { noteSummary, sessionGroups, sessionTasksStatus } from "./tasks-model.js";
+
+const done = (id, at, extra = {}) => ({ id, title: `t${id}`, status: "done", completed_at: at, ...extra });
+const todo = (id) => ({ id, title: `t${id}`, status: "pending" });
+
+test("a checklist's finished tasks fold into Done; the ones finished since the mark stay on top", () => {
+  const data = { requests: [], checklist: [todo(1), done(2, 100), done(3, 300), done(4, 200), todo(5)] };
+  const g = sessionGroups(data, "S", 150);
+  expect(g.map((x) => x.id)).toEqual(["done-new", "session", "done"]);
+  expect(g[0].title).toBe("Done since you last looked");
+  expect(g[0].rows.map((t) => t.id)).toEqual([3, 4]);
+  expect(g[1].rows.map((t) => t.id)).toEqual([1, 5]);
+  expect(g[2].rows.map((t) => t.id)).toEqual([2]);
+  expect(g[2].collapsed).toBe(true);
+  // Nothing new: no such group, and everything finished is folded.
+  expect(sessionGroups(data, "S", 400).map((x) => x.id)).toEqual(["session", "done"]);
+});
+
+test("the status line counts what is open and what finished since the list was opened", () => {
+  const data = { requests: [], checklist: [todo(1), todo(2), done(3, 100), done(4, 300), done(5, 400)] };
+  expect(sessionTasksStatus(data, 0, "UTC", 200)).toEqual({ text: "2 open · +2 done", forYou: 0, pending: 2, short: "2 · +2" });
+  expect(sessionTasksStatus(data, 0, "UTC", 500).text).toBe("2 open");
+  expect(sessionTasksStatus(data, 0, "UTC", 500).short).toBe("2");
+});
+
+test("agents' groups keep their finished tasks in their own folds, not among their open rows", () => {
+  const list = [
+    { id: 1, place: "agent", assignee_session_id: "A", status: "pending", title: "a" },
+    { id: 2, place: "agent", assignee_session_id: "A", status: "done", completed_at: 10, title: "b" },
+    { id: 3, place: "agent", assignee_session_id: "A", status: "done", completed_at: 500, title: "c" },
+  ];
+  const g = groupTasks(list, { agents: true, since: 100 });
+  expect(g.map((x) => x.id)).toEqual(["agent:A", "done-new:agent:A", "done:agent:A"]);
+  expect(g[0].rows.map((t) => t.id)).toEqual([1]);
+  expect(g[0].progress).toBe("1 open");
+});
+
+test("a note reads as one line: first line, no markdown, 110 characters", () => {
+  expect(noteSummary("**Deployed** X at 22:25.\nChecked it.")).toBe("Deployed X at 22:25.");
+  expect(noteSummary("\n## Heading\nbody")).toBe("Heading");
+  expect(noteSummary("w".repeat(200))).toBe(`${"w".repeat(110)}…`);
+  expect(noteSummary("")).toBe("");
 });

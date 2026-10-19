@@ -356,12 +356,39 @@ function readSeen() {
   try { return Number(localStorage.getItem(SEEN_KEY)) || 0; } catch (_) { return 0; }
 }
 
-// markTasksSeen — opening the view: what arrived before now stops being new
-// the NEXT time, so the dots survive the visit that shows them.
+// markTasksSeen — opening the global view: what arrived before now stops
+// being new the NEXT time, so the dots survive the visit that shows them.
 export function markTasksSeen() {
-  const before = readSeen();
-  patch({ newSince: before });
-  try { localStorage.setItem(SEEN_KEY, String(Date.now())); } catch (_) { /* ignore */ }
+  patch({ newSince: readSeen() });
+  markListSeen('');
+}
+
+// ── Done since you last looked ───────────────────────────────────────────
+// Each list (the global view, and each session's checklist) keeps its own
+// mark, on this device: opening one never makes another's news old. What was
+// completed after the mark stays out of the Done fold during the visit, and
+// the mark moves to now so the next visit folds it. A list never opened counts
+// as last seen a day ago.
+
+const DAY = 24 * 60 * 60 * 1000;
+const markKey = (listId) => (listId ? `${SEEN_KEY}:${listId}` : SEEN_KEY);
+
+function readMark(listId) {
+  try { return Number(localStorage.getItem(markKey(listId))) || 0; } catch (_) { return 0; }
+}
+
+// listMark — the moment from which a list's finished tasks are news.
+export function listMark(marks, listId = '', now = Date.now()) {
+  return marks?.[listId] || readMark(listId) || now - DAY;
+}
+
+// markListSeen — opening a list. Returns the mark the visit counts from.
+export function markListSeen(listId = '') {
+  const now = Date.now();
+  const before = readMark(listId) || now - DAY;
+  try { localStorage.setItem(markKey(listId), String(now)); } catch (_) { /* ignore */ }
+  patch((t) => ({ marks: { ...t.marks, [listId]: now }, visits: { ...t.visits, [listId]: before } }));
+  return before;
 }
 
 export function isNewRequest(task, newSince) {
