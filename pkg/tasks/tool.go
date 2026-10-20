@@ -144,6 +144,12 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 			if err := actsForOwner(ctx, repo, actor, action, params); err != nil {
 				return core.ErrorResult(toolErrorText(err)), nil
 			}
+			// Stopping a schedule and withdrawing a request are the top-level
+			// conversation's: a subagent shares its SessionID but not this
+			// authority.
+			if isTopLevelAction(action) && core.AgentIDFromContext(ctx) != "" {
+				return core.ErrorResult(fmt.Sprintf("a subagent cannot %s tasks: tell the conversation that started you", action)), nil
+			}
 			var (
 				res core.Result
 				err error
@@ -391,6 +397,14 @@ func toolDone(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 	return core.TextResult(msg), nil
 }
 
+func isTopLevelAction(action string) bool {
+	switch action {
+	case "pause", "resume", "delete", "withdraw":
+		return true
+	}
+	return false
+}
+
 // toolWithdraw closes a request to the user, signed by who withdrew it.
 func toolWithdraw(ctx context.Context, scope *Scope, actor Actor, params map[string]any) (core.Result, error) {
 	id, err := idParam(params, "withdraw")
@@ -399,9 +413,19 @@ func toolWithdraw(ctx context.Context, scope *Scope, actor Actor, params map[str
 	}
 	note, _ := params["note"].(string)
 	by := ""
-	if actor.Owner && scope.owners != nil {
-		if o, ok, err := scope.owners.OwnerOf(actor.SessionID); err == nil && ok {
-			by = o.Name
+	if actor.Owner {
+		// The owner's project authority is read fresh from the directory: a
+		// conversation whose owner was removed or replaced keeps only what
+		// it asked itself.
+		actor.Owner = false
+		if scope.owners != nil {
+			o, ok, err := scope.owners.OwnerOf(actor.SessionID)
+			if err != nil {
+				return core.Result{}, err
+			}
+			if ok && o.ProjectKey == actor.ProjectKey {
+				actor.Owner, by = true, o.Name
+			}
 		}
 	}
 	t, err := scope.Repo().AgentWithdraw(ctx, actor, by, id, note)

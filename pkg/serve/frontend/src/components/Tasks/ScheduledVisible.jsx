@@ -149,14 +149,14 @@ export function ScheduledByProject({ list, phone, onSelect, selected, single }) 
         const pinned = (t) => isRepeat(t) || stateOf(t) === "late";
         const rec = g.rows.filter(pinned);
         const once = g.rows.filter((t) => !pinned(t));
-        const limit = more[g.name] ? once.length : 2;
+        const limit = more[g.key] ? once.length : 2;
         return (
-          <section class="sv-proj" key={g.name}>
+          <section class="sv-proj" key={g.key}>
             {!single && <div class="sv-proj-t">{g.name}</div>}
             {rec.map((t) => <AgendaRow key={t.id} t={t} phone={phone} onSelect={onSelect} selected={selected === t.id} showProject={false} {...ctx} />)}
             {once.slice(0, limit).map((t) => <AgendaRow key={t.id} t={t} phone={phone} onSelect={onSelect} selected={selected === t.id} showProject={false} {...ctx} />)}
             {once.length > limit && (
-              <button type="button" class={`sv-more${phone ? " is-phone" : ""}`} onClick={() => setMore({ ...more, [g.name]: true })}>
+              <button type="button" class={`sv-more${phone ? " is-phone" : ""}`} onClick={() => setMore({ ...more, [g.key]: true })}>
                 {once.length - limit} more in {g.name}
               </button>
             )}
