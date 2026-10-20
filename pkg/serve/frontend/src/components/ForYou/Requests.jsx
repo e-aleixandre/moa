@@ -99,15 +99,19 @@ export function groupByProject(rows, now = Date.now()) {
   }));
 }
 
-// The fold survives a trip to Tasks and back.
+// The user's own fold survives a trip to Tasks and back. Until he folds or
+// unfolds it, the fold follows the list as it is now — also when it arrives
+// after the first render (empty, then the GET's answer).
 let foldMemory = null;
+export function __resetRequestsFoldForTests() { foldMemory = null; }
 
 // Requests — every request, one line saying how many per project, folded
 // when there are more than three; open, grouped by project, the old ones
 // folded apart and dismissable in one go after a confirmation.
 export function Requests({ rows, phone, openId, setOpenId, onLeave, onReturn }) {
-  const [folded, setFoldedState] = useState(() => foldMemory ?? rows.length > 3);
-  const setFolded = (f) => { foldMemory = f; setFoldedState(f); };
+  const [chosen, setChosen] = useState(foldMemory);
+  const folded = chosen ?? rows.length > 3;
+  const setFolded = (f) => { foldMemory = f; setChosen(f); };
   const [showOld, setShowOld] = useState({});
   const [confirm, setConfirm] = useState(false);
   const groups = useMemo(() => groupByProject(rows), [rows]);
@@ -136,15 +140,14 @@ export function Requests({ rows, phone, openId, setOpenId, onLeave, onReturn }) 
         <ChevronRight size={14} class={`fy-fold-chev${folded ? "" : " is-open"}`} aria-hidden="true" />
       </button>
       {!folded && groups.map((g) => {
-        const allOld = g.recent.length === 0;
         return (
           <div class="fy-pgroup" key={g.project}>
             <div class="fy-pgroup-h"><span>{g.project}</span><span class="zl-data">{g.recent.length + g.old.length}</span></div>
             <ul class="fy-list">
               {g.recent.map(row)}
-              {(allOld || showOld[g.project]) && g.old.map(row)}
+              {showOld[g.project] && g.old.map(row)}
             </ul>
-            {!allOld && g.old.length > 0 && !showOld[g.project] && (
+            {g.old.length > 0 && !showOld[g.project] && (
               <button type="button" class="fy-earlier" onClick={() => setShowOld({ ...showOld, [g.project]: true })}>
                 {g.old.length} older than a week<ChevronRight size={14} aria-hidden="true" />
               </button>
