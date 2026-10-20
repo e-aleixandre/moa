@@ -83,9 +83,7 @@ func TestBackupUpgradePathsOneToolSameTurnAndNaturalRestore(t *testing.T) {
 				t.Fatal("model changed")
 			}
 		}
-		if string(tr.bodies[0]) != string(tr.bodies[1]) {
-			t.Fatal("fallback changed the rejected request body")
-		}
+		assertBackupIdentityDelta(t, tr.bodies[0], tr.bodies[1])
 		// The capture reports its weekly reset (~45h later): until then the
 		// next ordinary request goes straight to the API, then back to the plan.
 		if _, err := a.Send(ctx, "offline"); err != nil {
