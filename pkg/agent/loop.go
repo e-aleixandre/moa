@@ -863,7 +863,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		requestCompaction := compactionSettings
 		transportAttempt, quotaAttempt := 0, 0
 		waitNoteID := ""
-		backupNoteID := ""
+		backupPrepared := false
 		var retrySource *core.ProviderSource
 		var retryRevision uint64
 		for attempt := 0; ; attempt++ {
@@ -976,7 +976,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					return cfg.agent.admitProviderSource(dispatchCtx, cfg.requestRevision, cfg.model, bound, &source)
 				}
 				req.Options.OnProviderPrepare = func(prepareCtx context.Context, source core.ProviderSource) error {
-					return cfg.prepareBackup(prepareCtx, source, &backupNoteID)
+					return cfg.prepareBackup(prepareCtx, &backupPrepared)
 				}
 				cfg.agent.mu.Lock()
 				hasWaitSave := cfg.agent.providerWaitSave != nil
