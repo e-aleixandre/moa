@@ -86,11 +86,20 @@ func TestBackupUpgradePathsOneToolSameTurnAndNaturalRestore(t *testing.T) {
 		if string(tr.bodies[0]) != string(tr.bodies[1]) {
 			t.Fatal("fallback changed the rejected request body")
 		}
+		// The capture reports its weekly reset (~45h later): until then the
+		// next ordinary request goes straight to the API, then back to the plan.
 		if _, err := a.Send(ctx, "offline"); err != nil {
 			t.Fatal(err)
 		}
-		if len(tr.headers) != 4 || tr.headers[3].Get("Authorization") == "" || tools != 1 {
-			t.Fatal("next ordinary request did not prefer OAuth or repeated a tool")
+		if len(tr.headers) != 4 || tr.headers[3].Get("X-API-Key") == "" || tr.headers[3].Get("Authorization") != "" || tools != 1 {
+			t.Fatal("next request before the reset probed the plan or repeated a tool")
+		}
+		time.Sleep(46 * time.Hour)
+		if _, err := a.Send(context.Background(), "offline"); err != nil {
+			t.Fatal(err)
+		}
+		if len(tr.headers) != 5 || tr.headers[4].Get("Authorization") == "" || tools != 1 {
+			t.Fatal("next ordinary request after the reset did not prefer OAuth or repeated a tool")
 		}
 	})
 }

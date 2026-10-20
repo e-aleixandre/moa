@@ -12,6 +12,10 @@ import (
 	"github.com/e-aleixandre/moa/pkg/provider/anthropic"
 )
 
+// maxRememberedPlanLimit bounds a remembered reset: the longest plan window is
+// a week, so a later date is not trusted.
+const maxRememberedPlanLimit = 8 * 24 * time.Hour
+
 func backupReplaySupported(req core.Request) bool {
 	if req.Options.Fast {
 		return false
@@ -94,6 +98,19 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 		}
 		return streamBackup(auth.BackupRevision{Primary: binding.PrimaryGeneration, Key: binding.BackupGeneration}, binding.OAuthNotBefore)
 	}
+	backupEligible := primary.Source == core.CredentialSourceStore && primary.Kind == "oauth" && backup.Active && backup.Revision.Primary == primary.Generation && backupReplaySupported(req)
+	now := time.Now
+	if p.now != nil {
+		now = p.now
+	}
+	// A plan limit confirmed with a reliable reset holds for the whole account
+	// until that reset: asking the plan again before it only collects another
+	// rejection, so the request goes straight to the API.
+	if backupEligible {
+		if until, ok := p.authStore.AnthropicPlanLimit(backup.Revision, now()); ok {
+			return streamBackup(backup.Revision, &until)
+		}
+	}
 	base := anthropic.NewWithKind("", primary.Kind == "oauth")
 	if p.httpClient != nil {
 		base.WithHTTPClient(p.httpClient)
@@ -104,8 +121,13 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 	}))
 	ch, err := base.Stream(ctx, req)
 	if err != nil {
-		if qe, ok := core.AsQuotaExceeded(err); ok && qe.Wait != nil && qe.Wait.Kind == "quota_confirmed" && (qe.Wait.Scope == "five_hour" || qe.Wait.Scope == "seven_day") && primary.Source == core.CredentialSourceStore && primary.Kind == "oauth" && backup.Active && backup.Revision.Primary == primary.Generation && backupReplaySupported(req) {
+		if qe, ok := core.AsQuotaExceeded(err); ok && qe.Wait != nil && qe.Wait.Kind == "quota_confirmed" && (qe.Wait.Scope == "five_hour" || qe.Wait.Scope == "seven_day") && backupEligible {
 			notBefore := qe.Wait.NextAttemptAt
+			// Only a complete reset is remembered; a bare backoff or Retry-After
+			// is no recovery date, and nothing beyond a week (plus margin) is.
+			if left := notBefore.Sub(now()); qe.Wait.ResetAt != nil && left > 0 && left <= maxRememberedPlanLimit {
+				p.authStore.RememberAnthropicPlanLimit(backup.Revision, notBefore)
+			}
 			return streamBackup(backup.Revision, &notBefore)
 		}
 		err = p.classify(ctx, primary, secrets, err)

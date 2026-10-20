@@ -208,3 +208,25 @@ func TestRememberedPlanLimitDoesNotForceUnsupportedRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestRememberedPlanLimitShowsAPICreditsErrorOncePerSend(t *testing.T) {
+	p, s, tr, req := backupRuntime(t)
+	tr.serve = func(_ *http.Request, n int) (int, http.Header, string) {
+		if n == 0 {
+			return backupRejectUntil("seven_day", time.Now().Add(time.Hour))
+		}
+		return 400, http.Header{}, `{"error":{"type":"invalid_request_error","message":"Your credit balance is too low"}}`
+	}
+	for i, want := range []int{2, 3} {
+		_, err := p.Stream(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "credit") || len(tr.headers) != want {
+			t.Fatalf("send %d: want visible API error after %d requests: %v requests=%d", i, want, err, len(tr.headers))
+		}
+	}
+	if tr.headers[2].Get("X-API-Key") == "" || tr.headers[2].Get("Authorization") != "" {
+		t.Fatal("remembered limit probed the plan after an API denial")
+	}
+	if snap, err := s.PeekSnapshot("anthropic"); err != nil || snap.Kind != "oauth" {
+		t.Fatal("API denial invalidated OAuth")
+	}
+}
