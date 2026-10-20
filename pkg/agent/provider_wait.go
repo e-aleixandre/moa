@@ -113,8 +113,8 @@ func (a *Agent) providerPhase(phase string) {
 
 // Preparation saves the turn before obtaining a paid dispatch tuple. Store
 // locks are not held here; Stop and configuration are rechecked at dispatch.
-func (cfg *loopConfig) prepareBackup(ctx context.Context, source core.ProviderSource, noteID *string) error {
-	if *noteID != "" {
+func (cfg *loopConfig) prepareBackup(ctx context.Context, prepared *bool) error {
+	if *prepared {
 		return ctx.Err()
 	}
 	a := cfg.agent
@@ -124,14 +124,13 @@ func (cfg *loopConfig) prepareBackup(ctx context.Context, source core.ProviderSo
 	if save == nil {
 		return core.ErrProviderWaitNotSaved
 	}
-	note := core.AgentMessage{Message: core.Message{Role: "session_event", ProviderSource: &source, Content: []core.Content{core.TextContent("API backup prepared. If interrupted, continue explicitly; no automatic API request will be made after restart.")}}, Custom: map[string]any{"type": "provider_source_note", "source": "api_backup", "job_id": core.AgentIDFromContext(ctx)}}
-	note.EnsureMsgID()
-	cfg.appendState(note)
-	emitLifecycle(cfg, core.AgentEvent{Type: core.AgentEventUserMessage, Message: note, MsgID: note.MsgID})
+	// The save is the whole protection: the turn is on disk before the paid
+	// request, and a restart never resumes it by itself. Nothing is added to
+	// the conversation; the status line is the only signal that the key is used.
 	if err := save(ctx); err != nil {
 		return fmt.Errorf("%w: %v", core.ErrProviderWaitNotSaved, err)
 	}
-	*noteID = note.MsgID
+	*prepared = true
 	return ctx.Err()
 }
 
