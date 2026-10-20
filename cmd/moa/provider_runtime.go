@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -27,6 +28,8 @@ type snapshotProvider struct {
 	// (same generation and account) instead of the text selection. A
 	// replaced or removed sign-in fails the request; it never switches.
 	plan *auth.CredentialSnapshot
+	// now is the clock for remembered plan limits; nil means time.Now.
+	now func() time.Time
 }
 
 func (p *snapshotProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
