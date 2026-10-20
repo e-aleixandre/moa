@@ -331,6 +331,12 @@ export function resumeSchedule(task) {
   return control(`/api/tasks/${task.id}/resume`, { revision: task.revision }, task.id).then(after);
 }
 
+// keepSchedule — For you's Keep: the user reviewed a recurring task that runs
+// on its own and lets it go on.
+export function keepSchedule(task) {
+  return control(`/api/tasks/${task.id}/keep`, { revision: task.revision }, task.id).then(after);
+}
+
 export function confirmRun(run, action, taskId) {
   return control(`/api/tasks/occurrences/${run.id}/confirm`, { revision: run.revision, action }, taskId);
 }

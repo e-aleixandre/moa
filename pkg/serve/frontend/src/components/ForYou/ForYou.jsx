@@ -13,6 +13,8 @@ import { OwnerAvatarFor } from "../Owners/OwnerAvatar.jsx";
 import { AskUserPrompt } from "../AskUserCard/AskUserPrompt.jsx";
 import "./ForYou.css";
 import { Requests } from "./Requests.jsx";
+import { RecurringWatch } from "../Tasks/ScheduledVisible.jsx";
+import { openTasksView } from "../../data/tasks-view.js";
 import { QuestionCall, StopQuestionCall } from "./QuestionCall.jsx";
 
 function age(since) {
@@ -318,6 +320,7 @@ function List({ phone, scope, onOpenAll, onLeave, onReturn }) {
           </ul>
         </section>
       )}
+      {!scope && <RecurringWatch phone={phone} onOpenTasks={() => { onLeave?.(); openTasksView({}); }} />}
       {upToDate && <div class="fy-empty">{scope ? "Nothing is waiting on you here." : "You are up to date."}</div>}
       {scope && upToDate && news.length === 0 && onOpenAll && (
         <button type="button" class="fy-open fy-all" onClick={onOpenAll}>See everything in For you<ArrowUpRight size={14} aria-hidden="true" /></button>

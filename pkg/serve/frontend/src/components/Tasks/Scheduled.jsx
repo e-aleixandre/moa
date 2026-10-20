@@ -96,7 +96,8 @@ export function SchedRow({ t, selected, onSelect, phone, context, sessions, owne
 }
 
 // ScheduledGroup — Scheduled, on top of the list: what needs you first, then
-// by next run, paused at the end. Five rows, then "Show all".
+// by next run, paused at the end. Five rows plus every recurring one, then
+// "Show all".
 export function ScheduledGroup({ list, selected, onSelect, phone, context, limit = 5, onAdd }) {
   const [all, setAll] = useState(false);
   const sessions = useStore(selectSessionDirectory);
@@ -106,7 +107,8 @@ export function ScheduledGroup({ list, selected, onSelect, phone, context, limit
   const tz = deviceZone();
   const rows = scheduledRows(list);
   if (!rows.length && !onAdd) return null;
-  const shown = all ? rows : rows.slice(0, limit);
+  // A recurring task is never hidden behind "Show all": it runs again.
+  const shown = all ? rows : rows.filter((t, i) => i < limit || isRepeat(t));
   const waiting = waitingCount(rows);
   return (
     <div class={`tk-list sch-list${phone ? " is-phone" : ""}`} role="listbox" aria-label="Scheduled">

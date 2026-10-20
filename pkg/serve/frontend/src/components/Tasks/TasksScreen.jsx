@@ -11,8 +11,9 @@ import {
 } from "../../data/tasks-model.js";
 import { CloseIcon, EmptyState, Filters, Keycap, TaskGroups, completesInline, openTaskSession, useRowChecks } from "./parts.jsx";
 import { TaskDetail, taskEyebrow, useTaskLookup } from "./TaskDetail.jsx";
-import { ScheduledGroup } from "./Scheduled.jsx";
+import { ScheduledByProject } from "./ScheduledVisible.jsx";
 import { scheduledRows } from "../../data/schedule-model.js";
+import { bucketOf, byProject } from "../../data/scheduled-visible.js";
 
 // TasksScreen — the global view, in the desktop's middle zone. You (requests
 // above notes), a Backlog per project, the agents' checklists behind their
@@ -46,12 +47,14 @@ export function TasksScreen() {
     [only, onlyData, slice.list, slice.agents, project, sessions, since],
   );
   // Scheduled sits on top of the other groups: the templates the view shows
-  // (a session's own, or those filed under the chosen project).
+  // (a session's own, an owner's project's, or those filed under the chosen
+  // project), by project.
   const scheduled = useMemo(
     () => scheduledRows(only ? onlyData?.scheduled : slice.list.filter((t) => !project || t.project_key === project)),
     [only, onlyData, slice.list, project],
   );
-  const rows = [...scheduled.slice(0, 5), ...flatRows(groups, doneOpen)];
+  const schedNav = byProject(scheduled.filter((t) => bucketOf(t) !== "stale")).flatMap((g) => g.rows);
+  const rows = [...schedNav, ...flatRows(groups, doneOpen)];
   const projects = projectOptions(slice.projects, slice.list);
   const task = sel ? slice.list.find((t) => t.id === sel) || slice.details[sel] || scheduled.find((t) => t.id === sel) || lookup(sel) : null;
 
@@ -113,7 +116,7 @@ export function TasksScreen() {
         <div class="tk-scroll" ref={listRef}>
           {slice.error && !slice.loaded && <p class="tk-banner" role="status">Couldn't load tasks: {slice.error}</p>}
           {(only ? !!onlyData?.loaded : slice.loaded) && !hasOpen && <EmptyState compact={hasDone} onNew={() => setCreating(true)} />}
-          <ScheduledGroup list={scheduled} selected={sel} onSelect={open} />
+          <ScheduledByProject list={scheduled} selected={sel} onSelect={open} single={!!only || !!project} />
           {(hasOpen || hasDone) && (
             <TaskGroups
               groups={groups}

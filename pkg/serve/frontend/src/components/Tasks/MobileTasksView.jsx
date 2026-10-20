@@ -11,8 +11,9 @@ import { errorText, groupTasks, movePatch, projectOptions, sessionGroups, sessio
 import { projectLabels } from "../../data/tasks-move.js";
 import { BackIcon, EmptyState, Filters, MoveList, TaskGroups, openTaskSession, useEscape, useRowChecks, completesInline } from "./parts.jsx";
 import { DepsPage, TaskDetail, useTaskLookup } from "./TaskDetail.jsx";
-import { ReroutePage, ScheduledGroup, TargetPage, WhenPage } from "./Scheduled.jsx";
+import { ReroutePage, TargetPage, WhenPage } from "./Scheduled.jsx";
 import { scheduledRows } from "../../data/schedule-model.js";
+import { ScheduledByProject } from "./ScheduledVisible.jsx";
 import "../../layout/mobile/MobileConversationScreen/MobileInboxView.css";
 
 // MobileTasksView — the Tasks screen on the phone: a full-screen push, like
@@ -81,7 +82,7 @@ export function MobileTasksView({ onBack }) {
           onClearSession={() => setTasksSession(null)}
         />
         {(only ? !!onlyData?.loaded : slice.loaded) && !hasOpen && <EmptyState phone compact={hasDone} onNew={() => push({ kind: "new" })} />}
-        <ScheduledGroup list={scheduled} phone limit={4} onSelect={(id) => push({ kind: "task", id })} />
+        <ScheduledByProject list={scheduled} phone onSelect={(id) => push({ kind: "task", id })} single={!!only || !!project} />
         {(hasOpen || hasDone) && (
           <TaskGroups
             groups={groups}
