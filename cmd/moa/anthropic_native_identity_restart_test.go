@@ -64,7 +64,7 @@ func TestNativeIdentityPreparedSnapshotRestartNoPaidAutostart(t *testing.T) {
 	if _, err := a.SendWithMsgID(ctx, "original work", "stable-before-restart"); err == nil || snapshot == nil || len(tr.snapshot()) != 2 {
 		t.Fatalf("snapshot setup failed: err=%v HTTP calls=%d", err, len(tr.snapshot()))
 	}
-	users, preparations := 0, 0
+	users, notes := 0, 0
 	tree, err := session.NewTreeFromEntries(snapshot.Entries, snapshot.LeafID)
 	if err != nil {
 		t.Fatal(err)
@@ -73,14 +73,14 @@ func TestNativeIdentityPreparedSnapshotRestartNoPaidAutostart(t *testing.T) {
 		if m.Role == "user" && m.MsgID == "stable-before-restart" {
 			users++
 		}
-		if m.ProviderSource != nil && m.ProviderSource.Kind == "api_backup" {
-			preparations++
+		if m.Role == "session_event" || m.Custom["type"] == "provider_source_note" {
+			notes++
 		}
 	}
-	if users != 1 || preparations != 1 {
+	if users != 1 || notes != 0 || len(tree.AllMessages()) != 1 {
 		data, _ := json.Marshal(snapshot)
 		t.Logf("synthetic preterminal snapshot: %s", data)
-		t.Fatalf("preterminal snapshot lost preparation/turn: users=%d preparations=%d", users, preparations)
+		t.Fatalf("preterminal snapshot must retain the acknowledged user without a chat note: users=%d notes=%d messages=%d", users, notes, len(tree.AllMessages()))
 	}
 	// Restore the acknowledged preterminal snapshot in a new real FileStore
 	// and Manager, not a terminal error saved after the provider returned.
@@ -124,6 +124,9 @@ func TestNativeIdentityPreparedSnapshotRestartNoPaidAutostart(t *testing.T) {
 	}
 	if wire.Type != "init" || init.State == "running" || init.ProviderExecution.Phase != "" {
 		t.Fatalf("restart auto-resumed preparation: type=%s state=%s execution=%+v", wire.Type, init.State, init.ProviderExecution)
+	}
+	if len(init.Messages) != 1 || init.Messages[0].Role != "user" || init.Messages[0].MsgID != "stable-before-restart" || init.Messages[0].Custom["type"] == "provider_source_note" {
+		t.Fatal("restart did not serve the original durable user without a chat note")
 	}
 	if len(tr.snapshot()) != 2 {
 		t.Fatal("restoring/reconnecting replayed an old 400 or started API")
