@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -41,6 +42,11 @@ type ForYouItem struct {
 	TaskID      int64  `json:"task_id,omitempty"`
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
+	// TaskRevision lets the user close or drop the request from here with the
+	// tasks API's optimistic check; Project is the requester's directory
+	// name, to group old requests. Additive.
+	TaskRevision int64  `json:"task_revision,omitempty"`
+	Project      string `json:"project,omitempty"`
 	// CallAt is when an unanswered asynchronous question calls the user
 	// (only while that is pending); CallState is pending, calling or missed.
 	// Additive.
@@ -178,7 +184,15 @@ func (m *Manager) openTaskRequests(ctx context.Context) []ForYouItem {
 		out = append(out, ForYouItem{
 			Kind: "task_request", ID: "task:" + strconv.FormatInt(t.ID, 10), SessionID: t.RequesterSessionID,
 			Since: time.UnixMilli(t.CreatedAt), TaskID: t.ID, Title: t.Title, Description: t.Description,
+			TaskRevision: t.Revision, Project: projectName(t.ProjectCWD),
 		})
 	}
 	return out
+}
+
+func projectName(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	return filepath.Base(cwd)
 }

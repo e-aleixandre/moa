@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -181,5 +182,37 @@ func TestForYouListsOpenTaskRequests(t *testing.T) {
 	if len(reqs) != 1 || reqs[0].TaskID != int64(open.ID) || reqs[0].SessionID != "asker" ||
 		reqs[0].Title != "Approve the deploy window?" || reqs[0].Blocking || reqs[0].ID == "" {
 		t.Fatalf("task requests = %+v", reqs)
+	}
+}
+
+// A task request carries what closing it from For you needs: the task's
+// revision for the tasks API's optimistic check, and the project's name to
+// group it by. A PATCH with that revision succeeds.
+func TestForYouTaskRequestCarriesRevisionAndProject(t *testing.T) {
+	ctx := context.Background()
+	mgr := newTestManagerWithConfig(t, ctx, newMockProvider(), t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off"})
+	cwd := filepath.Join(t.TempDir(), "winerim")
+	a := tasks.Actor{SessionID: "asker", ProjectKey: "p", ProjectCWD: cwd}
+	open, err := mgr.tasks.AgentAsk(ctx, a, tasks.AgentInput{Title: "Upload the SVG logo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := mgr.tasks.Get(ctx, open.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req *ForYouItem
+	for _, it := range getForYou(t, mgr).Items {
+		if it.Kind == "task_request" {
+			it := it
+			req = &it
+		}
+	}
+	if req == nil || req.TaskRevision != rec.Revision || req.TaskRevision == 0 || req.Project != "winerim" {
+		t.Fatalf("task request = %+v, want revision %d and project winerim", req, rec.Revision)
+	}
+	done := tasks.StatusDone
+	if _, err := mgr.tasks.Update(ctx, req.TaskID, req.TaskRevision, tasks.Patch{Status: &done}); err != nil {
+		t.Fatalf("closing with the listed revision: %v", err)
 	}
 }

@@ -5,7 +5,8 @@
 // An owner is the project's standing agent, so its view also covers the
 // sessions that report to it: a child's permission is the owner's business.
 
-import { forYouSlice } from './for-you.js';
+import { forYouSlice, isWaitingItem } from './for-you.js';
+import { setState } from './store.js';
 
 // forYouScopeIds — the session ids a conversation answers for: itself and,
 // when it is an owner's conversation, every session whose ownerId is that
@@ -30,11 +31,23 @@ export function forYouForSession(state, sessionId, owners = []) {
   const ids = forYouScopeIds(sessionId, state?.sessions, owners);
   const items = slice.items.filter((it) => ids.has(it.session_id));
   const news = slice.news.filter((n) => ids.has(n.session_id));
-  return { ids, items, news, waiting: items.length, unread: news.filter((n) => !n.read_at).length };
+  return { ids, items, news, waiting: items.filter(isWaitingItem).length, unread: news.filter((n) => !n.read_at).length };
 }
 
 // sessionForYouLabel — what the header button says, in words, for the three
 // states (waiting, unread News, nothing).
 export function sessionForYouLabel(waiting = 0, unread = 0) {
   return `For you in this conversation${waiting > 0 ? `, ${waiting} waiting` : ''}${unread > 0 ? `, ${unread} new` : ''}`;
+}
+
+// The header's sheet is open for one conversation: its id, in the store
+// rather than in the screen, so it survives the desktop leaving the
+// conversation for Tasks and can be reopened from there (Back). A sheet for
+// another conversation than the one shown is closed.
+export function sessionForYouSheetFor(state) {
+  return state?.forYouSheetFor || null;
+}
+
+export function setSessionForYouSheet(sessionId) {
+  setState({ forYouSheetFor: sessionId || null });
 }

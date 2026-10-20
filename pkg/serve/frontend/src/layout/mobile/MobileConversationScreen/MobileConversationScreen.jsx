@@ -31,6 +31,7 @@ import { closeTasksView, openTasksView } from "../../../data/tasks-view.js";
 import { closeForYouView, openForYouView } from "../../../data/for-you.js";
 import { MobileForYouView } from "../../../components/ForYou/ForYou.jsx";
 import { SessionForYouSheet, useSessionForYou } from "../../../components/ForYou/SessionForYou.jsx";
+import { sessionForYouSheetFor, setSessionForYouSheet } from "../../../data/for-you-session.js";
 import { PinnedTaskLine } from "../../../components/Tasks/PinnedTaskLine.jsx";
 import { AsyncAskPin } from "../../../components/AskUserCard/AsyncAskPin.jsx";
 import { MobileTasksView } from "../../../components/Tasks/MobileTasksView.jsx";
@@ -561,7 +562,8 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   // For you OF THIS conversation, top right; the id (not a flag) so that
   // changing conversation closes its sheet.
   const sessionForYou = useSessionForYou(chrome.activeId);
-  const [forYouSheetId, setForYouSheetId] = useState(null);
+  const forYouSheetId = useStore(sessionForYouSheetFor);
+  const setForYouSheetId = setSessionForYouSheet;
   // The session the header is about, for the Owner chip. Read here rather than
   // taken from `chrome`: the chrome snapshot is deliberately the ROSTER, and
   // adding a whole session to it would rebuild the header on every token.
@@ -606,6 +608,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
         phone
         open={!!chrome.activeId && forYouSheetId === chrome.activeId}
         onClose={() => setForYouSheetId(null)}
+          onReopen={() => setForYouSheetId(chrome.activeId)}
         sessionId={chrome.activeId}
         scope={chrome.titleOwner ? "This owner" : "This session"}
       />

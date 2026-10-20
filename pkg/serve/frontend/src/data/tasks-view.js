@@ -7,11 +7,14 @@ import { store } from './store.js';
 import { setTasksSession } from './tasks.js';
 
 let from = null;
+let onBack = null;
 
 // openTasksView opens every task, or with { sessionId } only that session's
-// (the status line's Tasks item).
-export function openTasksView({ sessionId = null } = {}) {
+// (the status line's Tasks item). `back` runs when the view is left again,
+// for a caller that closed itself to open it (For you's sheet reopens).
+export function openTasksView({ sessionId = null, back = null } = {}) {
   setTasksSession(sessionId);
+  onBack = back;
   const view = store.get().view;
   if (view === 'tasks') return;
   from = view;
@@ -24,6 +27,9 @@ export function closeTasksView() {
   const back = from === 'tasks' ? null : from;
   from = null;
   navigate(back);
+  const reopen = onBack;
+  onBack = null;
+  reopen?.();
 }
 
 export function toggleTasksView() {

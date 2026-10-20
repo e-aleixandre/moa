@@ -137,12 +137,13 @@ test("Open conversation and Enter password close the sheet through onLeave", () 
   expect(left).toBe(2);
 }));
 
-test("a task request's Open request closes the sheet too", () => untouched(() => {
-  const item = { kind: "task_request", id: "task:1", session_id: "s1", since: new Date().toISOString(), title: "Review" };
-  const row = { item, owner: null, ownConversation: false, session: "Tienda" };
-  let left = 0;
-  const tree = Row({ row, open: true, onLeave: () => { left++; } });
-  const answer = descendants(tree).find((n) => typeof n.type === "function" && n.props.row);
-  press(rendered(answer), (n) => String(n.props.class).includes("is-primary"));
-  expect(left).toBe(1);
-}));
+test("a task request's Open in Tasks closes the sheet too", async () => {
+  const { RequestRow } = await import("./Requests.jsx");
+  await untouched(() => {
+    const item = { kind: "task_request", id: "task:1", task_id: 1, task_revision: 1, session_id: "s1", since: new Date().toISOString(), title: "Review" };
+    let left = 0;
+    const tree = RequestRow({ row: { item, owner: null, ownConversation: false, session: "Tienda" }, open: true, phone: true, onLeave: () => { left++; } });
+    press(tree, (n) => n.props["data-act"] === "tasks");
+    expect(left).toBe(1);
+  });
+});

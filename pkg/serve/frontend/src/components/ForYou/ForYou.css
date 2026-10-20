@@ -151,3 +151,29 @@
 .fy-sheet { margin: 0 -18px; }
 .fy-sheet .fy-empty { padding: 4px 16px 8px; }
 .fy-sheet .fy-all { margin: 0 0 0 16px; }
+.fy-phone .fy-empty { padding: 20px 16px; }
+
+/* Requests: an agent's request of the user, closed in its own row, under
+   one folded line per project (the old ones folded apart). */
+.fy-req .fy-row-head { min-height: 48px; padding-top: 10px; padding-bottom: 10px; align-items: center; }
+.fy-req:not(.is-open) .fy-title { -webkit-line-clamp: 1; }
+.fy-req .fy-title { font-weight: 400; }
+.fy-req.is-old .fy-title { color: var(--zl-t2); }
+.fy-ico.is-task_request { background: transparent; box-shadow: inset 0 0 0 1px var(--zl-line); }
+.fy-req-acts { display: flex; gap: 2px; opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+.fy-req:hover .fy-req-acts, .fy-req:focus-within .fy-req-acts { opacity: 1; }
+.fy-ibtn { display: inline-grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: var(--zl-r-sm); background: none; color: var(--zl-t3); cursor: pointer; }
+.fy-ibtn:hover { background: var(--zl-control); color: var(--zl-t1); }
+.fy-sec-fold { width: 100%; min-height: 44px; border: 0; background: none; font-family: inherit; text-align: left; cursor: pointer; align-items: center; }
+.fy-sec-fold .fy-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-fold-chev { flex: none; color: var(--zl-t4); transition: transform var(--motion-fast) var(--motion-ease); }
+.fy-fold-chev.is-open { transform: rotate(90deg); }
+.fy-pgroup + .fy-pgroup { margin-top: 14px; }
+.fy-pgroup-h { display: flex; gap: 8px; padding: 4px 4px 6px; color: var(--zl-t2); font-size: var(--zl-fs-meta); font-weight: 500; }
+.fy-pgroup-h .zl-data { color: var(--zl-t4); }
+.fy-phone .fy-pgroup-h { padding: 4px 16px 6px; }
+.fy-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 4px 0; color: var(--zl-t2); font-size: var(--zl-fs-meta); }
+.fy-phone .fy-bulk { padding: 14px 16px 0; }
+.fy-bulk .fy-sec-act { margin-left: 0; }
+.fy-btn.is-danger { background: color-mix(in srgb, var(--zl-red, #f38ba8) 22%, transparent); color: var(--zl-red, #f38ba8); box-shadow: none; }
+.fy-news-old .fy-earlier { margin-top: 0; }

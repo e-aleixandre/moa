@@ -16,6 +16,9 @@ export function forYouSlice(state) {
 }
 
 let inflight = null;
+// closing holds the task requests being closed from here: hidden at once,
+// and kept hidden from any GET until the tasks API has answered.
+const closing = new Set();
 // changes counts this client's own changes (an answer, a read): a GET that
 // started before one may describe the state before it, so its response is
 // dropped and a fresh GET follows it (reloadAfterChange).
@@ -26,7 +29,7 @@ export function loadForYou() {
   inflight = api('GET', '/api/for-you')
     .then((res) => {
       if (seen !== changes) return;
-      const items = Array.isArray(res?.items) ? res.items : [];
+      const items = (Array.isArray(res?.items) ? res.items : []).filter((it) => !closing.has(it.id));
       setState((s) => {
         const prev = forYouSlice(s);
         // No news field: the server could not read them; keep what is shown.
@@ -97,8 +100,40 @@ export function orderWaiting(items) {
   return [...items].sort((a, b) => rank(a) - rank(b) || at(b) - at(a));
 }
 
+// isWaitingItem — what the amber count means: something asks or stops a
+// session. A task request is listed, not counted (it sits under Requests).
+export function isWaitingItem(it) {
+  return it?.kind !== 'task_request';
+}
+
 export function forYouCount(state) {
-  return forYouSlice(state).items.length;
+  return forYouSlice(state).items.filter(isWaitingItem).length;
+}
+
+// closeTaskRequest closes an agent's request of the user from For you:
+// "done" marks the task done, which tells the session that asked (at once
+// when it is live; when it is next opened when it is saved — it is never
+// woken from here); "dismiss" deletes it and tells no one. Both carry the
+// revision For you showed: a 409 means it changed meanwhile, so the row comes
+// back as it is now. Resolves to "ok", "conflict" or "error".
+export function closeTaskRequest(item, how) {
+  closing.add(item.id);
+  setState((s) => {
+    const prev = forYouSlice(s);
+    const items = prev.items.filter((it) => it.id !== item.id);
+    return items.length === prev.items.length ? null : { forYou: { ...prev, items } };
+  });
+  changes++;
+  const req = how === 'done'
+    ? api('PATCH', `/api/tasks/${item.task_id}`, { revision: item.task_revision, status: 'done' })
+    : api('DELETE', `/api/tasks/${item.task_id}?revision=${item.task_revision}`);
+  return req
+    .then(() => 'ok', (error) => (error?.status === 409 ? 'conflict' : 'error'))
+    .then((outcome) => {
+      closing.delete(item.id);
+      reloadAfterChange();
+      return outcome;
+    });
 }
 
 let from = null;

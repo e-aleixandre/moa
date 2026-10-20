@@ -19,6 +19,7 @@ import { Button, Kbd } from "../../primitives/index.js";
 import { updateSession } from "../../data/store.js";
 import { ownersSlice } from "../../data/owners.js";
 import { SessionForYouSheet, useSessionForYou } from "../../components/ForYou/SessionForYou.jsx";
+import { sessionForYouSheetFor, setSessionForYouSheet } from "../../data/for-you-session.js";
 import { useStore } from "../../hooks/useStore.js";
 import { usePresence } from "../../hooks/usePresence.js";
 import { projectStream, liveTrayAgents } from "../../data/stream-model.js";
@@ -149,7 +150,8 @@ export function ConversationScreen() {
   // For you of THIS conversation, in its head; the id so that moving to
   // another conversation closes the sheet.
   const sessionForYou = useSessionForYou(session?.id);
-  const [forYouSheetId, setForYouSheetId] = useState(null);
+  const forYouSheetId = useStore(sessionForYouSheetFor);
+  const setForYouSheetId = setSessionForYouSheet;
   useEffect(() => { setRewindOpen(false); }, [activeId]);
   useEffect(() => { setSecretAliases(null); }, [activeId]);
 
@@ -408,6 +410,7 @@ export function ConversationScreen() {
         <SessionForYouSheet
           open={forYouSheetId === session.id}
           onClose={() => setForYouSheetId(null)}
+          onReopen={() => setForYouSheetId(session.id)}
           sessionId={session.id}
         />
       )}

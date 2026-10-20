@@ -45,7 +45,9 @@ export function SessionForYouButton({ waiting = 0, unread = 0, phone = false, op
 // SessionForYouSheet — what the button opens: the conversation's share of
 // For you, the same rows as the general one, filtered. A bottom sheet on the
 // phone, the centred sheet on the desktop.
-export function SessionForYouSheet({ open, onClose, sessionId, phone = false, scope = "This conversation" }) {
+// onReopen opens it again: Back from Tasks, opened from one of its rows,
+// returns here.
+export function SessionForYouSheet({ open, onClose, onReopen, sessionId, phone = false, scope = "This conversation" }) {
   const openAll = () => {
     onClose?.();
     openForYouView();
@@ -53,13 +55,13 @@ export function SessionForYouSheet({ open, onClose, sessionId, phone = false, sc
   if (phone) {
     return (
       <MobileSheet open={open} onClose={onClose} title="For you" scope={scope}>
-        {open && <div class="fy-phone fy-sheet"><SessionForYouList sessionId={sessionId} phone onOpenAll={openAll} onLeave={onClose} /></div>}
+        {open && <div class="fy-phone fy-sheet"><SessionForYouList sessionId={sessionId} phone onOpenAll={openAll} onLeave={onClose} onReturn={onReopen} /></div>}
       </MobileSheet>
     );
   }
   return (
     <Sheet open={open} onClose={onClose} title="For you" class="fy-dsheet">
-      {open && <SessionForYouList sessionId={sessionId} onOpenAll={openAll} onLeave={onClose} />}
+      {open && <SessionForYouList sessionId={sessionId} onOpenAll={openAll} onLeave={onClose} onReturn={onReopen} />}
     </Sheet>
   );
 }
