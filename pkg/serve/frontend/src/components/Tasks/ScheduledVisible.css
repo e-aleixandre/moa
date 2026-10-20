@@ -1,16 +1,11 @@
 /* Scheduled tasks always in sight: Tasks' Scheduled section and For you's card. */
 .sv-wrap { padding: 4px 8px 8px; }
-.sv-head, .sv-line { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px 6px; }
+.sv-head { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px 6px; }
 .sv-head-t { font-size: var(--zl-fs-meta); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--zl-t2); }
 .sv-sum { font-size: var(--zl-fs-meta); color: var(--zl-t3); display: inline-flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 .sv-sum-rec { color: var(--zl-t1); font-weight: 500; }
 .sv-sum-attn { color: var(--zl-yellow); font-weight: 500; }
 .sv-sep { color: var(--zl-t4); }
-.sv-line {
-  width: calc(100% - 16px); margin: 6px 8px; align-items: center; border: 0; border-radius: var(--zl-r-md); background: var(--zl-raised);
-  box-shadow: var(--zl-rim); color: var(--zl-t2); font-family: inherit; text-align: left; cursor: pointer; min-height: 44px; padding: 8px 14px;
-}
-.sv-line:hover { background: var(--zl-hi); }
 .sv-proj { margin-top: 6px; }
 .sv-proj-t { display: flex; gap: 8px; align-items: baseline; padding: 8px 14px 4px; font-size: var(--zl-fs-meta); font-weight: 600; color: var(--zl-t3); }
 .sv-row { display: flex; align-items: flex-start; gap: 12px; padding: 8px 10px 8px 14px; border-radius: var(--zl-r-md); cursor: default; }
@@ -61,8 +56,7 @@
 .sv-card-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
 .sv-card-acts .sv-acts { align-self: auto; }
 .sv-btn {
-  height: 32px; padding: 0 12px; border: 0; border-radius: var(--zl-r-md); background: var(--zl-accent); color: var(--zl-on-accent, #fff);
+  height: 32px; padding: 0 12px; border: 0; border-radius: var(--zl-r-md); background: var(--zl-accent); color: var(--zl-accent-ink);
   font-family: inherit; font-size: var(--zl-fs-meta); font-weight: 500; cursor: pointer;
 }
 .sv-card.is-phone .sv-btn { height: 40px; font-size: 14px; padding: 0 14px; }
-.sv-watch .sv-line { width: 100%; margin: 6px 0; }

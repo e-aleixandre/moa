@@ -70,6 +70,8 @@ test("every recurring row shows, however many once tasks there are; the stale on
   render(h(ScheduledByProject, { list }), root);
   expect(text()).toContain("Count new delivery notes");
   expect(text()).toContain("3 more in winerim-backend");
+  // A once task has nothing to pause: only Delete.
+  expect(root.byClass("sv-row").find((r) => r.textContent.includes("Once 1")).byClass("sv-act").map((b) => b.textContent)).toEqual(["Delete"]);
   expect(text()).toContain("Didn't run");
   expect(text()).not.toContain("Once 6");
 });

@@ -21,8 +21,8 @@ function fail(title, error) {
   addToast({ title, detail: errorText(error), type: "error" });
 }
 
-// RowActions — Pause/Resume and Delete on the row itself. Delete asks once,
-// in place.
+// RowActions — Pause/Resume (a recurring task) and Delete on the row itself.
+// Delete asks once, in place.
 function RowActions({ t, phone }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -47,7 +47,7 @@ function RowActions({ t, phone }) {
   };
   return (
     <span class={`sv-acts${phone ? " is-phone" : ""}`} onClick={stop}>
-      {!stale && (
+      {!stale && isRepeat(t) && (
         <button type="button" class="sv-act" disabled={busy} onClick={toggle} aria-label={paused ? `Resume ${t.title}` : `Pause ${t.title}`}>
           {paused ? <Play size={14} aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />}
           {!phone && <span class="sv-act-t">{paused ? "Resume" : "Pause"}</span>}
@@ -175,12 +175,11 @@ export function ScheduledByProject({ list, phone, onSelect, selected, single }) 
 
 // RecurringWatch — For you's "Running on its own": a recurring task an agent
 // set, that has run three times or more, asks once whether to keep it.
-export function RecurringWatch({ phone, onOpenTasks }) {
+export function RecurringWatch({ phone }) {
   const list = useStore((st) => tasksSlice(st).list);
   const ctx = useCtx();
   const rows = watchList(list);
-  const stale = openTemplates(list).filter((t) => bucketOf(t) === "stale");
-  if (!rows.length && !stale.length) return null;
+  if (!rows.length) return null;
   return (
     <section class="fy-sec sv-watch">
       <div class="fy-sec-head"><span class="fy-sec-t">Running on its own</span></div>
@@ -198,11 +197,6 @@ export function RecurringWatch({ phone, onOpenTasks }) {
           </div>
         </div>
       ))}
-      {stale.length > 0 && (
-        <button type="button" class={`sv-line${phone ? " is-phone" : ""}`} onClick={onOpenTasks}>
-          <AlertTriangle size={15} aria-hidden="true" /><span>{stale.length} scheduled tasks didn't run</span><span class="tk-grow" /><span class="sv-sum">Review in Tasks</span><ChevronRight size={15} aria-hidden="true" />
-        </button>
-      )}
     </section>
   );
 }
