@@ -99,9 +99,7 @@ func TestBackupRuntimeFiveSevenAndNaturalRestore(t *testing.T) {
 			if len(tr.headers) != 2 || tr.headers[0].Get("Authorization") == "" || tr.headers[1].Get("X-API-Key") != "fake-api-backup" {
 				t.Fatalf("OAuth→API dispatches=%v", tr.headers)
 			}
-			if string(tr.bodies[0]) != string(tr.bodies[1]) {
-				t.Fatal("fallback changed wire prefix/body")
-			}
+			assertBackupIdentityDelta(t, tr.bodies[0], tr.bodies[1])
 			if tr.headers[1].Get("Authorization") != "" || strings.Contains(tr.headers[1].Get("anthropic-beta"), "oauth-") {
 				t.Fatal("API used OAuth headers")
 			}

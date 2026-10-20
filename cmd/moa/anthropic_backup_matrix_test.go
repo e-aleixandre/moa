@@ -34,9 +34,10 @@ func TestBackupReplayModelModeSignedPrefixAndTransformations(t *testing.T) {
 					return status, h, body
 				}
 				msg := finishBackup(t, p, context.Background(), req)
-				if len(tr.bodies) != 2 || string(tr.bodies[0]) != string(tr.bodies[1]) {
-					t.Fatal("OAuth→API changed replay profile")
+				if len(tr.bodies) != 2 {
+					t.Fatalf("requests=%d", len(tr.bodies))
 				}
+				assertBackupIdentityDelta(t, tr.bodies[0], tr.bodies[1])
 				for _, value := range []string{"fake-signed-empty-thinking", "fake-redacted-signature", "already-ran", "already executed result"} {
 					if !strings.Contains(string(tr.bodies[1]), value) {
 						t.Fatalf("dropped %s", value)

@@ -99,13 +99,14 @@ type outputConfig struct {
 // If isOAuth is true, the system prompt is prefixed with the Claude Code
 // identity string and tool names are mapped to Claude Code's canonical casing.
 func buildRequestBody(req core.Request, isOAuth bool) ([]byte, error) {
-	return buildRequestBodyWith(req, isOAuth, nil)
+	return buildRequestBodyWith(req, isOAuth, isOAuth, nil)
 }
 
 // buildRequestBodyWith is buildRequestBody plus a hook that adjusts the
 // finished request before it is marshaled. Prewarm uses it so that the only
-// differences from a streaming body are the ones it names.
-func buildRequestBodyWith(req core.Request, isOAuth bool, mutate func(*anthropicRequest)) ([]byte, error) {
+// differences from a streaming body are the ones it names. API backup keeps
+// the OAuth codec for history/tools without claiming the OAuth CLI identity.
+func buildRequestBodyWith(req core.Request, profileOAuth, oauthIdentity bool, mutate func(*anthropicRequest)) ([]byte, error) {
 	ar := anthropicRequest{
 		Model:     req.Model.ID,
 		MaxTokens: resolveMaxTokens(req),
@@ -116,7 +117,7 @@ func buildRequestBodyWith(req core.Request, isOAuth bool, mutate func(*anthropic
 	}
 
 	// System prompt — OAuth requires Claude Code preamble
-	if isOAuth {
+	if oauthIdentity {
 		systemBlocks := []map[string]any{
 			{"type": "text", "text": claudeCodeSystemPreamble},
 		}
@@ -133,11 +134,11 @@ func buildRequestBodyWith(req core.Request, isOAuth bool, mutate func(*anthropic
 	}
 
 	// Messages — merge consecutive same-role messages (Anthropic requires alternation)
-	ar.Messages = convertMessages(req.Messages, isOAuth)
+	ar.Messages = convertMessages(req.Messages, profileOAuth)
 
 	// Tools — remap names for OAuth
 	if len(req.Tools) > 0 {
-		ar.Tools = convertToolSpecs(req.Tools, isOAuth)
+		ar.Tools = convertToolSpecs(req.Tools, profileOAuth)
 	}
 
 	// Thinking

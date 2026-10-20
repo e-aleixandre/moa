@@ -99,7 +99,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	}
 
 	profileOAuth := oauthMode || req.Options.AnthropicWireProfile == "oauth"
-	body, err := buildRequestBody(req, profileOAuth)
+	body, err := buildRequestBodyWith(req, profileOAuth, oauthMode, nil)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: building request: %w", err)
 	}
@@ -766,7 +766,7 @@ func (a *Anthropic) Prewarm(ctx context.Context, req core.Request) (core.Usage, 
 	}
 	profileOAuth := oauthMode || req.Options.AnthropicWireProfile == "oauth"
 	manualThinking := false
-	body, err := buildRequestBodyWith(req, profileOAuth, func(ar *anthropicRequest) {
+	body, err := buildRequestBodyWith(req, profileOAuth, oauthMode, func(ar *anthropicRequest) {
 		ar.Stream = false
 		// resolveMaxTokens turns 0 into the model default, so it is set here,
 		// after the builder.

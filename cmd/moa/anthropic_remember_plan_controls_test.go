@@ -26,8 +26,9 @@ func TestReviewMemoPreservesWireAndUnsupportedSuccessDoesNotClearIt(t *testing.T
 			if len(tr.headers) != 3 || tr.headers[2].Get("Authorization") != "" || tr.headers[2].Get("X-API-Key") == "" {
 				t.Fatal("memo did not choose API")
 			}
-			if !bytes.Equal(tr.bodies[0], tr.bodies[2]) || !strings.Contains(string(tr.bodies[2]), `"model":"`+model+`"`) {
-				t.Fatal("remembered API changed rejected model/body")
+			assertBackupIdentityDelta(t, tr.bodies[0], tr.bodies[2])
+			if !bytes.Equal(tr.bodies[1], tr.bodies[2]) || !strings.Contains(string(tr.bodies[2]), `"model":"`+model+`"`) {
+				t.Fatal("remembered API changed the established API body/model")
 			}
 			fast := req
 			fast.Options.Fast = true
