@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -100,9 +101,9 @@ type Store struct {
 	// (see RecordUse); it lives for the process and is never persisted.
 	useMu sync.Mutex
 	uses  map[useKey]useRecord
-	// planLimit is the remembered Anthropic plan limit (see
-	// RememberAnthropicPlanLimit), guarded by useMu.
-	planLimit *planLimit
+	// planLimits are the remembered Anthropic plan limits by sign-in and key
+	// pair (see RememberAnthropicPlanLimit), guarded by useMu.
+	planLimits map[BackupRevision]time.Time
 	// useSelected, when set by a test, runs in RecordUse between the
 	// selection check and publication, to hold a result in that window.
 	useSelected func(useKey)

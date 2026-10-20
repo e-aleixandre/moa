@@ -16,6 +16,10 @@ import (
 // a week, so a later date is not trusted.
 const maxRememberedPlanLimit = 8 * 24 * time.Hour
 
+// errPlanLimitPassed stops a send admitted on a remembered plan limit that
+// reached its reset before dispatch; no API request has been made.
+var errPlanLimitPassed = errors.New("remembered plan limit passed before dispatch")
+
 func backupReplaySupported(req core.Request) bool {
 	if req.Options.Fast {
 		return false
@@ -40,7 +44,13 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 	if backupErr != nil {
 		backup.Active = false
 	}
-	streamBackup := func(revision auth.BackupRevision, notBefore *time.Time) (<-chan core.AssistantEvent, error) {
+	now := time.Now
+	if p.now != nil {
+		now = p.now
+	}
+	// remembered marks a send that skipped the plan on a remembered limit: it
+	// is admitted only while that limit still holds, else the plan is asked.
+	streamBackup := func(revision auth.BackupRevision, notBefore *time.Time, remembered bool) (<-chan core.AssistantEvent, error) {
 		if !backupReplaySupported(req) {
 			return nil, errors.New("API backup cannot replay this model or mode. Stop and continue with a supported model, or wait for the plan")
 		}
@@ -70,7 +80,14 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 		}
 		base.WithDispatch(func(ctx context.Context) (string, error) {
 			var key string
+			passed := false
 			err := p.authStore.AdmitAnthropicBackup(ctx, revision, func(selected auth.AnthropicBackupSelection) error {
+				if remembered {
+					if _, ok := p.authStore.AnthropicPlanLimit(revision, now()); !ok {
+						passed = true
+						return errPlanLimitPassed
+					}
+				}
 				next := core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore}
 				if err := dispatch(next); err != nil {
 					return err
@@ -80,6 +97,10 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 				source = next
 				return nil
 			})
+			if passed {
+				// The store reports a refusal of its callback as its own failure.
+				return "", errPlanLimitPassed
+			}
 			return key, err
 		})
 		ch, err := base.Stream(ctx, paidReq)
@@ -96,19 +117,18 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 		if binding.Provider != req.Model.Provider || binding.Model != req.Model.ID || binding.WireProfile != "oauth" {
 			return nil, errors.New("API continuation no longer matches this request. Stop and continue explicitly")
 		}
-		return streamBackup(auth.BackupRevision{Primary: binding.PrimaryGeneration, Key: binding.BackupGeneration}, binding.OAuthNotBefore)
+		return streamBackup(auth.BackupRevision{Primary: binding.PrimaryGeneration, Key: binding.BackupGeneration}, binding.OAuthNotBefore, false)
 	}
 	backupEligible := primary.Source == core.CredentialSourceStore && primary.Kind == "oauth" && backup.Active && backup.Revision.Primary == primary.Generation && backupReplaySupported(req)
-	now := time.Now
-	if p.now != nil {
-		now = p.now
-	}
 	// A plan limit confirmed with a reliable reset holds for the whole account
 	// until that reset: asking the plan again before it only collects another
 	// rejection, so the request goes straight to the API.
 	if backupEligible {
 		if until, ok := p.authStore.AnthropicPlanLimit(backup.Revision, now()); ok {
-			return streamBackup(backup.Revision, &until)
+			ch, err := streamBackup(backup.Revision, &until, true)
+			if !errors.Is(err, errPlanLimitPassed) {
+				return ch, err
+			}
 		}
 	}
 	base := anthropic.NewWithKind("", primary.Kind == "oauth")
@@ -128,7 +148,7 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 			if left := notBefore.Sub(now()); qe.Wait.ResetAt != nil && left > 0 && left <= maxRememberedPlanLimit {
 				p.authStore.RememberAnthropicPlanLimit(backup.Revision, notBefore)
 			}
-			return streamBackup(backup.Revision, &notBefore)
+			return streamBackup(backup.Revision, &notBefore, false)
 		}
 		err = p.classify(ctx, primary, secrets, err)
 		p.authStore.RecordUse(primary, err)

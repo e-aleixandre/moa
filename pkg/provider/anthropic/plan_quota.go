@@ -123,6 +123,13 @@ func planQuotaTiming(h http.Header, scope string, observed time.Time, backoff ti
 		if !valid || (!latest.IsZero() && time.Unix(epoch, 0).UTC() != latest) {
 			complete = false
 		}
+	} else {
+		// Repeated global resets are no single recovery date either.
+		for k := range h {
+			if strings.EqualFold(k, unifiedPrefix+"reset") {
+				complete = false
+			}
+		}
 	}
 	if complete && !latest.IsZero() {
 		w.ResetAt = &latest

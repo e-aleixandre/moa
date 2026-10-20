@@ -2,21 +2,22 @@ package auth
 
 import "time"
 
-// planLimit is a confirmed Anthropic plan limit (5h or weekly) and the reset
-// it reported, for the plan sign-in and API key pair it was observed with.
-// Like uses, it lives for the process and is never persisted: after a restart
-// one request to the plan rediscovers it.
-type planLimit struct {
-	revision BackupRevision
-	until    time.Time
-}
-
 // RememberAnthropicPlanLimit records that the plan sign-in of revision is
-// exhausted until until. A later confirmation replaces it.
+// exhausted until until. Limits are kept per sign-in and key pair, like uses:
+// a late reply observed with an older pair only writes that pair's entry,
+// which no lookup for the current pair reads, and a reply for the same pair
+// never shortens a later reset already known. The record lives for the
+// process and is never persisted: after a restart one request to the plan
+// rediscovers it.
 func (s *Store) RememberAnthropicPlanLimit(revision BackupRevision, until time.Time) {
 	s.useMu.Lock()
 	defer s.useMu.Unlock()
-	s.planLimit = &planLimit{revision: revision, until: until}
+	if s.planLimits == nil {
+		s.planLimits = map[BackupRevision]time.Time{}
+	}
+	if until.After(s.planLimits[revision]) {
+		s.planLimits[revision] = until
+	}
 }
 
 // AnthropicPlanLimit reports the remembered reset when it was observed with
@@ -25,13 +26,9 @@ func (s *Store) RememberAnthropicPlanLimit(revision BackupRevision, until time.T
 func (s *Store) AnthropicPlanLimit(revision BackupRevision, now time.Time) (time.Time, bool) {
 	s.useMu.Lock()
 	defer s.useMu.Unlock()
-	l := s.planLimit
-	if l == nil || l.revision != revision {
+	until, ok := s.planLimits[revision]
+	if !ok || !now.Before(until) {
 		return time.Time{}, false
 	}
-	if !now.Before(l.until) {
-		s.planLimit = nil
-		return time.Time{}, false
-	}
-	return l.until, true
+	return until, true
 }
