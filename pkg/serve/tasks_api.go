@@ -298,6 +298,12 @@ func handleSessionTasks(m *Manager) http.HandlerFunc {
 			writeTaskError(w, err)
 			return
 		}
+		// An owner's Tasks show what every session of its project scheduled,
+		// so nothing runs in the project without the user seeing it there.
+		if scheduled, err = m.withProjectScheduled(r.Context(), id, scheduled); err != nil {
+			writeTaskError(w, err)
+			return
+		}
 		if scheduled == nil {
 			scheduled = []tasks.Record{}
 		}

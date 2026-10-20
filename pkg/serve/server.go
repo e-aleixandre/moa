@@ -221,6 +221,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/tasks/{id}/skip", handleSkipNext(manager))
 	mux.HandleFunc("POST /api/tasks/{id}/pause", handlePauseResume(manager, false))
 	mux.HandleFunc("POST /api/tasks/{id}/resume", handlePauseResume(manager, true))
+	mux.HandleFunc("POST /api/tasks/{id}/keep", handleKeepSchedule(manager))
 	mux.HandleFunc("POST /api/tasks/occurrences/{oid}/confirm", handleConfirmOccurrence(manager))
 	mux.HandleFunc("POST /api/tasks/occurrences/{oid}/reroute", handleRerouteOccurrence(manager))
 	mux.HandleFunc("GET /api/commands", handleListCommands())

@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -385,10 +386,33 @@ func (r *Repo) Delete(ctx context.Context, id, revision int64, deliver string) e
 	if err := validDeliver(deliver); err != nil {
 		return err
 	}
+	return r.deleteAs(ctx, nil, id, revision, deliver)
+}
+
+// AgentDeleteSchedule is the session's own Delete: only a task it scheduled.
+// Its runs already on a checklist stay there, as with the owner's Delete.
+func (r *Repo) AgentDeleteSchedule(ctx context.Context, a Actor, id int64) error {
+	return r.deleteAs(ctx, a.ownSchedule, id, 0, "")
+}
+
+// deleteAs is Delete behind guard; with a guard, revision 0 means the
+// current one.
+func (r *Repo) deleteAs(ctx context.Context, guard func(*Record) error, id, revision int64, deliver string) error {
 	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		cur, err := getRecord(ctx, tx, id)
+		if errors.Is(err, ErrNotFound) && guard != nil {
+			return false, notAvailable(id)
+		}
 		if err != nil {
 			return false, err
+		}
+		if guard != nil {
+			if err := guard(&cur); err != nil {
+				return false, err
+			}
+			if revision == 0 {
+				revision = cur.Revision
+			}
 		}
 		if cur.Revision != revision {
 			return false, &ConflictError{Current: cur}

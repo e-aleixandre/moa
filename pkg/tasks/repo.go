@@ -514,6 +514,14 @@ CREATE INDEX questions_call_due ON questions(call_due_at) WHERE call_state = 'pe
 CREATE INDEX news_origins_news ON news_origins(news_id);
 INSERT OR IGNORE INTO news_origins(session_id, origin, news_id)
   SELECT session_id, origin, id FROM news WHERE origin <> '';`,
+	// 6: the user said Keep to a recurring task that runs on its own (For
+	// you's "Running on its own"). Its own table, cascading with the
+	// template: an older binary never reads it, and deleting the template
+	// there leaves nothing behind.
+	`CREATE TABLE task_schedule_reviews (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  kept_at INTEGER NOT NULL
+);`,
 }
 
 // newsCompatLevel is the compat migration that created the news table.
@@ -714,6 +722,7 @@ CREATE TEMP TABLE task_handoffs (task_id INTEGER PRIMARY KEY, from_owner_id TEXT
   to_owner_id TEXT, to_owner_name TEXT, to_session_id TEXT, state TEXT, outcome TEXT, created_at INTEGER, updated_at INTEGER);
 CREATE TEMP TABLE task_comments (id INTEGER PRIMARY KEY, task_id INTEGER, author_kind TEXT, author_session_id TEXT,
   author_name TEXT, body TEXT, created_at INTEGER);
+CREATE TEMP TABLE task_schedule_reviews (task_id INTEGER PRIMARY KEY, kept_at INTEGER);
 PRAGMA query_only = 1;`
 
 // openReader opens the read pool. With noCompat each connection first gets

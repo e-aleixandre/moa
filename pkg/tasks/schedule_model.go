@@ -179,6 +179,24 @@ type RunFailure struct {
 	Note         string `json:"note,omitempty"`
 }
 
+// RunStats counts a template's runs. Ran counts runs handed to a session
+// (assigned or done); FirstAt is the first one's due time. Last is the most
+// recent run in any state but late. CostUSD is what the runs cost: nil
+// (unknown) until runs record their cost; it is never reported as zero.
+type RunStats struct {
+	Ran     int      `json:"ran"`
+	FirstAt int64    `json:"first_at,omitempty"`
+	Last    *LastRun `json:"last,omitempty"`
+	CostUSD *float64 `json:"cost_usd"`
+}
+
+// LastRun is a template's latest run, as a list row shows it.
+type LastRun struct {
+	DueAt       int64  `json:"due_at"`
+	State       string `json:"state"`
+	CompletedAt int64  `json:"completed_at,omitempty"`
+}
+
 // Destination is the session a run was resolved to, with its actual project.
 type Destination struct {
 	SessionID  string

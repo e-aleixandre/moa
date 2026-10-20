@@ -78,6 +78,12 @@ type Record struct {
 	CreatedBySessionID string      `json:"created_by_session_id,omitempty"`
 	LateCount          int         `json:"late_count,omitempty"`
 	Failure            *RunFailure `json:"failure,omitempty"`
+	// RunStats summarizes a template's runs so a list can say how long it
+	// has been running and when it last ran without opening its detail.
+	RunStats *RunStats `json:"run_stats,omitempty"`
+	// KeptAt is when the user said Keep to a recurring task that runs on
+	// its own; 0 while nobody has reviewed it.
+	KeptAt int64 `json:"kept_at,omitempty"`
 
 	// A run's child task links back to its template and occurrence.
 	ParentTaskID int64 `json:"parent_task_id,omitempty"`
@@ -162,4 +168,8 @@ type Actor struct {
 	// TZ is the IANA zone of the device that created the session, "" when
 	// unknown. Scheduling by the agent uses it (UTC when unknown).
 	TZ string
+	// Owner says the actor is its project's owner conversation itself (not
+	// a subagent): it also lists, and may withdraw, the requests to the user
+	// that its project's sessions made.
+	Owner bool
 }

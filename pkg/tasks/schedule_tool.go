@@ -98,6 +98,35 @@ func toolSchedule(ctx context.Context, repo *Repo, actor Actor, in AgentInput, t
 	return core.TextResult(sb.String()), nil
 }
 
+// toolScheduleControl is pause, resume or delete of a task this session
+// scheduled. Anything else is refused: the user's tasks, another session's
+// schedules and ordinary tasks are not the session's to stop.
+func toolScheduleControl(ctx context.Context, repo *Repo, actor Actor, action string, params map[string]any) (core.Result, error) {
+	id, err := idParam(params, action)
+	if err != nil {
+		return core.Result{}, err
+	}
+	switch action {
+	case "delete":
+		if err := repo.AgentDeleteSchedule(ctx, actor, id); err != nil {
+			return core.Result{}, err
+		}
+		return core.TextResult(fmt.Sprintf("Deleted scheduled task #%d: it will not run again. Runs already on your checklist stay there.", id)), nil
+	case "pause":
+		rec, err := repo.AgentPause(ctx, actor, id)
+		if err != nil {
+			return core.Result{}, err
+		}
+		return core.TextResult(fmt.Sprintf("Paused scheduled task #%d: %s. It does not run until resumed.", rec.ID, rec.Title)), nil
+	default:
+		rec, err := repo.AgentResume(ctx, actor, id)
+		if err != nil {
+			return core.Result{}, err
+		}
+		return core.TextResult(fmt.Sprintf("Resumed scheduled task #%d: %s. Next run: %s.", rec.ID, rec.Title, formatInstant(rec.Next, rec.TZ))), nil
+	}
+}
+
 // formatInstant is an instant as wall time in its zone: "Thu 1 Oct 2026, 09:00 Europe/Madrid".
 func formatInstant(ms int64, tz string) string {
 	loc, err := LoadZone(tz)

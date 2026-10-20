@@ -420,6 +420,62 @@ func handleParseWhen(m *Manager) http.HandlerFunc {
 	}
 }
 
+// withProjectScheduled adds, for an owner's session, the templates filed
+// under its project by any session. Other sessions get list unchanged.
+func (m *Manager) withProjectScheduled(ctx context.Context, sessionID string, list []tasks.Record) ([]tasks.Record, error) {
+	store, err := m.ownerStore()
+	if err != nil {
+		return list, nil
+	}
+	owners, err := store.List()
+	if err != nil {
+		return list, nil
+	}
+	for _, o := range owners {
+		if o.SessionID != sessionID || o.CodebaseKey == "" {
+			continue
+		}
+		more, err := m.tasks.ScheduledInProject(ctx, o.CodebaseKey)
+		if err != nil {
+			return nil, err
+		}
+		seen := make(map[int64]bool, len(list))
+		for _, t := range list {
+			seen[t.ID] = true
+		}
+		for _, t := range more {
+			if !seen[t.ID] {
+				seen[t.ID] = true
+				list = append(list, t)
+			}
+		}
+	}
+	return list, nil
+}
+
+// handleKeepSchedule is For you's Keep on a recurring task that runs on
+// its own.
+func handleKeepSchedule(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := taskID(w, r)
+		if !ok {
+			return
+		}
+		var b struct {
+			Revision int64 `json:"revision"`
+		}
+		if !decodeStrict(w, r, &b) {
+			return
+		}
+		rec, err := m.tasks.Keep(r.Context(), id, b.Revision)
+		if err != nil {
+			writeTaskError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, rec)
+	}
+}
+
 // sessionScheduled lists the templates that concern a session, including the
 // ones aimed at the owner whose conversation it is.
 func (m *Manager) sessionScheduled(ctx context.Context, sessionID string) ([]tasks.Record, error) {

@@ -39,7 +39,7 @@ func ChildVariant(t core.Tool) (core.Tool, bool) {
 }
 
 func newTool(scope *Scope, ownerSession bool) core.Tool {
-	actions := `"create", "ask", "list", "get", "update", "done", "claim", "comment"`
+	actions := `"create", "ask", "list", "get", "update", "done", "claim", "comment", "pause", "resume", "delete", "withdraw"`
 	description := toolDescription
 	if ownerSession {
 		actions += `, "send"`
@@ -59,7 +59,7 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 				},
 				"id": {
 					"type": "integer",
-					"description": "Task ID (required for update/done/get/claim/comment)"
+					"description": "Task ID (required for update/done/get/claim/comment/pause/resume/delete/withdraw)"
 				},
 				"title": {
 					"type": "string",
@@ -89,7 +89,7 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 				},
 				"note": {
 					"type": "string",
-					"description": "For done, required: 1-4 lines. The first says what is true now (\"Deployed X at 22:25 UTC\"); the next ones, how you checked it and the evidence (commit, PR, time). For a task another owner sent you: the result, or the reason for cant_do"
+					"description": "For withdraw, required: why the user no longer needs to do it. For done, required: 1-4 lines. The first says what is true now (\"Deployed X at 22:25 UTC\"); the next ones, how you checked it and the evidence (commit, PR, time). For a task another owner sent you: the result, or the reason for cant_do"
 				},
 				"search": {
 					"type": "string",
@@ -131,6 +131,7 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 		Execute: func(ctx context.Context, params map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			action, _ := params["action"].(string)
 			repo, actor := scope.Repo(), scope.Actor()
+			actor.Owner = scope.ownerSession && core.AgentIDFromContext(ctx) == ""
 			// A nullable optional arrives as null from strict-schema models.
 			for k, v := range params {
 				if v == nil {
@@ -164,6 +165,10 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 				res, err = toolList(ctx, repo, actor, params)
 			case "get":
 				res, err = toolGet(ctx, repo, actor, params)
+			case "pause", "resume", "delete":
+				res, err = toolScheduleControl(ctx, repo, actor, action, params)
+			case "withdraw":
+				res, err = toolWithdraw(ctx, scope, actor, params)
 			default:
 				return core.ErrorResult(fmt.Sprintf("unknown action: %s", action)), nil
 			}
@@ -185,10 +190,12 @@ const toolDescription = "Your task checklist, your requests to the owner, and yo
 	"done needs a note of 1-4 lines: the first says what is true now, the next ones how you checked it and the evidence (commit, PR, time). " +
 	"comment writes in the thread of any task on your checklist, of a task between owners or of your request: use it for milestones the user would want to read later (a decision, a deploy, a check), not every step. " +
 	"A task another owner sent you is closed with done, an outcome and a note. " +
+	"pause, resume and delete act only on a task you scheduled (the schedule itself, not one of its runs): pause stops a recurring task until resume, delete removes the schedule; runs already on your checklist stay there and are closed with done. " +
+	"withdraw closes a request to the user that is no longer needed (one this session asked), with a note saying why; it stays in Done with that note. " +
 	"You only ever see your own checklist and requests plus the project's backlog and the tasks you scheduled."
 
 const toolOwnerDescription = " send gives a task to another project's owner (to, title, description, subtasks); " +
-	"without the user's permission it waits for them first. list shows what you sent under Sent."
+	"without the user's permission it waits for them first. list shows what you sent under Sent, and the requests to the user that your project's sessions made, which you can withdraw too."
 
 // actsForOwner refuses what a subagent (a context tagged with an agent id)
 // would do in its owner's name: sending a task to another owner, and
@@ -382,6 +389,26 @@ func toolDone(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 		msg += "\n\nAll tasks complete!"
 	}
 	return core.TextResult(msg), nil
+}
+
+// toolWithdraw closes a request to the user, signed by who withdrew it.
+func toolWithdraw(ctx context.Context, scope *Scope, actor Actor, params map[string]any) (core.Result, error) {
+	id, err := idParam(params, "withdraw")
+	if err != nil {
+		return core.Result{}, err
+	}
+	note, _ := params["note"].(string)
+	by := ""
+	if actor.Owner && scope.owners != nil {
+		if o, ok, err := scope.owners.OwnerOf(actor.SessionID); err == nil && ok {
+			by = o.Name
+		}
+	}
+	t, err := scope.Repo().AgentWithdraw(ctx, actor, by, id, note)
+	if err != nil {
+		return core.Result{}, err
+	}
+	return core.TextResult(fmt.Sprintf("Withdrew request #%d: %s. It is in the user's Done with your note.", t.ID, t.Title)), nil
 }
 
 func toolComment(ctx context.Context, repo *Repo, actor Actor, params map[string]any) (core.Result, error) {
@@ -658,7 +685,7 @@ func toolList(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 	if err != nil {
 		return core.Result{}, err
 	}
-	if len(view.Checklist)+len(view.Requests)+len(view.Backlog)+len(view.Scheduled)+len(view.Sent) == 0 {
+	if len(view.Checklist)+len(view.Requests)+len(view.Backlog)+len(view.Scheduled)+len(view.Sent)+len(view.ProjectRequests) == 0 {
 		return core.TextResult("No tasks yet."), nil
 	}
 	now := repo.now()
@@ -694,7 +721,7 @@ func toolList(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 		}
 		return out
 	}
-	checklist, requests, sent := pick(view.Checklist), pick(view.Requests), pick(view.Sent)
+	checklist, requests, sent, projectRequests := pick(view.Checklist), pick(view.Requests), pick(view.Sent), pick(view.ProjectRequests)
 	backlog, scheduled := rest(view.Backlog), rest(view.Scheduled)
 
 	var sb strings.Builder
@@ -718,6 +745,7 @@ func toolList(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 		section(fmt.Sprintf("Tasks (%d/%d done):", done, total), checklist, func(t AgentTask) { writeListed(&sb, t) })
 	}
 	section("\n\nYour requests to the owner:", requests, func(t AgentTask) { writeListed(&sb, t) })
+	section("\n\nRequests to the user from your project's sessions (withdraw the ones no longer needed):", projectRequests, func(t AgentTask) { writeListed(&sb, t) })
 	section("\n\nBacklog you can claim (your project):", backlog, func(t AgentTask) { writeTask(&sb, t) })
 	section("\n\nSent to other owners:", sent, func(t AgentTask) {
 		fmt.Fprintf(&sb, "\n- #%d → %s: %s — %s", t.ID, t.To, t.Title, handoffStatus(t))

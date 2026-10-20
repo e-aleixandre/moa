@@ -64,6 +64,9 @@ type AgentView struct {
 	Scheduled []AgentTask `json:"scheduled,omitempty"`
 	// Sent are the tasks this owner sent to other owners, whatever their state.
 	Sent []AgentTask `json:"sent,omitempty"`
+	// ProjectRequests are, for an owner, the requests to the user that the
+	// other sessions of its project made, so it can find and withdraw them.
+	ProjectRequests []AgentTask `json:"project_requests,omitempty"`
 }
 
 // AgentInput creates a checklist task or a request.
@@ -256,7 +259,69 @@ func (r *Repo) agentList(ctx context.Context, a Actor, withArchived bool) (Agent
 		AND id IN (SELECT task_id FROM task_schedules WHERE created_by_session_id = ?)`, a.SessionID); err != nil {
 		return view, err
 	}
+	if a.Owner && a.ProjectKey != "" {
+		if view.ProjectRequests, err = load(`place = 'you' AND project_key = ? AND `+live+`
+			AND requester_session_id IS NOT NULL AND requester_session_id <> ?
+			AND id NOT IN (SELECT task_id FROM task_handoffs)`, a.ProjectKey, a.SessionID); err != nil {
+			return view, err
+		}
+	}
 	return view, nil
+}
+
+// withdraws reports whether the actor may withdraw a request to the user: the
+// session that asked, or the owner of the request's project.
+func (a Actor) withdraws(t *Record) bool {
+	if a.SessionID == "" || t.Place != PlaceYou || t.template || t.handoff || t.RequesterSessionID == "" {
+		return false
+	}
+	return t.RequesterSessionID == a.SessionID || a.Owner && a.ProjectKey != "" && t.ProjectKey == a.ProjectKey
+}
+
+// AgentWithdraw closes a request to the user that is no longer needed. It is
+// not a delete: the request goes to Done with the reason, signed by who
+// withdrew it (by), and is archived like any done task. by names the owner
+// when the owner withdraws a session's request.
+func (r *Repo) AgentWithdraw(ctx context.Context, a Actor, by string, id int64, note string) (AgentTask, error) {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return AgentTask{}, invalid("withdraw needs a note: why the user no longer needs to do task #%d", id)
+	}
+	var out AgentTask
+	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
+		cur, err := getRecord(ctx, tx, id)
+		if err != nil {
+			return false, err
+		}
+		if !a.withdraws(&cur) {
+			if a.reads(&cur) {
+				return false, invalid("task #%d is not a request to the user: only requests can be withdrawn", id)
+			}
+			return false, notAvailable(id)
+		}
+		if cur.Status == StatusDone {
+			return false, invalid("task #%d is already done", id)
+		}
+		if cur.RequesterSessionID == a.SessionID || strings.TrimSpace(by) == "" {
+			by = "the agent that asked"
+		}
+		r.applyStatus(&cur, StatusDone)
+		cur.CompletionNote = "Withdrawn by " + strings.TrimSpace(by) + ": " + note
+		if err := r.saveTask(ctx, tx, cur, cur.Revision); err != nil {
+			return false, err
+		}
+		rec, err := getRecord(ctx, tx, id)
+		if err != nil {
+			return false, err
+		}
+		pr, err := a.project(ctx, tx, []Record{rec})
+		if err != nil {
+			return false, err
+		}
+		out = pr[0]
+		return true, nil
+	})
+	return out, err
 }
 
 // AgentGet returns one task the agent can read.

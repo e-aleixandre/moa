@@ -206,6 +206,9 @@ func attachSchedules(ctx context.Context, q querier, recs []Record) error {
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		if err := attachRunStats(ctx, q, recs, idx, ph, args); err != nil {
+			return err
+		}
 		for _, id := range chunk {
 			rec := &recs[idx[id]]
 			switch {
@@ -222,6 +225,84 @@ func attachSchedules(ctx context.Context, q querier, recs []Record) error {
 		}
 		return nil
 	})
+}
+
+// attachRunStats fills RunStats on the templates in one chunk.
+func attachRunStats(ctx context.Context, q querier, recs []Record, idx map[int64]int, ph string, args []any) error {
+	rows, err := q.QueryContext(ctx, `SELECT o.schedule_task_id,
+		SUM(o.state IN ('assigned','done')),
+		MIN(CASE WHEN o.state IN ('assigned','done') THEN o.due_at END),
+		(SELECT l.due_at FROM task_occurrences l WHERE l.schedule_task_id = o.schedule_task_id AND l.state <> 'late' ORDER BY l.due_at DESC, l.id DESC LIMIT 1),
+		(SELECT l.state FROM task_occurrences l WHERE l.schedule_task_id = o.schedule_task_id AND l.state <> 'late' ORDER BY l.due_at DESC, l.id DESC LIMIT 1),
+		(SELECT l.completed_at FROM task_occurrences l WHERE l.schedule_task_id = o.schedule_task_id AND l.state <> 'late' ORDER BY l.due_at DESC, l.id DESC LIMIT 1)
+		FROM task_occurrences o WHERE o.schedule_task_id IN (`+ph+`) GROUP BY o.schedule_task_id`, args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var parent int64
+		var ran sql.NullInt64
+		var first, lastDue, lastDone sql.NullInt64
+		var lastState sql.NullString
+		if err := rows.Scan(&parent, &ran, &first, &lastDue, &lastState, &lastDone); err != nil {
+			return err
+		}
+		st := &RunStats{Ran: int(ran.Int64), FirstAt: first.Int64}
+		if lastDue.Valid {
+			st.Last = &LastRun{DueAt: lastDue.Int64, State: lastState.String, CompletedAt: lastDone.Int64}
+		}
+		recs[idx[parent]].RunStats = st
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_ = rows.Close()
+	kept, err := q.QueryContext(ctx, "SELECT task_id, kept_at FROM task_schedule_reviews WHERE task_id IN ("+ph+")", args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = kept.Close() }()
+	for kept.Next() {
+		var id, at int64
+		if err := kept.Scan(&id, &at); err != nil {
+			return err
+		}
+		recs[idx[id]].KeptAt = at
+	}
+	return kept.Err()
+}
+
+// Keep records that the user reviewed a recurring task and wants it to go on
+// running: For you stops asking about it. The template's revision moves so
+// every client sees the change.
+func (r *Repo) Keep(ctx context.Context, taskID, revision int64) (Record, error) {
+	if revision <= 0 {
+		return Record{}, invalid("revision is required")
+	}
+	var out Record
+	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
+		cur, err := getRecord(ctx, tx, taskID)
+		if err != nil {
+			return false, err
+		}
+		if !cur.template || cur.When == nil || cur.When.Kind != WhenRepeat {
+			return false, invalid("only a recurring task can be kept")
+		}
+		if cur.Revision != revision {
+			return false, &ConflictError{Current: cur}
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO task_schedule_reviews(task_id, kept_at) VALUES (?, ?)
+			ON CONFLICT(task_id) DO UPDATE SET kept_at = excluded.kept_at`, taskID, r.now().UnixMilli()); err != nil {
+			return false, err
+		}
+		if err := r.saveTask(ctx, tx, cur, revision); err != nil {
+			return false, err
+		}
+		out, err = getRecord(ctx, tx, taskID)
+		return true, err
+	})
+	return out, err
 }
 
 // createSchedule writes the definition of a template inserted in tx.
@@ -660,11 +741,54 @@ func (r *Repo) setEnabled(ctx context.Context, taskID, revision int64, enabled b
 	if revision <= 0 {
 		return Record{}, invalid("revision is required")
 	}
+	return r.setEnabledAs(ctx, nil, taskID, revision, enabled)
+}
+
+// AgentPause and AgentResume are the session's own Pause and Resume: only on
+// a recurring task it scheduled, at its current revision.
+func (r *Repo) AgentPause(ctx context.Context, a Actor, taskID int64) (Record, error) {
+	return r.setEnabledAs(ctx, a.ownSchedule, taskID, 0, false)
+}
+
+func (r *Repo) AgentResume(ctx context.Context, a Actor, taskID int64) (Record, error) {
+	return r.setEnabledAs(ctx, a.ownSchedule, taskID, 0, true)
+}
+
+// ownSchedule allows a gesture only on a template this session scheduled
+// (its creator), checked inside the gesture's transaction. A task it cannot
+// read does not exist for it.
+func (a Actor) ownSchedule(t *Record) error {
+	if !a.reads(t) {
+		return notAvailable(t.ID)
+	}
+	if !t.template {
+		return invalid("task #%d is not a scheduled task: pause, resume and delete only act on a task you scheduled", t.ID)
+	}
+	if t.CreatedBySessionID == "" || t.CreatedBySessionID != a.SessionID {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// setEnabledAs is Pause/Resume behind guard; with a guard, revision 0 means
+// the current one.
+func (r *Repo) setEnabledAs(ctx context.Context, guard func(*Record) error, taskID, revision int64, enabled bool) (Record, error) {
 	var out Record
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		cur, err := getRecord(ctx, tx, taskID)
+		if errors.Is(err, ErrNotFound) && guard != nil {
+			return false, notAvailable(taskID)
+		}
 		if err != nil {
 			return false, err
+		}
+		if guard != nil {
+			if err := guard(&cur); err != nil {
+				return false, err
+			}
+			if revision == 0 {
+				revision = cur.Revision
+			}
 		}
 		s, ok, err := getSchedule(ctx, tx, taskID)
 		if err != nil {
@@ -946,8 +1070,9 @@ func (r *Repo) deliverOccurrence(ctx context.Context, tx *sql.Tx, o *Occurrence,
 	if err != nil {
 		return err
 	}
+	own := o.Spec.CreatedBySessionID != "" && o.Spec.CreatedBySessionID == dest.SessionID
 	noticeID, err := r.insertNotice(ctx, tx, child.ID, NoticeAssigned, dest.SessionID, o.Spec.Delivery.Saved,
-		fmt.Sprintf("Scheduled task #%d", child.ID), scheduledText(*o, child))
+		fmt.Sprintf("Scheduled task #%d", child.ID), scheduledText(*o, child, own))
 	if err != nil {
 		return err
 	}
@@ -960,8 +1085,10 @@ func (r *Repo) deliverOccurrence(ctx context.Context, tx *sql.Tx, o *Occurrence,
 }
 
 // scheduledText is the assignment an agent reads for a run. The owner's text
-// is quoted as data, like every notice.
-func scheduledText(o Occurrence, child Record) string {
+// is quoted as data, like every notice. It names what the session can do
+// with the schedule: stop it when it scheduled it itself (own), or tell the
+// user, who is the only one who can.
+func scheduledText(o Occurrence, child Record, own bool) string {
 	var b strings.Builder
 	due := time.UnixMilli(o.DueAt).UTC()
 	if loc, err := LoadZone(o.Spec.TZ); err == nil {
@@ -970,7 +1097,14 @@ func scheduledText(o Occurrence, child Record) string {
 	fmt.Fprintf(&b, "Scheduled task #%d %q is due (%s, %s). It is on your checklist as task #%d.\n",
 		o.ScheduleTaskID, oneLine(child.Title), due.Format("2006-01-02 15:04"), o.Spec.TZ, child.ID)
 	writeSnapshot(&b, child)
-	fmt.Fprintf(&b, "When you finish, mark it done with the tasks tool (action \"done\", id %d).", child.ID)
+	fmt.Fprintf(&b, "When you finish, mark this run done with the tasks tool (action \"done\", id %d). Task #%d is the schedule, not this run: do not mark it done.", child.ID, o.ScheduleTaskID)
+	if o.Spec.When.Kind == WhenRepeat {
+		if own {
+			fmt.Fprintf(&b, " If it should stop repeating, pause or delete it (action \"pause\" or \"delete\", id %d).", o.ScheduleTaskID)
+		} else {
+			b.WriteString(" Only the user can pause or delete the schedule: if it should stop, say so.")
+		}
+	}
 	return b.String()
 }
 
@@ -1577,6 +1711,21 @@ func legacyTitle(text string) string {
 		line = strings.TrimSpace(string(r[:89])) + "…"
 	}
 	return line
+}
+
+// ScheduledInProject lists every template filed under a project, whichever
+// session scheduled it: what an owner's Tasks show besides its own.
+func (r *Repo) ScheduledInProject(ctx context.Context, projectKey string) ([]Record, error) {
+	if projectKey == "" {
+		return nil, nil
+	}
+	r.archiveDue(ctx)
+	rd, err := r.reader()
+	if err != nil || rd == nil {
+		return nil, err
+	}
+	return loadRecords(ctx, rd, `place = 'you' AND archived_at IS NULL AND project_key = ?
+		AND id IN (SELECT task_id FROM task_schedules)`, projectKey)
 }
 
 // ScheduledFor lists the templates that concern a session: the ones that
