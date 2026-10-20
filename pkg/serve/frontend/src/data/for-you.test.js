@@ -4,7 +4,7 @@
 
 import { test, expect, afterEach } from 'bun:test';
 import { store, setState } from './store.js';
-import { __resetForYouForTests, forYouCount, forYouSlice, forgetForYouItem, loadForYou, markNewsRead, unreadNewsCount } from './for-you.js';
+import { __resetForYouForTests, forYouCount, forYouSlice, forgetForYouItem, loadForYou, markNewsRead, orderWaiting, unreadNewsCount } from './for-you.js';
 import { waitsForYou } from './util/format.js';
 
 const originalFetch = globalThis.fetch;
@@ -96,4 +96,15 @@ test('opening a session from the sidebar while For you shows leaves For you', as
   expect(openSession('s1')).toBe(true);
   expect(store.get().view).not.toBe('foryou');
   setState({ isMobile: false, sessions: {} });
+});
+
+test('orderWaiting puts blocking items before task requests, newest first in each group', () => {
+  const mk = (id, kind, since) => ({ id, kind, since });
+  const out = orderWaiting([
+    mk('t-old', 'task_request', '2026-10-20T08:00:00Z'),
+    mk('q-old', 'question', '2026-10-20T07:00:00Z'),
+    mk('t-new', 'task_request', '2026-10-20T10:00:00Z'),
+    mk('s-new', 'secret', '2026-10-20T09:00:00Z'),
+  ]).map((i) => i.id);
+  expect(out).toEqual(['s-new', 'q-old', 't-new', 't-old']);
 });

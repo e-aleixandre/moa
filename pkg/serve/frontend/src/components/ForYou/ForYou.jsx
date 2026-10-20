@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { ArrowUp, ArrowUpRight, Check, ChevronRight, Info, KeyRound, ListChecks, Lock, MessageCircleQuestionMark, SquareTerminal, TriangleAlert } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { useEdgeSwipeBack } from "../../hooks/useEdgeSwipeBack.js";
-import { forYouSlice, forgetForYouItem, loadForYou, markNewsRead } from "../../data/for-you.js";
+import { forYouSlice, forgetForYouItem, loadForYou, markNewsRead, orderWaiting } from "../../data/for-you.js";
 import { forYouScopeIds } from "../../data/for-you-session.js";
 import { ownersSlice } from "../../data/owners.js";
 import { navigate } from "../../data/router.js";
@@ -51,7 +51,7 @@ function useRows(scope) {
   const rows = useMemo(() => {
     const ownerBySession = new Map(owners.filter((o) => o.session_id).map((o) => [o.session_id, o]));
     const ownerById = new Map(owners.map((o) => [o.id, o]));
-    const list = items.map((item) => {
+    const list = orderWaiting(items).map((item) => {
       const sess = sessions[item.session_id];
       const ownConv = ownerBySession.get(item.session_id) || null;
       const owner = ownConv || (sess?.ownerId ? ownerById.get(sess.ownerId) : null) || null;
@@ -62,9 +62,7 @@ function useRows(scope) {
         session: ownConv ? ownConv.name : (sess?.title || "A session"),
       };
     });
-    // What has stopped a session first, oldest first; then what does not
-    // stop anything, oldest first.
-    return [...list.filter((r) => r.item.blocking), ...list.filter((r) => !r.item.blocking)];
+    return list;
   }, [items, sessions, owners]);
   return { rows, loaded };
 }

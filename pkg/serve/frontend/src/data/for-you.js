@@ -88,6 +88,15 @@ export function markNewsRead(shown) {
   return api('POST', '/api/for-you/news/read', { items: acks }).catch(() => {}).finally(() => reloadAfterChange());
 }
 
+// orderWaiting sorts "Waiting on you": what stops a session first (anything
+// but a task request), then task requests; newest first inside each group,
+// like News.
+export function orderWaiting(items) {
+  const rank = (it) => (it.kind === 'task_request' ? 1 : 0);
+  const at = (it) => Date.parse(it.since || '') || 0;
+  return [...items].sort((a, b) => rank(a) - rank(b) || at(b) - at(a));
+}
+
 export function forYouCount(state) {
   return forYouSlice(state).items.length;
 }
