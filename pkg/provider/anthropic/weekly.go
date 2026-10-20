@@ -18,6 +18,7 @@ var weeklyKnown = map[string]bool{
 	"5h-utilization": true, "7d-reset": true, "reset": true,
 	"5h-reset": true, "7d-surpassed-threshold": true,
 	"fallback-percentage": true, "overage-disabled-reason": true,
+	"upgrade-paths": true,
 }
 
 func rawSingleton(h http.Header, name string) (string, bool) {
