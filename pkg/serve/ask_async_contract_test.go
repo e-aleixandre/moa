@@ -352,8 +352,19 @@ func f1ActiveForStop(t *testing.T, e *f1Env, sess *ManagedSession) {
 	}
 	e.send(sess, "F1-HOLD innocuous work until Stop")
 	if !f1Eventually(f1Guard, func() bool {
-		return sess.runtime.Context().Agent.IsRunning() &&
-			strings.HasPrefix(f1LatestFixtureInput(e.prov.lastSession(t, sess.ID)), "F1-HOLD")
+		if !sess.runtime.Context().Agent.IsRunning() {
+			return false
+		}
+		// Running is published before Stream records the request.
+		e.prov.mu.Lock()
+		defer e.prov.mu.Unlock()
+		key := core.PromptCacheKey(sess.ID)
+		for i := len(e.prov.reqs) - 1; i >= 0; i-- {
+			if e.prov.reqs[i].Options.PromptCacheKey == key {
+				return strings.HasPrefix(f1LatestFixtureInput(e.prov.reqs[i]), "F1-HOLD")
+			}
+		}
+		return false
 	}) {
 		t.Fatal("the harmless run used to exercise Stop never started")
 	}
