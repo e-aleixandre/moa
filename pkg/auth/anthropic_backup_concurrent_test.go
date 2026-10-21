@@ -20,14 +20,20 @@ func TestAnthropicBackupLateOldPrimarySuccessCannotClearCurrentCredit(t *testing
 	// captured map, not a new selection read after the replacement.
 	s.mu.Lock()
 	go func() { s.RecordAnthropicBackupUse(old, nil); close(done) }()
-	runtime.Gosched()
 	stack := make([]byte, 1<<20)
-	stack = stack[:runtime.Stack(stack, true)]
 	parked := false
-	for _, block := range strings.Split(string(stack), "\n\n") {
-		if strings.Contains(block, ".RecordAnthropicBackupUse(") && strings.Contains(block, ".reload(") && strings.Contains(block, "[sync.Mutex.Lock]") {
-			parked = true
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		runtime.Gosched()
+		n := runtime.Stack(stack, true)
+		for _, block := range strings.Split(string(stack[:n]), "\n\n") {
+			if strings.Contains(block, ".RecordAnthropicBackupUse(") && strings.Contains(block, ".reload(") && strings.Contains(block, "[sync.Mutex.Lock]") {
+				parked = true
+			}
 		}
+		if parked {
+			break
+		}
+		time.Sleep(time.Millisecond)
 	}
 	if !parked {
 		s.mu.Unlock()
