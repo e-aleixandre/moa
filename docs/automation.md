@@ -217,10 +217,14 @@ answers `409` and leaves the event in the inbox. Delivery claims
 the event (`new` → `routing`) before sending, so two concurrent decisions cannot
 deliver it twice.
 
-The Inbox keeps settled events as read-only details: an ignored event says
-**Ignored**, a delivery in progress says **Delivering**, and a routed event
+The **Events** view (formerly Inbox) keeps settled events as read-only details:
+an ignored event says **Ignored**, a delivery in progress says **Delivering**,
+and a routed event
 whose destination session is no longer available says so alongside its source,
 arrival time and payload. Only events still in state `new` can be routed again.
+This is separate from [For you](./serve.md#for-you), which collects questions,
+news and task requests. The rename does not change the `inbox` routing token,
+`pending_reason` values or `/api/events` routes.
 
 **Exposing the path.** Keep Serve itself private and expose only `/hooks` to
 the provider. With Tailscale Funnel, for example, mount just that prefix on a

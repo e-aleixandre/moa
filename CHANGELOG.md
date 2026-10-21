@@ -5,19 +5,121 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.47.0] - 2026-10-21
+
+### Added
+
+- **Voice calls.** Call a conversation from the phone button in its composer,
+  or an owner from **Call** in its ⋯ menu. The call runs over your ChatGPT or Grok
+  plan (a paid API is offered only if the plan cannot take the call, and only
+  starts when you tap it); ending it leaves minutes in the conversation
+  (Decided, Passed to…). Settings → Calls chooses the plan and shows
+  recent usage. The Android app places and receives calls natively (moa's
+  call screen with Telecom integration, lock-screen call notification, ringing
+  through Firebase push with the app closed), and the iOS app rings through
+  CallKit. A browser rings
+  as a web notification. See [Calls](docs/serve.md#calls) and
+  [Native app](docs/mobile.md#calls).
+- **Owners can call you.** An owner may ask to talk (`request_call`); each
+  owner has a call level, and Settings sets the hours it may call and a pause.
+- **For you.** One place for what waits on you: the questions agents asked,
+  a **News** section with what sessions chose to tell you, and task requests.
+  Each conversation shows its own For you in its header. On the phone the
+  question is pinned above the composer and answered in a sheet. Blocking
+  items come first, newest first. Requests can be marked **Done** or
+  **Dismissed** without leaving For you, are grouped by project, and fold
+  requests older than a week separately; you can dismiss those older requests
+  together after confirming.
+- **`ask_user` in `moa serve` no longer blocks the agent (on by default).** It
+  posts a durable question and returns at once. While your answer is pending, the
+  agent may only do already-scoped, local, reversible work that does not
+  depend on the answer or commit anything important; otherwise it waits.
+  Your answer reaches it later as a `question_answer` event, also after a
+  restart. Questions show context and have no Skip. Set
+  `"ask_user_async": false` to go back to the blocking question; see
+  [Configuration](docs/configuration.md) for the exact condition to roll
+  back to an older binary.
+- **An owner calls you about its own question that needs your tap** (such as
+  an approval) if it stays unanswered for 15 minutes by default, within the
+  owner's call level and hours; **Settings → Calls** sets the wait. The pin and
+  For you say that it is calling, or that the call was missed. The call never
+  substitutes for your tap.
+- **Cache keep-alive (Anthropic plan, off by default).** While an agent waits, moa
+  can resend the last request with no output so the next message finds the
+  prompt cache warm. Switch it on per role (owner, session, subagent) in
+  **Settings → Cache keep-alive** or with `cache_keepalive`. Settings shows today's
+  ping cost and estimated saving; Usage lists each conversation's keep-alive
+  separately.
+- **Requests in Tasks.** What agents ask of you is now called *Requests*.
+  The task list is compact, has project filters and an Agents toggle, can be
+  opened for one session, and shows *Done since you last looked*. An agent closes
+  its own task with a note of one to four lines (what is true now, then how it
+  was checked).
+- **Scheduled tasks stay visible.** Tasks groups them by project and shows
+  the next run, recurrence, creator and recent runs, with Pause/Resume for
+  recurring tasks and Delete on the row. For you asks whether to keep an
+  agent-created recurring task after it has run at least three times.
+  Agents can pause, resume or delete schedules created by their own
+  conversation and withdraw their own requests when you no longer need to act.
+- **Events.** The wake-on-event Inbox is renamed **Events** and has its own icon.
+- **A password request is signalled.** A session waiting on a password shows a
+  lock and *Needs password*, and a toast takes you to the card from any other
+  session; the push also reaches sessions an owner launched.
+- **`@owner` and `@session` mentions** in the composer, and a `read_session`
+  tool for reading a conversation you referred to.
+- Invoking a skill with `/<name>` starts a run and shows a compact skill row.
+- **Dictation through your ChatGPT plan**, with fallback to a configured API key.
+- **`book-tidy` skill** for cleaning the project book (it asks before
+  applying), and the `book` tool warns when a file is getting large.
 
 ### Changed
 
 - **Daybreak is a switch, not a model.** It sits under Fast in the model
   picker of each session, applies from the next request (also mid-run), is
-  saved with the session and passes to the subagents it launches. It is
+  saved with the session and passes to compatible subagents it launches. It is
   offered only when your plan's model catalog lists a model that takes it, and
-  only over the ChatGPT plan login. With it on, models that don't take it are
-  shown as *No Daybreak* and a change to one is refused. The `daybreak` model
+  only over the ChatGPT plan login. With it on, incompatible OpenAI models are
+  shown as *No Daybreak* and cannot be selected. The `daybreak` model
   spec now means GPT-6 Sol with Daybreak; sessions saved on the retired
   `gpt-daybreak-blue-latest` alias move to it on their next request, with their
   history kept as it was.
+- The browser's earlier live call is retired together with its
+  `/api/voice/live/*` endpoints; calls replace it, and old transcripts still
+  render.
+- Push notification titles are in English.
+- Android calls show the owner's name on the lock screen, or **moa** for an
+  ordinary conversation, rather than its title.
+
+### Fixed
+
+- **Anthropic API backup works with the weekly quota response's newer
+  metadata.** A confirmed plan limit can fall back to the API key configured
+  beside the plan instead of retrying the exhausted plan.
+- **A confirmed Anthropic plan limit is remembered until its reliable reset.**
+  Supported requests go straight to the API backup until then, rather than
+  asking the exhausted plan first each time. After a restart, one plan request
+  rediscovers the limit; replacing the sign-in or key invalidates the remembered
+  limit. A backoff without a reliable reset is not remembered.
+- **No API-backup notice in the chat.** The status line still shows `api`;
+  saving the turn before a paid request no longer adds a conversation message.
+- **Anthropic API backup uses API identity**, without the adapter's OAuth-only
+  CLI identity, while preserving the history and tool encoding needed to
+  continue the conversation.
+- Failed saves of a Stop's question-answer fence are journalled for startup
+  recovery, with a visible error.
+- A run's history is read under the agent's lock, so a message appended while
+  a run finishes cannot race the reads.
+- Priced subagent replies and their tools are kept in the child view.
+- Owners are told not to re-ask a session's question with `ask_user`.
+- The mobile attention badge counts owners and their sessions.
+- The phone's pinned question is clamped to two lines in WebKit, and the For you
+  sheet closes when an action opens the conversation already on screen.
+- Closing an own task with the default outcome is accepted.
+- OpenAI Responses errors nested in a streamed response are read with their
+  code and message.
+- Android: calls tie their Telecom requests and hangups to the call, stale
+  pushes are fenced after unpairing, and a failed call registration is redone
+  without reopening the app.
 
 ## [0.46.0] - 2026-10-15
 

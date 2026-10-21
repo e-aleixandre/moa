@@ -40,12 +40,19 @@ index.
 `list` (which also names live sessions in other directories that no owner
 watches), `read`, `send` (message or steer), `new` (create a child in a
 directory of the codebase and send its first prompt), and `answer` (resolve a
-pending `ask_user` of a child). A session waiting on a question reads no message
-until the question is resolved, so `send` treats it by origin: in a session the
-owner started, it skips the question (the same answers as the **Skip** button)
-and delivers the message; in a session you started, it is refused and names
-your question, because the owner does not answer for you. To reply to a
-question, the owner uses `answer`. There is deliberately no permission action:
+pending `ask_user` of a child). [Asynchronous questions](./serve.md#questions-from-the-agent)
+are the default: `send` neither answers nor skips them, and they do not block
+messages. To reply, the owner uses `answer` when its book already contains the
+answer; it does not repeat the question with another `ask_user`, because it
+already reaches you in For you.
+
+With the blocking question mode, `send` treats a pending question by origin:
+in a session the owner started, it skips an ordinary question (the same answers
+as the **Skip** button) and delivers the message; in a session you started, it
+is refused and names your question. **`requires_tap` questions are human-only
+in either mode:** neither `answer` nor an attempted Skip can resolve them,
+and `send` refuses a known blocking tap-only question before queuing its
+message. There is deliberately no permission action:
 approving what a session wants to do stays yours. That is policy for a
 cooperative agent, not a security barrier — the owner has bash like any
 session; what bounds it is the session's permission mode and allowed paths.
@@ -80,6 +87,54 @@ resumed to receive it.
 
 Point a hook at the owner and it dispatches.
 
+## Calls from an owner
+
+Open **Edit owner › Calls from this owner** to choose how that owner may
+reach you. The choice is saved immediately, separately from Save changes:
+
+| Level | What happens |
+| --- | --- |
+| **Never** (`never`, the default) | This owner will not ask to call you; its question is asked in writing instead. |
+| **Ask first** (`ask_first`) | You get a notification when it wants to talk. Call back if you want; your phone does not ring. |
+| **Ring** (`ring`) | Your phone rings when it wants to talk. You can answer or choose **Write it instead**. |
+
+**Settings › Voice › Calls** holds the global provider/model, allowed hours,
+pause and ring duration, plus a list of owners linking to their own controls.
+Hours default to **Any time**; **From – Until** initially proposes 08:00–22:00
+in your device's timezone. Ringing defaults to 45 seconds (adjustable from 10
+to 120). With no voice plan signed in, enabling Ask first or Ring requires a
+ready paid provider and your explicit confirmation of its per-minute cost.
+A failed plan does **not** silently fall back to a paid API.
+
+The owner's `request_call` takes a one-line `reason`, an optional `urgency`
+and a required `written_fallback` question. It is meant for important work
+blocked on a decision, broken production or a real time window, not every
+finished turn. Each request rings once at most. If it is missed, declined,
+outside allowed hours, paused, disabled or cannot connect through the plan,
+the fallback is asked in writing; with asynchronous questions it returns an
+acknowledgement immediately and the answer arrives later. It must not call
+again about the same unanswered request.
+
+An owner's **own asynchronous `ask_user`** can also carry a durable call
+deadline. A tap-only question defaults to 15 minutes, adjustable to 5–240 in
+Calls settings; for another question the owner must explicitly set
+`call_after_minutes` (5–240). This respects the owner's level, allowed hours
+and pause. A deadline outside the window moves to the next allowed window;
+a busy line is deferred, not treated as a missed call. The question shows
+**Calls you in …**, **Calling you…** or **Missed call**. A missed call is not
+retried and leaves the question open.
+
+Answering, Dismiss, withdrawal or **Don't call** cancels the pending question
+call; Don't call leaves the question open. **Stop** also cancels it (and hangs
+up an active escalation), without dismissing the question. Ordinary sessions,
+blocking questions, permissions, `tasks ask` requests and a `request_call`'s
+written fallback do not get this automatic escalation.
+
+**Calling is not authorization.** A deployment, merge, release or
+permission-like question marked `requires_tap` still needs your own tap or
+typed answer. Neither the voice relay, another agent nor automation may
+answer it. Actual tool permissions and passwords keep their own cards.
+
 ## Whose session is it
 
 | Origin | Who directs it | Questions |
@@ -106,7 +161,7 @@ owner no longer hears it. The owner's own conversation cannot be detached.
 GET    /api/owners                    list
 POST   /api/owners                    {root, name, model?, thinking?, avatar?}
 GET    /api/owners/{id}               owner and its session state
-PATCH  /api/owners/{id}               {name?, avatar?, can_send_tasks_to?: [owner id]}
+PATCH  /api/owners/{id}               {name?, avatar?, can_send_tasks_to?: [owner id], call_level?, cost_ack_provider?}
 DELETE /api/owners/{id}               remove owner and its conversation; the book stays
 GET    /api/owners/{id}/book          the book's files, with sizes
 GET    /api/owners/{id}/book/{path}   one file's content, and whether it is editable
@@ -119,6 +174,12 @@ asking you (see [Tasks between owners](./serve.md#tasks-between-owners)); it is
 stored in `owner.json`, returned on every owner, and answers `400` for the
 owner itself or an unknown ID. Deleting an owner removes it from every list.
 An older moa that rewrites `owner.json` (a rename, say) drops the list.
+
+`call_level` is `never`, `ask_first` or `ring`, returned on each owner and
+stored in `owner.json`. Without a voice plan, a non-Never level requires
+`cost_ack_provider` naming the ready paid provider; the acknowledgement is
+bound to that provider, not a general approval of paid calls. Missing
+credentials or cost acknowledgement answers `400` without changing the level.
 
 A detached session lists `detached_owner_id` / `detached_owner_name` in place
 of `owner_id` / `owner_name`. Detaching answers `409` for a session that cannot

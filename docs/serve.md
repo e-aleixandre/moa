@@ -335,8 +335,9 @@ head holds search (`⌘K`), **+** for a new session, and the two orders:
   folded group still shows its most urgent state.
 
 Each row says why a session wants you in words, not only in colour. Use a row's
-menu to close or reopen it, copy its ID, or delete it. The foot holds the
-[inbox](#event-inbox), [**Tasks**](#using-tasks-in-the-web-ui) and **Settings**
+menu to close or reopen it, copy its ID, or delete it. **[For you](#for-you)**
+is the first row of the list, including in the phone's drawer. The foot holds
+[**Events**](#events), [**Tasks**](#using-tasks-in-the-web-ui) and **Settings**
 (compaction, notification sound and push, subagent models, **Providers**, paired
 devices, **Saved passwords** in the iOS app, and the version under **About**). The gear shows a dot when a newer release is out.
 
@@ -370,6 +371,33 @@ which opens that session's tasks. On a phone the tasks chip stays visible while
 the session has unfinished tasks, in its short form; it gives way only to
 alarms (two on the line, or one next to the owner's face on the narrowest
 screens) and never pushes the context gauge off the line.
+
+## Mentioning owners and sessions
+
+Type **`@`** in the composer and select a result. The menu groups **Owners →
+Sessions → Files**; a path such as `@src/` narrows it to files. Use the arrow
+keys to move and Enter or Tab to choose, or tap a row. Owners and sessions
+appear highlighted in the composer and as chips in your sent message.
+
+- **@owner** gives the agent an identifiable reference (name, ID and project),
+  not an instruction sent to that owner. An owner may use `tasks send` to pass
+  work on, under the existing directional permissions. A mention does not
+  change those permissions or start a turn by itself.
+- **@session** offers ordinary sessions of the **same project**, live or
+  saved, not subagents. In an ordinary conversation, selecting and sending
+  that reference lets its agent read the mentioned conversation with
+  `read_session`. It does not grant write, send or approval access. A detached
+  session can be read this way; detachment still keeps it outside its owner's
+  reach. Owners use their existing `sessions read` access instead.
+
+`read_session` returns recent messages abridged to their beginning and end;
+`message_id` (or `"last"`) reads one in full, `offset` pages a long message,
+and `tools: true` includes tool calls. Only sessions you explicitly selected
+and sent **in this conversation** can be read. Pasting a title, an ID or a
+copied mention block does not grant access. The grant survives compaction;
+rewind removes grants whose messages are no longer on the active branch.
+Every read rechecks the project and target: deleting or moving the referenced
+session can make it unavailable. Subagents do not inherit `read_session`.
 
 ## Model and thinking
 
@@ -464,13 +492,6 @@ transcript lands at the cursor, so you can dictate, fix a word and dictate
 more. `Esc` discards a recording. `⌘.` / `Alt+.` does the same as a tap.
 Dictation also works when steering a subagent.
 
-An agent question (`ask_user`) can offer options to pick one from, or, when the
-agent marks it multiple-choice, toggles you can combine, plus optional free
-text. Whatever you choose reaches the agent as one answer, with the picks joined
-by `; ` and the free text last. A question answered by someone else (the
-project's [owner](./owners.md) from its book, or an automation) says *Answered
-by ‹name›* on its card.
-
 Agent questions (`ask_user`) take dictation the same way: with the free answer
 empty, its button is a microphone; or use the shortcut while the question is on
 screen. Speech is appended
@@ -510,6 +531,77 @@ Moa carries the audio, so the browser never talks to the provider.
   offer, the model that works for the call, and what recent calls measured.
   The spend shown there is how much the session's own spend changed while the
   call was open, which includes anything else it ran.
+
+Owners can also [ask to call you](./owners.md#calls-from-an-owner), subject to
+the level you chose for each owner and your allowed call hours. A call only
+gets your attention; it never authorizes a deployment, release or permission.
+
+## Questions from the agent
+
+In `moa serve`, **`ask_user` is asynchronous by default**, for owners and
+ordinary sessions. It posts a durable question, returns a `question_id` to the
+agent immediately, and leaves the conversation free to continue. The return
+value is an acknowledgement, **not your answer**.
+
+The question sits in a compact block above the composer, and in **[For
+you](#for-you)** even when its conversation is not open. **Answer** expands it
+in place on desktop and opens a bottom sheet on a phone. The agent can include
+`context` explaining what is happening, why it asks and what each option
+changes; use **More** to read a long explanation. Questions can offer a single
+choice or multiple choices, with optional free text. Multiple picks arrive
+joined by `; `, followed by your free text.
+
+**Submit** saves the answer and delivers a `<question_answer>` event tied to
+the question, with its original text, when it was asked and answered, and who
+answered. It reaches a working agent at a safe point; an idle or saved session
+is started to receive it. Answers and open questions survive a server restart.
+The model receives an up-to-date, bounded list of its open questions on each
+request and can use `ask_user` action `list` for their full detail.
+
+While waiting, the agent is instructed to continue only with work that meets
+**all five** conditions:
+
+1. It is already inside your task, without widening it or turning a draft into
+   a decision.
+2. It is right whichever answer you give, or is an isolated, labelled
+   experiment that applies neither option.
+3. It is local and fully reversible, with no important consequences before
+   the reversal.
+4. It commits nothing important: no product behavior, permissions, security,
+   relevant persisted data, public contract, message to a third party,
+   publication or deployment.
+5. It starts no new spending, heavy load or data egress.
+
+If nothing qualifies, the agent ends its turn and waits for your answer to
+wake it. This is **guidance to the model**, not a server-enforced dependency
+lock; an open question is never authorization. Permissions and password
+requests still block the action they protect.
+
+- Only **one open `ask_user` invocation per session** is allowed; that
+  invocation can contain up to 32 questions. The agent must wait or withdraw
+  it before posting another.
+- **Later** just folds the answer UI. **Dismiss** closes the question without
+  answering or calling the model; there is no Skip on the asynchronous card.
+- **Stop** stops work and cancels a pending question call, but leaves the
+  question open. Dismiss it too if you no longer want to answer it. A later
+  answer can start work again.
+- The agent can retire an obsolete question with `action: "withdraw"`,
+  `question_id` and `reason`. Withdrawal is not an answer or an approval.
+- Compaction and Start fresh keep open questions. Rewind invalidates those
+  whose asking tool call is no longer on the active branch; returning to an
+  old branch does not reopen a closed question.
+- **Needs your tap** (`requires_tap`) accepts only your own tap or typed
+  answer, never an owner agent, automation or voice relay. Ordinary answers
+  from someone else are attributed as *Answered by ‹name›*, not as your words.
+
+Set [`ask_user_async`](./configuration.md#features) to `false` to use the
+blocking card instead. Resolve or withdraw existing asynchronous questions
+and let their answers drain first; the configuration reference also gives the
+conditions for returning to a binary from before asynchronous questions.
+
+An owner's own questions can [escalate to a call](./owners.md#calls-from-an-owner).
+Ordinary sessions' questions, blocking questions, permissions and `tasks ask`
+requests do not automatically call you.
 
 ## Attachments
 
@@ -936,7 +1028,57 @@ The `GET /api/sessions` roster includes `unseen`, `unseen_seq`, and
 `attention_namespace` scopes that occurrence and any read cursor to its runtime
 incarnation.
 
-## Event inbox
+## For you
+
+Open **For you** at the top of the sidebar or phone drawer to see what needs
+you across conversations. The button at the **top right of a conversation**
+opens a sheet scoped to that session; an owner's sheet also includes its
+sessions. Both entry points remain available when there is nothing new, so
+you can return to earlier news. Create new sessions from the sidebar's **+**.
+
+The amber number counts **questions and blocking waits**, not task requests
+or news. A violet dot means unread news. Simply looking at a question does
+not close it. The main sections are:
+
+- **Waiting on you** — questions, permissions and passwords, newest first.
+  The row distinguishes an agent that keeps working from one stopped until
+  you answer. Answer a question or allow/deny a permission there; **Enter
+  password** opens that conversation's secure input. Tap-only questions keep
+  their human-only requirement wherever you answer them.
+- **News** — deliberate updates from an owner or a session in a project
+  without an owner, not every final reply. Opening an item marks that item
+  read; **Mark all read** marks the displayed unread items. Items read during
+  your visit stay in place until you leave. **Earlier news** keeps read items
+  available for seven days after they were read. Read state is shared across
+  devices and survives restarts.
+- **Requests · N** — tasks agents asked you to do, grouped by project and
+  newest first within each project, after News. More than three requests fold
+  by default; those a week old or older fold separately. **Done** tells the
+  asking session, without waking it if it is saved (it receives the notice
+  when opened). **Dismiss** deletes the request without telling the session.
+  Older requests can be dismissed together after confirmation. **Open in
+  Tasks** opens that session's task list; Back returns here. If a request
+  changed meanwhile, it returns with **This request changed** rather than
+  closing a newer version silently.
+
+The general view can also show **Running on its own** for recurring tasks
+that need a review; see [Scheduled tasks](#scheduled-tasks).
+
+Agents publish News with `notify`, using `done`, `deployed`, `problem` or
+`info`. Reusing a `key` updates the same item and marks it unread again. Only
+`problem` news sends a push notification; its title and body are not copied
+to the lock screen. Sessions under an owner report to that owner instead of
+publishing News themselves. Recent news and its read state are provided to
+the publishing session to help it avoid repeating an update as new; this is
+guidance, not a guarantee against repetition.
+
+This is separate from **Events**, which holds incoming external webhooks.
+`GET /api/for-you` returns the current waiting items and news; resolving an
+item uses its own session or task endpoint, not a blanket approval endpoint.
+
+<a id="event-inbox"></a>
+
+## Events
 
 External events — a mail reply, a failed pipeline, a cron job — reach moa
 through [`POST /hooks/<source>/<secret>`](./automation.md#event-hooks) and are
@@ -946,8 +1088,8 @@ config.
 By default an event is sent straight to a live session in the target project,
 so the work continues without you opening moa. When routing cannot pick one
 session (none, several, a missing/errored target, a busy session with autorun
-off, or a rate-limited source), the event waits in the **Inbox** — its own
-surface, not a group inside the session list. Its door is the **Inbox** button
+off, or a rate-limited source), the event waits in **Events** — its own
+surface, not a group inside the session list. Its door is the **Events** button
 in the session list's foot, which appears once any event has arrived; on a
 phone the count also rides on the title chip, so waiting events are visible
 without opening the drawer. Each waiting row says **why** it is there, and opens
@@ -965,12 +1107,12 @@ actually arrived before deciding:
 Choosing a destination starts a turn on it: placing an event by hand *is* the
 instruction to act on it, whatever the source's unattended `autorun` setting
 says. A route the server refuses leaves the event pending with an error instead
-of silently closing the inbox.
+of silently closing Events.
 
-The inbox keeps history: pending, delivered, and dismissed. A dismissal
+The Events view keeps history: pending, delivered, and dismissed. A dismissal
 survives a restart (`~/.config/moa/events.json`).
 
-A push notification announces each arriving event, and opens the inbox rather
+A push notification announces each arriving event, and opens Events rather
 than the home screen. Following the push contract it carries only what happened
 and, at most, the session title — never the event's own text, which is external
 content that would land on a lock screen. It is quiet and one per source: the
@@ -985,7 +1127,7 @@ assistant. A session that an event created is marked as such in the session list
 
 Tasks live in one SQLite database, `tasks.sqlite` in the config directory, shared by every session, the CLI and `moa serve`. A change made in one process shows up in the others within about half a second. Each task sits in one of three places:
 
-- **You**: your own notes, and the requests agents file for you with `tasks ask`. An agent never sees your notes; a request is visible only to the session that asked.
+- **You**: your own notes, and the requests agents file for you with `tasks ask`. An agent never sees your notes; a request is visible to the session that asked and its project's owner, which can withdraw it when it is no longer needed.
 - **Backlog**: a project's shared pool (a project is a repository: all its worktrees share it). Agents of that project can read it and `claim` a pending task.
 - **Agents**: a session's own checklist, which is what `tasks create` adds to.
 
@@ -1001,9 +1143,12 @@ If `tasks.sqlite` was written by a newer moa, this one reads it but refuses to c
 number counts only the requests agents made that are still open; your own
 notes never add to it. The view groups tasks under **You** (requests first,
 then your notes), one **Backlog** per project and **Done**, folded. Agents'
-checklists stay out of sight until you turn on **Agents' tasks**; the project
-menu narrows everything to one project. A request that arrived since your last
-visit carries a dot.
+checklists stay out of sight until you turn on **Agents' tasks**; **All
+projects** narrows the view to a project when you pick one. Opening tasks from
+a session's status line shows just that session's list: clear its name chip
+to show every task again. A request that arrived since your last visit carries
+a dot. **Done since you last looked** stays visible above the older **Done**
+fold; each list keeps its own last-visit mark.
 
 Click a task to open it on the right; on a phone it opens as a sheet, and
 **Move** is a page of that same sheet. In the detail you edit the title and
@@ -1016,19 +1161,32 @@ details, add subtasks and tasks it waits for, and use:
 - **Save** / **Save and notify** — appear once you change something. **Save
   and notify** is only offered when the task has a session to tell.
 
+A finished task keeps its closing note in the detail: **Summary** for an
+agent's checklist, **Your note** for a request you completed, and **Result**
+or **Can't do** for work between owners. Agents must supply a short note
+when using `tasks done`: what is true now, how it was checked, and the
+evidence. Your own Done note is optional (except for Can't do between owners).
+An obsolete request can be closed by its asking session or its project's
+owner with `tasks withdraw` and a required reason. It stays in Done as
+**Withdrawn by …: ‹reason›**; this does not answer a question, approve an
+action or cancel a schedule. Subagents cannot withdraw requests.
+
 Keyboard, in the view: `j`/`k` or `↓`/`↑` move between tasks, `c` creates one,
 `m` opens Move, `Alt+Enter` (`⌘Enter` on a Mac) completes the open task, and
 `Esc` closes the detail.
 
 Inside a conversation, the session panel's **Tasks** row lists what that
-session asked you and its own checklist, with **Add a task** to give it one.
+session asked you under **Requests**, separately from its own checklist and
+scheduled tasks, with **Add a task** to give it one.
 While the session has an open request for you, its first one is pinned above
 the message box with **Done**, and `+N` when there are more.
 
-When a gesture would tell a session that is saved rather than open, moa asks
+In Tasks, when a gesture would tell a session that is saved rather than open, moa asks
 before sending anything: **Wake and notify** opens it now; **Notify when
 opened** keeps the notice until you open it. Neither is preselected. An open
-session is told at once, without asking.
+session is told at once, without asking. **Done from For you** is the
+exception: it always holds the notice for a saved session, without waking it
+or asking you to choose.
 
 A notice that has not arrived is said in the task's detail, in words:
 *Waiting for ‹session› to open* with **Wake now**, *Not delivered* with the
@@ -1038,7 +1196,7 @@ a notice appears as a folded **tasks** event.
 
 ### Notices to sessions
 
-Some of your gestures tell a session what happened, as a folded event in its conversation (like an [inbox event](#event-inbox)):
+Some of your gestures tell a session what happened, as a folded event in its conversation (like an [external event](#events)):
 
 - assigning a task to a session (creating it in **Agents**, or moving it there);
 - **Save and notify** on a task with a session: its assignee, or the session that asked for a request. Plain **Save** tells nobody;
@@ -1062,6 +1220,36 @@ Such a task, and any request an agent made to you, has a thread. The sender, the
 The record carries `handoff` (`from_owner_id`, `from_owner_name`, `to_owner_id`, `to_owner_name`, `state`: `awaiting_permission`, `sent` or `declined`, `outcome`: `done` or `cant_do` once closed) and `comment_count`. `GET /api/tasks/{id}/comments` is the thread (`{"comments": [...]}`), `POST` there with `{"body"}` writes yours; `POST /api/tasks/{id}/handoff` with `{"action": "send" | "allow" | "decline", "revision"}` answers a request waiting for permission (`allow` stores the permission in the sender's `owner.json` first); `PATCH /api/tasks/{id}` takes `outcome`.
 
 ### Scheduled tasks
+
+A task can be scheduled from **When** in its detail or the **clock beside
+Send** in the composer. Enter a time in English or Spanish, or use the date
+and time controls, and check the resolved date, timezone and **Send to**
+before confirming. Choose an owner, an existing session or a new session.
+Agents can use `tasks create` with `when` to schedule work in their own
+session, not another destination.
+
+**Scheduled** stays at the top of Tasks, grouped by project. Every recurring
+task and every run waiting for you remains visible; upcoming one-off tasks
+can expand with **N more**. Rows show the next time, recurrence, who set it,
+last run and run count. Times are shown in your device's timezone where the
+rule can be represented faithfully; a monthly rule that crosses a calendar
+day is shown in its original, named timezone. **cost unknown** means cost is
+not recorded per run, not that it was free.
+
+Use **Pause / Resume** on a recurring row or **Delete** (with confirmation)
+to remove its schedule. One-off tasks that failed or were sent but never
+finished stay under **Didn't run**, folded, until you delete them. An owner's
+Tasks also shows the schedules filed under its project, including ones its
+sessions created; an agent's pause/resume/delete authority is still limited
+to schedules it created itself, never another session's or yours. Subagents
+cannot use those controls through the tool. Deleting a schedule does not
+remove runs already delivered to a checklist.
+
+In the general **For you**, **Running on its own** asks you to review an
+active, agent-created recurring task after at least three runs. **Keep
+running** records your review so it no longer asks; Pause and Delete are also
+available there. This is a review reminder, not a gate that stops scheduled
+runs pending your answer.
 
 A task can run later or repeat. Such a **template** is a private task of yours; when its time comes the scheduler turns each run into an ordinary task on the checklist of the session it targets, delivered as a [notice](#notices-to-sessions). The API adds these optional members to `POST /api/tasks` and `PATCH /api/tasks/{id}`; tasks without them look exactly as before:
 
@@ -1124,7 +1312,7 @@ screen is rendering, once its history has been shown and while the page is
 visible; it is renewed every 15 s and lapses after 45 s, so a phone that was
 put away stops counting without sending anything. A connected socket does not
 count by itself: neither a session that is connected but not shown (the other
-tiles while one conversation is open; the Tasks screen, or the inbox on a
+tiles while one conversation is open; the Tasks screen, or Events on a
 phone; a subagent or bash detail covering it) nor one still loading.
 
 On the device, quiet notifications are `silent` and a notification replaces the
@@ -1182,7 +1370,7 @@ Beyond the per-session WebSocket, Serve exposes a few global read/write endpoint
 | `POST /api/pulse/pairings` · `.../pairings/claim` · `GET /api/pulse/devices` · `POST /api/pulse/devices/{id}/revoke` | Pulse pairing and device administration (owner-only) |
 | `GET /api/push/vapid-public-key` · `POST /api/push/subscribe` · `.../unsubscribe` | Web-push subscription management |
 | `GET /api/preview/target` · `PUT /api/preview/target` | Whether the [Live Preview proxy](#the-live-preview-proxy) is listening right now, at what address, and which dev server it points at. `PUT` with a `url` starts the listener and points it; `PUT {"enabled": false}` shuts it down |
-| `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` · `POST /api/events/dismiss` | The [event inbox](#event-inbox): history, sending or dropping one, or dismissing a source |
+| `GET /api/events` · `POST /api/events/{id}/route` · `.../dismiss` · `POST /api/events/dismiss` | [Events](#events): history, sending or dropping one, or dismissing a source |
 | `POST /api/sessions/{id}/steers/cancel` | Cancel every queued, not-yet-delivered message; with the header `X-Moa-Steers-Cancel-Response: discarded` the reply lists exactly what was discarded |
 | `POST /api/sessions/{id}/mcp/{server}/oauth/start` · `.../oauth/finish` · `.../oauth/signout` | Sign a session's remote MCP server in or out |
 | `GET /api/tasks?project=&include_agents=&include_archived=` · `POST /api/tasks` · `GET`/`PATCH`/`DELETE /api/tasks/{id}` · `GET /api/tasks/projects` · `GET /api/sessions/{id}/tasks` | The [task database](#tasks): the owner's view of every task. `PATCH` and `DELETE` need the `revision` you last read and answer `409` with the current task when it is stale. A gesture that [notifies a session](#notices-to-sessions) takes `"deliver": "wake"` or `"hold"` for a saved one (`DELETE` in its JSON body or as `?deliver=`); `PATCH` takes `"notify": true` for Save and notify. `GET /api/tasks/{id}` adds `recipient` (who a gesture would notify now, and whether it is `live`, `saved` or `missing`) and the task's last five `notices`; the list marks a task with `notice_state` when its latest notice is `held`, `pending` or `failed`. `GET /api/tasks/projects` lists each backlog with `cwds`, every known directory of that project, so a client can group sessions (worktrees included) under it |

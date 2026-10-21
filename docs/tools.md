@@ -36,7 +36,7 @@ Conditionally registered:
 | Tool | Condition |
 |------|-----------|
 | `web_search` | `brave_api_key` is configured |
-| `ask_user` | The web UI is active (not headless). A question can offer options to pick one from or, when the agent marks it multiple-choice, to toggle several, always with room for a free-text answer. If someone other than you answered (an [owner](./owners.md) from its book, or an automation), the agent is told so and the card says *Answered by ‹name›* |
+| `ask_user` | The web UI is active (not headless). In `moa serve`, asynchronous by default: posts a durable question, returns its ID immediately and receives the answer later as a `question_answer` event. Options, multiple choices and free text are supported. See [Asynchronous questions](#asynchronous-questions) for context, continuation limits and human-only approvals |
 | `run_with_secret` | The web UI is active. Runs a command in a terminal and types the password the owner enters on a card at its password prompts. See [Passwords for one action](#passwords-for-one-action) |
 | `browser_fill_secret` | The web UI is active and an MCP server exposes `browser_type` and `browser_evaluate` (Playwright). Types what the owner enters on a card into fields of the open page. See [Passwords for one action](#passwords-for-one-action) for its limits |
 
@@ -51,6 +51,90 @@ In a codebase that has a [project owner](./owners.md), every session also gets
 `book` with write access, `sessions` to list, read, message, start and answer
 the sessions of its codebase, and the built-in skills its role relies on
 through `load_skill`.
+
+Serve also registers these role-specific tools (not part of the ordinary
+CLI tool set):
+
+- **`notify`** — in owners and sessions in projects without an owner. Posts
+  deliberate updates to [For you › News](./serve.md#for-you), with `kind`
+  (`done`, `deployed`, `problem`, `info`), `title`, `body` and an optional
+  `key` to update the same item. `action: "list"` shows that session's news
+  and read state. Only `problem` sends push. Sessions under an owner report
+  to it instead.
+- **`request_call`** — in the owner's own conversation. Takes `reason`,
+  optional `urgency` (`normal` or `urgent`) and a required `written_fallback`
+  question. It obeys the owner's [call level](./owners.md#calls-from-an-owner),
+  hours and pause. If no call happens, the fallback becomes a written
+  question (acknowledgement now, answer later with async questions). A call
+  contacts the user; it never authorizes an action. The fallback must keep
+  `requires_tap` for deployment, merge, release or permission-like approvals.
+- **`read_session`** — in non-owner conversations, not inherited by
+  subagents. Reads only same-project sessions the user explicitly selected
+  with [@session in this conversation](./serve.md#mentioning-owners-and-sessions).
+  Takes `session_id`, optional `limit` (default 20, max 60), `message_id`
+  (`"last"` for the latest assistant message), `offset`, and `tools`.
+  Read access does not grant permission to message or change the target.
+
+## Asynchronous questions
+
+In `moa serve`, `ask_user` defaults to `action: "post"`. Each question has
+`question`, optional `context` (what is happening, why the agent asks and what
+changes with each option), `options`, and `multiple`. Keep the question short
+and put its explanation in `context`. One invocation may contain up to 32
+questions, but a session can have **only one invocation open at a time**.
+Each question is limited to 4 KiB of text, 2,000 bytes of context and up to
+32 predefined options of 1 KiB each.
+
+The result is a durable `question_id`, not an answer. The later
+`<question_answer>` event includes the original question, both timestamps and
+the responder. The agent gets a bounded current inventory on each request;
+`action: "list"` reads the full open questions, and `action: "withdraw"` with
+`question_id` and `reason` retires an obsolete one without granting approval.
+Open questions survive Stop, compaction, Start fresh and restarts; rewind
+invalidates questions whose origin left the active branch. **Dismiss** closes
+without answering or calling the model; Stop alone leaves the question open.
+
+While it waits, the agent is instructed to do **only already-requested,
+answer-independent, local, completely reversible work** that commits nothing
+important and starts no new spend, heavy load or data egress. If no work meets
+all five conditions in [Questions from the agent](./serve.md#questions-from-the-agent),
+it must end its turn and wait. This is model guidance, not a server-enforced
+dependency lock. Permission and secret requests remain synchronous.
+
+Set root-level `requires_tap: true` for deploy, merge, release or
+permission-like confirmations. Only the human's own tap or typed answer can
+resolve these: an owner agent, automation and voice relay are refused.
+Non-human answers to ordinary questions retain their attribution.
+
+Only owners' asynchronous questions accept `call_after_minutes` (5–240).
+An owner's tap-only question gets the configured call delay by default
+(15 minutes), subject to its call level and allowed hours. Other sessions,
+blocking questions, permissions and task requests do not escalate. See
+[Calls from an owner](./owners.md#calls-from-an-owner) for cancellation and
+missed-call behavior. `tasks ask` is a separate request in For you › Requests,
+not an `ask_user` question.
+
+[`ask_user_async: false`](./configuration.md#features) restores the blocking
+tool. Drain open questions and answers before disabling it; heed the rollback
+conditions in that configuration reference before using an older binary.
+
+## Task lists and closing notes
+
+`tasks list` defaults to open tasks plus tasks done in the last 24 hours, with
+finished tasks reduced to one line including a short closing-note summary.
+Use `status: "open"`, `"done"` or `"all"` to change that window. Combine
+`archived: true` with `status: "done"` or `"all"` to include archived tasks,
+and use `limit` (default 50, maximum 200) to bound the result. `search`
+matches titles, descriptions, subtasks and closing notes, ignoring accents
+and case, and also searches finished and archived tasks. `tasks get` with an
+`id` reads a task in full. These filters never widen which tasks the session
+is allowed to see.
+
+`tasks done` requires a short `note` saying what is true now and how it was
+checked. `tasks withdraw` closes an obsolete task request with a required
+reason, not an asynchronous question; it preserves the request in Done with
+that reason. See [Tasks](./serve.md#using-tasks-in-the-web-ui) for who may
+withdraw a request and where its closing note appears.
 
 ## Tool selection guidance
 
