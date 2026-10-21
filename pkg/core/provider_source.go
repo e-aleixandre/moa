@@ -15,6 +15,7 @@ type ProviderSource struct {
 	Provider             string     `json:"provider,omitempty"`
 	Model                string     `json:"model,omitempty"`
 	OAuthNotBefore       *time.Time `json:"oauth_not_before,omitempty"`
+	OAuthQuotaObservedAt *time.Time `json:"oauth_quota_observed_at,omitempty"`
 	EstimatedCost        *float64   `json:"estimated_cost,omitempty"`
 	UsageComplete        bool       `json:"usage_complete,omitempty"`
 	InputTransformations []string   `json:"input_transformations,omitempty"`

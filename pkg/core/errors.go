@@ -53,6 +53,10 @@ func (e *QuotaExceededError) Is(target error) bool {
 // ErrQuotaExceeded is a sentinel for errors.Is(err, core.ErrQuotaExceeded).
 var ErrQuotaExceeded = &QuotaExceededError{}
 
+// ErrAnthropicLowCredit identifies an explicit HTTP 400 API credit refusal,
+// not a generic API failure or a plan quota limit.
+var ErrAnthropicLowCredit = errors.New("anthropic API credit balance too low")
+
 // AsQuotaExceeded extracts a *QuotaExceededError from an error chain, if present.
 func AsQuotaExceeded(err error) (*QuotaExceededError, bool) {
 	var qe *QuotaExceededError

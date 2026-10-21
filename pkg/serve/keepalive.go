@@ -36,25 +36,26 @@ const warmWakeShare = 0.95
 // keepAliveRecord is one line of keepalive.jsonl, the durable trace the net
 // saving is measured from: every ping, failed ping and wake.
 type keepAliveRecord struct {
-	At            time.Time `json:"at"`
-	Kind          string    `json:"kind"`
-	SessionID     string    `json:"session_id,omitempty"`
-	JobID         string    `json:"job_id,omitempty"`
-	Role          string    `json:"role,omitempty"`
-	State         string    `json:"state,omitempty"`
-	Model         string    `json:"model,omitempty"`
-	ContextTokens int       `json:"context_tokens,omitempty"`
-	Input         int       `json:"input,omitempty"`
-	CacheRead     int       `json:"cache_read,omitempty"`
-	CacheWrite    int       `json:"cache_write,omitempty"`
-	Output        int       `json:"output,omitempty"`
-	CostUSD       float64   `json:"cost_usd,omitempty"`
-	Pings         int       `json:"pings,omitempty"`
-	PingCostUSD   float64   `json:"ping_cost_usd,omitempty"`
-	SleptSeconds  int64     `json:"slept_s,omitempty"`
-	Warm          bool      `json:"warm,omitempty"`
-	SavedUSD      float64   `json:"saved_usd,omitempty"`
-	Error         string    `json:"error,omitempty"`
+	At             time.Time            `json:"at"`
+	Kind           string               `json:"kind"`
+	SessionID      string               `json:"session_id,omitempty"`
+	JobID          string               `json:"job_id,omitempty"`
+	Role           string               `json:"role,omitempty"`
+	State          string               `json:"state,omitempty"`
+	Model          string               `json:"model,omitempty"`
+	ContextTokens  int                  `json:"context_tokens,omitempty"`
+	Input          int                  `json:"input,omitempty"`
+	CacheRead      int                  `json:"cache_read,omitempty"`
+	CacheWrite     int                  `json:"cache_write,omitempty"`
+	Output         int                  `json:"output,omitempty"`
+	CostUSD        float64              `json:"cost_usd,omitempty"`
+	Pings          int                  `json:"pings,omitempty"`
+	PingCostUSD    float64              `json:"ping_cost_usd,omitempty"`
+	SleptSeconds   int64                `json:"slept_s,omitempty"`
+	Warm           bool                 `json:"warm,omitempty"`
+	SavedUSD       float64              `json:"saved_usd,omitempty"`
+	Error          string               `json:"error,omitempty"`
+	ProviderSource *core.ProviderSource `json:"provider_source,omitempty"`
 }
 
 // keepAliveService is the server-wide part of keep-alive: the setting in
@@ -244,6 +245,7 @@ func (m *Manager) onKeepAliveEvent(sess *ManagedSession, jobID string, e agent.K
 		At: e.At, Kind: e.Kind, SessionID: sess.ID, JobID: jobID, Role: e.Role, State: e.State, Model: e.Model.ID,
 		ContextTokens: e.ContextTokens, Input: e.Usage.Input, CacheRead: e.Usage.CacheRead, CacheWrite: e.Usage.CacheWrite,
 		Output: e.Usage.Output, CostUSD: e.CostUSD, Pings: e.Pings, PingCostUSD: e.PingCostUSD, SleptSeconds: int64(e.Slept / time.Second),
+		ProviderSource: e.ProviderSource,
 	}
 	if e.Err != nil {
 		rec.Error = e.Err.Error()

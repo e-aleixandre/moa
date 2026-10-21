@@ -117,7 +117,16 @@ func (s *Store) RecordAnthropicBackupUse(revision BackupRevision, err error) {
 	if err != nil {
 		state = "api_error"
 	}
-	s.observe(useKey{anthropicBackupSlot, "store", revision.Key}, state)
+	s.observeUse(useKey{anthropicBackupSlot, "store", revision.Key}, useRecord{
+		state: state, backupPrimary: revision.Primary, lowCredit: errors.Is(err, core.ErrAnthropicLowCredit),
+	})
+}
+
+// AnthropicBackupCreditExhausted reads the last API outcome for this exact
+// pair. It is only a keep-alive guard; foreground work remains admissible.
+func (s *Store) AnthropicBackupCreditExhausted(revision BackupRevision) bool {
+	rec, ok := s.observed(useKey{anthropicBackupSlot, "store", revision.Key})
+	return ok && rec.backupPrimary == revision.Primary && rec.lowCredit
 }
 
 // SaveAnthropicAPIKey stores the one Anthropic API key. Next to a stored plan

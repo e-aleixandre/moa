@@ -91,14 +91,15 @@ type KeepAliveEvent struct {
 	Kind string
 	// At is when the ping was sent (the instant that refreshed the cache), or
 	// when the wake's response arrived.
-	At            time.Time
-	Role          string
-	State         string // ping: what the agent was waiting for
-	Model         core.Model
-	ContextTokens int // the prefix the pings kept warm
-	Usage         core.Usage
-	CostUSD       float64
-	Err           error
+	At             time.Time
+	Role           string
+	State          string // ping: what the agent was waiting for
+	Model          core.Model
+	ContextTokens  int // the prefix the pings kept warm
+	Usage          core.Usage
+	CostUSD        float64
+	Err            error
+	ProviderSource *core.ProviderSource
 	// Wake only: the pings since the previous real request, what they cost,
 	// and how long the agent slept.
 	Pings       int
@@ -299,14 +300,16 @@ func (ka *keepAlive) sending(req core.Request, provider core.Provider, state *Ag
 	defer ka.mu.Unlock()
 	var prevSent time.Time
 	prevTokens := 0
+	var prevSource *core.ProviderSource
 	if ka.snap != nil {
 		prevSent, prevTokens = ka.snap.sentAt, ka.snap.contextTokens
+		prevSource = ka.snap.req.Options.ProviderBinding
 	}
 	ka.suspendLocked()
 	ka.snap = snap
 	ka.inFlight = true
 	if ka.pings > 0 {
-		ka.wake = &KeepAliveEvent{Kind: KeepAliveWake, Role: ka.cfg.Role, Model: req.Model, ContextTokens: prevTokens, Pings: ka.pings, PingCostUSD: ka.pingCost}
+		ka.wake = &KeepAliveEvent{Kind: KeepAliveWake, Role: ka.cfg.Role, Model: req.Model, ContextTokens: prevTokens, Pings: ka.pings, PingCostUSD: ka.pingCost, ProviderSource: prevSource}
 		if !prevSent.IsZero() {
 			ka.wake.Slept = now.Sub(prevSent)
 		}
@@ -467,7 +470,7 @@ func (ka *keepAlive) ping(ctx context.Context, cancel context.CancelFunc, s *kee
 	// is reported as a failed ping and leaves a trace.
 	cancelled := (ctx.Err() != nil && errors.Is(err, context.Canceled)) || errors.Is(err, errPingStale)
 	cancel()
-	ev := &KeepAliveEvent{At: sentAt, Role: ka.cfg.Role, State: state, Model: s.req.Model, ContextTokens: s.contextTokens}
+	ev := &KeepAliveEvent{At: sentAt, Role: ka.cfg.Role, State: state, Model: s.req.Model, ContextTokens: s.contextTokens, ProviderSource: s.req.Options.ProviderBinding}
 
 	ka.mu.Lock()
 	current := gen == ka.gen && ka.snap == s

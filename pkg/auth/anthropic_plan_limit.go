@@ -24,11 +24,18 @@ func (s *Store) RememberAnthropicPlanLimit(revision BackupRevision, until time.T
 // exactly revision and has not passed at now. A new sign-in or key changes the
 // revision, so a limit seen with the old pair no longer applies.
 func (s *Store) AnthropicPlanLimit(revision BackupRevision, now time.Time) (time.Time, bool) {
-	s.useMu.Lock()
-	defer s.useMu.Unlock()
-	until, ok := s.planLimits[revision]
+	until, ok := s.AnthropicPlanReset(revision)
 	if !ok || !now.Before(until) {
 		return time.Time{}, false
 	}
 	return until, true
+}
+
+// AnthropicPlanReset returns the reliable remembered boundary even after it
+// passes, so a cache ping can stop without probing either origin.
+func (s *Store) AnthropicPlanReset(revision BackupRevision) (time.Time, bool) {
+	s.useMu.Lock()
+	defer s.useMu.Unlock()
+	until, ok := s.planLimits[revision]
+	return until, ok
 }

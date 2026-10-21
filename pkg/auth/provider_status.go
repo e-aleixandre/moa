@@ -101,9 +101,11 @@ func (s *Store) ProviderStatus(provider string) ProviderStatus {
 type useKey struct{ provider, source, generation string }
 
 type useRecord struct {
-	state     string
-	changedAt time.Time
-	lastOK    time.Time
+	state         string
+	changedAt     time.Time
+	lastOK        time.Time
+	backupPrimary string
+	lowCredit     bool
 }
 
 // RecordUse records the outcome of one provider request made with snap: a
@@ -177,6 +179,10 @@ func (s *Store) isSelected(key useKey) bool {
 // selection was recorded, and pruning would then erase the current record.
 // Generations are never reused, so stale records are inert.
 func (s *Store) observe(key useKey, state string) {
+	s.observeUse(key, useRecord{state: state})
+}
+
+func (s *Store) observeUse(key useKey, next useRecord) {
 	now := time.Now()
 	s.useMu.Lock()
 	defer s.useMu.Unlock()
@@ -184,12 +190,13 @@ func (s *Store) observe(key useKey, state string) {
 		s.uses = map[useKey]useRecord{}
 	}
 	rec := s.uses[key]
-	if rec.state != state {
-		rec.state, rec.changedAt = state, now
+	if rec.state != next.state {
+		rec.state, rec.changedAt = next.state, now
 	}
-	if state == StatusReady {
+	if next.state == StatusReady {
 		rec.lastOK = now
 	}
+	rec.backupPrimary, rec.lowCredit = next.backupPrimary, next.lowCredit
 	s.uses[key] = rec
 }
 

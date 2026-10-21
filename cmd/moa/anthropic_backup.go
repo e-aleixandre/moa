@@ -50,12 +50,12 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 	}
 	// remembered marks a send that skipped the plan on a remembered limit: it
 	// is admitted only while that limit still holds, else the plan is asked.
-	streamBackup := func(revision auth.BackupRevision, notBefore *time.Time, remembered bool) (<-chan core.AssistantEvent, error) {
+	streamBackup := func(revision auth.BackupRevision, notBefore, observedAt *time.Time, remembered bool) (<-chan core.AssistantEvent, error) {
 		if !backupReplaySupported(req) {
 			return nil, errors.New("API backup cannot replay this model or mode. Stop and continue with a supported model, or wait for the plan")
 		}
 		if req.Options.OnProviderPrepare != nil {
-			if err := req.Options.OnProviderPrepare(ctx, core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore}); err != nil {
+			if err := req.Options.OnProviderPrepare(ctx, core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore, OAuthQuotaObservedAt: observedAt}); err != nil {
 				return nil, err
 			}
 		}
@@ -88,7 +88,7 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 						return errPlanLimitPassed
 					}
 				}
-				next := core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore}
+				next := core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore, OAuthQuotaObservedAt: observedAt}
 				if err := dispatch(next); err != nil {
 					return err
 				}
@@ -117,7 +117,7 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 		if binding.Provider != req.Model.Provider || binding.Model != req.Model.ID || binding.WireProfile != "oauth" {
 			return nil, errors.New("API continuation no longer matches this request. Stop and continue explicitly")
 		}
-		return streamBackup(auth.BackupRevision{Primary: binding.PrimaryGeneration, Key: binding.BackupGeneration}, binding.OAuthNotBefore, false)
+		return streamBackup(auth.BackupRevision{Primary: binding.PrimaryGeneration, Key: binding.BackupGeneration}, binding.OAuthNotBefore, binding.OAuthQuotaObservedAt, false)
 	}
 	backupEligible := primary.Source == core.CredentialSourceStore && primary.Kind == "oauth" && backup.Active && backup.Revision.Primary == primary.Generation && backupReplaySupported(req)
 	// A plan limit confirmed with a reliable reset holds for the whole account
@@ -125,7 +125,7 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 	// rejection, so the request goes straight to the API.
 	if backupEligible {
 		if until, ok := p.authStore.AnthropicPlanLimit(backup.Revision, now()); ok {
-			ch, err := streamBackup(backup.Revision, &until, true)
+			ch, err := streamBackup(backup.Revision, &until, nil, true)
 			if !errors.Is(err, errPlanLimitPassed) {
 				return ch, err
 			}
@@ -148,7 +148,11 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 			if left := notBefore.Sub(now()); qe.Wait.ResetAt != nil && left > 0 && left <= maxRememberedPlanLimit {
 				p.authStore.RememberAnthropicPlanLimit(backup.Revision, notBefore)
 			}
-			return streamBackup(backup.Revision, &notBefore, false)
+			var observedAt *time.Time
+			if !qe.Wait.ObservedAt.IsZero() {
+				observedAt = &qe.Wait.ObservedAt
+			}
+			return streamBackup(backup.Revision, &notBefore, observedAt, false)
 		}
 		err = p.classify(ctx, primary, secrets, err)
 		p.authStore.RecordUse(primary, err)
@@ -188,14 +192,19 @@ func (p *snapshotProvider) primaryDispatch(primary auth.CredentialSnapshot, secr
 }
 
 // Prewarm is the cache keep-alive ping: req, the last request an agent sent,
-// resent with no output on the plan sign-in that served it. Only a stored
-// Anthropic plan sign-in pings. Never the paid API backup, and never another
-// login: a ping that lands on a different account finds no cache and writes
+// resent with no output on the exact source that served it. Never another
+// login or key: a ping that lands on a different account finds no cache and writes
 // the whole prefix cold, which is what it exists to avoid. The binding is the
 // source the last response reported.
 func (p *snapshotProvider) Prewarm(ctx context.Context, req core.Request) (core.Usage, error) {
 	binding := req.Options.ProviderBinding
-	if p.model.Provider != "anthropic" || p.plan != nil || binding == nil || binding.Kind != "oauth" {
+	if p.model.Provider != "anthropic" || p.plan != nil || binding == nil {
+		return core.Usage{}, core.ErrPrewarmUnsupported
+	}
+	if binding.Kind == "api_backup" {
+		return p.prewarmAnthropicBackup(ctx, req, *binding)
+	}
+	if binding.Kind != "oauth" {
 		return core.Usage{}, core.ErrPrewarmUnsupported
 	}
 	snap, err := p.resolve(ctx)
@@ -215,6 +224,72 @@ func (p *snapshotProvider) Prewarm(ctx context.Context, req core.Request) (core.
 	req.Options.APIKey = ""
 	req.Options.ProviderBinding = nil
 	usage, err := base.Prewarm(ctx, req)
+	return usage, secrets.redact(err)
+}
+
+func (p *snapshotProvider) prewarmAnthropicBackup(ctx context.Context, req core.Request, source core.ProviderSource) (core.Usage, error) {
+	if source.Provider != req.Model.Provider || source.Model != req.Model.ID || source.WireProfile != "oauth" ||
+		req.Model.Provider != p.model.Provider || req.Model.ID != p.model.ID || source.PrimaryGeneration == "" || source.BackupGeneration == "" || !backupReplaySupported(req) {
+		return core.Usage{}, core.ErrPrewarmUnsupported
+	}
+	revision := auth.BackupRevision{Primary: source.PrimaryGeneration, Key: source.BackupGeneration}
+	now := time.Now
+	if p.now != nil {
+		now = p.now
+	}
+	secrets := &secretSet{}
+	admitted, denied := false, false
+	gate := req.Options.OnProviderDispatch
+	base := anthropic.NewWithKind("", false)
+	if p.httpClient != nil {
+		base.WithHTTPClient(p.httpClient)
+	}
+	base.WithDispatch(func(ctx context.Context) (string, error) {
+		var key string
+		var refusal error
+		err := p.authStore.AdmitAnthropicBackup(ctx, revision, func(selected auth.AnthropicBackupSelection) (err error) {
+			// Store failures are sanitized by transact; retain the caller's
+			// own refusal so unsupported/stale pings stay silent.
+			defer func() { refusal = err }()
+			if until, known := p.authStore.AnthropicPlanReset(revision); known {
+				at := now()
+				// An old binding stops at the reliable reset. Only a fresh
+				// plan rejection at/after it can authorize keeping API warm.
+				if !at.Before(until) && (source.OAuthQuotaObservedAt == nil || source.OAuthQuotaObservedAt.Before(until) || source.OAuthQuotaObservedAt.After(at)) {
+					return core.ErrPrewarmUnsupported
+				}
+			}
+			if p.authStore.AnthropicBackupCreditExhausted(revision) {
+				return core.ErrPrewarmUnsupported
+			}
+			if gate != nil {
+				if err := gate(ctx, source); err != nil {
+					return err
+				}
+			}
+			secrets.add(selected.Snapshot)
+			key, admitted = selected.Snapshot.Token, true
+			return nil
+		})
+		if refusal != nil {
+			return "", refusal
+		}
+		return key, err
+	})
+	req.Options.APIKey = ""
+	req.Options.AnthropicWireProfile = "oauth"
+	req.Options.ProviderBinding = nil
+	if gate != nil {
+		req.Options.OnProviderDispatch = func(ctx context.Context, _ core.ProviderSource) error {
+			err := gate(ctx, source)
+			denied = err != nil
+			return err
+		}
+	}
+	usage, err := base.Prewarm(ctx, req)
+	if admitted && !denied && !errors.Is(err, context.Canceled) && !errors.Is(err, core.ErrProviderReconfigured) {
+		p.authStore.RecordAnthropicBackupUse(revision, err)
+	}
 	return usage, secrets.redact(err)
 }
 

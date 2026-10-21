@@ -200,7 +200,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return nil, &core.ProviderAuthError{Provider: "anthropic", Status: resp.StatusCode}
 		}
-		return nil, fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, errText)
+		return nil, markLowCredit(fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, errText), resp.StatusCode, errBody)
 	}
 
 	// Rate-limit state comes back in the response headers (available now, before
@@ -804,16 +804,38 @@ func (a *Anthropic) Prewarm(ctx context.Context, req core.Request) (core.Usage, 
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		pe := &PrewarmError{Status: resp.StatusCode}
+		var raw []byte
 		if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
-			_, pe.Body = retry.ErrorBody(resp.Body)
+			raw, pe.Body = retry.ErrorBody(resp.Body)
 		}
-		return core.Usage{}, pe
+		return core.Usage{}, markLowCredit(pe, resp.StatusCode, raw)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return core.Usage{}, fmt.Errorf("anthropic: reading prewarm response: %w", err)
 	}
 	return parsePrewarmUsage(data)
+}
+
+type lowCreditError struct{ error }
+
+func (e *lowCreditError) Unwrap() error        { return e.error }
+func (e *lowCreditError) Is(target error) bool { return target == core.ErrAnthropicLowCredit }
+
+// Only the provider's explicit credit refusal is authoritative. Arbitrary
+// error strings, other HTTP statuses and unrelated invalid requests are not.
+func markLowCredit(err error, status int, body []byte) error {
+	if status != http.StatusBadRequest {
+		return err
+	}
+	var payload struct {
+		Error struct{ Type, Message string } `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) == nil && payload.Error.Type == "invalid_request_error" &&
+		(payload.Error.Message == "Your credit balance is too low" || strings.HasPrefix(payload.Error.Message, "Your credit balance is too low to access the Anthropic API.")) {
+		return &lowCreditError{err}
+	}
+	return err
 }
 
 func parsePrewarmUsage(data []byte) (core.Usage, error) {
