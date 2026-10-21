@@ -90,6 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Android calls show the owner's name on the lock screen, or **moa** for an
   ordinary conversation, rather than its title.
 
+### Security
+
+- Built with Go 1.26.10 (fixes GO-2026-6809 in crypto/x509).
+
 ### Fixed
 
 - **Anthropic API backup works with the weekly quota response's newer
