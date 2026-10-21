@@ -101,11 +101,10 @@ func (s *Store) ProviderStatus(provider string) ProviderStatus {
 type useKey struct{ provider, source, generation string }
 
 type useRecord struct {
-	state         string
-	changedAt     time.Time
-	lastOK        time.Time
-	backupPrimary string
-	lowCredit     bool
+	state     string
+	changedAt time.Time
+	lastOK    time.Time
+	lowCredit bool
 }
 
 // RecordUse records the outcome of one provider request made with snap: a
@@ -196,7 +195,7 @@ func (s *Store) observeUse(key useKey, next useRecord) {
 	if next.state == StatusReady {
 		rec.lastOK = now
 	}
-	rec.backupPrimary, rec.lowCredit = next.backupPrimary, next.lowCredit
+	rec.lowCredit = next.lowCredit
 	s.uses[key] = rec
 }
 

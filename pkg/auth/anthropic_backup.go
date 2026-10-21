@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -30,6 +31,12 @@ type AnthropicBackupStatus struct {
 type AnthropicBackupSelection struct {
 	Snapshot CredentialSnapshot `json:"-"`
 	Revision BackupRevision
+}
+
+// The primary can change without replacing the key. Include both in the
+// observation identity so a late old-pair result cannot overwrite the winner.
+func anthropicBackupUseKey(revision BackupRevision) useKey {
+	return useKey{anthropicBackupSlot, "store", strconv.Itoa(len(revision.Primary)) + ":" + revision.Primary + revision.Key}
 }
 
 // readBackup ignores the backup_policy written by PR #36: its enabled flag and
@@ -91,7 +98,7 @@ func (s *Store) AnthropicBackupStatus() (AnthropicBackupStatus, error) {
 			}
 			s.dropPending(anthropicBackupSlot)
 		}
-		if rec, seen := s.observed(useKey{anthropicBackupSlot, "store", out.Revision.Key}); seen && rec.state == "api_error" {
+		if rec, seen := s.observed(anthropicBackupUseKey(out.Revision)); seen && rec.state == "api_error" {
 			out.State = "api_error"
 		}
 		return nil
@@ -102,7 +109,7 @@ func (s *Store) AnthropicBackupStatus() (AnthropicBackupStatus, error) {
 	return out, nil
 }
 
-// Backup results are attributed only to their secondary generation. They
+// Backup results are attributed only to their exact generation pair. They
 // never feed the primary OAuth status or expire its access token.
 func (s *Store) RecordAnthropicBackupUse(revision BackupRevision, err error) {
 	disk, loadErr := s.reload()
@@ -117,16 +124,16 @@ func (s *Store) RecordAnthropicBackupUse(revision BackupRevision, err error) {
 	if err != nil {
 		state = "api_error"
 	}
-	s.observeUse(useKey{anthropicBackupSlot, "store", revision.Key}, useRecord{
-		state: state, backupPrimary: revision.Primary, lowCredit: errors.Is(err, core.ErrAnthropicLowCredit),
+	s.observeUse(anthropicBackupUseKey(revision), useRecord{
+		state: state, lowCredit: errors.Is(err, core.ErrAnthropicLowCredit),
 	})
 }
 
 // AnthropicBackupCreditExhausted reads the last API outcome for this exact
 // pair. It is only a keep-alive guard; foreground work remains admissible.
 func (s *Store) AnthropicBackupCreditExhausted(revision BackupRevision) bool {
-	rec, ok := s.observed(useKey{anthropicBackupSlot, "store", revision.Key})
-	return ok && rec.backupPrimary == revision.Primary && rec.lowCredit
+	rec, ok := s.observed(anthropicBackupUseKey(revision))
+	return ok && rec.lowCredit
 }
 
 // SaveAnthropicAPIKey stores the one Anthropic API key. Next to a stored plan
