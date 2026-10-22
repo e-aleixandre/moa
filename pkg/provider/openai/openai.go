@@ -106,6 +106,13 @@ func (o *OpenAI) supportsExplicitCacheBreakpoints(modelID string) bool {
 	return o.endpoint == apiEndpoint && modelSupportsExplicitCacheBreakpoints(modelID)
 }
 
+// ImplicitPrefixCache is true when requests carry no explicit breakpoints (the
+// ChatGPT OAuth backend), so the cached prefix is whatever the previous
+// request happened to end with.
+func (o *OpenAI) ImplicitPrefixCache(modelID string) bool {
+	return !o.supportsExplicitCacheBreakpoints(modelID)
+}
+
 // Stream sends a request and returns a channel of normalized AssistantEvents.
 func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	// GPT-6 Astra rejects temperature. The normal agent path does not set it,

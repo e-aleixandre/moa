@@ -16,7 +16,7 @@ import (
 func offlineQNRequests(t *testing.T) (*f1Env, *ManagedSession, []core.Request) {
 	t.Helper()
 	f1Isolate(t)
-	p := &f1Provider{script: func(r core.Request) <-chan core.AssistantEvent {
+	p := &f1Provider{implicitCache: true, script: func(r core.Request) <-chan core.AssistantEvent {
 		has := func(id string) bool {
 			for _, m := range r.Messages {
 				if m.Role == "tool_result" && m.ToolCallID == id {

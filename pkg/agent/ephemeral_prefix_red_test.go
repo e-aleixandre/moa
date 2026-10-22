@@ -38,6 +38,7 @@ func TestREDUnchangedEphemeralKeepsOpenAIPrefix(t *testing.T) {
 			return simpleTextResponse("done")(req)
 		},
 	)
+	prov.implicitCache = true
 	ag, err := New(AgentConfig{Provider: prov, Model: core.Model{ID: "gpt-6.1-sol", Provider: "openai"}, SystemPrompt: "fixed instructions", Tools: reg, MaxTurns: 5, MaxToolCallsPerTurn: 5, MaxRunDuration: 10 * time.Second, EphemeralContext: func() *core.Message { m := core.NewUserMessage("<recent_news>unchanged</recent_news>"); return &m }})
 	if err != nil {
 		t.Fatal(err)

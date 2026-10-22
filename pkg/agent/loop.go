@@ -153,10 +153,11 @@ func (cfg *loopConfig) ephemeralBlock() *core.Message {
 // they finish a request that was already sent, so they must not rewrite what
 // the model was shown. The next ordinary request evaluates it afresh.
 //
-// An ordinary request keeps the previous block where it sat while the block is
-// unchanged (see reuse): a provider with implicit prefix caching (OpenAI
-// Responses over OAuth, no breakpoints) otherwise finds the previous request's
-// cached tail displaced by every new message and re-reads only system+tools.
+// On a provider with implicit prefix caching (OpenAI Responses over OAuth, no
+// breakpoints) an ordinary request keeps the previous block where it sat while
+// it is unchanged (see reuse): re-anchoring it at the end every time displaces
+// the previous request's tail, which may keep the whole previous request from
+// being reused as a prefix. Providers with their own breakpoints never do so.
 type frozenEphemeral struct {
 	msg *core.Message
 	at  int
@@ -164,6 +165,9 @@ type frozenEphemeral struct {
 	// compaction or trim (epoch) or another model rewrites that prefix.
 	epoch int
 	model core.Model
+	// prefix hashes the messages before at, so an anchor kept across runs is
+	// only trusted while that history is byte-identical.
+	prefix string
 }
 
 // reuse reports whether the anchored block may serve an ordinary request that
@@ -186,6 +190,35 @@ func (f frozenEphemeral) into(msgs []core.Message) []core.Message {
 	out = append(out, msgs[:at]...)
 	out = append(out, *f.msg)
 	return append(out, msgs[at:]...)
+}
+
+// recalledAnchor returns the anchor the agent's previous run left, when the
+// history before it is unchanged; the zero value otherwise.
+func (cfg *loopConfig) recalledAnchor(msgs []core.Message) frozenEphemeral {
+	if cfg.agent == nil {
+		return frozenEphemeral{}
+	}
+	cfg.agent.mu.Lock()
+	f := cfg.agent.ephemeralAnchor
+	cfg.agent.mu.Unlock()
+	if f.msg == nil || f.at > len(msgs) {
+		return frozenEphemeral{}
+	}
+	if _, h := messagesChain(msgs[:f.at], 0); h != f.prefix {
+		return frozenEphemeral{}
+	}
+	return f
+}
+
+// rememberAnchor keeps f for the agent's next run. Request-only: it is never
+// part of the state, the saved tree or any snapshot.
+func (cfg *loopConfig) rememberAnchor(f frozenEphemeral) {
+	if cfg.agent == nil {
+		return
+	}
+	cfg.agent.mu.Lock()
+	cfg.agent.ephemeralAnchor = f
+	cfg.agent.mu.Unlock()
 }
 
 // ErrAdmissionNotSaved ends a run whose next request would carry a message
@@ -540,6 +573,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	justPaused := false
 	// The ephemeral block of the last ordinary request, for its continuations.
 	var frozen frozenEphemeral
+	var shape requestShape
 	// Local to this admitted work, never inherited by another Send or child.
 	// A tool result can change ordinary settings without being a new entry
 	// into API while this work's OAuth restriction still makes return early.
@@ -921,8 +955,18 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			bound := justPaused || repairPartial != nil
 			if !bound {
 				block := cfg.ephemeralBlock()
-				if !frozen.reuse(block, cfg.state.CompactionEpoch, cfg.model, len(baseMessages)) {
+				anchored := core.ProviderHasImplicitPrefixCache(cfg.provider, cfg.model.ID)
+				if anchored && frozen.msg == nil {
+					frozen = cfg.recalledAnchor(baseMessages)
+				}
+				if !anchored || !frozen.reuse(block, cfg.state.CompactionEpoch, cfg.model, len(baseMessages)) {
 					frozen = frozenEphemeral{msg: block, at: len(baseMessages), epoch: cfg.state.CompactionEpoch, model: cfg.model}
+					if anchored {
+						if block != nil {
+							_, frozen.prefix = messagesChain(baseMessages, 0)
+						}
+						cfg.rememberAnchor(frozen)
+					}
 				}
 			}
 			reqMessages := frozen.into(baseMessages)
@@ -963,7 +1007,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				Options:  cfg.requestOptions(),
 			}
 			req.Options.AccessProgram = cfg.requestProgram
-			logRequestShape(req)
+			shape.log(req)
 			if !bound && retrySource == nil && apiWorkOrigin != nil && apiWorkOrigin.Model == cfg.model.ID && apiWorkOrigin.OAuthNotBefore != nil && time.Now().Before(*apiWorkOrigin.OAuthNotBefore) {
 				req.Options.ProviderBinding = apiWorkOrigin
 			}

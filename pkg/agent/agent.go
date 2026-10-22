@@ -404,6 +404,9 @@ func ownItem(it core.SteerItem) core.SteerItem {
 // Agent runs the core loop: prompt → LLM → tool calls → execute → repeat.
 // It's a library — no I/O, no UI, no filesystem opinions.
 type Agent struct {
+	// ephemeralAnchor is where the last ordinary request put the ephemeral
+	// block, for the next run (guarded by mu). Never persisted.
+	ephemeralAnchor         frozenEphemeral
 	config                  AgentConfig
 	state                   AgentState
 	tools                   *core.Registry

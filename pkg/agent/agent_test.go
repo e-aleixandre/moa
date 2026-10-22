@@ -23,7 +23,11 @@ type MockProvider struct {
 	mu       sync.Mutex
 	calls    int
 	handlers []func(req core.Request) (<-chan core.AssistantEvent, error)
+	// implicitCache makes the mock declare an implicit-prefix-cache provider.
+	implicitCache bool
 }
+
+func (m *MockProvider) ImplicitPrefixCache(string) bool { return m.implicitCache }
 
 func NewMockProvider(handlers ...func(req core.Request) (<-chan core.AssistantEvent, error)) *MockProvider {
 	return &MockProvider{handlers: handlers}
