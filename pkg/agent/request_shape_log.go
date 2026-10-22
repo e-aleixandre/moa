@@ -61,17 +61,26 @@ func (s *requestShape) log(req core.Request) {
 		}
 	}
 	atPrev, all := messagesChain(req.Messages, s.items)
+	chainHash := "invalid"
+	if all != "" {
+		chainHash = all[:8]
+	}
 	attrs := []any{
 		"cache_key", req.Options.PromptCacheKey,
 		"model", req.Model.ID,
-		"items", len(req.Messages), "chain_hash", all[:8],
+		"items", len(req.Messages), "chain_hash", chainHash,
 		"system_bytes", len(req.System), "system_hash", shortHash([]byte(req.System)),
 		"tools_bytes", len(tools), "tools_hash", shortHash(tools),
 		"ephemeral_at", ephAt, "ephemeral_hash", ephHash,
 	}
-	if s.items > 0 {
+	// An empty hash means the history could not be fingerprinted: never compare
+	// it (two empty hashes would read as an intact prefix) and start over.
+	if s.items > 0 && s.chain != "" && atPrev != "" {
 		attrs = append(attrs, "prev_items", s.items, "prev_is_prefix", s.items <= len(req.Messages) && atPrev == s.chain)
 	}
 	s.items, s.chain = len(req.Messages), all
+	if all == "" {
+		s.items = 0
+	}
 	slog.Info("request shape", attrs...)
 }

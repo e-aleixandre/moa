@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -138,4 +140,27 @@ func TestMessagesChainFailsClosedOnUnserializable(t *testing.T) {
 	if at, all := messagesChain([]core.Message{bad}, 0); at != "" || all != "" {
 		t.Fatalf("got %q %q, want empty", at, all)
 	}
+}
+
+func TestRequestShapeSurvivesUnserializableHistory(t *testing.T) {
+	previous := slog.Default()
+	defer slog.SetDefault(previous)
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("request-shape logging must survive the fail-closed result: %v", r)
+		}
+	}()
+	var s requestShape
+	s.log(core.Request{Messages: []core.Message{unserializableMessage()}})
+	s.log(core.Request{Messages: []core.Message{unserializableMessage()}})
+	if s.chain != "" {
+		t.Fatalf("an invalid fingerprint was kept as the previous chain: %q", s.chain)
+	}
+}
+
+func unserializableMessage() core.Message {
+	bad := core.NewUserMessage("x")
+	bad.Content = append(bad.Content, core.Content{Type: "tool_call", Arguments: map[string]any{"f": func() {}}})
+	return bad
 }
