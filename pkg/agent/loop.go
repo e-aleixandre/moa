@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -151,9 +152,28 @@ func (cfg *loopConfig) ephemeralBlock() *core.Message {
 // repair, a pause_turn or truncation resubmit) resend it in the same place:
 // they finish a request that was already sent, so they must not rewrite what
 // the model was shown. The next ordinary request evaluates it afresh.
+//
+// An ordinary request keeps the previous block where it sat while the block is
+// unchanged (see reuse): a provider with implicit prefix caching (OpenAI
+// Responses over OAuth, no breakpoints) otherwise finds the previous request's
+// cached tail displaced by every new message and re-reads only system+tools.
 type frozenEphemeral struct {
 	msg *core.Message
 	at  int
+	// epoch and model are what the messages before at were built under; a
+	// compaction or trim (epoch) or another model rewrites that prefix.
+	epoch int
+	model core.Model
+}
+
+// reuse reports whether the anchored block may serve an ordinary request that
+// evaluated block afresh: same content, same prefix before it, still inside
+// the history. Timestamp and MsgID are regenerated per evaluation and ignored.
+func (f frozenEphemeral) reuse(block *core.Message, epoch int, model core.Model, history int) bool {
+	if f.msg == nil || block == nil || f.at > history || f.epoch != epoch || !sameModel(f.model, model) {
+		return false
+	}
+	return f.msg.Role == block.Role && reflect.DeepEqual(f.msg.Content, block.Content)
 }
 
 // into returns msgs with the block in its place, msgs itself when there is none.
@@ -900,7 +920,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			}
 			bound := justPaused || repairPartial != nil
 			if !bound {
-				frozen = frozenEphemeral{msg: cfg.ephemeralBlock(), at: len(baseMessages)}
+				block := cfg.ephemeralBlock()
+				if !frozen.reuse(block, cfg.state.CompactionEpoch, cfg.model, len(baseMessages)) {
+					frozen = frozenEphemeral{msg: block, at: len(baseMessages), epoch: cfg.state.CompactionEpoch, model: cfg.model}
+				}
 			}
 			reqMessages := frozen.into(baseMessages)
 			if repairPartial != nil {

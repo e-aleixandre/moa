@@ -563,7 +563,7 @@ type AgentConfig struct {
 	// the manual CompactWithCheckpoint path.
 	SessionCheckpoint *sessioncheckpoint.Slot
 
-	// EphemeralContext returns a message appended, as the last one, to each
+	// EphemeralContext returns a message inserted into each
 	// ordinary request (nil for none). It is built per request, never enters the
 	// conversation, the saved tree or the system prompt, and subagents do not
 	// get one.
