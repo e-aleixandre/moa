@@ -63,6 +63,7 @@ type Peer struct {
 	closeOne sync.Once
 	closeErr error
 	workers  sync.WaitGroup
+	startup  peerStartup
 
 	sendCtlMu sync.Mutex // serialises SendControl so the buffer check and send are atomic
 	ctlMu     sync.Mutex // guards ctlClosed and sends on control
@@ -114,6 +115,7 @@ func NewPeer(cfg PeerConfig) (*Peer, error) {
 		up:      NewUpsampler2x(),
 		frame48: make([]byte, 4*peerFrameSamples),
 		packet:  make([]byte, 1500),
+		startup: peerStartup{wake: make(chan struct{}, 1)},
 	}
 	fail := func(err error) error { _ = p.Close(); return err }
 	if p.enc, err = opus.NewEncoder(opus.WithBitrate(32000), opus.WithApplication(opus.ApplicationVoIP)); err != nil {
@@ -140,6 +142,12 @@ func NewPeer(cfg PeerConfig) (*Peer, error) {
 		}
 	}()
 	pc.OnTrack(p.readTrack)
+	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
+		if s == webrtc.ICEConnectionStateConnected || s == webrtc.ICEConnectionStateCompleted {
+			p.startup.iceConnected(time.Now())
+		}
+	})
+	pc.SCTP().Transport().OnStateChange(p.startup.dtlsChanged)
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		switch s {
 		case webrtc.PeerConnectionStateFailed:
@@ -169,7 +177,10 @@ func (p *Peer) Offer(ctx context.Context) (string, error) {
 	p.mu.Lock()
 	p.dc = dc
 	p.mu.Unlock()
-	dc.OnOpen(func() { close(p.open) })
+	dc.OnOpen(func() {
+		p.startup.channelOpened()
+		close(p.open)
+	})
 	dc.OnMessage(p.onControl)
 
 	offer, err := p.pc.CreateOffer(nil)

@@ -477,7 +477,9 @@ func (c *voiceCall) submit(job voiceJob) {
 			c.releaseHandoff(job.handoffKey)
 		}
 		if r, ok := c.up.(voice.HandoffResponder); ok {
-			_ = r.SendHandoffResult(ctx, job.handoff.ItemID, "moa is busy with earlier requests; try again in a moment.")
+			if err := r.SendHandoffResult(ctx, job.handoff.ItemID, "moa is busy with earlier requests; try again in a moment."); err != nil {
+				slog.Warn("voice handoff return failed", "call", c.id, "provider", c.provider, "reason", "append_send_failed")
+			}
 		}
 		return
 	}
@@ -515,7 +517,9 @@ func (c *voiceCall) runJob(job voiceJob) {
 			c.storeHandoff(job.handoffKey, text)
 		}
 		if r, ok := c.up.(voice.HandoffResponder); ok {
-			_ = r.SendHandoffResult(ctx, job.handoff.ItemID, text)
+			if err := r.SendHandoffResult(ctx, job.handoff.ItemID, text); err != nil {
+				slog.Warn("voice handoff return failed", "call", c.id, "provider", c.provider, "reason", "append_send_failed")
+			}
 		}
 	} else {
 		results := make([]voice.ToolResult, 0, len(job.tools))
