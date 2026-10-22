@@ -131,3 +131,11 @@ func TestRecalledAnchorNeedsIdenticalPrefix(t *testing.T) {
 		t.Fatal("shortened history must drop the anchor")
 	}
 }
+
+func TestMessagesChainFailsClosedOnUnserializable(t *testing.T) {
+	bad := core.NewUserMessage("x")
+	bad.Content = append(bad.Content, core.Content{Type: "tool_call", Arguments: map[string]any{"f": func() {}}})
+	if at, all := messagesChain([]core.Message{bad}, 0); at != "" || all != "" {
+		t.Fatalf("got %q %q, want empty", at, all)
+	}
+}

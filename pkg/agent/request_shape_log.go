@@ -23,7 +23,11 @@ func messagesChain(msgs []core.Message, n int) (atN, all string) {
 		if i == n {
 			atN = hex.EncodeToString(h.Sum(nil))
 		}
-		b, _ := json.Marshal(m)
+		b, err := json.Marshal(m)
+		if err != nil {
+			// Fail closed: callers treat "" as "cannot vouch for this history".
+			return "", ""
+		}
 		h.Write(b)
 	}
 	all = hex.EncodeToString(h.Sum(nil))

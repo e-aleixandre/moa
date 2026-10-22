@@ -204,7 +204,7 @@ func (cfg *loopConfig) recalledAnchor(msgs []core.Message) frozenEphemeral {
 	if f.msg == nil || f.at > len(msgs) {
 		return frozenEphemeral{}
 	}
-	if _, h := messagesChain(msgs[:f.at], 0); h != f.prefix {
+	if _, h := messagesChain(msgs[:f.at], 0); h == "" || h != f.prefix {
 		return frozenEphemeral{}
 	}
 	return f
