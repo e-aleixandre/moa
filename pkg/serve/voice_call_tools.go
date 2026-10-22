@@ -357,14 +357,14 @@ func (c *voiceCall) backendLoop(ctx context.Context, input string, tools []core.
 		}
 		b.provider, b.model = prov, model
 	}
-	start, complete := len(b.messages), false
+	previous, prefix := b.messages, b.prefix
+	start, complete := len(previous), false
 	defer func() {
 		if !complete {
-			// Never replay an incomplete exchange after failure/cancellation.
-			b.messages = append([]core.Message(nil), b.messages[:start]...)
-			// Reads can have enlarged the ledger even when the exchange failed.
-			end := len(b.messages)
-			b.fit(&end)
+			// Tentative eviction belongs to this exchange too. Restore the
+			// completed history without undoing accepted tools or new reads.
+			b.messages = append([]core.Message(nil), previous...)
+			b.prefix = prefix
 		}
 	}()
 	b.messages = append(b.messages, core.NewUserMessage(input))

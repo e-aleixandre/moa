@@ -13,6 +13,9 @@ const (
 	voiceBackendHistoryBytes = 256 << 10
 	voiceBackendLedgerBytes  = 8 << 10
 	voiceBackendBookChars    = 16_000
+	// Reserve both the live read ledger and its frozen replay prefix, with
+	// JSON separators, even before the first compaction.
+	voiceBackendMessagesBytes = voiceBackendHistoryBytes - 2*(voiceBackendLedgerBytes+1)
 )
 
 // voiceBackend reuses the scoped voice loop, not the general agent's tool
@@ -24,7 +27,7 @@ type voiceBackend struct {
 	model    core.Model
 	messages []core.Message
 	reads    []string
-	dropped  bool
+	prefix   *core.Message
 }
 
 func (c *voiceCall) backendConversation() *voiceBackend {
@@ -44,38 +47,34 @@ func (b *voiceBackend) ledger() core.Message {
 }
 
 func (b *voiceBackend) contextMessages() []core.Message {
-	if !b.dropped {
+	if b.prefix == nil {
 		return b.messages
 	}
-	return append([]core.Message{b.ledger()}, b.messages...)
+	return append([]core.Message{*b.prefix}, b.messages...)
 }
 
 // fit removes only completed exchanges, keeping tool-call/result pairs and
 // provider replay metadata intact. start moves with the active exchange.
 // An oversized active exchange is refused, never sent with missing results.
 func (b *voiceBackend) fit(start *int) bool {
-	// Refuse an impossible exchange before evicting useful earlier state.
-	// Reserve the ledger too: eviction may make it necessary below.
-	active := append([]core.Message{b.ledger()}, b.messages[*start:]...)
-	if data, err := json.Marshal(active); err != nil || len(data) > voiceBackendHistoryBytes {
+	fits := func(messages []core.Message) bool {
+		data, err := json.Marshal(messages)
+		return err == nil && len(data) <= voiceBackendMessagesBytes
+	}
+	if !fits(b.messages[*start:]) {
 		return false
 	}
-	for {
-		data, err := json.Marshal(b.contextMessages())
-		if err == nil && len(data) <= voiceBackendHistoryBytes {
-			return true
-		}
-		if *start == 0 {
-			return false
-		}
+	for !fits(b.messages) {
 		end := 1
 		for end < *start && b.messages[end].Role != "user" {
 			end++
 		}
 		b.messages = append([]core.Message(nil), b.messages[end:]...)
 		*start -= end
-		b.dropped = true
+		prefix := b.ledger()
+		b.prefix = &prefix
 	}
+	return true
 }
 
 func (b *voiceBackend) recordRead(r voice.ToolResult) {
