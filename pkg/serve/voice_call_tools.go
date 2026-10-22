@@ -119,6 +119,17 @@ func (c *voiceCall) executeOnce(_ context.Context, tc voice.ToolCall) voice.Tool
 		if err != nil {
 			return voiceErrorResult(tc.ID, "that book file cannot be read")
 		}
+		_, offset := args["offset"]
+		_, limit := args["limit"]
+		if offset || limit {
+			page, err := voiceBookPage(args, string(data))
+			if err != nil {
+				return voiceErrorResult(tc.ID, err.Error())
+			}
+			label := fmt.Sprintf("%s [characters %d:%d]", str("path"), page["offset"], page["next_offset"])
+			c.remember("book", label, page["content"].(string))
+			return voiceResult(tc.ID, page)
+		}
 		c.remember("book", str("path"), string(data))
 		return voiceResult(tc.ID, map[string]any{"path": str("path"), "content": string(data)})
 	case "end_call":
@@ -251,15 +262,15 @@ func (m *Manager) voiceBookOwner(called string) (string, error) {
 // The delegation is often only the owner's last words ("yes, pass it"), so
 // the backend also gets the observed call and the called session.
 //
-// The backend starts from scratch every time, so it also gets what the call
-// already learned (callData). One trace line per handoff, without content,
-// says which context it had, what it ran and how it ended.
+// The call's backend conversation retains earlier exchanges. Supplemental
+// callData also carries asynchronous answers and direct reads. One trace line
+// per handoff, without content, says what it ran and how it ended.
 func (c *voiceCall) runHandoff(ctx context.Context, transcript, request string) string {
 	data := c.callData()
 	input := c.callContext(transcript) + data + "\nLatest request from the voice model (it may be only the owner's last words):\n" + request
 	started := time.Now()
 	var trace voiceBackendTrace
-	answer := c.backendLoop(ctx, input, voice.ToolSpecs(), nil, &trace)
+	answer := c.backendLoop(ctx, input, voiceBackendTools(), nil, &trace)
 	slog.Info("voice handoff", "call", c.id, "started", started.UTC().Format(time.RFC3339Nano), "duration_ms", time.Since(started).Milliseconds(),
 		"tools", strings.Join(trace.tools, ","), "outcome", trace.outcome, "data_chars", len([]rune(data)), "data_sha", voiceTraceHash(data))
 	return answer
@@ -326,19 +337,54 @@ func (c *voiceCall) backendLoop(ctx context.Context, input string, tools []core.
 	if trace == nil {
 		trace = &voiceBackendTrace{}
 	}
-	prov, model, err := c.reg.backendProvider(c.id)
-	if err != nil {
-		trace.outcome = "no_backend"
-		return "moa's backend is not available for this call."
+	b := c.backendConversation()
+	select {
+	case b.gate <- struct{}{}:
+		defer func() { <-b.gate }()
+	case <-ctx.Done():
+		trace.outcome = "cancelled"
+		return "moa's backend failed to answer."
 	}
-	msgs := []core.Message{core.NewUserMessage(input)}
+	if ctx.Err() != nil {
+		trace.outcome = "cancelled"
+		return "moa's backend failed to answer."
+	}
+	if b.provider == nil {
+		prov, model, err := c.reg.backendProvider(c.id)
+		if err != nil {
+			trace.outcome = "no_backend"
+			return "moa's backend is not available for this call."
+		}
+		b.provider, b.model = prov, model
+	}
+	start, complete := len(b.messages), false
+	defer func() {
+		if !complete {
+			// Never replay an incomplete exchange after failure/cancellation.
+			b.messages = append([]core.Message(nil), b.messages[:start]...)
+			// Reads can have enlarged the ledger even when the exchange failed.
+			end := len(b.messages)
+			b.fit(&end)
+		}
+	}()
+	b.messages = append(b.messages, core.NewUserMessage(input))
+	contextLimit := func() string {
+		trace.outcome = "context_limit"
+		return "moa's backend reached this request's context limit; ask for a smaller lookup."
+	}
 	for range voiceHandoffSteps {
-		msg, err := streamMessage(ctx, prov, core.Request{Model: model, System: voice.HandoffInstructions, Messages: msgs, Tools: tools})
+		if !b.fit(&start) {
+			return contextLimit()
+		}
+		// Give the provider its own slice; later appends/eviction must not
+		// change a retained request's backing array.
+		msgs := append([]core.Message(nil), b.contextMessages()...)
+		msg, err := streamMessage(ctx, b.provider, core.Request{Model: b.model, System: voice.HandoffInstructions, Messages: msgs, Tools: tools})
 		if err != nil {
 			trace.outcome = "backend_error"
 			return "moa's backend failed to answer."
 		}
-		msgs = append(msgs, msg)
+		b.messages = append(b.messages, msg)
 		var calls []core.Content
 		var text strings.Builder
 		for _, part := range msg.Content {
@@ -350,12 +396,31 @@ func (c *voiceCall) backendLoop(ctx context.Context, input string, tools []core.
 			}
 		}
 		if len(calls) == 0 {
+			if !b.fit(&start) {
+				return contextLimit()
+			}
+			complete = true
 			trace.outcome = "answered"
 			return text.String()
 		}
 		for _, call := range calls {
-			args, _ := json.Marshal(call.Arguments)
+			arguments := core.CloneArgs(call.Arguments)
+			if call.ToolName == "book_read" {
+				if arguments == nil {
+					arguments = map[string]any{}
+				}
+				if _, ok := arguments["offset"]; !ok {
+					arguments["offset"] = 0
+				}
+				if _, ok := arguments["limit"]; !ok {
+					arguments["limit"] = voiceBackendBookChars
+				}
+			}
+			args, _ := json.Marshal(arguments)
 			r := c.execute(ctx, voice.ToolCall{ID: call.ToolCallID, Name: call.ToolName, Arguments: args})
+			if call.ToolName == "book_read" {
+				b.recordRead(r)
+			}
 			name := call.ToolName
 			if !voice.Allowed(name) {
 				name = "unknown" // a provider-minted name is not ours to log
@@ -364,9 +429,13 @@ func (c *voiceCall) backendLoop(ctx context.Context, input string, tools []core.
 				name += ":error"
 			}
 			trace.tools = append(trace.tools, name)
-			msgs = append(msgs, core.NewToolResultMessage(call.ToolCallID, call.ToolName, []core.Content{core.TextContent(string(r.Output))}, r.IsError))
+			b.messages = append(b.messages, core.NewToolResultMessage(call.ToolCallID, call.ToolName, []core.Content{core.TextContent(string(r.Output))}, r.IsError))
 		}
 		if stop != nil && stop() {
+			if !b.fit(&start) {
+				return contextLimit()
+			}
+			complete = true
 			trace.outcome = "stopped"
 			return ""
 		}

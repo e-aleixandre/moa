@@ -7,14 +7,13 @@ import (
 	"strings"
 )
 
-// The ChatGPT-plan backend starts every handoff from scratch, so what the
-// call already learned would exist for the voice model only: in the Cellaria
-// call (17/10) the session's answer "sin [...] identidades" reached the voice,
-// and a later handoff reasoned without it. Each handoff gets it again, as
-// data, bounded: the brief, the session's answers and the book files read.
+// Bounded supplemental data carries asynchronous session answers, the brief
+// and direct voice-tool reads into the backend. Backend lookups additionally
+// retain their complete pages in the call's conversation (voice_call_backend.go);
+// this prefix is not their only copy or their lookup boundary.
 const (
 	voiceCallDataItems    = 6      // answers and book files kept, newest first
-	voiceCallDataBookChar = 6_000  // one book file, its beginning kept
+	voiceCallDataBookChar = 6_000  // supplemental book excerpt, not the backend read limit
 	voiceCallDataBrief    = 8_000  // the brief, its beginning kept
 	voiceCallDataChars    = 20_000 // the whole block, brief included
 )
