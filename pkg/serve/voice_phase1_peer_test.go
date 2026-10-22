@@ -41,6 +41,7 @@ type vpVoiceText struct {
 	tools    []core.ToolSpec
 	system   string
 	inputs   []string       // last user message of every backend request
+	models   []string       // actual model of every backend request
 	minutes  map[string]any // end_call arguments for a backend minutes request
 }
 type vpVoiceTool struct {
@@ -96,6 +97,7 @@ func (p *vpVoiceText) Stream(ctx context.Context, r core.Request) (<-chan core.A
 	last := vpLastUser(r)
 	p.mu.Lock()
 	p.inputs = append(p.inputs, last)
+	p.models = append(p.models, r.Model.ID)
 	var script vpVoiceTool
 	if minutesOnly {
 		if p.minutes != nil {

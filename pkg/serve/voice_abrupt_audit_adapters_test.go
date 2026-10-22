@@ -329,8 +329,9 @@ func TestVoiceAbruptAuditAdapters_ChatGPTBackendMinutesRunsAfterClientLoss(t *te
 	}
 }
 
-// Hold the backend request while a provider final arrives. A later read
-// delegation is a FIFO barrier proving the controller handled that final.
+// Hold the backend request while a provider final arrives. Admission of a
+// later read delegation proves the controller handled that final; its backend
+// send must wait for the minutes request, as the conversation is serialized.
 func TestVoiceAbruptAuditAdapters_ChatGPTBackendMinutesIncludesFinalDuringEnding(t *testing.T) {
 	for _, timing := range []string{"before_loss", "during_minutes"} {
 		t.Run(timing, func(t *testing.T) {
@@ -362,6 +363,7 @@ func TestVoiceAbruptAuditAdapters_ChatGPTBackendMinutesIncludesFinalDuringEnding
 			limits.minutes = 5 * time.Second
 			f := vpNewFixtureWithLimits(t, "chatgpt-plan", limits, handlers...)
 			c := f.call()
+			call := persistentCall(t, f, c)
 			p := f.up.peer(t, f.provider)
 			vpAwaitBrief(t, f, p)
 			p.assistant(t, "audit-late", "AUDIT-PARTIAL", false)
@@ -381,9 +383,11 @@ func TestVoiceAbruptAuditAdapters_ChatGPTBackendMinutesIncludesFinalDuringEnding
 			if timing == "during_minutes" {
 				p.assistant(t, "audit-late", "AUDIT-PARTIAL AUDIT-LATE-FINAL", true)
 				p.tool(t, "audit-final-barrier", "read_session", map[string]any{})
-				if vpError(p.result(t, "audit-final-barrier")) {
-					t.Fatal("FIFO barrier read failed during ending")
-				}
+				pollUntil(t, vpDeadline, "FIFO barrier admitted after final during ending", func() bool {
+					call.mu.Lock()
+					defer call.mu.Unlock()
+					return len(call.handoffs) == 1
+				})
 			}
 			once.Do(func() { close(release) })
 			vpClosed(t, p)

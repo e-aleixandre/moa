@@ -61,9 +61,16 @@ func TestChatGPTPlan_BackendModelIsFixedAtOpen(t *testing.T) {
 	f.backendMu.Lock()
 	models := append([]string(nil), f.backendModels...)
 	f.backendMu.Unlock()
-	if len(models) < 2 {
-		t.Fatalf("handoff backends built = %v, want at least 2", models)
+	if len(models) != 1 {
+		t.Fatalf("call backends built = %v, want exactly 1", models)
 	}
+	f.voiceText.mu.Lock()
+	requests := append([]string(nil), f.voiceText.models...)
+	f.voiceText.mu.Unlock()
+	if len(requests) < 2 {
+		t.Fatalf("backend request models = %v, want at least 2 requests", requests)
+	}
+	models = append(models, requests...)
 	for _, m := range models {
 		if m != "gpt-6-sol" {
 			t.Fatalf("backend models = %v, want gpt-6-sol for the whole call", models)
