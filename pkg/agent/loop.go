@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -151,9 +152,32 @@ func (cfg *loopConfig) ephemeralBlock() *core.Message {
 // repair, a pause_turn or truncation resubmit) resend it in the same place:
 // they finish a request that was already sent, so they must not rewrite what
 // the model was shown. The next ordinary request evaluates it afresh.
+//
+// On a provider with implicit prefix caching (OpenAI Responses over OAuth, no
+// breakpoints) an ordinary request keeps the previous block where it sat while
+// it is unchanged (see reuse): re-anchoring it at the end every time displaces
+// the previous request's tail, which may keep the whole previous request from
+// being reused as a prefix. Providers with their own breakpoints never do so.
 type frozenEphemeral struct {
 	msg *core.Message
 	at  int
+	// epoch and model are what the messages before at were built under; a
+	// compaction or trim (epoch) or another model rewrites that prefix.
+	epoch int
+	model core.Model
+	// prefix hashes the messages before at, so an anchor kept across runs is
+	// only trusted while that history is byte-identical.
+	prefix string
+}
+
+// reuse reports whether the anchored block may serve an ordinary request that
+// evaluated block afresh: same content, same prefix before it, still inside
+// the history. Timestamp and MsgID are regenerated per evaluation and ignored.
+func (f frozenEphemeral) reuse(block *core.Message, epoch int, model core.Model, history int) bool {
+	if f.msg == nil || block == nil || f.at > history || f.epoch != epoch || !sameModel(f.model, model) {
+		return false
+	}
+	return f.msg.Role == block.Role && reflect.DeepEqual(f.msg.Content, block.Content)
 }
 
 // into returns msgs with the block in its place, msgs itself when there is none.
@@ -166,6 +190,35 @@ func (f frozenEphemeral) into(msgs []core.Message) []core.Message {
 	out = append(out, msgs[:at]...)
 	out = append(out, *f.msg)
 	return append(out, msgs[at:]...)
+}
+
+// recalledAnchor returns the anchor the agent's previous run left, when the
+// history before it is unchanged; the zero value otherwise.
+func (cfg *loopConfig) recalledAnchor(msgs []core.Message) frozenEphemeral {
+	if cfg.agent == nil {
+		return frozenEphemeral{}
+	}
+	cfg.agent.mu.Lock()
+	f := cfg.agent.ephemeralAnchor
+	cfg.agent.mu.Unlock()
+	if f.msg == nil || f.at > len(msgs) {
+		return frozenEphemeral{}
+	}
+	if _, h := messagesChain(msgs[:f.at], 0); h == "" || h != f.prefix {
+		return frozenEphemeral{}
+	}
+	return f
+}
+
+// rememberAnchor keeps f for the agent's next run. Request-only: it is never
+// part of the state, the saved tree or any snapshot.
+func (cfg *loopConfig) rememberAnchor(f frozenEphemeral) {
+	if cfg.agent == nil {
+		return
+	}
+	cfg.agent.mu.Lock()
+	cfg.agent.ephemeralAnchor = f
+	cfg.agent.mu.Unlock()
 }
 
 // ErrAdmissionNotSaved ends a run whose next request would carry a message
@@ -520,6 +573,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	justPaused := false
 	// The ephemeral block of the last ordinary request, for its continuations.
 	var frozen frozenEphemeral
+	var shape requestShape
 	// Local to this admitted work, never inherited by another Send or child.
 	// A tool result can change ordinary settings without being a new entry
 	// into API while this work's OAuth restriction still makes return early.
@@ -900,7 +954,20 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			}
 			bound := justPaused || repairPartial != nil
 			if !bound {
-				frozen = frozenEphemeral{msg: cfg.ephemeralBlock(), at: len(baseMessages)}
+				block := cfg.ephemeralBlock()
+				anchored := core.ProviderHasImplicitPrefixCache(cfg.provider, cfg.model.ID)
+				if anchored && frozen.msg == nil {
+					frozen = cfg.recalledAnchor(baseMessages)
+				}
+				if !anchored || !frozen.reuse(block, cfg.state.CompactionEpoch, cfg.model, len(baseMessages)) {
+					frozen = frozenEphemeral{msg: block, at: len(baseMessages), epoch: cfg.state.CompactionEpoch, model: cfg.model}
+					if anchored {
+						if block != nil {
+							_, frozen.prefix = messagesChain(baseMessages, 0)
+						}
+						cfg.rememberAnchor(frozen)
+					}
+				}
 			}
 			reqMessages := frozen.into(baseMessages)
 			if repairPartial != nil {
@@ -940,6 +1007,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				Options:  cfg.requestOptions(),
 			}
 			req.Options.AccessProgram = cfg.requestProgram
+			shape.log(req)
 			if !bound && retrySource == nil && apiWorkOrigin != nil && apiWorkOrigin.Model == cfg.model.ID && apiWorkOrigin.OAuthNotBefore != nil && time.Now().Before(*apiWorkOrigin.OAuthNotBefore) {
 				req.Options.ProviderBinding = apiWorkOrigin
 			}

@@ -55,6 +55,31 @@ func ProviderSupportsDocuments(p Provider) bool {
 	return false
 }
 
+// ImplicitPrefixCacheProvider is optionally implemented by a provider that
+// reuses the longest matching request prefix with no cache breakpoint of its
+// own for modelID, so nothing keeps a request-only block out of that prefix.
+// Providers that place breakpoints before the ephemeral block (Anthropic) must
+// not implement it: moving the block would break the prefix they cache.
+type ImplicitPrefixCacheProvider interface {
+	ImplicitPrefixCache(modelID string) bool
+}
+
+// ProviderHasImplicitPrefixCache reports whether p, following decorators,
+// caches by implicit prefix for modelID. Unknown providers report false.
+func ProviderHasImplicitPrefixCache(p Provider, modelID string) bool {
+	for p != nil {
+		if ic, ok := p.(ImplicitPrefixCacheProvider); ok {
+			return ic.ImplicitPrefixCache(modelID)
+		}
+		unwrapper, ok := p.(ProviderUnwrapper)
+		if !ok {
+			return false
+		}
+		p = unwrapper.Unwrap()
+	}
+	return false
+}
+
 // Request contains everything needed for an LLM call.
 type Request struct {
 	Model    Model

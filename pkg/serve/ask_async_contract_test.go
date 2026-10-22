@@ -60,7 +60,11 @@ type f1Provider struct {
 	mu     sync.Mutex
 	reqs   []core.Request
 	script func(core.Request) <-chan core.AssistantEvent
+	// implicitCache makes the fake declare an implicit-prefix-cache provider.
+	implicitCache bool
 }
+
+func (p *f1Provider) ImplicitPrefixCache(string) bool { return p.implicitCache }
 
 func (p *f1Provider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	if isTestAutoTitleRequest(req) {
