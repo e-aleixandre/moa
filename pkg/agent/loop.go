@@ -963,6 +963,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				Options:  cfg.requestOptions(),
 			}
 			req.Options.AccessProgram = cfg.requestProgram
+			logRequestShape(req)
 			if !bound && retrySource == nil && apiWorkOrigin != nil && apiWorkOrigin.Model == cfg.model.ID && apiWorkOrigin.OAuthNotBefore != nil && time.Now().Before(*apiWorkOrigin.OAuthNotBefore) {
 				req.Options.ProviderBinding = apiWorkOrigin
 			}
