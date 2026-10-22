@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -19,6 +20,11 @@ import (
 const ChatGPTCallsURL = "https://chatgpt.com/backend-api/wham/realtime/calls?intent=quicksilver&architecture=avas"
 
 const chatGPTVoiceModel = "gpt-live-1-codex"
+
+const (
+	chatGPTStartupTimeout = 20 * time.Second
+	chatGPTDTLSStall      = 3 * time.Second
+)
 
 // ChatGPTPlanConfig configures the chatgpt-plan adapter.
 type ChatGPTPlanConfig struct {
@@ -48,19 +54,63 @@ func (a *chatGPTPlan) Availability(context.Context) Availability {
 }
 
 func (a *chatGPTPlan) Open(ctx context.Context, spec CallSpec) (Upstream, error) {
-	peer, err := NewPeer(a.cfg.Peer)
-	if err != nil {
-		return nil, &OpenError{Class: ClassUnavailable}
+	ctx, cancel := context.WithTimeout(ctx, chatGPTStartupTimeout)
+	defer cancel()
+	client, closeTransport := chatGPTSignalingClient(a.cfg.HTTPClient)
+	defer closeTransport()
+	creds := &chatGPTStartupCredentials{source: a.cfg.Credentials}
+	started := time.Now()
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, Classify(err)
+		}
+		slog.Info("voice startup attempt", "provider", ChatGPTPlan, "attempt", attempt, "stage", "begin")
+		peer, err := NewPeer(a.cfg.Peer)
+		if err != nil {
+			slog.Info("voice startup failed", "provider", ChatGPTPlan, "attempt", attempt, "stage", "peer", "reason", ClassUnavailable, "retry_count", attempt-1)
+			return nil, &OpenError{Class: ClassUnavailable}
+		}
+		up, err := a.open(ctx, spec, peer, client, creds)
+		if err == nil {
+			slog.Info("voice startup ready", "provider", ChatGPTPlan, "attempt", attempt, "retry_count", attempt-1, "elapsed_ms", time.Since(started).Milliseconds())
+			return up, nil
+		}
+		stall := errors.Is(err, errDTLSStartupStall)
+		reason := Classify(err).Class
+		if stall {
+			reason = "dtls_startup_stall"
+		}
+		ice, dtls := peer.startup.seen()
+		slog.Info("voice startup attempt", "provider", ChatGPTPlan, "attempt", attempt, "stage", "open", "reason", reason, "ice_seen", ice, "dtls_seen", dtls)
+		closing := time.Now()
+		closeErr := peer.closeStartup()
+		result := "joined"
+		if closeErr != nil {
+			result = "close_failed"
+		}
+		slog.Info("voice startup peer closed", "provider", ChatGPTPlan, "attempt", attempt, "close_ms", time.Since(closing).Milliseconds(), "result", result)
+		if stall && attempt == 1 && closeErr == nil && ctx.Err() == nil {
+			deadline, _ := ctx.Deadline()
+			// Local join cannot confirm destruction of the remote allocation.
+			slog.Info("voice startup retry", "provider", ChatGPTPlan, "attempt", 2, "reason", reason, "remaining_ms", time.Until(deadline).Milliseconds(), "remote_close", "unconfirmed")
+			continue
+		}
+		if ctx.Err() != nil {
+			err = ctx.Err()
+			reason = "cancelled"
+			if errors.Is(err, context.DeadlineExceeded) {
+				reason = "deadline"
+			}
+		} else if closeErr != nil {
+			reason = "close_failed"
+		}
+		slog.Info("voice startup failed", "provider", ChatGPTPlan, "attempt", attempt, "stage", "open", "reason", reason, "retry_count", attempt-1)
+		return nil, Classify(err)
 	}
-	up, err := a.open(ctx, spec, peer)
-	if err != nil {
-		_ = peer.Close()
-		return nil, err
-	}
-	return up, nil
+	return nil, &OpenError{Class: ClassUnavailable}
 }
 
-func (a *chatGPTPlan) open(ctx context.Context, spec CallSpec, peer *Peer) (*chatGPTUpstream, error) {
+func (a *chatGPTPlan) open(ctx context.Context, spec CallSpec, peer *Peer, client *http.Client, creds *chatGPTStartupCredentials) (*chatGPTUpstream, error) {
 	offer, err := peer.Offer(ctx)
 	if err != nil {
 		return nil, Classify(err)
@@ -79,8 +129,7 @@ func (a *chatGPTPlan) open(ctx context.Context, spec CallSpec, peer *Peer) (*cha
 	if err != nil {
 		return nil, &OpenError{Class: ClassUnavailable}
 	}
-	client := noRedirect(a.cfg.HTTPClient)
-	answer, err := withAuthRetry(ctx, a.cfg.Credentials, true, func(c Credential) (string, error) {
+	answer, err := withAuthRetry(ctx, creds, !creds.refreshed, func(c Credential) (string, error) {
 		if c.AccountID == "" {
 			return "", &OpenError{Class: ClassCredentials}
 		}
@@ -92,8 +141,8 @@ func (a *chatGPTPlan) open(ctx context.Context, spec CallSpec, peer *Peer) (*cha
 	if err := peer.SetAnswer(answer); err != nil {
 		return nil, &OpenError{Class: ClassUnavailable}
 	}
-	if err := peer.WaitReady(ctx); err != nil {
-		return nil, Classify(err)
+	if err := peer.waitStartupReady(ctx, chatGPTDTLSStall); err != nil {
+		return nil, err
 	}
 	// session.started on the datachannel is the ready signal.
 	for {
@@ -104,6 +153,9 @@ func (a *chatGPTPlan) open(ctx context.Context, spec CallSpec, peer *Peer) (*cha
 			}
 			var env wsEvent
 			if json.Unmarshal(data, &env) == nil && env.Type == "session.started" {
+				if err := ctx.Err(); err != nil {
+					return nil, Classify(err)
+				}
 				u := &chatGPTUpstream{peer: peer, events: make(chan Event, upstreamEventQueue), stop: make(chan struct{}), readerDone: make(chan struct{})}
 				go u.read()
 				// An incoming call waits for the user's hello: the plan cannot
@@ -123,6 +175,9 @@ func (a *chatGPTPlan) open(ctx context.Context, spec CallSpec, peer *Peer) (*cha
 }
 
 func (a *chatGPTPlan) post(ctx context.Context, client *http.Client, body []byte, thread string, c Credential) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", Classify(err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.URL, bytes.NewReader(body))
 	if err != nil {
 		return "", &OpenError{Class: ClassUnavailable}
@@ -133,6 +188,7 @@ func (a *chatGPTPlan) post(ctx context.Context, client *http.Client, body []byte
 	req.Header.Set("originator", "Codex Desktop")
 	req.Header.Set("OpenAI-Alpha", "quicksilver=v2")
 	req.Header.Set("Thread-Id", thread)
+	req.Close = true
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", Classify(err)
