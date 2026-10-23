@@ -157,7 +157,11 @@ func (cfg *loopConfig) ephemeralBlock() *core.Message {
 // breakpoints) an ordinary request keeps the previous block where it sat while
 // it is unchanged (see reuse): re-anchoring it at the end every time displaces
 // the previous request's tail, which may keep the whole previous request from
-// being reused as a prefix. Providers with their own breakpoints never do so.
+// being reused as a prefix. A provider that binds thinking to the prefix
+// (Anthropic) anchors it too: its breakpoint stays on the last durable block
+// either way, but removing the block from where the previous request carried
+// it drops the thinking of every turn after it. A changed block still moves to
+// the end and breaks the cached prefix from where the old one sat.
 type frozenEphemeral struct {
 	msg *core.Message
 	at  int
@@ -955,7 +959,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			bound := justPaused || repairPartial != nil
 			if !bound {
 				block := cfg.ephemeralBlock()
-				anchored := core.ProviderHasImplicitPrefixCache(cfg.provider, cfg.model.ID)
+				anchored := core.ProviderHasImplicitPrefixCache(cfg.provider, cfg.model.ID) ||
+					core.ProviderBindsThinkingPrefix(cfg.provider, cfg.model.ID)
 				if anchored && frozen.msg == nil {
 					frozen = cfg.recalledAnchor(baseMessages)
 				}

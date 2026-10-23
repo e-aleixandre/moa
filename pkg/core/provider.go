@@ -59,7 +59,8 @@ func ProviderSupportsDocuments(p Provider) bool {
 // reuses the longest matching request prefix with no cache breakpoint of its
 // own for modelID, so nothing keeps a request-only block out of that prefix.
 // Providers that place breakpoints before the ephemeral block (Anthropic) must
-// not implement it: moving the block would break the prefix they cache.
+// not implement it; they anchor the block only for the thinking they bind to
+// the prefix (ThinkingPrefixBindingProvider).
 type ImplicitPrefixCacheProvider interface {
 	ImplicitPrefixCache(modelID string) bool
 }
@@ -70,6 +71,32 @@ func ProviderHasImplicitPrefixCache(p Provider, modelID string) bool {
 	for p != nil {
 		if ic, ok := p.(ImplicitPrefixCacheProvider); ok {
 			return ic.ImplicitPrefixCache(modelID)
+		}
+		unwrapper, ok := p.(ProviderUnwrapper)
+		if !ok {
+			return false
+		}
+		p = unwrapper.Unwrap()
+	}
+	return false
+}
+
+// ThinkingPrefixBindingProvider is optionally implemented by a provider that,
+// for modelID, binds signed thinking to the exact request prefix it followed
+// and drops it once that prefix changes (Anthropic's block_binding). Moving a
+// request-only block off its place edits that prefix and costs the model the
+// reasoning of every turn after it, so the agent keeps the block anchored
+// while unchanged, as with an implicit prefix cache.
+type ThinkingPrefixBindingProvider interface {
+	BindsThinkingPrefix(modelID string) bool
+}
+
+// ProviderBindsThinkingPrefix reports whether p, following decorators, binds
+// thinking to its request prefix for modelID. Unknown providers report false.
+func ProviderBindsThinkingPrefix(p Provider, modelID string) bool {
+	for p != nil {
+		if bp, ok := p.(ThinkingPrefixBindingProvider); ok {
+			return bp.BindsThinkingPrefix(modelID)
 		}
 		unwrapper, ok := p.(ProviderUnwrapper)
 		if !ok {

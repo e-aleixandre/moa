@@ -93,8 +93,8 @@ func TestFrozenEphemeralReuse(t *testing.T) {
 	}
 }
 
-// A provider with its own breakpoints (Anthropic) caches the prefix up to the
-// last durable block, so the block must stay last there.
+// A provider with neither an implicit prefix cache nor prefix-bound thinking
+// gains nothing from the anchor, so the block stays last there.
 func TestEphemeralNotAnchoredWithoutImplicitPrefixCache(t *testing.T) {
 	pos := ephemeralPositions(t, false, func() string { return "inventory" })
 	if len(pos) != 2 || pos[0] != 1 || pos[1] != 3 {

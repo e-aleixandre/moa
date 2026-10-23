@@ -83,6 +83,17 @@ func (p *snapshotProvider) ImplicitPrefixCache(modelID string) bool {
 	return err == nil && core.ProviderHasImplicitPrefixCache(base, modelID)
 }
 
+// BindsThinkingPrefix answers, like ImplicitPrefixCache, for the provider the
+// next request would use.
+func (p *snapshotProvider) BindsThinkingPrefix(modelID string) bool {
+	snap, err := p.peek()
+	if err != nil {
+		return false
+	}
+	base, err := provider.New(p.model, p.config(snap, nil))
+	return err == nil && core.ProviderBindsThinkingPrefix(base, modelID)
+}
+
 func (p *snapshotProvider) selection() []auth.SnapshotSelection {
 	if p.plan != nil {
 		return []auth.SnapshotSelection{auth.SelectPlanOAuth}
