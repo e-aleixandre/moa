@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -412,5 +413,88 @@ func TestChatGPTHandoff_UnicodeKeepsOriginalTarget(t *testing.T) {
 	}
 	if got.String() != want {
 		t.Fatal("chunk order/content changed")
+	}
+}
+
+func stallLines(logs string) []string {
+	var out []string
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, `msg="voice startup dtls stall"`) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func logFields(line string) map[string]string {
+	fields := map[string]string{}
+	for _, f := range strings.Fields(line) {
+		if k, v, ok := strings.Cut(f, "="); ok {
+			fields[k] = strings.Trim(v, `"`)
+		}
+	}
+	return fields
+}
+
+func TestChatGPTStartup_DTLSStallLogsDiagnosticOncePerAttempt(t *testing.T) {
+	f := newStartupFixture(t, "stall", "stall")
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if up, err := f.adapter().Open(ctx, CallSpec{}); up != nil || err == nil {
+		t.Fatal("double stall succeeded")
+	}
+	logs := f.log.String()
+	lines := stallLines(logs)
+	if len(lines) != 2 {
+		t.Fatalf("stall diagnostics=%d, want one per stalled attempt:\n%s", len(lines), logs)
+	}
+	ip4 := regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}\b`)
+	ip6 := regexp.MustCompile(`(?i)[0-9a-f]{0,4}(:[0-9a-f]{0,4}){2,}`)
+	hostPort := regexp.MustCompile(`[^\s=]+:\d{2,5}\b`)
+	for i, line := range lines {
+		// The record's own timestamp legitimately contains colons.
+		record := regexp.MustCompile(`time=\S+ `).ReplaceAllString(line, "")
+		for _, re := range []*regexp.Regexp{ip4, ip6, hostPort} {
+			if m := re.FindString(record); m != "" {
+				t.Errorf("address-like %q in %s", m, line)
+			}
+		}
+		got := logFields(line)
+		for k, want := range map[string]string{
+			"provider": "chatgpt-plan", "attempt": fmt.Sprint(i + 1), "dtls_role": "client", "pair_known": "true",
+			"local_type": "host", "local_protocol": "udp", "local_interface_class": "loopback",
+			"remote_type": "host", "remote_protocol": "udp", "non_stun_bytes_received": "0",
+			"non_stun_packets_received": "0", "stun_alive": "true",
+		} {
+			if got[k] != want {
+				t.Errorf("%s=%q, want %q: %s", k, got[k], want, line)
+			}
+		}
+		for _, k := range []string{"ice_connected_ms", "non_stun_packets_sent", "non_stun_bytes_sent", "stun_responses_received"} {
+			if n, err := strconv.Atoi(got[k]); err != nil || n < 0 {
+				t.Errorf("%s=%q is not a count: %s", k, got[k], line)
+			}
+		}
+		if n, _ := strconv.Atoi(got["non_stun_packets_sent"]); n < 1 {
+			t.Errorf("no DTLS flight counted as sent: %s", line)
+		}
+	}
+	// The diagnostic precedes the close of its own attempt.
+	if first, closed := strings.Index(logs, `msg="voice startup dtls stall"`), strings.Index(logs, "voice startup peer closed"); first < 0 || closed < first {
+		t.Fatal("diagnostic not emitted before the peer was closed")
+	}
+}
+
+func TestChatGPTStartup_HealthyStartupHasNoDTLSStallDiagnostic(t *testing.T) {
+	f := newStartupFixture(t, "healthy")
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	up, err := f.adapter().Open(ctx, CallSpec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startupClose(t, up)
+	if lines := stallLines(f.log.String()); len(lines) != 0 {
+		t.Fatalf("healthy startup logged a stall: %v", lines)
 	}
 }

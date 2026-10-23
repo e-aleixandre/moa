@@ -64,6 +64,7 @@ func (a *chatGPTPlan) Open(ctx context.Context, spec CallSpec) (Upstream, error)
 		if err := ctx.Err(); err != nil {
 			return nil, Classify(err)
 		}
+		began := time.Now()
 		slog.Info("voice startup attempt", "provider", ChatGPTPlan, "attempt", attempt, "stage", "begin")
 		peer, err := NewPeer(a.cfg.Peer)
 		if err != nil {
@@ -82,6 +83,9 @@ func (a *chatGPTPlan) Open(ctx context.Context, spec CallSpec) (Upstream, error)
 		}
 		ice, dtls := peer.startup.seen()
 		slog.Info("voice startup attempt", "provider", ChatGPTPlan, "attempt", attempt, "stage", "open", "reason", reason, "ice_seen", ice, "dtls_seen", dtls)
+		if stall {
+			peer.logDTLSStall(ChatGPTPlan, attempt, began)
+		}
 		closing := time.Now()
 		closeErr := peer.closeStartup()
 		result := "joined"

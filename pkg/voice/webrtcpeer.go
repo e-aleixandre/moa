@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/interceptor"
@@ -64,6 +65,9 @@ type Peer struct {
 	closeErr error
 	workers  sync.WaitGroup
 	startup  peerStartup
+	// localDTLSRole is set by SetAnswer for the startup stall diagnostic only.
+	localDTLSRole atomic.Int32
+	statsMu       sync.Mutex // serialises the stall diagnostic's GetStats with pc.Close
 
 	sendCtlMu sync.Mutex // serialises SendControl so the buffer check and send are atomic
 	ctlMu     sync.Mutex // guards ctlClosed and sends on control
@@ -203,7 +207,12 @@ func (p *Peer) Offer(ctx context.Context) (string, error) {
 
 // SetAnswer applies the remote SDP answer.
 func (p *Peer) SetAnswer(sdp string) error {
-	return p.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: sdp})
+	desc := webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: sdp}
+	if err := p.pc.SetRemoteDescription(desc); err != nil {
+		return err
+	}
+	p.localDTLSRole.Store(int32(localDTLSRoleFromAnswer(desc)))
+	return nil
 }
 
 // WaitReady blocks until the control datachannel is open.
@@ -435,7 +444,9 @@ func (p *Peer) Close() error {
 		p.closing = true
 		p.mu.Unlock()
 		p.doneOnce.Do(func() { close(p.done) })
+		p.statsMu.Lock()
 		p.closeErr = p.pc.Close()
+		p.statsMu.Unlock()
 		p.workers.Wait()
 		close(p.pcm)
 		p.ctlMu.Lock()

@@ -39,6 +39,12 @@ func (s *peerStartup) iceConnected(now time.Time) {
 	s.notify()
 }
 
+func (s *peerStartup) firstICEAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.firstICE
+}
+
 func (s *peerStartup) dtlsChanged(state webrtc.DTLSTransportState) {
 	s.mu.Lock()
 	if !s.abandoned {
