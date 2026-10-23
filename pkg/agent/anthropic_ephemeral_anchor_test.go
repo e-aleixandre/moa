@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -65,34 +66,28 @@ func anthropicAnchorSSE(n int, tool bool) string {
 	return s + ev("message_stop", `{"type":"message_stop"}`)
 }
 
-// wireMessages returns each message of a request body re-serialized without
+// wireMessages returns each message of a request body exactly as sent, minus
 // the blocks' own cache_control, which is the only part of a turn that may
 // legitimately move between requests.
 func wireMessages(t *testing.T, body []byte) [][]byte {
 	t.Helper()
 	var req struct {
-		Messages []map[string]any `json:"messages"`
+		Messages []json.RawMessage `json:"messages"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		t.Fatal(err)
 	}
 	out := make([][]byte, len(req.Messages))
 	for i, m := range req.Messages {
-		if content, ok := m["content"].([]any); ok {
-			for _, c := range content {
-				if b, ok := c.(map[string]any); ok {
-					delete(b, "cache_control")
-				}
-			}
-		}
-		b, err := json.Marshal(m)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out[i] = b
+		out[i] = cacheControlLast.ReplaceAll(cacheControlFirst.ReplaceAll(m, []byte("{")), nil)
 	}
 	return out
 }
+
+var (
+	cacheControlFirst = regexp.MustCompile(`\{"cache_control":\{[^{}]*\},?`)
+	cacheControlLast  = regexp.MustCompile(`,"cache_control":\{[^{}]*\}`)
+)
 
 // firstRewrite is the index of the first message of prev that next does not
 // carry byte for byte, or -1 when next extends prev.
