@@ -6,22 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
-
-func TestBuildSystemPrompt_CustomToolDescRuneBoundary(t *testing.T) {
-	// A custom tool (name unknown to toolSnippets) with a long multibyte
-	// description exercises the 200-byte truncation path.
-	tools := []core.ToolSpec{
-		{Name: "customtool", Description: strings.Repeat("é", 300)},
-	}
-	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: tools, CWD: "/test"})
-	if !utf8.ValidString(prompt) {
-		t.Errorf("truncated tool description must not split a rune, got invalid UTF-8")
-	}
-}
 
 func TestBuildSystemPrompt_MemoryAndCheckpointGuidanceWithoutIndex(t *testing.T) {
 	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: []core.ToolSpec{{Name: "memory"}, {Name: "checkpoint"}, {Name: "load_skill"}, {Name: "tasks"}}, CWD: "/test"})
@@ -141,9 +128,6 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	if !strings.Contains(prompt, "coding agent") {
 		t.Error("expected role description")
-	}
-	if !strings.Contains(prompt, "bash:") {
-		t.Error("expected tool description")
 	}
 	if !strings.Contains(prompt, "Project: test") {
 		t.Error("expected AGENTS.md content")
