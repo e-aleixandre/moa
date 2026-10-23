@@ -84,6 +84,9 @@ type SessionConfig struct {
 	// the caller's responsibility to reject: the merge would silently override
 	// operator config.
 	ExtraMCPServers map[string]core.MCPServer
+	// MCPToolSeed is a restored session's snapshot of the MCP tools it was
+	// offering, by server (see mcp.Manager.SeedTools). Nil when there is none.
+	MCPToolSeed map[string][]mcp.ToolDef
 
 	// Context for MCP servers and subagent async jobs. Required.
 	Ctx context.Context
@@ -548,6 +551,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	mcpPolicy := core.NewMCPDisablePolicy(mcpDisableSources)
 	if len(moaCfg.MCPServers) > 0 {
 		mcpMgr = mcp.NewManager(nil, cfg.CWD)
+		mcpMgr.SeedTools(cfg.MCPToolSeed)
 		// Resolve the disabled set BEFORE spawning so a vetoed server never
 		// starts a process (e.g. never launches a Chrome for a disabled
 		// Playwright). Disabled servers still get a placeholder for the panel.

@@ -170,6 +170,9 @@ type ManagedSession struct {
 
 	// Serve-specific infrastructure (MCP, toolReg — not agent).
 	infra serveInfra
+	// mcpCtrl mirrors infra.mcpController for the persister, which must not
+	// take s.mu from the persistence reactor.
+	mcpCtrl atomic.Pointer[mcp.Controller]
 
 	// artifactStore is the session's durable catalog of files delivered with
 	// send_file. Writer instance: it is the one the tool publishes through, and

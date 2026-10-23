@@ -116,6 +116,9 @@ type Manager struct {
 	configs  map[string]core.MCPServer // last config per server, for restart
 	onChange func(ServerStatus)        // notified on any state transition (may be nil)
 	closed   bool
+	// seed is a restored session's snapshot of the tools it was offering,
+	// by server; nil when there is none (see SeedTools).
+	seed map[string][]ToolDef
 
 	// oauthStore holds the OAuth tokens of remote servers; process-wide, so an
 	// authorization done from one session reaches every manager.
@@ -185,6 +188,33 @@ type toolInfo struct {
 	params      json.RawMessage
 }
 
+// ToolDef is one MCP tool exactly as a server listed it: its own name (not
+// the prefixed registry name), description and input schema bytes.
+type ToolDef struct {
+	Name        string
+	Description string
+	Params      json.RawMessage
+}
+
+func toolInfosFromDefs(defs []ToolDef) []toolInfo {
+	out := make([]toolInfo, 0, len(defs))
+	for _, d := range defs {
+		out = append(out, toolInfo{name: d.Name, description: d.Description, params: d.Params})
+	}
+	return out
+}
+
+// SeedTools gives Start a restored session's snapshot of the tools it was
+// offering, by server. Start offers exactly those for each configured server
+// (none for a server absent from it) until the server answers. A nil seed
+// keeps the default: no tools before the handshake, except a lazy server's
+// discovery cache. Call it before Start.
+func (m *Manager) SeedTools(seed map[string][]ToolDef) {
+	m.mu.Lock()
+	m.seed = seed
+	m.mu.Unlock()
+}
+
 type cachedTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -216,6 +246,9 @@ func (m *Manager) toolsCachePath(name string, cfg core.MCPServer) string {
 }
 
 func (m *Manager) loadTools(name string, cfg core.MCPServer) ([]toolInfo, bool) {
+	if cfg.IsRemote() {
+		return nil, false
+	}
 	path := m.toolsCachePath(name, cfg)
 	if path == "" {
 		return nil, false
@@ -240,6 +273,9 @@ func (m *Manager) loadTools(name string, cfg core.MCPServer) ([]toolInfo, bool) 
 }
 
 func (m *Manager) saveTools(name string, cfg core.MCPServer, tools []toolInfo) {
+	if !cfg.Lazy || cfg.IsRemote() {
+		return
+	}
 	path := m.toolsCachePath(name, cfg)
 	if path == "" {
 		return
@@ -273,16 +309,6 @@ func (m *Manager) saveTools(name string, cfg core.MCPServer, tools []toolInfo) {
 		return
 	}
 	_ = os.Rename(f.Name(), path)
-}
-
-// forgetTools drops a server's cached tool listing when its tools are
-// withdrawn because it failed or lost its authorization. Sessions stop
-// offering those tools then, so the next start must not offer them again
-// before the server has answered; a clean shutdown keeps the cache.
-func (m *Manager) forgetTools(name string, cfg core.MCPServer) {
-	if path := m.toolsCachePath(name, cfg); path != "" {
-		_ = os.Remove(path)
-	}
 }
 
 func stopIdleLocked(s *serverSession) {
@@ -430,12 +456,26 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 		}
 	}
 	sortStrings(names)
-	// The tools a server listed last time are offered again right away, so a
-	// restored conversation sends the same tool definitions (and keeps its
-	// prompt cache) instead of waiting for, or racing, the handshake.
+	// A restored session's own snapshot says which tools it was offering, so
+	// they are offered again right away, byte for byte, instead of waiting
+	// for (or racing) the handshake: changing them would rewrite the prompt
+	// cache. Without a snapshot, lazy servers fall back to their discovery
+	// cache.
+	m.mu.Lock()
+	seed := m.seed
+	m.mu.Unlock()
 	cached := make(map[string][]toolInfo)
 	for _, name := range names {
-		if !initiallyDisabled[name] {
+		if initiallyDisabled[name] {
+			continue
+		}
+		if seed != nil {
+			if defs, ok := seed[name]; ok && len(defs) > 0 {
+				cached[name] = toolInfosFromDefs(defs)
+			}
+			continue
+		}
+		if servers[name].Lazy && !servers[name].IsRemote() {
 			if tools, ok := m.loadTools(name, servers[name]); ok {
 				cached[name] = tools
 			}
@@ -751,6 +791,27 @@ func (m *Manager) ToolsForServer(name string) ([]core.Tool, bool) {
 		out = append(out, m.wrapTool(sess, ti))
 	}
 	return out, true
+}
+
+// toolsAndDefsForServer is ToolsForServer plus the definitions those tools
+// were built from, read in one step so the two always agree.
+func (m *Manager) toolsAndDefsForServer(name string) ([]core.Tool, []ToolDef) {
+	m.mu.Lock()
+	sess, ok := m.byName[name]
+	m.mu.Unlock()
+	if !ok {
+		return nil, nil
+	}
+	sess.mu.Lock()
+	infos := append([]toolInfo(nil), sess.tools...)
+	sess.mu.Unlock()
+	tools := make([]core.Tool, 0, len(infos))
+	defs := make([]ToolDef, 0, len(infos))
+	for _, ti := range infos {
+		tools = append(tools, m.wrapTool(sess, ti))
+		defs = append(defs, ToolDef{Name: ti.name, Description: ti.description, Params: ti.params})
+	}
+	return tools, defs
 }
 
 // Status returns an immutable snapshot of every server's health, in config

@@ -81,6 +81,16 @@ func (r *swappableRemote) release() {
 	r.mu.Unlock()
 }
 
+// discover starts a manager against servers once, as the session that sent
+// the tools did, and returns that session's snapshot.
+func discover(t *testing.T, servers map[string]core.MCPServer) map[string][]ToolDef {
+	t.Helper()
+	mgr := NewManager(nil, "")
+	startWait(t, mgr, servers, nil)
+	defer mgr.Close()
+	return NewController(ControllerConfig{Manager: mgr, Registry: core.NewRegistry()}).Snapshot()
+}
+
 func resultText(res core.Result) string {
 	var b strings.Builder
 	for _, c := range res.Content {
@@ -89,7 +99,7 @@ func resultText(res core.Result) string {
 	return b.String()
 }
 
-func TestRemoteServerStartsWithCachedToolsAndCallWaitsForHandshake(t *testing.T) {
+func TestRemoteServerStartsWithSeededToolsAndCallWaitsForHandshake(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	remote := newSwappableRemote(t, "Echoes back")
@@ -98,6 +108,7 @@ func TestRemoteServerStartsWithCachedToolsAndCallWaitsForHandshake(t *testing.T)
 	first := NewManager(nil, "")
 	startWait(t, first, servers, nil)
 	sent := first.Tools()
+	snap := NewController(ControllerConfig{Manager: first, Registry: core.NewRegistry()}).Snapshot()
 	first.Close()
 	if len(sent) != 1 {
 		t.Fatalf("first start tools = %+v, want echo", sent)
@@ -105,6 +116,7 @@ func TestRemoteServerStartsWithCachedToolsAndCallWaitsForHandshake(t *testing.T)
 
 	remote.hold()
 	second := NewManager(nil, "")
+	second.SeedTools(snap)
 	second.Start(context.Background(), servers, nil)
 	defer second.Close()
 	restored := second.Tools()
@@ -137,18 +149,17 @@ func TestRemoteServerStartsWithCachedToolsAndCallWaitsForHandshake(t *testing.T)
 	}
 }
 
-func TestCachedToolWhoseDefinitionChangedIsRefused(t *testing.T) {
+func TestSeededToolWhoseDefinitionChangedIsRefused(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	remote := newSwappableRemote(t, "Echoes back")
 	servers := map[string]core.MCPServer{"remote": {URL: remote.url}}
 
-	first := NewManager(nil, "")
-	startWait(t, first, servers, nil)
-	first.Close()
+	snap := discover(t, servers)
 
 	remote.setDescription("Echoes back, louder")
 	second := NewManager(nil, "")
+	second.SeedTools(snap)
 	second.Start(context.Background(), servers, nil)
 	defer second.Close()
 	stale := second.Tools()[0]
@@ -167,42 +178,24 @@ func TestCachedToolWhoseDefinitionChangedIsRefused(t *testing.T) {
 	if res.IsError || resultText(res) != "echo: hi" {
 		t.Fatalf("call with the new definition = %+v", res)
 	}
-	second.Close()
-
-	third := NewManager(nil, "")
-	third.Start(context.Background(), servers, nil)
-	defer third.Close()
-	if got := third.Tools(); len(got) != 1 || got[0].Description != "Echoes back, louder" {
-		t.Fatalf("next start offers %+v, want the refreshed cache", got)
-	}
 }
 
-// A server whose tools were withdrawn because it failed is not offered again
-// from the cache on the next start: the sessions stopped sending its tools.
-func TestFailedServerIsNotResurrectedFromCache(t *testing.T) {
+// The seed is authoritative: a configured server absent from it starts with
+// no tools, and a seeded server that is no longer configured is not offered.
+func TestSeedIsAuthoritativeForConfiguredServers(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	remote := newSwappableRemote(t, "Echoes back")
 	servers := map[string]core.MCPServer{"remote": {URL: remote.url}}
-
-	first := NewManager(nil, "")
-	startWait(t, first, servers, nil)
-	first.Close()
-
-	remote.down.Store(true)
-	second := NewManager(nil, "")
-	startWait(t, second, servers, nil)
-	if st := second.Status()[0]; st.State != StateFailed {
-		t.Fatalf("state = %s, want failed", st.State)
-	}
-	second.Close()
+	snap := discover(t, servers)
 
 	remote.hold()
-	third := NewManager(nil, "")
-	third.Start(context.Background(), servers, nil)
-	defer third.Close()
-	if got := third.Tools(); len(got) != 0 {
-		t.Fatalf("next start offers %d cached tools of a server that failed", len(got))
+	mgr := NewManager(nil, "")
+	mgr.SeedTools(map[string][]ToolDef{"gone": snap["remote"]})
+	mgr.Start(context.Background(), servers, nil)
+	defer mgr.Close()
+	if got := mgr.Tools(); len(got) != 0 {
+		t.Fatalf("offered %d tools; want none for a server the snapshot did not hold, and none for one no longer configured", len(got))
 	}
 }
 
@@ -213,12 +206,11 @@ func TestControllerOwnsToolsOfAServerThatFailedDuringConstruction(t *testing.T) 
 	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
 	remote := newSwappableRemote(t, "Echoes back")
 	servers := map[string]core.MCPServer{"remote": {URL: remote.url}}
-	first := NewManager(nil, "")
-	startWait(t, first, servers, nil)
-	first.Close()
+	snap := discover(t, servers)
 
 	remote.hold()
 	mgr := NewManager(nil, "")
+	mgr.SeedTools(snap)
 	mgr.Start(context.Background(), servers, nil)
 	defer mgr.Close()
 	reg := core.NewRegistry()
@@ -236,5 +228,8 @@ func TestControllerOwnsToolsOfAServerThatFailedDuringConstruction(t *testing.T) 
 	ctrl.SyncServer("remote")
 	if _, ok := reg.Get("mcp__remote__echo"); ok {
 		t.Fatal("failed server's tool still registered after sync")
+	}
+	if got := ctrl.Snapshot(); len(got) != 0 {
+		t.Fatalf("snapshot after withdrawal = %+v, want empty", got)
 	}
 }

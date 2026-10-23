@@ -14,6 +14,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/session"
 )
 
 const restoreRelayTool = "mcp__relay__mark_task_done"
@@ -274,4 +275,87 @@ func textOf(m core.Message) string {
 		b.WriteString(c.Text)
 	}
 	return b.String()
+}
+
+// A server whose tools the session stopped offering before the restart is not
+// brought back: the snapshot is what the session was sending, not what the
+// server once listed.
+func TestRestoredSessionDoesNotResurrectWithdrawnMCPTools(t *testing.T) {
+	relay := newRestartableRelay(t, "Marks the originating task done")
+	mgr, sess, requests, _ := newRestoreFixture(t, relay,
+		simpleResponseHandler("without relay"),
+		simpleResponseHandler("after restart"),
+	)
+	pollUntil(t, 5*time.Second, "first turn settled", func() bool { return sessState(sess) == StateIdle })
+	relay.goDown()
+	if _, err := sess.RestartMCPServer("relay"); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	pollUntil(t, 5*time.Second, "failed server's tools withdrawn", func() bool {
+		_, ok := sess.infra.toolReg.Get(restoreRelayTool)
+		return !ok
+	})
+	if _, _, _, err := mgr.Send(sess.ID, "second", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	before := recvRequest(t, requests, 5*time.Second, "request without the relay")
+	if requestHasTool(before, restoreRelayTool) {
+		t.Fatal("withdrawn tool still offered before the restart")
+	}
+
+	resumed := restartSession(t, mgr, sess, relay.hold)
+	defer relay.open()
+	if _, _, _, err := mgr.Send(resumed.ID, "third", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	after := recvRequest(t, requests, 3*time.Second, "first request after restoring")
+	if !sameToolSpecs(before.Tools, after.Tools) {
+		t.Fatalf("restoring changed the tools:\nbefore %v\nafter  %v", toolNames(before.Tools), toolNames(after.Tools))
+	}
+}
+
+// A session saved before snapshots existed restores as before (its MCP tools
+// arrive when the server connects) and gains a snapshot on its next save,
+// with each schema stored byte for byte.
+func TestRestoredSessionWithoutMCPSnapshot(t *testing.T) {
+	relay := newRestartableRelay(t, "Marks the originating task done")
+	mgr, sess, requests, before := newRestoreFixture(t, relay, simpleResponseHandler("second done"))
+
+	resumed := restartSession(t, mgr, sess, func() {
+		saved, store, err := session.FindSession(mgr.sessionBaseDir, sess.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := saved.Metadata[session.MetaMCPTools]; !ok {
+			t.Fatal("saved session has no MCP tool snapshot")
+		}
+		delete(saved.Metadata, session.MetaMCPTools)
+		if err := store.Save(saved); err != nil {
+			t.Fatal(err)
+		}
+	})
+	waitMCPSettled(t, resumed.infra.mcpMgr)
+	pollUntil(t, 5*time.Second, "relay tool registered after connecting", func() bool {
+		_, ok := resumed.infra.toolReg.Get(restoreRelayTool)
+		return ok
+	})
+	if _, _, _, err := mgr.Send(resumed.ID, "second", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	recvRequest(t, requests, 5*time.Second, "request after restoring")
+	unloadSession(t, mgr, resumed.ID)
+	saved, _, err := session.FindSession(mgr.sessionBaseDir, resumed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := mcpToolSeedFromMeta(saved.Metadata)
+	var sent core.ToolSpec
+	for _, spec := range before.Tools {
+		if spec.Name == restoreRelayTool {
+			sent = spec
+		}
+	}
+	if len(seed["relay"]) != 1 || seed["relay"][0].Name != "mark_task_done" || !bytes.Equal(seed["relay"][0].Params, sent.Parameters) {
+		t.Fatalf("snapshot after the next save = %+v, want the relay tool with its exact schema", seed)
+	}
 }

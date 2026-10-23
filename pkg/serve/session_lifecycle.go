@@ -198,6 +198,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 
 	sp := newServePersister(persisted, store, sess.titleState)
 	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
+	sp.mcpTools = sess.mcpToolsSnapshot
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
@@ -312,10 +313,12 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	var notifyOn bool
 
 	var extraMCPServers map[string]core.MCPServer
+	var mcpToolSeed map[string][]mcp.ToolDef
 	var creatorTZ string
 	if opts != nil {
 		extraMCPServers = opts.extraMCPServers
 		creatorTZ = opts.creatorTZ
+		mcpToolSeed = mcpToolSeedFromMeta(opts.initialMetadata)
 	}
 
 	bs, err := bootstrap.BuildSession(bootstrap.SessionConfig{
@@ -329,6 +332,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Tasks:               m.tasks,
 		MCPDisableSources:   mcpSources,
 		ExtraMCPServers:     extraMCPServers,
+		MCPToolSeed:         mcpToolSeed,
 		Ctx:                 sessionCtx,
 		EnableAskUser:       true,
 		AsyncQuestions:      askAsync,
@@ -755,6 +759,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		attachmentScope: attachScope,
 		askAsync:        askAsync,
 	}
+	sess.mcpCtrl.Store(bs.MCPController)
 	if askAsync {
 		m.questions.attach(sess)
 	}
@@ -1458,6 +1463,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 	// 5. Attach persistence.
 	sp := newServePersister(saved, store, sess.titleState)
 	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
+	sp.mcpTools = sess.mcpToolsSnapshot
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
@@ -2049,6 +2055,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		} else {
 			s.infra.mcpController = nil
 		}
+		s.mcpCtrl.Store(s.infra.mcpController)
 		secretaction.SyncBrowserFillTool(s.infra.toolReg, s.runtime.Context().SecretBroker)
 		s.infra.UntrustedMCP = false
 		s.mu.Unlock()

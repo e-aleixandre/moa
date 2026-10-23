@@ -33,6 +33,10 @@ type servePersister struct {
 	// onSaved runs after every successful save, outside the lock: task notices
 	// count as delivered once they are on disk.
 	onSaved func()
+	// mcpTools returns the session's current MCP tool snapshot for
+	// MetaMCPTools; ok is false when the session has no MCP servers. Nil
+	// leaves whatever the session file held.
+	mcpTools func() (snapshot any, ok bool)
 }
 
 func newServePersister(persisted *session.Session, store *session.FileStore, titleState func() (string, string, bool)) *servePersister {
@@ -54,6 +58,7 @@ func (sp *servePersister) SnapshotAcknowledged(messages []core.AgentMessage, epo
 }
 
 func (sp *servePersister) snapshot(messages []core.AgentMessage, epoch int, metadata map[string]any, acknowledged bool) error {
+	metadata = sp.withMCPTools(metadata)
 	sp.mu.Lock()
 	if sp.deleted || sp.persisted == nil || sp.store == nil {
 		sp.mu.Unlock()
@@ -103,6 +108,7 @@ func (sp *servePersister) SnapshotTreeAcknowledged(entries []session.Entry, leaf
 }
 
 func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, metadata map[string]any, acknowledged bool) error {
+	metadata = sp.withMCPTools(metadata)
 	sp.mu.Lock()
 	if sp.deleted || sp.persisted == nil || sp.store == nil {
 		sp.mu.Unlock()
@@ -138,6 +144,27 @@ func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, m
 	}
 	sp.saved()
 	return nil
+}
+
+// withMCPTools sets the live MCP tool snapshot into a snapshot's metadata, so
+// the saved one is never the stale copy loaded with the session. Called before
+// sp.mu: it reads the session's controller.
+func (sp *servePersister) withMCPTools(metadata map[string]any) map[string]any {
+	if sp.mcpTools == nil {
+		return metadata
+	}
+	snap, ok := sp.mcpTools()
+	sp.mu.Lock()
+	delete(sp.preserved, session.MetaMCPTools)
+	sp.mu.Unlock()
+	if !ok {
+		return metadata
+	}
+	if metadata == nil {
+		metadata = make(map[string]any, 1)
+	}
+	metadata[session.MetaMCPTools] = snap
+	return metadata
 }
 
 func (sp *servePersister) saved() {

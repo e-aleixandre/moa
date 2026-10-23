@@ -43,6 +43,9 @@ type Controller struct {
 	// serverTools is the exact set of tool names currently registered for each
 	// server. It is the source of truth for re-sync, replacing prefix matching.
 	serverTools map[string]map[string]struct{}
+	// serverDefs holds the definitions of those registered tools, for the
+	// session's snapshot (see Snapshot).
+	serverDefs map[string][]ToolDef
 }
 
 // ControllerConfig configures a Controller.
@@ -72,17 +75,34 @@ func NewController(cfg ControllerConfig) *Controller {
 		afterSync:     cfg.AfterSync,
 		policy:        cfg.Policy,
 		serverTools:   map[string]map[string]struct{}{},
+		serverDefs:    map[string][]ToolDef{},
 	}
 	for _, st := range c.mgr.Status() {
-		tools, _ := c.mgr.ToolsForServer(st.Name)
+		tools, defs := c.mgr.toolsAndDefsForServer(st.Name)
 		set := make(map[string]struct{}, len(tools))
 		for _, t := range tools {
 			core.RegisterOrLog(c.reg, t)
 			set[t.Name] = struct{}{}
 		}
 		c.serverTools[st.Name] = set
+		if len(defs) > 0 {
+			c.serverDefs[st.Name] = defs
+		}
 	}
 	return c
+}
+
+// Snapshot returns the definitions of the MCP tools currently registered, by
+// server: what the session offers the model. A restored session hands it to
+// Manager.SeedTools so it offers the same tools before its servers answer.
+func (c *Controller) Snapshot() map[string][]ToolDef {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string][]ToolDef, len(c.serverDefs))
+	for name, defs := range c.serverDefs {
+		out[name] = append([]ToolDef(nil), defs...)
+	}
+	return out
 }
 
 // SetRefreshPrompt sets the prompt-refresh hook after construction. The frontend
@@ -381,7 +401,7 @@ func (c *Controller) resyncServer(name string) {
 	}
 
 	// Register the current generation and rebuild the index.
-	tools, _ := c.mgr.ToolsForServer(name)
+	tools, defs := c.mgr.toolsAndDefsForServer(name)
 	next := make(map[string]struct{}, len(tools))
 	for _, t := range tools {
 		core.RegisterOrLog(c.reg, t)
@@ -391,8 +411,10 @@ func (c *Controller) resyncServer(name string) {
 	c.mu.Lock()
 	if len(next) == 0 {
 		delete(c.serverTools, name)
+		delete(c.serverDefs, name)
 	} else {
 		c.serverTools[name] = next
+		c.serverDefs[name] = defs
 	}
 	c.mu.Unlock()
 	if c.afterSync != nil {
