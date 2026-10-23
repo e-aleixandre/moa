@@ -78,3 +78,10 @@ func TestResultCarriesReferencesAndText(t *testing.T) {
 		t.Fatalf("empty result = %+v", r)
 	}
 }
+
+func TestSearchSelectLoadsExactlyThoseTools(t *testing.T) {
+	got := Search(specs(), "select:mcp__playwright__browser_navigate, list_projects,nope", 8)
+	if len(got) != 2 || got[0] != "mcp__playwright__browser_navigate" || got[1] != "mcp__lovable__list_projects" {
+		t.Fatalf("got %v", got)
+	}
+}

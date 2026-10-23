@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -62,7 +63,7 @@ func Spec(deferred []core.ToolSpec) core.ToolSpec {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Load the tools listed below before using them: they are available but not loaded. "+
-		"Search by keywords or by exact tool name; the matching tools (up to %d, best first) are loaded and can be called "+
+		"Search by keywords, or name the tools with select:<name>[,<name>...]; the matching tools (up to %d, best first) are loaded and can be called "+
 		"right after, for the rest of the conversation (search again after it is compacted). "+
 		"Calling one of these tools without loading it first fails.\n\nMCP servers:", Limit)
 	for _, srv := range servers {
@@ -78,7 +79,7 @@ func Spec(deferred []core.ToolSpec) core.ToolSpec {
 		Name:        Name,
 		Description: b.String(),
 		Parameters: json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{`+
-			`"query":{"type":"string","description":"Keywords describing the action, a server name, or an exact tool name"},`+
+			`"query":{"type":"string","description":"Keywords describing the action, a server name, an exact tool name, or select:<name>[,<name>...]"},`+
 			`"limit":{"type":"integer","description":"Most tools to load (1-%d, default %d)"}},"required":["query"]}`, Limit, Limit)),
 	}
 }
@@ -159,6 +160,24 @@ func Search(deferred []core.ToolSpec, query string, limit int) []string {
 		limit = Limit
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
+	// "select:a,b" names the tools outright. Claude models write it unasked
+	// (it is Claude Code's form), and it must load exactly those.
+	if names, ok := strings.CutPrefix(q, "select:"); ok {
+		var out []string
+		for _, want := range strings.Split(names, ",") {
+			want = strings.TrimSpace(want)
+			for _, s := range deferred {
+				if _, tool := server(s.Name); want != "" && (want == strings.ToLower(s.Name) || want == strings.ToLower(tool)) && !slices.Contains(out, s.Name) {
+					out = append(out, s.Name)
+					break
+				}
+			}
+		}
+		if len(out) > limit {
+			out = out[:limit]
+		}
+		return out
+	}
 	terms := tokenize(q)
 
 	docs := make([][]string, len(deferred))
