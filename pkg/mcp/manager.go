@@ -275,6 +275,16 @@ func (m *Manager) saveTools(name string, cfg core.MCPServer, tools []toolInfo) {
 	_ = os.Rename(f.Name(), path)
 }
 
+// forgetTools drops a server's cached tool listing when its tools are
+// withdrawn because it failed or lost its authorization. Sessions stop
+// offering those tools then, so the next start must not offer them again
+// before the server has answered; a clean shutdown keeps the cache.
+func (m *Manager) forgetTools(name string, cfg core.MCPServer) {
+	if path := m.toolsCachePath(name, cfg); path != "" {
+		_ = os.Remove(path)
+	}
+}
+
 func stopIdleLocked(s *serverSession) {
 	s.idleSeq++
 	if s.idleTimer != nil {

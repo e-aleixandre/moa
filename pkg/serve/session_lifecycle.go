@@ -2034,13 +2034,10 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 				s.infra.toolReg.Unregister(spec.Name)
 			}
 		}
-		// Register new tools.
-		for _, t := range newTools {
-			core.RegisterOrLog(s.infra.toolReg, t)
-		}
 		s.infra.mcpMgr = newMgr
 		// Rebuild the controller over the new manager (the old one pointed at the
-		// now-closed manager) and rewire its prompt refresh.
+		// now-closed manager) and rewire its prompt refresh. It registers the new
+		// manager's tools itself.
 		if newMgr != nil {
 			reg, broker := s.infra.toolReg, s.runtime.Context().SecretBroker
 			s.infra.mcpController = mcp.NewController(mcp.ControllerConfig{

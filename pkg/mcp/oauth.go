@@ -95,6 +95,7 @@ func authFailed(h *oauthHandler, err error) bool {
 // setConnectFailed records a failed connect: StateAuthRequired when the
 // server wants sign-in, StateFailed otherwise.
 func (m *Manager) setConnectFailed(sess *serverSession, cfg core.MCPServer, err error) {
+	m.forgetTools(sess.name, cfg)
 	if errors.Is(err, errAuthRequired) {
 		sess.setAuthRequired(m.authAction(cfg))
 		return
@@ -146,6 +147,7 @@ func (m *Manager) handleAuthLost(sess *serverSession, h *oauthHandler) {
 	if oldSession != nil {
 		_ = oldSession.Close()
 	}
+	m.forgetTools(sess.name, cfg)
 	sess.setAuthRequired(m.authAction(cfg))
 	st := sess.status()
 	m.logger.Warn("MCP server needs sign-in", "server", sess.name)
@@ -209,6 +211,7 @@ func (m *Manager) signOut(sess *serverSession) {
 	defer sess.lifecycle.Unlock()
 	m.mu.Lock()
 	closed := m.closed
+	cfg, hasCfg := m.configs[sess.name]
 	m.mu.Unlock()
 	if closed {
 		return
@@ -217,6 +220,9 @@ func (m *Manager) signOut(sess *serverSession) {
 	if sess.state == StateDisabled || sess.state == StateDisabling {
 		sess.mu.Unlock()
 		return
+	}
+	if hasCfg {
+		m.forgetTools(sess.name, cfg)
 	}
 	sess.gen++
 	oldSession := sess.session

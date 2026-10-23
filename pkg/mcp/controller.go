@@ -58,9 +58,12 @@ type ControllerConfig struct {
 	AfterSync func()
 }
 
-// NewController builds a Controller over an already-started manager and the
-// registry its tools were registered into. It captures the current server→tool
-// name index from the manager so later reconciles can re-sync by exact name.
+// NewController builds a Controller over an already-started manager and
+// registers the manager's current tools into the registry. Registration and
+// the server→tool name index come from the same snapshot: a server that
+// changes state while the session is being built (a cached tool set whose
+// handshake then fails) must not leave registered tools the Controller does
+// not know it owns, or no later re-sync would withdraw them.
 func NewController(cfg ControllerConfig) *Controller {
 	c := &Controller{
 		mgr:           cfg.Manager,
@@ -70,12 +73,12 @@ func NewController(cfg ControllerConfig) *Controller {
 		policy:        cfg.Policy,
 		serverTools:   map[string]map[string]struct{}{},
 	}
-	// Seed the index from what the manager currently exposes, so we own an
-	// accurate picture of which tool names belong to which server.
 	for _, st := range c.mgr.Status() {
-		set := map[string]struct{}{}
-		for _, name := range currentToolNames(c.mgr, st.Name) {
-			set[name] = struct{}{}
+		tools, _ := c.mgr.ToolsForServer(st.Name)
+		set := make(map[string]struct{}, len(tools))
+		for _, t := range tools {
+			core.RegisterOrLog(c.reg, t)
+			set[t.Name] = struct{}{}
 		}
 		c.serverTools[st.Name] = set
 	}
@@ -433,19 +436,4 @@ func canonicalJSON(raw json.RawMessage) string {
 		return string(raw)
 	}
 	return string(out)
-}
-
-// currentToolNames returns the exact registered tool names for one server, from
-// the manager. Used only to seed the index at construction.
-func currentToolNames(mgr *Manager, server string) []string {
-	tools, ok := mgr.ToolsForServer(server)
-	if !ok {
-		return nil
-	}
-	names := make([]string, 0, len(tools))
-	for _, t := range tools {
-		names = append(names, t.Name)
-	}
-	sort.Strings(names)
-	return names
 }

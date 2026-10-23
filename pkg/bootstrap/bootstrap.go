@@ -552,11 +552,8 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		// starts a process (e.g. never launches a Chrome for a disabled
 		// Playwright). Disabled servers still get a placeholder for the panel.
 		mcpMgr.Start(cfg.Ctx, moaCfg.MCPServers, mcpPolicy.DisabledSet())
-		for _, t := range mcpMgr.Tools() {
-			core.RegisterOrLog(toolReg, t)
-		}
-		// The Controller coordinates policy + registry + prompt on top of the
-		// manager. refreshPrompt is wired by the frontend once its runtime
+		// The Controller registers the manager's tools and coordinates
+		// policy + registry + prompt on top of the manager. refreshPrompt is wired by the frontend once its runtime
 		// exists (SetRefreshPrompt); until then reconciles just skip the refresh.
 		mcpController = mcp.NewController(mcp.ControllerConfig{
 			Manager:  mcpMgr,

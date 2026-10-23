@@ -23,6 +23,7 @@ type swappableRemote struct {
 	current atomic.Pointer[sdkmcp.Server]
 	mu      sync.Mutex
 	gate    chan struct{}
+	down    atomic.Bool
 }
 
 func newSwappableRemote(t *testing.T, description string) *swappableRemote {
@@ -40,6 +41,10 @@ func newSwappableRemote(t *testing.T, description string) *swappableRemote {
 			case <-req.Context().Done():
 				return
 			}
+		}
+		if r.down.Load() {
+			http.Error(w, "gone", http.StatusBadGateway)
+			return
 		}
 		handler.ServeHTTP(w, req)
 	}))
@@ -169,5 +174,67 @@ func TestCachedToolWhoseDefinitionChangedIsRefused(t *testing.T) {
 	defer third.Close()
 	if got := third.Tools(); len(got) != 1 || got[0].Description != "Echoes back, louder" {
 		t.Fatalf("next start offers %+v, want the refreshed cache", got)
+	}
+}
+
+// A server whose tools were withdrawn because it failed is not offered again
+// from the cache on the next start: the sessions stopped sending its tools.
+func TestFailedServerIsNotResurrectedFromCache(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	remote := newSwappableRemote(t, "Echoes back")
+	servers := map[string]core.MCPServer{"remote": {URL: remote.url}}
+
+	first := NewManager(nil, "")
+	startWait(t, first, servers, nil)
+	first.Close()
+
+	remote.down.Store(true)
+	second := NewManager(nil, "")
+	startWait(t, second, servers, nil)
+	if st := second.Status()[0]; st.State != StateFailed {
+		t.Fatalf("state = %s, want failed", st.State)
+	}
+	second.Close()
+
+	remote.hold()
+	third := NewManager(nil, "")
+	third.Start(context.Background(), servers, nil)
+	defer third.Close()
+	if got := third.Tools(); len(got) != 0 {
+		t.Fatalf("next start offers %d cached tools of a server that failed", len(got))
+	}
+}
+
+// Tools registered at session construction are owned by the Controller even
+// when the handshake fails before it is built, so the failure withdraws them.
+func TestControllerOwnsToolsOfAServerThatFailedDuringConstruction(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	remote := newSwappableRemote(t, "Echoes back")
+	servers := map[string]core.MCPServer{"remote": {URL: remote.url}}
+	first := NewManager(nil, "")
+	startWait(t, first, servers, nil)
+	first.Close()
+
+	remote.hold()
+	mgr := NewManager(nil, "")
+	mgr.Start(context.Background(), servers, nil)
+	defer mgr.Close()
+	reg := core.NewRegistry()
+	ctrl := NewController(ControllerConfig{Manager: mgr, Registry: reg})
+	if _, ok := reg.Get("mcp__remote__echo"); !ok {
+		t.Fatal("cached tool not registered by the Controller")
+	}
+	remote.down.Store(true)
+	remote.release()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := mgr.WaitSettled(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ctrl.SyncServer("remote")
+	if _, ok := reg.Get("mcp__remote__echo"); ok {
+		t.Fatal("failed server's tool still registered after sync")
 	}
 }
