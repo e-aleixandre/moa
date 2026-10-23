@@ -8,6 +8,8 @@ const InstructionTopicContext = "Recorded decisions and constraints bound what y
 
 // InstructionTopicRecovery is backend-only: the text model has the book and
 // session tools, while Live reasons from the context and brief it receives.
+// It keeps the exact pre-debate wording, including the shared decision rule.
 const InstructionTopicRecovery = "When the owner brings up a topic (\"let's talk about X\"), recover its context before giving an opinion: read its book file (book_list, book_read) or ask_session for the topic context. " +
 	"You need its goal, the decisions that are not reopened, the relevant data or documents, and what is really still to decide. " +
+	InstructionTopicContext + " " +
 	"If you could not recover the context, say so instead of guessing."
