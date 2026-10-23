@@ -8,7 +8,7 @@
     "check:fields": "node scripts/check-fields.mjs"
   },
   "dependencies": {
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.17",
     "highlight.js": "^11.11.1",
     "lucide-preact": "^0.577.0",
     "marked": "^18.0.6",
