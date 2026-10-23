@@ -19,7 +19,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/provider/retry"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
-	"github.com/e-aleixandre/moa/pkg/tool"
+	"github.com/e-aleixandre/moa/pkg/toolsearch"
 )
 
 // doomLoopThreshold is the number of consecutive identical tool-call sets
@@ -1008,9 +1008,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				Model:    cfg.model,
 				System:   cfg.systemPrompt,
 				Messages: reqMessages,
-				Tools:    toolSpecs,
 				Options:  cfg.requestOptions(),
 			}
+			// After the settings above: deferral depends on the provider and
+			// model this request goes to.
+			req.Tools, _ = requestTools(cfg.provider, cfg.model.ID, toolSpecs, cfg.tools)
 			req.Options.AccessProgram = cfg.requestProgram
 			shape.log(req)
 			if !bound && retrySource == nil && apiWorkOrigin != nil && apiWorkOrigin.Model == cfg.model.ID && apiWorkOrigin.OAuthNotBefore != nil && time.Now().Before(*apiWorkOrigin.OAuthNotBefore) {
@@ -1802,6 +1804,13 @@ func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot,
 		Args:       core.CloneArgs(tc.Arguments),
 	})
 	slot.startEmitted = true
+	// A deferred tool the conversation never loaded: its schema and how to
+	// load it, before anyone is asked to approve a call made blind.
+	if spec, unloaded := cfg.unloadedDeferredTool(tc.ToolName); unloaded {
+		slot.rejectReason = toolsearch.NotLoadedText(spec)
+		slot.rejectKind = rejectKindOther
+		return
+	}
 	// Best effort: flush start to subscribers before we might block on
 	// permission checks, so the UI sees the tool call first.
 	if cfg.permissionCheck != nil {
@@ -1831,7 +1840,7 @@ func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot,
 		slot.rejectKind = rejectKindOther
 		return
 	}
-	if err := tool.ValidateToolCall(cfg.tools, tc.ToolName, tc.Arguments); err != nil {
+	if err := validateToolCall(cfg, tc); err != nil {
 		slot.rejectReason = "Parameter validation error: " + err.Error()
 		slot.rejectKind = rejectKindOther
 		slot.validationError = true
@@ -1902,7 +1911,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		if !slots[i].approved {
 			continue
 		}
-		t, _ := cfg.tools.Get(slots[i].tc.ToolName)
+		t, _ := cfg.lookupTool(slots[i].tc.ToolName)
 		effect := t.Effect
 
 		// WritePath with failed LockKey → treat as shell.
@@ -2128,7 +2137,7 @@ func runTool(ctx context.Context, cfg *loopConfig, tc core.Content) (result core
 }
 
 func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, batch *toolBatch) (result core.Result, isError, executed bool) {
-	t, ok := cfg.tools.Get(tc.ToolName)
+	t, ok := cfg.lookupTool(tc.ToolName)
 	if !ok {
 		return core.ErrorResult(fmt.Sprintf("unknown tool: %s", tc.ToolName)), true, false
 	}

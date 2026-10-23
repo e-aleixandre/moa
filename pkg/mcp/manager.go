@@ -1245,6 +1245,7 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 		Label:       label,
 		Description: ti.description,
 		Parameters:  ti.params,
+		Deferrable:  true,
 		Execute: func(ctx context.Context, args map[string]any, onUpdate func(core.Result)) (core.Result, error) {
 			m.mu.Lock()
 			cfg := m.configs[sess.name]

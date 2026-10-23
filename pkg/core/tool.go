@@ -31,6 +31,9 @@ type Tool struct {
 	Execute     ExecuteFunc     `json:"-"`
 	Effect      ToolEffect      `json:"-"` // scheduling hint for conflict-aware execution
 	LockKey     LockKeyFunc     `json:"-"` // required when Effect is EffectWritePath
+	// Deferrable marks a tool the provider may load on demand, through
+	// tool_search, instead of with every request. Only MCP tools set it.
+	Deferrable bool `json:"-"`
 }
 
 // LockKeyFunc returns a canonical path used as a lock key for scheduling.
@@ -114,8 +117,13 @@ type Registry struct {
 // ReservedToolName reports whether name is reserved for an internal tool which
 // must never be supplied by scripts, extensions, or MCP servers.
 func ReservedToolName(name string) bool {
-	return name == "checkpoint"
+	return name == "checkpoint" || name == ToolSearchName
 }
+
+// ToolSearchName is the tool the agent adds to a request whose deferrable
+// tools the provider loads on demand. It is never registered: the agent
+// provides it only while deferral is on, so no other source may claim it.
+const ToolSearchName = "tool_search"
 
 // BuiltinOnlyToolName reports whether name belongs to a builtin that the
 // permission gate trusts by name: the secret-action tools show the owner their

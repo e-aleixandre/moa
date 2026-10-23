@@ -124,6 +124,9 @@ type keepAliveSnapshot struct {
 	msgCount  int
 	lastMsgID string
 	toolsHash [32]byte
+	// provider is where req went: whether its tools were deferred depends on
+	// it, so the next request's tool list is derived against it.
+	provider core.Provider
 }
 
 type keepAlive struct {
@@ -289,7 +292,7 @@ func (ka *keepAlive) sending(req core.Request, provider core.Provider, state *Ag
 			snap = &keepAliveSnapshot{
 				req: ping, pw: pw, sentAt: now, anchor: now, ttl: ttl, every: every,
 				revision: revision, epoch: state.CompactionEpoch, trimMark: state.TrimWatermarkMsgID,
-				msgCount: len(state.Messages), toolsHash: toolsHash(req.Tools),
+				msgCount: len(state.Messages), toolsHash: toolsHash(req.Tools), provider: provider,
 			}
 			if n := len(state.Messages); n > 0 {
 				snap.lastMsgID = state.Messages[n-1].MsgID
@@ -546,7 +549,8 @@ func (a *Agent) keepAliveMatchesLocked(s *keepAliveSnapshot) bool {
 	if len(msgs) < s.msgCount || (s.msgCount > 0 && msgs[s.msgCount-1].MsgID != s.lastMsgID) {
 		return false
 	}
-	return toolsHash(a.tools.Specs()) == s.toolsHash
+	next, _ := requestTools(s.provider, s.req.Model.ID, a.tools.Specs(), a.tools)
+	return toolsHash(next) == s.toolsHash
 }
 
 func cacheTTL(retention string) time.Duration {
