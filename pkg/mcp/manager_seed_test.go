@@ -233,3 +233,40 @@ func TestControllerOwnsToolsOfAServerThatFailedDuringConstruction(t *testing.T) 
 		t.Fatalf("snapshot after withdrawal = %+v, want empty", got)
 	}
 }
+
+// A call waiting for its server's handshake ends with its own context, and
+// within a bound of its own, even when the handshake itself overruns.
+func TestSeededToolCallWaitIsCancellableAndBounded(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	remote := newSwappableRemote(t, "Echoes back")
+	servers := map[string]core.MCPServer{"remote": {URL: remote.url}}
+	snap := discover(t, servers)
+
+	remote.hold()
+	mgr := NewManager(nil, "")
+	mgr.SeedTools(snap)
+	mgr.Start(context.Background(), servers, nil)
+	defer mgr.Close()
+	tool := mgr.Tools()[0]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	began := time.Now()
+	res, err := tool.Execute(ctx, map[string]any{"text": "hi"}, nil)
+	if err != nil || !res.IsError || !strings.Contains(resultText(res), "still connecting") {
+		t.Fatalf("cancelled wait = %+v, %v; want a still-connecting error", res, err)
+	}
+	if waited := time.Since(began); waited > 2*time.Second {
+		t.Fatalf("cancelled call waited %s", waited)
+	}
+
+	old := toolLifecycleWait
+	toolLifecycleWait = 200 * time.Millisecond
+	defer func() { toolLifecycleWait = old }()
+	began = time.Now()
+	res, _ = tool.Execute(context.Background(), map[string]any{"text": "hi"}, nil)
+	if !res.IsError || !strings.Contains(resultText(res), "still connecting") || time.Since(began) > 2*time.Second {
+		t.Fatalf("bounded wait = %+v after %s", res, time.Since(began))
+	}
+}

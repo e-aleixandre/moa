@@ -26,6 +26,35 @@ import (
 
 const serverStartTimeout = 15 * time.Second
 
+// toolLifecycleWait bounds how long a tool call waits for its server's start,
+// restart or enable in progress: the connect deadline plus a margin.
+var toolLifecycleWait = serverStartTimeout + 5*time.Second
+
+var errLifecycleWait = errors.New("timed out waiting for the connection")
+
+// lockWithin acquires mu unless ctx ends or d passes first.
+func lockWithin(ctx context.Context, mu *sync.Mutex, d time.Duration) error {
+	if mu.TryLock() {
+		return nil
+	}
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return errLifecycleWait
+		case <-tick.C:
+			if mu.TryLock() {
+				return nil
+			}
+		}
+	}
+}
+
 // remoteToolCallTimeout caps a tool call against a REMOTE server when the
 // caller's context carries no deadline. A local stdio server dies with its
 // process, so a hung call there resolves itself; a remote peer can accept the
@@ -1225,8 +1254,13 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 				return core.ErrorResult("MCP manager closed"), nil
 			}
 			// lifecycle serializes cold starts; a second caller finds the first
-			// caller's connection instead of spawning another process.
-			sess.lifecycle.Lock()
+			// caller's connection instead of spawning another process. It is
+			// also held by a start, restart or enable in progress, so a call to
+			// a restored tool waits here for its server; the wait has its own
+			// bound because a handshake can outlast its connect deadline.
+			if err := lockWithin(ctx, &sess.lifecycle, toolLifecycleWait); err != nil {
+				return core.ErrorResult(fmt.Sprintf("MCP server %s is still connecting (%v); try again later", sess.name, err)), nil
+			}
 			sess.mu.Lock()
 			idle := sess.state == StateIdle
 			sess.mu.Unlock()
