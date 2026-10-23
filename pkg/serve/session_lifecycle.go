@@ -618,6 +618,19 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		core.RegisterOrLog(bs.ToolReg, newReadSessionTool(m, id, func() *ManagedSession { return sess }))
 	}
 
+	// Bootstrap built the prompt before the tools registered above, and the
+	// prompt lists the tool set. Build it from the final registry: otherwise it
+	// only became complete when an MCP sync rebuilt it, so a restored session,
+	// whose MCP tools come back unchanged, would start with a different prompt
+	// than it had before the restart and lose its prompt cache.
+	if bs.BuildBasePrompt != nil && bs.Agent != nil {
+		if prompt := bs.BuildBasePrompt(bs.ToolReg.Specs()); prompt != bs.Agent.SystemPrompt() {
+			if err := bs.Agent.SetSystemPrompt(prompt); err == nil {
+				bs.SystemPrompt = prompt
+			}
+		}
+	}
+
 	// Build RuntimeConfig from bootstrap session + serve-specific fields.
 	rcfg := bs.RuntimeConfig()
 	rcfg.SessionID = id

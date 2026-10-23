@@ -216,9 +216,6 @@ func (m *Manager) toolsCachePath(name string, cfg core.MCPServer) string {
 }
 
 func (m *Manager) loadTools(name string, cfg core.MCPServer) ([]toolInfo, bool) {
-	if cfg.IsRemote() {
-		return nil, false
-	}
 	path := m.toolsCachePath(name, cfg)
 	if path == "" {
 		return nil, false
@@ -243,9 +240,6 @@ func (m *Manager) loadTools(name string, cfg core.MCPServer) ([]toolInfo, bool) 
 }
 
 func (m *Manager) saveTools(name string, cfg core.MCPServer, tools []toolInfo) {
-	if !cfg.Lazy || cfg.IsRemote() {
-		return
-	}
 	path := m.toolsCachePath(name, cfg)
 	if path == "" {
 		return
@@ -426,9 +420,12 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 		}
 	}
 	sortStrings(names)
+	// The tools a server listed last time are offered again right away, so a
+	// restored conversation sends the same tool definitions (and keeps its
+	// prompt cache) instead of waiting for, or racing, the handshake.
 	cached := make(map[string][]toolInfo)
 	for _, name := range names {
-		if !initiallyDisabled[name] && servers[name].Lazy && !servers[name].IsRemote() {
+		if !initiallyDisabled[name] {
 			if tools, ok := m.loadTools(name, servers[name]); ok {
 				cached[name] = tools
 			}
@@ -465,7 +462,9 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 			sess = &serverSession{name: name, lazy: cfg.Lazy, idleTimeout: cfg.IdleTimeout, state: StateStarting, changedAt: now}
 			if tools, ok := cached[name]; ok {
 				sess.tools = tools
-				sess.state = StateIdle
+				if cfg.Lazy && !cfg.IsRemote() {
+					sess.state = StateIdle
+				}
 			}
 		}
 		sessions[i] = sess
@@ -485,6 +484,10 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 		m.notify(st)
 		cfg := servers[name]
 		if sess.state == StateStarting {
+			// Taken here, not in the goroutine: a call to a cached tool made
+			// before the handshake runs then waits for it on this lock instead
+			// of finding the server still starting.
+			sess.lifecycle.Lock()
 			go m.finishStart(ctx, sess, cfg)
 		}
 	}
@@ -518,8 +521,8 @@ func (m *Manager) settled() bool {
 	return true
 }
 
+// finishStart connects a server whose lifecycle lock Start already holds.
 func (m *Manager) finishStart(ctx context.Context, sess *serverSession, cfg core.MCPServer) {
-	sess.lifecycle.Lock()
 	defer sess.lifecycle.Unlock()
 
 	m.mu.Lock()
@@ -1187,26 +1190,42 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 			if lostState {
 				sess.lostState = false
 			}
-			present := false
+			present, changed := false, false
 			for _, tool := range sess.tools {
 				if tool.name == toolName {
 					present = true
+					// The model was given ti; a server that came back with a
+					// different definition must not receive arguments built
+					// for the old one. The registry takes the new definition
+					// once the turn ends.
+					changed = tool.description != ti.description || canonicalJSON(tool.params) != canonicalJSON(ti.params)
 					break
 				}
 			}
+			errText := sess.err
 			if session != nil {
-				if present {
+				if present && !changed {
 					stopIdleLocked(sess)
 					sess.active++
 				}
 			}
 			sess.mu.Unlock()
-			if session != nil && !present && idle && cfg.Lazy && cfg.IdleTimeout == "" {
+			if session != nil && (!present || changed) && idle && cfg.Lazy && cfg.IdleTimeout == "" {
 				m.parkIdle(sess)
 			}
 			sess.lifecycle.Unlock()
 			if session == nil {
-				return core.ErrorResult(fmt.Sprintf("MCP server %s is %s", sess.name, state)), nil
+				msg := fmt.Sprintf("MCP server %s is %s", sess.name, state)
+				if errText != "" {
+					msg += ": " + errText
+				}
+				return core.ErrorResult(msg), nil
+			}
+			if changed {
+				if cfg.IdleTimeout != "" {
+					m.armIdle(sess, cfg)
+				}
+				return noteLostMCPState(core.ErrorResult(fmt.Sprintf("MCP tool %s changed its definition when the server reconnected; the updated definition is available from the next turn", label)), lostState), nil
 			}
 			if !present {
 				if cfg.IdleTimeout != "" {

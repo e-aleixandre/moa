@@ -75,6 +75,7 @@ func Run(m *testing.M) (code int) {
 	env := map[string]string{
 		"HOME":            home,
 		"XDG_CONFIG_HOME": filepath.Join(sandbox, "xdg"),
+		"XDG_CACHE_HOME":  filepath.Join(sandbox, "cache"),
 		"TMPDIR":          tmp,
 		protectedEnv:      strings.Join(roots, string(os.PathListSeparator)),
 	}
