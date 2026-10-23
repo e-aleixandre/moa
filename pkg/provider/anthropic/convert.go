@@ -357,37 +357,32 @@ func newToolIndex(specs []core.ToolSpec) toolIndex {
 }
 
 // toolResultContent is the content of a tool result as this request can
-// send it. A result whose references all point at deferred definitions goes
-// as references only, which the API expands; its text, which only names
-// them, would just repeat them. Any other result with references (a server
-// since removed, or deferral off for this request) goes without them, since
-// one unresolvable reference would 400 the session for good. Its text still
-// names the tools, and a line says which of them are gone.
+// send it. The references that point at deferred definitions of this request
+// go alone, which the API expands; the text, which only names them, would
+// just repeat them. A reference that does not resolve (a server since
+// removed, or deferral off for this request) is dropped, since it would 400
+// the session for good. When none resolves, the text goes instead, with a
+// line naming the tools that are gone.
 func toolResultContent(blocks []core.Content, idx toolIndex, isOAuth bool) []core.Content {
-	var refs, rest []core.Content
-	resolvable := true
+	var refs, resolved, rest []core.Content
 	for _, b := range blocks {
 		if b.Type != "tool_reference" {
 			rest = append(rest, b)
 			continue
 		}
 		refs = append(refs, b)
-		if !idx.deferred[b.ToolName] {
-			resolvable = false
+		if idx.deferred[b.ToolName] {
+			if isOAuth {
+				b.ToolName = toClaudeCodeName(b.ToolName)
+			}
+			resolved = append(resolved, b)
 		}
 	}
 	if len(refs) == 0 {
 		return blocks
 	}
-	if resolvable {
-		out := make([]core.Content, len(refs))
-		for i, r := range refs {
-			if isOAuth {
-				r.ToolName = toClaudeCodeName(r.ToolName)
-			}
-			out[i] = r
-		}
-		return out
+	if len(resolved) > 0 {
+		return resolved
 	}
 	var gone []string
 	for _, r := range refs {

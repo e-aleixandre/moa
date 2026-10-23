@@ -87,7 +87,7 @@ func (a *Anthropic) BindsThinkingPrefix(modelID string) bool { return bindsThink
 // demand: every model since the 4.5 family, unless a request was already
 // refused for it (see Stream).
 func (a *Anthropic) SupportsDeferredTools(modelID string) bool {
-	if _, refused := deferralRefused.Load(deferralKey(a.baseURL, a.isOAuth, modelID)); refused {
+	if _, refused := deferralRefused.Load(deferralKey(a.baseURL, modelID)); refused {
 		return false
 	}
 	return modelDefersTools(modelID)
@@ -105,14 +105,16 @@ func modelDefersTools(modelID string) bool {
 	return true
 }
 
-// deferralRefused remembers, for the life of the process, the endpoint,
-// transport and model combinations that rejected deferred tools, so their
-// later requests send the full list straight away. Providers are built per
-// request, so this cannot live on one.
+// deferralRefused remembers, for the life of the process, the endpoint and
+// model combinations that rejected deferred tools, so their later requests
+// send the full list straight away. Providers are built per request, so this
+// cannot live on one. The credential kind is not part of the key: the
+// capability is asked of the selected login, while a request may go out on
+// the API backup, and a refusal must reach both.
 var deferralRefused sync.Map
 
-func deferralKey(baseURL string, oauth bool, modelID string) string {
-	return fmt.Sprintf("%s|%t|%s", baseURL, oauth, modelID)
+func deferralKey(baseURL, modelID string) string {
+	return baseURL + "|" + modelID
 }
 
 func hasDeferred(specs []core.ToolSpec) bool {
@@ -268,8 +270,10 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		if refusal && hasDeferred(req.Tools) && !errors.Is(markLowCredit(errors.New(errText), resp.StatusCode, errBody), core.ErrAnthropicLowCredit) {
 			ch, err := a.Stream(ctx, withoutDeferral(req))
 			if err == nil {
-				deferralRefused.Store(deferralKey(a.baseURL, oauthMode, req.Model.ID), true)
-				slog.Warn("anthropic: deferred tools refused; sending the full tool list", "model", req.Model.ID, "status", resp.StatusCode, "error", errText)
+				deferralRefused.Store(deferralKey(a.baseURL, req.Model.ID), true)
+				// No body: an upstream error can echo what was sent, and this
+				// log is outside the redaction applied to returned errors.
+				slog.Warn("anthropic: deferred tools refused; sending the full tool list", "model", req.Model.ID, "status", resp.StatusCode)
 			}
 			return ch, err
 		}

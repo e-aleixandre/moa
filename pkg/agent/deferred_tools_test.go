@@ -211,3 +211,41 @@ func TestKeepAlivePingsWithDeferredTools(t *testing.T) {
 		t.Fatalf("pings = %d, want 1", got)
 	}
 }
+
+type flippingProvider struct {
+	*MockProvider
+	defers atomic.Bool
+}
+
+func (p *flippingProvider) SupportsDeferredTools(string) bool { return p.defers.Load() }
+
+// A tool_search the model called against the request it got still runs when
+// deferral was refused meanwhile (the provider's full-list fallback).
+func TestToolSearchRunsAfterDeferralIsRefused(t *testing.T) {
+	var n atomic.Int32
+	reg := deferredTestRegistry(t, &n)
+	var results []core.Message
+	prov := &flippingProvider{}
+	prov.defers.Store(true)
+	prov.MockProvider = NewMockProvider(
+		func(req core.Request) (<-chan core.AssistantEvent, error) {
+			prov.defers.Store(false)
+			return toolCallResponse("c1", toolsearch.Name, map[string]any{"query": "click"})(req)
+		},
+		func(req core.Request) (<-chan core.AssistantEvent, error) {
+			results = append(results, req.Messages[len(req.Messages)-1])
+			return simpleTextResponse("done")(req)
+		},
+	)
+	ag, err := New(AgentConfig{Provider: prov, Model: core.Model{ID: "m", Provider: "anthropic"}, SystemPrompt: "s", Tools: reg,
+		MaxTurns: 4, MaxToolCallsPerTurn: 5, MaxRunDuration: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ag.Run(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].IsError || !strings.Contains(results[0].Content[0].Text, "Loaded tools") {
+		t.Fatalf("search after refusal = %+v", results)
+	}
+}

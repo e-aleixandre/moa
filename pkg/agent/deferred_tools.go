@@ -44,17 +44,29 @@ func requestTools(p core.Provider, modelID string, specs []core.ToolSpec, reg *c
 	return specs, deferred
 }
 
-// lookupTool resolves a call's tool: tool_search while deferral is on, the
-// registry otherwise. It is re-derived on each lookup rather than kept from
-// the request, so a call outside an iteration (a resumed batch) finds it too.
+// lookupTool resolves a call's tool: tool_search over the registry's
+// deferrable tools, or a registered tool. tool_search runs whenever there is
+// something to search, not only while the provider defers: a call the model
+// made against an advertised tool_search must not fail because deferral was
+// refused meanwhile (its results then go as text, with every tool loaded).
 func (cfg *loopConfig) lookupTool(name string) (core.Tool, bool) {
 	if name == toolsearch.Name {
-		if _, deferred := requestTools(cfg.provider, cfg.model.ID, cfg.tools.Specs(), cfg.tools); len(deferred) > 0 {
+		if deferred := deferrableSpecs(cfg.tools); len(deferred) > 0 {
 			return toolsearch.Tool(deferred), true
 		}
 		return core.Tool{}, false
 	}
 	return cfg.tools.Get(name)
+}
+
+func deferrableSpecs(reg *core.Registry) []core.ToolSpec {
+	var out []core.ToolSpec
+	for _, t := range reg.All() {
+		if t.Deferrable {
+			out = append(out, t.Spec())
+		}
+	}
+	return out
 }
 
 // unloadedDeferredTool returns the definition of a deferred tool that this

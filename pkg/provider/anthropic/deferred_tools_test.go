@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -248,5 +249,55 @@ func TestOldModelsDoNotDefer(t *testing.T) {
 		if got := modelDefersTools(id); got != want {
 			t.Errorf("%s: %v, want %v", id, got, want)
 		}
+	}
+}
+
+// A search whose tools are partly gone still loads the ones that remain.
+func TestPartlyOrphanSearchKeepsSurvivingReferences(t *testing.T) {
+	model, _ := core.ResolveModel("claude-opus-5-5")
+	msgs := searchHistory("mcp__playwright__browser_click")
+	msgs[2].Content = append(msgs[2].Content, core.ToolReferenceContent("mcp__gone__thing"))
+	b := buildWire(t, core.Request{Model: model, Messages: msgs, Tools: deferredSpecs()}, true)
+	var result struct {
+		Content []map[string]any `json:"content"`
+	}
+	_ = json.Unmarshal(b.Messages[2].Content[0], &result)
+	if len(result.Content) != 1 || result.Content[0]["type"] != "tool_reference" || result.Content[0]["tool_name"] != "mcp__playwright__browser_click" {
+		t.Fatalf("result = %+v, want only the surviving reference", result.Content)
+	}
+}
+
+// The refusal reaches every credential kind on the endpoint: the capability
+// is asked of the selected login, the request may go out on the API backup.
+// Its log carries no upstream body, which can echo what was sent.
+func TestDeferralRefusalIsPerEndpointAndLogsNoBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(raw), "defer_loading") {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"type":"error","error":{"type":"invalid_request_error","message":"echo SYNTHETIC-SECRET"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, okSSE)
+	}))
+	defer srv.Close()
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+
+	model, _ := core.ResolveModel("claude-opus-5-5")
+	api := NewWithBaseURL("sk-ant-api03-test", srv.URL)
+	ch, err := api.Stream(context.Background(), core.Request{Model: model, Messages: []core.Message{core.NewUserMessage("hi")}, Tools: deferredSpecs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(t, ch)
+	if NewWithBaseURL("sk-ant-oat01-test", srv.URL).SupportsDeferredTools(model.ID) {
+		t.Fatal("an API refusal must stop deferral for the OAuth login on the same endpoint")
+	}
+	if strings.Contains(logs.String(), "SYNTHETIC-SECRET") || !strings.Contains(logs.String(), "deferred tools refused") {
+		t.Fatalf("log = %s", logs.String())
 	}
 }
