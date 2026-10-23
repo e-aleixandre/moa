@@ -139,6 +139,11 @@ const (
 	// MetaCreatorTZ is the IANA timezone of the device that created the
 	// session. Absent when unknown (older sessions, the CLI).
 	MetaCreatorTZ = "creator_tz"
+	// MetaMCPTools is the session's snapshot of the MCP tools it offers the
+	// model, by server, with each schema's exact bytes. A restored session
+	// offers the same ones before its servers reconnect, so a restart does
+	// not rewrite its prompt cache. Absent in older sessions.
+	MetaMCPTools = "mcp_tools"
 )
 
 // KindOwner marks the conversation of a project owner. Such a session is a
@@ -165,7 +170,7 @@ const OriginUser = "user"
 // does not know about. The persistence reactor rebuilds Metadata from scratch
 // on every snapshot, so persisters must carry these forward or they would be
 // dropped on the first save after creation.
-var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind, MetaOwnerDetached, MetaLegacyTasks, MetaCreatorTZ, MetaVoiceWake, MetaVoiceRelays}
+var preservedMetadataKeys = []string{MetaOrigin, MetaIdempotencyKey, MetaCallbackURL, MetaCallbackSecret, MetaAutomationCreated, MetaMCPServers, MetaKind, MetaOwnerDetached, MetaLegacyTasks, MetaCreatorTZ, MetaVoiceWake, MetaVoiceRelays, MetaMCPTools}
 
 // SetOrigin records who created the session (e.g. "user", "automation", or a
 // caller-chosen label such as "linear-webhook"). An empty origin is not stored:

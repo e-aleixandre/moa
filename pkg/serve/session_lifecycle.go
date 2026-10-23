@@ -198,6 +198,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 
 	sp := newServePersister(persisted, store, sess.titleState)
 	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
+	sp.mcpTools = sess.mcpToolsSnapshot
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
@@ -312,10 +313,12 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	var notifyOn bool
 
 	var extraMCPServers map[string]core.MCPServer
+	var mcpToolSeed map[string][]mcp.ToolDef
 	var creatorTZ string
 	if opts != nil {
 		extraMCPServers = opts.extraMCPServers
 		creatorTZ = opts.creatorTZ
+		mcpToolSeed = mcpToolSeedFromMeta(opts.initialMetadata)
 	}
 
 	bs, err := bootstrap.BuildSession(bootstrap.SessionConfig{
@@ -329,6 +332,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Tasks:               m.tasks,
 		MCPDisableSources:   mcpSources,
 		ExtraMCPServers:     extraMCPServers,
+		MCPToolSeed:         mcpToolSeed,
 		Ctx:                 sessionCtx,
 		EnableAskUser:       true,
 		AsyncQuestions:      askAsync,
@@ -618,6 +622,19 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		core.RegisterOrLog(bs.ToolReg, newReadSessionTool(m, id, func() *ManagedSession { return sess }))
 	}
 
+	// Bootstrap built the prompt before the tools registered above, and the
+	// prompt lists the tool set. Build it from the final registry: otherwise it
+	// only became complete when an MCP sync rebuilt it, so a restored session,
+	// whose MCP tools come back unchanged, would start with a different prompt
+	// than it had before the restart and lose its prompt cache.
+	if bs.BuildBasePrompt != nil && bs.Agent != nil {
+		if prompt := bs.BuildBasePrompt(bs.ToolReg.Specs()); prompt != bs.Agent.SystemPrompt() {
+			if err := bs.Agent.SetSystemPrompt(prompt); err == nil {
+				bs.SystemPrompt = prompt
+			}
+		}
+	}
+
 	// Build RuntimeConfig from bootstrap session + serve-specific fields.
 	rcfg := bs.RuntimeConfig()
 	rcfg.SessionID = id
@@ -742,6 +759,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		attachmentScope: attachScope,
 		askAsync:        askAsync,
 	}
+	sess.mcpCtrl.Store(bs.MCPController)
 	if askAsync {
 		m.questions.attach(sess)
 	}
@@ -1445,6 +1463,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 	// 5. Attach persistence.
 	sp := newServePersister(saved, store, sess.titleState)
 	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
+	sp.mcpTools = sess.mcpToolsSnapshot
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
@@ -2021,13 +2040,10 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 				s.infra.toolReg.Unregister(spec.Name)
 			}
 		}
-		// Register new tools.
-		for _, t := range newTools {
-			core.RegisterOrLog(s.infra.toolReg, t)
-		}
 		s.infra.mcpMgr = newMgr
 		// Rebuild the controller over the new manager (the old one pointed at the
-		// now-closed manager) and rewire its prompt refresh.
+		// now-closed manager) and rewire its prompt refresh. It registers the new
+		// manager's tools itself.
 		if newMgr != nil {
 			reg, broker := s.infra.toolReg, s.runtime.Context().SecretBroker
 			s.infra.mcpController = mcp.NewController(mcp.ControllerConfig{
@@ -2039,6 +2055,7 @@ func (s *ManagedSession) reloadMCP(sessionCfg core.MoaConfig) error {
 		} else {
 			s.infra.mcpController = nil
 		}
+		s.mcpCtrl.Store(s.infra.mcpController)
 		secretaction.SyncBrowserFillTool(s.infra.toolReg, s.runtime.Context().SecretBroker)
 		s.infra.UntrustedMCP = false
 		s.mu.Unlock()

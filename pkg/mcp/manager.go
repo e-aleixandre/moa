@@ -26,6 +26,35 @@ import (
 
 const serverStartTimeout = 15 * time.Second
 
+// toolLifecycleWait bounds how long a tool call waits for its server's start,
+// restart or enable in progress: the connect deadline plus a margin.
+var toolLifecycleWait = serverStartTimeout + 5*time.Second
+
+var errLifecycleWait = errors.New("timed out waiting for the connection")
+
+// lockWithin acquires mu unless ctx ends or d passes first.
+func lockWithin(ctx context.Context, mu *sync.Mutex, d time.Duration) error {
+	if mu.TryLock() {
+		return nil
+	}
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return errLifecycleWait
+		case <-tick.C:
+			if mu.TryLock() {
+				return nil
+			}
+		}
+	}
+}
+
 // remoteToolCallTimeout caps a tool call against a REMOTE server when the
 // caller's context carries no deadline. A local stdio server dies with its
 // process, so a hung call there resolves itself; a remote peer can accept the
@@ -116,6 +145,9 @@ type Manager struct {
 	configs  map[string]core.MCPServer // last config per server, for restart
 	onChange func(ServerStatus)        // notified on any state transition (may be nil)
 	closed   bool
+	// seed is a restored session's snapshot of the tools it was offering,
+	// by server; nil when there is none (see SeedTools).
+	seed map[string][]ToolDef
 
 	// oauthStore holds the OAuth tokens of remote servers; process-wide, so an
 	// authorization done from one session reaches every manager.
@@ -183,6 +215,33 @@ type toolInfo struct {
 	name        string
 	description string
 	params      json.RawMessage
+}
+
+// ToolDef is one MCP tool exactly as a server listed it: its own name (not
+// the prefixed registry name), description and input schema bytes.
+type ToolDef struct {
+	Name        string
+	Description string
+	Params      json.RawMessage
+}
+
+func toolInfosFromDefs(defs []ToolDef) []toolInfo {
+	out := make([]toolInfo, 0, len(defs))
+	for _, d := range defs {
+		out = append(out, toolInfo{name: d.Name, description: d.Description, params: d.Params})
+	}
+	return out
+}
+
+// SeedTools gives Start a restored session's snapshot of the tools it was
+// offering, by server. Start offers exactly those for each configured server
+// (none for a server absent from it) until the server answers. A nil seed
+// keeps the default: no tools before the handshake, except a lazy server's
+// discovery cache. Call it before Start.
+func (m *Manager) SeedTools(seed map[string][]ToolDef) {
+	m.mu.Lock()
+	m.seed = seed
+	m.mu.Unlock()
 }
 
 type cachedTool struct {
@@ -426,9 +485,26 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 		}
 	}
 	sortStrings(names)
+	// A restored session's own snapshot says which tools it was offering, so
+	// they are offered again right away, byte for byte, instead of waiting
+	// for (or racing) the handshake: changing them would rewrite the prompt
+	// cache. Without a snapshot, lazy servers fall back to their discovery
+	// cache.
+	m.mu.Lock()
+	seed := m.seed
+	m.mu.Unlock()
 	cached := make(map[string][]toolInfo)
 	for _, name := range names {
-		if !initiallyDisabled[name] && servers[name].Lazy && !servers[name].IsRemote() {
+		if initiallyDisabled[name] {
+			continue
+		}
+		if seed != nil {
+			if defs, ok := seed[name]; ok && len(defs) > 0 {
+				cached[name] = toolInfosFromDefs(defs)
+			}
+			continue
+		}
+		if servers[name].Lazy && !servers[name].IsRemote() {
 			if tools, ok := m.loadTools(name, servers[name]); ok {
 				cached[name] = tools
 			}
@@ -465,7 +541,9 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 			sess = &serverSession{name: name, lazy: cfg.Lazy, idleTimeout: cfg.IdleTimeout, state: StateStarting, changedAt: now}
 			if tools, ok := cached[name]; ok {
 				sess.tools = tools
-				sess.state = StateIdle
+				if cfg.Lazy && !cfg.IsRemote() {
+					sess.state = StateIdle
+				}
 			}
 		}
 		sessions[i] = sess
@@ -485,6 +563,10 @@ func (m *Manager) Start(ctx context.Context, servers map[string]core.MCPServer, 
 		m.notify(st)
 		cfg := servers[name]
 		if sess.state == StateStarting {
+			// Taken here, not in the goroutine: a call to a cached tool made
+			// before the handshake runs then waits for it on this lock instead
+			// of finding the server still starting.
+			sess.lifecycle.Lock()
 			go m.finishStart(ctx, sess, cfg)
 		}
 	}
@@ -518,8 +600,8 @@ func (m *Manager) settled() bool {
 	return true
 }
 
+// finishStart connects a server whose lifecycle lock Start already holds.
 func (m *Manager) finishStart(ctx context.Context, sess *serverSession, cfg core.MCPServer) {
-	sess.lifecycle.Lock()
 	defer sess.lifecycle.Unlock()
 
 	m.mu.Lock()
@@ -738,6 +820,27 @@ func (m *Manager) ToolsForServer(name string) ([]core.Tool, bool) {
 		out = append(out, m.wrapTool(sess, ti))
 	}
 	return out, true
+}
+
+// toolsAndDefsForServer is ToolsForServer plus the definitions those tools
+// were built from, read in one step so the two always agree.
+func (m *Manager) toolsAndDefsForServer(name string) ([]core.Tool, []ToolDef) {
+	m.mu.Lock()
+	sess, ok := m.byName[name]
+	m.mu.Unlock()
+	if !ok {
+		return nil, nil
+	}
+	sess.mu.Lock()
+	infos := append([]toolInfo(nil), sess.tools...)
+	sess.mu.Unlock()
+	tools := make([]core.Tool, 0, len(infos))
+	defs := make([]ToolDef, 0, len(infos))
+	for _, ti := range infos {
+		tools = append(tools, m.wrapTool(sess, ti))
+		defs = append(defs, ToolDef{Name: ti.name, Description: ti.description, Params: ti.params})
+	}
+	return tools, defs
 }
 
 // Status returns an immutable snapshot of every server's health, in config
@@ -1151,8 +1254,13 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 				return core.ErrorResult("MCP manager closed"), nil
 			}
 			// lifecycle serializes cold starts; a second caller finds the first
-			// caller's connection instead of spawning another process.
-			sess.lifecycle.Lock()
+			// caller's connection instead of spawning another process. It is
+			// also held by a start, restart or enable in progress, so a call to
+			// a restored tool waits here for its server; the wait has its own
+			// bound because a handshake can outlast its connect deadline.
+			if err := lockWithin(ctx, &sess.lifecycle, toolLifecycleWait); err != nil {
+				return core.ErrorResult(fmt.Sprintf("MCP server %s is still connecting (%v); try again later", sess.name, err)), nil
+			}
 			sess.mu.Lock()
 			idle := sess.state == StateIdle
 			sess.mu.Unlock()
@@ -1187,26 +1295,42 @@ func (m *Manager) wrapTool(sess *serverSession, ti toolInfo) core.Tool {
 			if lostState {
 				sess.lostState = false
 			}
-			present := false
+			present, changed := false, false
 			for _, tool := range sess.tools {
 				if tool.name == toolName {
 					present = true
+					// The model was given ti; a server that came back with a
+					// different definition must not receive arguments built
+					// for the old one. The registry takes the new definition
+					// once the turn ends.
+					changed = tool.description != ti.description || canonicalJSON(tool.params) != canonicalJSON(ti.params)
 					break
 				}
 			}
+			errText := sess.err
 			if session != nil {
-				if present {
+				if present && !changed {
 					stopIdleLocked(sess)
 					sess.active++
 				}
 			}
 			sess.mu.Unlock()
-			if session != nil && !present && idle && cfg.Lazy && cfg.IdleTimeout == "" {
+			if session != nil && (!present || changed) && idle && cfg.Lazy && cfg.IdleTimeout == "" {
 				m.parkIdle(sess)
 			}
 			sess.lifecycle.Unlock()
 			if session == nil {
-				return core.ErrorResult(fmt.Sprintf("MCP server %s is %s", sess.name, state)), nil
+				msg := fmt.Sprintf("MCP server %s is %s", sess.name, state)
+				if errText != "" {
+					msg += ": " + errText
+				}
+				return core.ErrorResult(msg), nil
+			}
+			if changed {
+				if cfg.IdleTimeout != "" {
+					m.armIdle(sess, cfg)
+				}
+				return noteLostMCPState(core.ErrorResult(fmt.Sprintf("MCP tool %s changed its definition when the server reconnected; the updated definition is available from the next turn", label)), lostState), nil
 			}
 			if !present {
 				if cfg.IdleTimeout != "" {
