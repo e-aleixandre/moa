@@ -16,6 +16,7 @@ import (
 //	"image"     → Data, MimeType
 //	"document"  → Data, MimeType, Filename
 //	"tool_call" → ToolCallID, ToolName, Arguments
+//	"tool_reference" → ToolName (a deferred tool a tool_search result loads)
 type Content struct {
 	Type string `json:"type"`
 
@@ -70,6 +71,13 @@ func DocumentContent(data, mime, filename string) Content {
 	return Content{Type: "document", Data: data, MimeType: mime, Filename: filename}
 }
 func ThinkingContent(text string) Content { return Content{Type: "thinking", Thinking: text} }
+
+// ToolReferenceContent points a tool result at a deferred tool, which the
+// provider then loads into the model's context. Codecs that do not defer
+// tools ignore it; the result also carries text for them.
+func ToolReferenceContent(name string) Content {
+	return Content{Type: "tool_reference", ToolName: name}
+}
 func ToolCallContent(id, name string, args map[string]any) Content {
 	return Content{Type: "tool_call", ToolCallID: id, ToolName: name, Arguments: args}
 }

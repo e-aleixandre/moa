@@ -1533,6 +1533,11 @@ func buildChildRegistry(parent *core.Registry, params map[string]any, readOnlyFi
 			if excludedTools[name] {
 				continue
 			}
+			// tool_search is not inherited: the child's own loop provides it
+			// for the MCP tools it receives.
+			if name == core.ToolSearchName {
+				continue
+			}
 			res := core.ErrorResult("unknown tool: " + name)
 			return nil, &res
 		}

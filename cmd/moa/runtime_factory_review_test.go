@@ -88,3 +88,23 @@ func TestRound2RuntimeFactoryKeepsPrefixAcrossRuns(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeFactoryExposesAnthropicThinkingPrefixBinding(t *testing.T) {
+	clearProviderEnv(t)
+	client := &http.Client{Transport: &round2Capture{}}
+	store := auth.NewStoreWithHTTPClient(filepath.Join(t.TempDir(), "auth.json"), client)
+	if _, err := store.CommitLogin("anthropic", "", auth.Credential{Type: "oauth", Access: "offline-review-no-valid-token", Refresh: "offline-refresh", Expires: time.Now().Add(time.Hour).UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	m := core.Model{Provider: "anthropic", ID: "claude-opus-5-5"}
+	built, err := buildProviderWithClient(m, store, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !core.ProviderBindsThinkingPrefix(built.Provider, m.ID) {
+		t.Fatalf("production factory returned %T, which hides thinking-prefix binding", built.Provider)
+	}
+	if core.ProviderHasImplicitPrefixCache(built.Provider, m.ID) {
+		t.Fatal("Anthropic places its own breakpoints; it must not report an implicit prefix cache")
+	}
+}

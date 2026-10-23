@@ -59,7 +59,8 @@ func ProviderSupportsDocuments(p Provider) bool {
 // reuses the longest matching request prefix with no cache breakpoint of its
 // own for modelID, so nothing keeps a request-only block out of that prefix.
 // Providers that place breakpoints before the ephemeral block (Anthropic) must
-// not implement it: moving the block would break the prefix they cache.
+// not implement it; they anchor the block only for the thinking they bind to
+// the prefix (ThinkingPrefixBindingProvider).
 type ImplicitPrefixCacheProvider interface {
 	ImplicitPrefixCache(modelID string) bool
 }
@@ -70,6 +71,56 @@ func ProviderHasImplicitPrefixCache(p Provider, modelID string) bool {
 	for p != nil {
 		if ic, ok := p.(ImplicitPrefixCacheProvider); ok {
 			return ic.ImplicitPrefixCache(modelID)
+		}
+		unwrapper, ok := p.(ProviderUnwrapper)
+		if !ok {
+			return false
+		}
+		p = unwrapper.Unwrap()
+	}
+	return false
+}
+
+// ThinkingPrefixBindingProvider is optionally implemented by a provider that,
+// for modelID, binds signed thinking to the exact request prefix it followed
+// and drops it once that prefix changes (Anthropic's block_binding). Moving a
+// request-only block off its place edits that prefix and costs the model the
+// reasoning of every turn after it, so the agent keeps the block anchored
+// while unchanged, as with an implicit prefix cache.
+type ThinkingPrefixBindingProvider interface {
+	BindsThinkingPrefix(modelID string) bool
+}
+
+// ProviderBindsThinkingPrefix reports whether p, following decorators, binds
+// thinking to its request prefix for modelID. Unknown providers report false.
+func ProviderBindsThinkingPrefix(p Provider, modelID string) bool {
+	for p != nil {
+		if bp, ok := p.(ThinkingPrefixBindingProvider); ok {
+			return bp.BindsThinkingPrefix(modelID)
+		}
+		unwrapper, ok := p.(ProviderUnwrapper)
+		if !ok {
+			return false
+		}
+		p = unwrapper.Unwrap()
+	}
+	return false
+}
+
+// DeferredToolsProvider is optionally implemented by a provider that, for
+// modelID, accepts deferred tool definitions (ToolSpec.Deferred) and expands
+// the tool_reference blocks of a tool_search result into them.
+type DeferredToolsProvider interface {
+	SupportsDeferredTools(modelID string) bool
+}
+
+// ProviderSupportsDeferredTools reports whether p, following decorators,
+// loads deferred tools on demand for modelID. Unknown providers report false:
+// they get every definition, as before.
+func ProviderSupportsDeferredTools(p Provider, modelID string) bool {
+	for p != nil {
+		if dp, ok := p.(DeferredToolsProvider); ok {
+			return dp.SupportsDeferredTools(modelID)
 		}
 		unwrapper, ok := p.(ProviderUnwrapper)
 		if !ok {
@@ -95,6 +146,10 @@ type ToolSpec struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
+	// Deferred asks the provider to keep the definition out of the model's
+	// context until a tool_search result references it. Set only by the agent,
+	// and only for a provider that reports SupportsDeferredTools.
+	Deferred bool `json:"deferred,omitempty"`
 }
 
 // Model identifies an LLM model.

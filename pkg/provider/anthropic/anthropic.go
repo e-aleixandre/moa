@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -76,6 +78,65 @@ func (a *Anthropic) IsOAuth() bool {
 // SupportsDocuments returns true: Anthropic document blocks are GA for both
 // API-key and OAuth auth.
 func (a *Anthropic) SupportsDocuments() bool { return true }
+
+// BindsThinkingPrefix is true for the models whose requests carry
+// block_binding: their signed thinking survives only an unchanged prefix.
+func (a *Anthropic) BindsThinkingPrefix(modelID string) bool { return bindsThinkingPrefix(modelID) }
+
+// SupportsDeferredTools reports whether modelID loads deferred tools on
+// demand: every model since the 4.5 family, unless a request was already
+// refused for it (see Stream).
+func (a *Anthropic) SupportsDeferredTools(modelID string) bool {
+	if _, refused := deferralRefused.Load(deferralKey(a.baseURL, modelID)); refused {
+		return false
+	}
+	return modelDefersTools(modelID)
+}
+
+// modelDefersTools is false for the models that predate tool search: Claude 3
+// and the 4.0 and 4.1 releases.
+func modelDefersTools(modelID string) bool {
+	id := strings.ToLower(modelID)
+	for _, old := range []string{"claude-3", "claude-opus-4-0", "claude-opus-4-1", "claude-opus-4-2025", "claude-sonnet-4-0", "claude-sonnet-4-2025"} {
+		if strings.HasPrefix(id, old) {
+			return false
+		}
+	}
+	return true
+}
+
+// deferralRefused remembers, for the life of the process, the endpoint and
+// model combinations that rejected deferred tools, so their later requests
+// send the full list straight away. Providers are built per request, so this
+// cannot live on one. The credential kind is not part of the key: the
+// capability is asked of the selected login, while a request may go out on
+// the API backup, and a refusal must reach both.
+var deferralRefused sync.Map
+
+func deferralKey(baseURL, modelID string) string {
+	return baseURL + "|" + modelID
+}
+
+func hasDeferred(specs []core.ToolSpec) bool {
+	for _, s := range specs {
+		if s.Deferred {
+			return true
+		}
+	}
+	return false
+}
+
+// withoutDeferral is req with every tool loaded up front. Its tool_search
+// results then go as text (toolResultContent), as nothing is deferred.
+func withoutDeferral(req core.Request) core.Request {
+	tools := make([]core.ToolSpec, len(req.Tools))
+	for i, s := range req.Tools {
+		s.Deferred = false
+		tools[i] = s
+	}
+	req.Tools = tools
+	return req
+}
 
 // isOAuthToken returns true if the key is an Anthropic OAuth token.
 func isOAuthToken(key string) bool {
@@ -199,6 +260,22 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 		// here: a rejected subscription token means signing in again.
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return nil, &core.ProviderAuthError{Provider: "anthropic", Status: resp.StatusCode}
+		}
+		// A model or endpoint that does not take deferred tools (a gateway, a
+		// model newer checks missed) refuses the request outright. The same
+		// request with every tool loaded keeps the session going; only if
+		// that one is accepted was deferral the cause, and the combination is
+		// remembered so later requests skip the round trip.
+		refusal := resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity
+		if refusal && hasDeferred(req.Tools) && !errors.Is(markLowCredit(errors.New(errText), resp.StatusCode, errBody), core.ErrAnthropicLowCredit) {
+			ch, err := a.Stream(ctx, withoutDeferral(req))
+			if err == nil {
+				deferralRefused.Store(deferralKey(a.baseURL, req.Model.ID), true)
+				// No body: an upstream error can echo what was sent, and this
+				// log is outside the redaction applied to returned errors.
+				slog.Warn("anthropic: deferred tools refused; sending the full tool list", "model", req.Model.ID, "status", resp.StatusCode)
+			}
+			return ch, err
 		}
 		return nil, markLowCredit(fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, errText), resp.StatusCode, errBody)
 	}

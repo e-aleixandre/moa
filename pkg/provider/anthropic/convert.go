@@ -134,7 +134,7 @@ func buildRequestBodyWith(req core.Request, profileOAuth, oauthIdentity bool, mu
 	}
 
 	// Messages — merge consecutive same-role messages (Anthropic requires alternation)
-	ar.Messages = convertMessages(req.Messages, profileOAuth)
+	ar.Messages = convertMessagesFor(req.Messages, profileOAuth, newToolIndex(req.Tools))
 
 	// Tools — remap names for OAuth
 	if len(req.Tools) > 0 {
@@ -334,6 +334,69 @@ func (r *imageRetirer) takeOldest() bool {
 //
 // Consecutive messages with the same Anthropic role are merged into one.
 func convertMessages(msgs []core.Message, isOAuth bool) []map[string]any {
+	return convertMessagesFor(msgs, isOAuth, toolIndex{})
+}
+
+// toolIndex is what a request's tool list says about the tool_reference
+// blocks in its history: the API expands a reference only into a deferred
+// definition present in the same request, and rejects the request otherwise.
+type toolIndex struct {
+	deferred map[string]bool // deferred definitions, by original name
+	present  map[string]bool // every definition, by original name
+}
+
+func newToolIndex(specs []core.ToolSpec) toolIndex {
+	idx := toolIndex{deferred: map[string]bool{}, present: map[string]bool{}}
+	for _, s := range specs {
+		idx.present[s.Name] = true
+		if s.Deferred {
+			idx.deferred[s.Name] = true
+		}
+	}
+	return idx
+}
+
+// toolResultContent is the content of a tool result as this request can
+// send it. The references that point at deferred definitions of this request
+// go alone, which the API expands; the text, which only names them, would
+// just repeat them. A reference that does not resolve (a server since
+// removed, or deferral off for this request) is dropped, since it would 400
+// the session for good. When none resolves, the text goes instead, with a
+// line naming the tools that are gone.
+func toolResultContent(blocks []core.Content, idx toolIndex, isOAuth bool) []core.Content {
+	var refs, resolved, rest []core.Content
+	for _, b := range blocks {
+		if b.Type != "tool_reference" {
+			rest = append(rest, b)
+			continue
+		}
+		refs = append(refs, b)
+		if idx.deferred[b.ToolName] {
+			if isOAuth {
+				b.ToolName = toClaudeCodeName(b.ToolName)
+			}
+			resolved = append(resolved, b)
+		}
+	}
+	if len(refs) == 0 {
+		return blocks
+	}
+	if len(resolved) > 0 {
+		return resolved
+	}
+	var gone []string
+	for _, r := range refs {
+		if !idx.present[r.ToolName] {
+			gone = append(gone, r.ToolName)
+		}
+	}
+	if len(gone) > 0 {
+		rest = append(rest, core.TextContent("No longer available: "+strings.Join(gone, ", ")))
+	}
+	return rest
+}
+
+func convertMessagesFor(msgs []core.Message, isOAuth bool, tools toolIndex) []map[string]any {
 	var result []map[string]any
 
 	// A call with no result right after it would 400 every future request.
@@ -344,7 +407,7 @@ func convertMessages(msgs []core.Message, isOAuth bool) []map[string]any {
 	retire := newImageRetirer(msgs)
 
 	for _, msg := range msgs {
-		apiMsg := convertMessage(msg, isOAuth, retire)
+		apiMsg := convertMessage(msg, isOAuth, retire, tools)
 		if apiMsg == nil {
 			continue
 		}
@@ -370,7 +433,7 @@ func convertMessages(msgs []core.Message, isOAuth bool) []map[string]any {
 }
 
 // convertMessage maps a single core.Message to Anthropic API format.
-func convertMessage(msg core.Message, isOAuth bool, retire *imageRetirer) map[string]any {
+func convertMessage(msg core.Message, isOAuth bool, retire *imageRetirer, tools toolIndex) map[string]any {
 	switch msg.Role {
 	case "user":
 		return map[string]any{
@@ -399,8 +462,8 @@ func convertMessage(msg core.Message, isOAuth bool, retire *imageRetirer) map[st
 		if msg.IsError {
 			block["is_error"] = true
 		}
-		if len(msg.Content) > 0 {
-			block["content"] = convertContentBlocks(msg.Content, retire)
+		if content := toolResultContent(msg.Content, tools, isOAuth); len(content) > 0 {
+			block["content"] = convertContentBlocks(content, retire)
 		}
 		return map[string]any{
 			"role":    "user",
@@ -474,6 +537,13 @@ func convertContentBlocks(blocks []core.Content, retire *imageRetirer) []any {
 					"media_type": core.CorrectImageMime(b.Data, b.MimeType),
 					"data":       b.Data,
 				},
+			})
+		case "tool_reference":
+			// Only tool results carry these, and only once toolResultContent
+			// has checked that the request defers their target.
+			result = append(result, map[string]any{
+				"type":      "tool_reference",
+				"tool_name": b.ToolName,
 			})
 		case "document":
 			result = append(result, map[string]any{
@@ -584,9 +654,25 @@ func convertAssistantContent(blocks []core.Content, isOAuth bool, dropThinking b
 }
 
 // convertToolSpecs maps []core.ToolSpec to Anthropic's tool format.
+//
+// Deferred definitions go first, flagged defer_loading, so that the last
+// tool, which carries the cache breakpoint, is one the API loads up front: a
+// breakpoint on a deferred tool is a 400. They stay out of the cached prefix
+// wherever they sit, so the rest keep the order they came in.
 func convertToolSpecs(specs []core.ToolSpec, isOAuth bool) []map[string]any {
 	result := make([]map[string]any, 0, len(specs))
+	ordered := make([]core.ToolSpec, 0, len(specs))
 	for _, s := range specs {
+		if s.Deferred {
+			ordered = append(ordered, s)
+		}
+	}
+	for _, s := range specs {
+		if !s.Deferred {
+			ordered = append(ordered, s)
+		}
+	}
+	for _, s := range ordered {
 		name := s.Name
 		if isOAuth {
 			name = toClaudeCodeName(name)
@@ -611,6 +697,9 @@ func convertToolSpecs(specs []core.ToolSpec, isOAuth bool) []map[string]any {
 		} else {
 			// Anthropic requires input_schema; use empty object
 			t["input_schema"] = map[string]any{"type": "object"}
+		}
+		if s.Deferred {
+			t["defer_loading"] = true
 		}
 		result = append(result, t)
 	}
@@ -698,9 +787,13 @@ func addCacheBreakpoints(ar *anthropicRequest, ttl string) {
 		blocks[len(blocks)-1]["cache_control"] = cc
 	}
 
-	// 2. Last tool
-	if len(ar.Tools) > 0 {
-		ar.Tools[len(ar.Tools)-1]["cache_control"] = cc
+	// 2. Last tool loaded up front. convertToolSpecs puts the deferred ones
+	// first; a breakpoint on one would be a 400.
+	for i := len(ar.Tools) - 1; i >= 0; i-- {
+		if ar.Tools[i]["defer_loading"] != true {
+			ar.Tools[i]["cache_control"] = cc
+			break
+		}
 	}
 
 	// 3. Last content block of the final user message (caches conversation history).

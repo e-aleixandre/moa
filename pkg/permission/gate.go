@@ -41,6 +41,8 @@ const permissionFeedbackArgKey = "__permission_feedback"
 var readOnly = map[string]bool{
 	"read": true, "ls": true, "grep": true, "find": true, "send_file": true,
 	"history": true, // reads only this session's own transcript
+	// Ranks tool definitions already in the request; core reserves the name.
+	"tool_search": true,
 }
 
 // selfApproving tools always show the user a card for the exact action and

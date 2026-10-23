@@ -5,32 +5,10 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/git"
 )
-
-// toolSnippets provides concise one-line descriptions for built-in tools.
-// These are used in the system prompt instead of the full JSON schema descriptions.
-var toolSnippets = map[string]string{
-	"read":            "Read the contents of a file. Supports text files and images.",
-	"bash":            "Execute a bash command. Returns stdout, stderr, and exit code.",
-	"edit":            "Make surgical edits to files. Supports fuzzy matching for whitespace differences.",
-	"multiedit":       "Make multiple edits to a single file atomically. Prefer over edit for several changes to the same file.",
-	"apply_patch":     "Apply a multi-file patch using *** Begin Patch format. Efficient for large changes across multiple files.",
-	"write":           "Create or overwrite files. Automatically creates parent directories.",
-	"grep":            "Search file contents for patterns (respects .gitignore).",
-	"find":            "Find files by glob pattern (respects .gitignore).",
-	"ls":              "List directory contents. Sorted alphabetically. Directories have '/' suffix.",
-	"subagent":        "Spawn a child agent with its own context for parallel investigation or focused subtasks.",
-	"subagent_status": "Check the status of an async subagent job.",
-	"subagent_wait":   "Block until an async subagent job finishes and return its result. Use instead of polling subagent_status.",
-	"subagent_cancel": "Cancel a running async subagent job.",
-	"subagent_steer":  "Send a message to a RUNNING subagent: extra instructions or a correction, read between its steps.",
-	"verify":          "Run project verification checks (build, test, lint) from .moa/verify.json.",
-	"memory":          "Manage narrowly scoped cross-session memory as single-fact notes. Do not store rules, procedures, task state, secrets, or copies of project knowledge.",
-}
 
 // asyncQuestionsSection is the standing rule for a session whose questions do
 // not block. It is advice, not enforcement: the five conditions are the
@@ -77,27 +55,8 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 
 `)
 
-	// Available tools — concise snippets, not full descriptions
-	if len(opts.Tools) > 0 {
-		sb.WriteString("Available tools:\n")
-		for _, t := range opts.Tools {
-			desc := toolSnippets[t.Name]
-			if desc == "" {
-				// Custom/unknown tool — use original description, truncated
-				desc = t.Description
-				if len(desc) > 200 {
-					desc = desc[:197]
-					// Don't split a multibyte rune at the byte cut.
-					for len(desc) > 0 && !utf8.ValidString(desc) {
-						desc = desc[:len(desc)-1]
-					}
-					desc += "..."
-				}
-			}
-			fmt.Fprintf(&sb, "- %s: %s\n", t.Name, desc)
-		}
-		sb.WriteString("\n")
-	}
+	// No tool inventory here: every request already carries the full schemas,
+	// so a list of names and descriptions would only repeat them.
 
 	// Build adaptive guidelines based on which tools are available
 	toolSet := make(map[string]bool, len(opts.Tools))
