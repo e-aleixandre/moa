@@ -137,6 +137,11 @@ func DeepCopyMessage(msg core.AgentMessage) core.AgentMessage {
 		msg.Usage = &u
 	}
 
+	if msg.RateLimit != nil {
+		rl := *msg.RateLimit
+		msg.RateLimit = &rl
+	}
+
 	// Deep copy Custom map
 	if msg.Custom != nil {
 		msg.Custom = deepCopyMap(msg.Custom)

@@ -183,8 +183,12 @@ type Message struct {
 	AccessProgram  string          `json:"access_program,omitempty"`
 	ProviderSource *ProviderSource `json:"provider_source,omitempty"`
 	Usage          *Usage          `json:"usage,omitempty"`
-	StopReason     string          `json:"stop_reason,omitempty"`
-	ErrorMessage   string          `json:"error_message,omitempty"`
+	// RateLimit is the plan-quota state the provider reported on the response
+	// that produced this message (percent used and reset per window, no
+	// content). Absent when the provider sent none.
+	RateLimit    *RateLimit `json:"rate_limit,omitempty"`
+	StopReason   string     `json:"stop_reason,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
 
 	// tool_result-only
 	ToolCallID string `json:"tool_call_id,omitempty"`
@@ -375,6 +379,10 @@ type RateLimit struct {
 	SevenDayUtil        float64 `json:"seven_day_util"`                 // [0,1], or -1 if unknown
 	OverageStatus       string  `json:"overage_status,omitempty"`
 	OverageUtil         float64 `json:"overage_util"` // [0,1], or -1 if unknown
+	// FiveHourResetAt and SevenDayResetAt are when each window resets, in Unix
+	// seconds; 0 when the provider did not say.
+	FiveHourResetAt int64 `json:"five_hour_reset_at,omitempty"`
+	SevenDayResetAt int64 `json:"seven_day_reset_at,omitempty"`
 }
 
 // OnOverage reports whether the request is currently being served from extra

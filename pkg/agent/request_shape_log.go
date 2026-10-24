@@ -43,13 +43,14 @@ func messagesChain(msgs []core.Message, n int) (atN, all string) {
 // the previous request of this run is still an exact prefix of this one
 // (prev_is_prefix=false: something earlier was rewritten or displaced). It is
 // a partial signal: it is taken before the provider's own transformations.
+// Only logged with core.CacheDebug; the agent keeps it between runs.
 type requestShape struct {
 	items int
 	chain string
 }
 
 func (s *requestShape) log(req core.Request) {
-	if !slog.Default().Enabled(context.Background(), slog.LevelInfo) {
+	if !core.CacheDebug() || !slog.Default().Enabled(context.Background(), slog.LevelInfo) {
 		return
 	}
 	tools, _ := json.Marshal(req.Tools)

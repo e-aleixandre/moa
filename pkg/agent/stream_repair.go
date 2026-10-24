@@ -113,6 +113,9 @@ func mergeAssistant(a, b *core.Message) *core.Message {
 	if b.Usage != nil {
 		out.Usage = b.Usage
 	}
+	if b.RateLimit != nil {
+		out.RateLimit = b.RateLimit
+	}
 	if b.Provider != "" {
 		out.Provider = b.Provider
 	}

@@ -103,6 +103,7 @@ func TestEphemeralNotAnchoredWithoutImplicitPrefixCache(t *testing.T) {
 }
 
 func TestRequestShapeReportsPrefixBreak(t *testing.T) {
+	t.Setenv("MOA_DEBUG_CACHE", "1")
 	var s requestShape
 	a, b, c, x := core.NewUserMessage("a"), core.NewUserMessage("b"), core.NewUserMessage("c"), core.NewUserMessage("X")
 	s.log(core.Request{Messages: []core.Message{a, b}})
@@ -143,6 +144,7 @@ func TestMessagesChainFailsClosedOnUnserializable(t *testing.T) {
 }
 
 func TestRequestShapeSurvivesUnserializableHistory(t *testing.T) {
+	t.Setenv("MOA_DEBUG_CACHE", "1")
 	previous := slog.Default()
 	defer slog.SetDefault(previous)
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))

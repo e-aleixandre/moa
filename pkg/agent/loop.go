@@ -225,6 +225,27 @@ func (cfg *loopConfig) rememberAnchor(f frozenEphemeral) {
 	cfg.agent.mu.Unlock()
 }
 
+// recalledShape and rememberShape carry the request-shape link from one run to
+// the next, so prev_is_prefix compares a run's first request with the last one
+// of the previous run instead of starting blank.
+func (cfg *loopConfig) recalledShape() requestShape {
+	if cfg.agent == nil {
+		return requestShape{}
+	}
+	cfg.agent.mu.Lock()
+	defer cfg.agent.mu.Unlock()
+	return cfg.agent.shape
+}
+
+func (cfg *loopConfig) rememberShape(s requestShape) {
+	if cfg.agent == nil {
+		return
+	}
+	cfg.agent.mu.Lock()
+	cfg.agent.shape = s
+	cfg.agent.mu.Unlock()
+}
+
 // ErrAdmissionNotSaved ends a run whose next request would carry a message
 // that must be on disk first (core.CustomDurableAdmission) when the save fails.
 var ErrAdmissionNotSaved = errors.New("an admitted message could not be saved; no request was made")
@@ -577,7 +598,8 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	justPaused := false
 	// The ephemeral block of the last ordinary request, for its continuations.
 	var frozen frozenEphemeral
-	var shape requestShape
+	shape := cfg.recalledShape()
+	defer func() { cfg.rememberShape(shape) }()
 	// Local to this admitted work, never inherited by another Send or child.
 	// A tool result can change ordinary settings without being a new entry
 	// into API while this work's OAuth restriction still makes return early.

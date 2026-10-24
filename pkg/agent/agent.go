@@ -406,7 +406,10 @@ func ownItem(it core.SteerItem) core.SteerItem {
 type Agent struct {
 	// ephemeralAnchor is where the last ordinary request put the ephemeral
 	// block, for the next run (guarded by mu). Never persisted.
-	ephemeralAnchor         frozenEphemeral
+	ephemeralAnchor frozenEphemeral
+	// shape is the request-shape link between runs (guarded by mu); only
+	// maintained while core.CacheDebug is on.
+	shape                   requestShape
 	config                  AgentConfig
 	state                   AgentState
 	tools                   *core.Registry

@@ -11,6 +11,7 @@ import (
 )
 
 func TestReviewRequestShapeDetectsEarlyPrefixRewrite(t *testing.T) {
+	t.Setenv("MOA_DEBUG_CACHE", "1")
 	previous := slog.Default()
 	defer slog.SetDefault(previous)
 	capture := func(text string) map[string]any {

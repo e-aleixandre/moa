@@ -212,6 +212,10 @@ func cloneAgentMessage(m core.AgentMessage) core.AgentMessage {
 		u := *m.Usage
 		m.Usage = &u
 	}
+	if m.RateLimit != nil {
+		rl := *m.RateLimit
+		m.RateLimit = &rl
+	}
 	return m
 }
 
