@@ -224,9 +224,7 @@ func convertMessageForProgram(msg core.Message, dialect Dialect, program string,
 	switch msg.Role {
 	case "user":
 		content := convertUserContent(msg.Content, dialect.SupportsDocuments)
-		// A request-only block is not in the next request: a breakpoint on it
-		// would mark a prefix nobody reads again.
-		if dialect.SupportsExplicitCacheBreakpoints && !msg.Ephemeral {
+		if dialect.SupportsExplicitCacheBreakpoints {
 			markLastInputTextBreakpoint(content)
 		}
 		return []map[string]any{

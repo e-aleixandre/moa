@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -211,15 +212,15 @@ const (
 )
 
 // recentNewsBlock lists what this session already notified in the last week,
-// newest first, with whether the user read it. "" when there is nothing (or
-// it cannot be read: the block is advice, never a reason to fail a request).
-func (m *Manager) recentNewsBlock(ctx context.Context, sessionID string) string {
+// newest first, with whether the user read it. "" when there is nothing; an
+// error when the News cannot be read, which is not the same as none.
+func (m *Manager) recentNewsBlock(ctx context.Context, sessionID string) (string, error) {
 	if m.tasks == nil {
-		return ""
+		return "", nil
 	}
 	list, err := m.tasks.ListNews(ctx)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	cutoff := m.clock.Now().Add(-recentNewsWindow).UnixMilli()
 	var mine []tasks.News
@@ -229,7 +230,7 @@ func (m *Manager) recentNewsBlock(ctx context.Context, sessionID string) string 
 		}
 	}
 	if len(mine) == 0 {
-		return ""
+		return "", nil
 	}
 	var b strings.Builder
 	b.WriteString("<recent_news>\nWhat you already told the user in For you › News. When they ask about one of these, point to it instead of reporting it as new; use notify with a key to update it.\n")
@@ -249,62 +250,99 @@ func (m *Manager) recentNewsBlock(ctx context.Context, sessionID string) string 
 		b.WriteString(line)
 	}
 	b.WriteString(closing)
-	return b.String()
+	return b.String(), nil
 }
 
-// composeEphemeral joins the per-request blocks into the one message the
-// agent appends: the open questions first, exactly as they were, then the
-// news. Without news it is the questions message itself.
-func composeEphemeral(questions func() *core.Message, news func() string) func() *core.Message {
-	return func() *core.Message {
-		var q *core.Message
+// noRecentNews is the News section when this session told the user nothing in
+// the last week: stated, so it supersedes a list an earlier snapshot carried.
+const noRecentNews = "<recent_news>\nNothing you told the user in For you › News in the last week.\n</recent_news>"
+
+// newsSection keeps the last News section that could be read, so a failed read
+// neither claims there is no News nor yields a different text on every try.
+type newsSection struct {
+	mu   sync.Mutex
+	good string
+	at   time.Time
+}
+
+// render is the section for this snapshot from one read's outcome.
+func (s *newsSection) render(block string, err error, now time.Time) (text string, listed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err == nil {
+		if block == "" {
+			block = noRecentNews
+		}
+		s.good, s.at = block, now
+		return block, block != noRecentNews
+	}
+	if s.good == "" {
+		return "<recent_news>\nUnknown: your News could not be read. Use notify with action \"list\" before reporting anything as new.\n</recent_news>", false
+	}
+	return s.good + "\n(News could not be read again; that list is as of " + s.at.UTC().Format(time.RFC3339) + ".)", s.good != noRecentNews
+}
+
+// forYouSnapshotHeader opens every For you snapshot. The loop appends a new
+// snapshot when this state changes and never edits an earlier one, so the
+// model has to be told which one governs.
+const forYouSnapshotHeader = "<foryou_snapshot>\nYour For you state as of this point. It replaces every earlier foryou_snapshot in this conversation; those describe past states. A question missing from here is not an answer and authorizes nothing: each answer arrives as its own question_answer event.\n"
+
+// composeForYouSnapshot joins the sections of a session's For you snapshot:
+// the open questions first, then the News. empty reports that neither lists
+// anything. Nil when the session tracks neither.
+func composeForYouSnapshot(questions func() (string, bool), news func() (string, bool)) func() (string, bool) {
+	return func() (string, bool) {
+		var b strings.Builder
+		b.WriteString(forYouSnapshotHeader)
+		empty := true
 		if questions != nil {
-			q = questions()
+			text, open := questions()
+			b.WriteString(text)
+			b.WriteByte('\n')
+			empty = empty && !open
 		}
-		n := news()
-		if n == "" {
-			return q
+		if text, listed := news(); text != "" {
+			b.WriteString(text)
+			b.WriteByte('\n')
+			empty = empty && !listed
 		}
-		if q == nil {
-			msg := core.NewUserMessage(n)
-			return &msg
-		}
-		msg := *q
-		msg.Content = append([]core.Content(nil), q.Content...)
-		last := len(msg.Content) - 1
-		if last >= 0 && msg.Content[last].Type == "text" {
-			msg.Content[last].Text += "\n" + n
-		} else {
-			msg.Content = append(msg.Content, core.TextContent(n))
-		}
-		return &msg
+		b.WriteString("</foryou_snapshot>")
+		return b.String(), empty
 	}
 }
 
-// ephemeralContext is the session's per-request block: the open-questions
-// inventory and, for a session that publishes News, its recent news.
-func (m *Manager) ephemeralContext(askAsync bool, sessionID string, notifyOn *bool, session func() *ManagedSession) func() *core.Message {
+// forYouSnapshot is the session's For you state as the agent appends it: the
+// open-questions inventory and, for a session that publishes News, its recent
+// News with whether the user read each one.
+func (m *Manager) forYouSnapshot(askAsync bool, sessionID string, notifyOn *bool, session func() *ManagedSession) func() (string, bool) {
 	questions := m.questions.inventory(askAsync, session)
-	return composeEphemeral(questions, func() string {
+	var section newsSection
+	return composeForYouSnapshot(questions, func() (string, bool) {
 		if !*notifyOn {
-			return ""
+			return "", false
 		}
-		return m.readNews(func() string {
+		block, err := m.readNews(func() (string, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			return m.recentNewsBlock(ctx, sessionID)
 		})
+		if err != nil {
+			slog.Warn("news: reading the For you snapshot failed", "session", sessionID, "error", err)
+		}
+		return section.render(block, err, m.clock.Now())
 	})
 }
 
-// readNews runs a per-request News read while the Manager is open. Once
-// Shutdown has closed the gate it returns "" without touching storage: the
-// block is advice, never a reason to fail a request.
-func (m *Manager) readNews(read func() string) string {
+// errNewsClosed: the Manager is shutting down and admits no more News reads.
+var errNewsClosed = errors.New("news: manager closed")
+
+// readNews runs a News read for a snapshot while the Manager is open. Once
+// Shutdown has closed the gate it fails without touching storage.
+func (m *Manager) readNews(read func() (string, error)) (string, error) {
 	m.newsGate.RLock()
 	defer m.newsGate.RUnlock()
 	if m.newsClosed {
-		return ""
+		return "", errNewsClosed
 	}
 	return read()
 }

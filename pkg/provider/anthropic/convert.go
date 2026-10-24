@@ -194,38 +194,11 @@ func buildRequestBodyWith(req core.Request, profileOAuth, oauthIdentity bool, mu
 	// 2. Last tool definition (tool specs are identical turn-to-turn)
 	// 3. Last content block of the last user message (caches conversation history)
 	addCacheBreakpoints(&ar, req.Options.CacheRetention)
-	stripEphemeralMarks(ar.Messages)
 
 	if mutate != nil {
 		mutate(&ar)
 	}
 	return json.Marshal(ar)
-}
-
-// ephemeralMark tags, on the way to the wire, a content block that exists only
-// in this request (core.Message.Ephemeral): a cache breakpoint is never put on
-// one, since the next request will not have it. stripEphemeralMarks removes the
-// tag before the body is serialized.
-const ephemeralMark = "\x00ephemeral"
-
-func markEphemeral(apiMsg map[string]any) {
-	content, _ := apiMsg["content"].([]any)
-	for _, c := range content {
-		if block, ok := c.(map[string]any); ok {
-			block[ephemeralMark] = true
-		}
-	}
-}
-
-func stripEphemeralMarks(msgs []map[string]any) {
-	for _, m := range msgs {
-		content, _ := m["content"].([]any)
-		for _, c := range content {
-			if block, ok := c.(map[string]any); ok {
-				delete(block, ephemeralMark)
-			}
-		}
-	}
 }
 
 // manyImageThreshold is the number of image blocks in a single request above
@@ -410,9 +383,6 @@ func convertMessagesFor(msgs []core.Message, isOAuth bool, tools toolIndex) []ma
 		apiMsg := convertMessage(msg, isOAuth, retire, tools)
 		if apiMsg == nil {
 			continue
-		}
-		if msg.Ephemeral {
-			markEphemeral(apiMsg)
 		}
 
 		// Merge consecutive same-role messages
@@ -797,24 +767,16 @@ func addCacheBreakpoints(ar *anthropicRequest, ttl string) {
 	}
 
 	// 3. Last content block of the final user message (caches conversation history).
-	// Walk backwards to find the last user-role message. A block that exists
-	// only in this request (the open-questions inventory) is passed over,
-	// wherever it sits, so the breakpoint stays on what the next request
-	// shares.
 	for i := len(ar.Messages) - 1; i >= 0; i-- {
 		if ar.Messages[i]["role"] == "user" {
 			content, _ := ar.Messages[i]["content"].([]any)
 			if len(content) == 0 {
 				return
 			}
-			for j := len(content) - 1; j >= 0; j-- {
-				if block, ok := content[j].(map[string]any); ok && block[ephemeralMark] == nil {
-					block["cache_control"] = cc
-					return
-				}
+			if block, ok := content[len(content)-1].(map[string]any); ok {
+				block["cache_control"] = cc
 			}
-			// Nothing but request-only blocks: the previous user message is
-			// what the next request shares.
+			return
 		}
 	}
 }

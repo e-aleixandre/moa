@@ -196,22 +196,21 @@ func escapedPrefix(s string, max int) string {
 	return b.String() + ellipsis
 }
 
-// inventory returns the per-request block that tells the model which of its
-// questions are still open. It is derived from the live projection, so it
-// follows answers and withdrawals made during the run, and it is never stored:
-// the transcript keeps only the acknowledgement and, later, the answer.
-func (q *questionService) inventory(enabled bool, session func() *ManagedSession) func() *core.Message {
+// inventory returns the open-questions section of the For you snapshot and
+// whether it lists any. It is derived from the live projection, so it follows
+// answers and withdrawals made during the run. With none open it says so: a
+// snapshot that left the section out would leave an earlier list governing.
+func (q *questionService) inventory(enabled bool, session func() *ManagedSession) func() (string, bool) {
 	if q == nil || !enabled {
 		return nil
 	}
-	return func() *core.Message {
-		sess := session()
-		if sess == nil {
-			return nil
+	return func() (string, bool) {
+		var open []bus.PendingAskInfo
+		if sess := session(); sess != nil {
+			open = sess.runtime.Context().Approvals.AsyncAsks()
 		}
-		open := sess.runtime.Context().Approvals.AsyncAsks()
 		if len(open) == 0 {
-			return nil
+			return "<open_questions>\nNone: nobody owes you an answer to a question you asked.\n</open_questions>", false
 		}
 		var b strings.Builder
 		b.WriteString("<open_questions>\nQuestions you asked that nobody has answered yet. Each answer arrives later as a question_answer event; do not ask them again, and apply the pending-answer rule to anything you do meanwhile. Use ask_user with action \"list\" for detail.\n")
@@ -234,8 +233,7 @@ func (q *questionService) inventory(enabled bool, session func() *ManagedSession
 			b.WriteString(line)
 		}
 		b.WriteString(closing)
-		msg := core.NewUserMessage(b.String())
-		return &msg
+		return b.String(), true
 	}
 }
 

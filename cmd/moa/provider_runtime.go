@@ -71,31 +71,9 @@ func (p *snapshotProvider) SupportsDocuments() bool {
 	return err == nil && core.ProviderSupportsDocuments(base)
 }
 
-// ImplicitPrefixCache answers for the provider the next request would use,
+// SupportsDeferredTools answers for the provider the next request would use,
 // without refreshing anything: the capability must survive this wrapper or the
 // agent never sees it.
-func (p *snapshotProvider) ImplicitPrefixCache(modelID string) bool {
-	snap, err := p.peek()
-	if err != nil {
-		return false
-	}
-	base, err := provider.New(p.model, p.config(snap, nil))
-	return err == nil && core.ProviderHasImplicitPrefixCache(base, modelID)
-}
-
-// BindsThinkingPrefix answers, like ImplicitPrefixCache, for the provider the
-// next request would use.
-func (p *snapshotProvider) BindsThinkingPrefix(modelID string) bool {
-	snap, err := p.peek()
-	if err != nil {
-		return false
-	}
-	base, err := provider.New(p.model, p.config(snap, nil))
-	return err == nil && core.ProviderBindsThinkingPrefix(base, modelID)
-}
-
-// SupportsDeferredTools answers, like ImplicitPrefixCache, for the provider
-// the next request would use.
 func (p *snapshotProvider) SupportsDeferredTools(modelID string) bool {
 	snap, err := p.peek()
 	if err != nil {

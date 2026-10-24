@@ -193,7 +193,11 @@ export function normalizeHistory(raw, liveSubagents = []) {
         modifiedFiles: Array.isArray(msg.custom.modified_files) ? msg.custom.modified_files.filter(f => typeof f === 'string') : [],
       });
     } else if (msg.role === 'user') {
-      if (msg.custom?.source === 'compaction_notice') {
+      if (msg.custom?.source === 'foryou_snapshot') {
+        // moa's record, for the model, of the For you state it observed. It
+        // rides as a user message for the provider but nobody wrote it, and
+        // the user sees that state in For you itself.
+      } else if (msg.custom?.source === 'compaction_notice') {
         // moa talking to itself. It rides as a user message because providers
         // accept no other role mid-conversation, but rendering it as one puts
         // a <system-reminder> block in the transcript under the user's name.

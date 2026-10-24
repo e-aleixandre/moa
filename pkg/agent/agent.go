@@ -404,9 +404,6 @@ func ownItem(it core.SteerItem) core.SteerItem {
 // Agent runs the core loop: prompt → LLM → tool calls → execute → repeat.
 // It's a library — no I/O, no UI, no filesystem opinions.
 type Agent struct {
-	// ephemeralAnchor is where the last ordinary request put the ephemeral
-	// block, for the next run (guarded by mu). Never persisted.
-	ephemeralAnchor frozenEphemeral
 	// shape is the request-shape link between runs (guarded by mu); only
 	// maintained while core.CacheDebug is on.
 	shape                   requestShape
@@ -569,11 +566,13 @@ type AgentConfig struct {
 	// the manual CompactWithCheckpoint path.
 	SessionCheckpoint *sessioncheckpoint.Slot
 
-	// EphemeralContext returns a message inserted into each
-	// ordinary request (nil for none). It is built per request, never enters the
-	// conversation, the saved tree or the system prompt, and subagents do not
-	// get one.
-	EphemeralContext func() *core.Message
+	// ForYouSnapshot renders the session's For you state (its open questions
+	// and recent News) as the text of a snapshot; empty reports that there is
+	// nothing in it. At each ordinary request boundary the loop appends it to
+	// the conversation, durably, when it is not what the context already
+	// carries (see appendForYouSnapshot). Nil for none; subagents and
+	// preparation runs never get one.
+	ForYouSnapshot func() (text string, empty bool)
 
 	// DrainTimeout is the maximum time Send/Run will wait for subscribers to
 	// finish processing events before returning. Default: 2s.
@@ -786,7 +785,9 @@ func (a *Agent) SendWithCustomAnnounced(ctx context.Context, prompt string, cust
 // the Responses end_turn:false "continue"). Any other reply is a real end.
 func OwesContinuation(msgs []core.AgentMessage) bool {
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if !msgs[i].IsLLMMessage() {
+		// A For you snapshot is state moa observed for a request, not input
+		// anyone is waiting on: it never owes a run by itself.
+		if !msgs[i].IsLLMMessage() || core.IsForYouSnapshot(msgs[i]) {
 			continue
 		}
 		switch msgs[i].Role {
@@ -2269,7 +2270,13 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 			defer a.mu.Unlock()
 			return a.requestSettingsLocked()
 		},
-		ephemeralContext: a.config.EphemeralContext,
+		// A preparation run's transcript is restored away: it observes nothing.
+		forYouSnapshot: func() func() (string, bool) {
+			if allowCheckpoint {
+				return nil
+			}
+			return a.config.ForYouSnapshot
+		}(),
 		// A prepare-compact run writes the checkpoint and is then discarded by
 		// restoreConversation, so an auto-compaction inside it must not consume
 		// the slot: doing so would clear the checkpoint the real compaction is

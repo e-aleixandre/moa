@@ -32,14 +32,14 @@ func TestVoiceRecordDuringRunIsSavedOnce(t *testing.T) {
 		// Parks the run right before it reads its history to build a
 		// request. Released before the record lands; the sleep only lets the
 		// record land before those reads, it orders nothing.
-		EphemeralContext: func() *core.Message {
+		ForYouSnapshot: func() (string, bool) {
 			if first {
 				first = false
 				close(entered)
 				<-release
 				time.Sleep(50 * time.Millisecond)
 			}
-			return nil
+			return "", true
 		},
 	})
 	if err != nil {

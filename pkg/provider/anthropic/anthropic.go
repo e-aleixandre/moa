@@ -79,10 +79,6 @@ func (a *Anthropic) IsOAuth() bool {
 // API-key and OAuth auth.
 func (a *Anthropic) SupportsDocuments() bool { return true }
 
-// BindsThinkingPrefix is true for the models whose requests carry
-// block_binding: their signed thinking survives only an unchanged prefix.
-func (a *Anthropic) BindsThinkingPrefix(modelID string) bool { return bindsThinkingPrefix(modelID) }
-
 // SupportsDeferredTools reports whether modelID loads deferred tools on
 // demand: every model since the 4.5 family, unless a request was already
 // refused for it (see Stream).

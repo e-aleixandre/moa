@@ -68,6 +68,9 @@ func runAutoPrepare(ctx context.Context, cfg *loopConfig, slot *sessioncheckpoin
 	// Steers and barriers belong to the parent run: draining them here would
 	// swallow a user's message into a transcript that is discarded.
 	sub.drainSteers = nil
+	// For you is observed by the conversation that goes on, not by a
+	// transcript this call throws away.
+	sub.forYouSnapshot = nil
 	sub.settleSteers = nil
 	sub.registerSteerWait = nil
 	sub.claimSteers = nil

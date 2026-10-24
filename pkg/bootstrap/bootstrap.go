@@ -137,8 +137,8 @@ type SessionConfig struct {
 	// answer (see agentcontext.SystemPromptOptions.AsyncQuestions).
 	AsyncQuestions bool
 
-	// EphemeralContext is AgentConfig.EphemeralContext for this session.
-	EphemeralContext func() *core.Message
+	// ForYouSnapshot is AgentConfig.ForYouSnapshot for this session.
+	ForYouSnapshot func() (text string, empty bool)
 
 	// BeforeWrite is called before write/edit tools modify a file.
 	// Used by the checkpoint system to capture pre-edit state.
@@ -818,7 +818,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		MaterializeContent:   cfg.MaterializeContent,
 		AttachmentScope:      cfg.AttachmentScope,
 		SessionCheckpoint:    sessionCheckpoint,
-		EphemeralContext:     cfg.EphemeralContext,
+		ForYouSnapshot:       cfg.ForYouSnapshot,
 		// The GLOBAL default only. A resumed session's own compact_at is applied
 		// afterwards via SetCompactAt, and the agent keeps the two apart, which is
 		// what lets a session's own choice win here without erasing the global

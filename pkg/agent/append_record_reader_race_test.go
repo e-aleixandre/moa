@@ -41,9 +41,9 @@ func TestAppendRecordWhileLoopReadsHistory(t *testing.T) {
 				Tools:        core.NewRegistry(),
 				MaxTurns:     10,
 				Compaction:   compaction,
-				EphemeralContext: func() *core.Message {
+				ForYouSnapshot: func() (string, bool) {
 					if !first {
-						return nil
+						return "", true
 					}
 					first = false
 					ag.mu.Lock()
@@ -54,7 +54,7 @@ func TestAppendRecordWhileLoopReadsHistory(t *testing.T) {
 					// Not a synchronization: it only lets the record land
 					// before the reads that follow this callback.
 					time.Sleep(50 * time.Millisecond)
-					return nil
+					return "", true
 				},
 			})
 			if err != nil {
