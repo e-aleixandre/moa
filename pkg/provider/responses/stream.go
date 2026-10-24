@@ -112,12 +112,12 @@ type responseUsage struct {
 }
 
 type item struct {
-	Type      string `json:"type"` // "message", "function_call", "reasoning"
-	ID        string `json:"id,omitempty"`
-	CallID    string `json:"call_id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-	Status    string `json:"status,omitempty"`
+	Type      string        `json:"type"` // "message", "function_call", "tool_search_call", "reasoning"
+	ID        string        `json:"id,omitempty"`
+	CallID    string        `json:"call_id,omitempty"`
+	Name      string        `json:"name,omitempty"`
+	Arguments itemArguments `json:"arguments,omitempty"`
+	Status    string        `json:"status,omitempty"`
 	// Phase is the output-message phase ("commentary"/"final_answer"). OpenAI
 	// warns that dropping it when replaying manually causes early stopping.
 	Phase   string `json:"phase,omitempty"`
@@ -130,6 +130,37 @@ type item struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"summary,omitempty"`
+}
+
+// itemArguments is an item's arguments as JSON text. A function_call sends
+// them as a JSON string; a tool_search_call, as the object itself.
+type itemArguments string
+
+func (a *itemArguments) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*a = itemArguments(s)
+		return nil
+	}
+	if string(b) == "null" {
+		*a = ""
+		return nil
+	}
+	*a = itemArguments(b)
+	return nil
+}
+
+// asToolSearchCall turns the model's tool_search_call into the function call
+// it stands for: the agent runs it as its tool_search tool. The item has no
+// name, and its arguments come whole on done, with no delta events.
+func (it *item) asToolSearchCall() {
+	if it != nil && it.Type == "tool_search_call" {
+		it.Type = "function_call"
+		it.Name = core.ToolSearchName
+	}
 }
 
 // slot tracks one output item of a response, keyed by its output_index. The
@@ -280,6 +311,7 @@ func consumeStream(ctx context.Context, body io.Reader, ch chan<- core.Assistant
 			}
 		}
 
+		ev.Item.asToolSearchCall()
 		terminal := processEvent(state, &ev, ch)
 		if terminal {
 			sentTerminal = true
@@ -309,7 +341,7 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 				callItem: ev.Item.ID,
 			}
 			if ev.Item.Arguments != "" {
-				sl.argsJSON.WriteString(ev.Item.Arguments)
+				sl.argsJSON.WriteString(string(ev.Item.Arguments))
 			}
 			// Reserve a content block now so the call keeps a stable index even
 			// when other output items interleave; arguments are filled on done.
@@ -455,7 +487,7 @@ func processEvent(state *streamState, ev *event, ch chan<- core.AssistantEvent) 
 					ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: fmt.Errorf("%s: function call missing call_id or name", state.message.Provider)}
 					return true
 				}
-				argsStr := ev.Item.Arguments
+				argsStr := string(ev.Item.Arguments)
 				if argsStr == "" {
 					argsStr = sl.argsJSON.String()
 				}
