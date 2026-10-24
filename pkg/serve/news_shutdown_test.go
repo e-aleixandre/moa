@@ -9,11 +9,13 @@ import (
 func TestShutdownWaitsForNewsReadsAndClosesAdmission(t *testing.T) {
 	m := NewManager(context.Background(), ManagerConfig{WorkspaceRoot: t.TempDir()})
 	inside, release := make(chan struct{}), make(chan struct{})
-	go m.readNews(func() (string, error) {
-		close(inside)
-		<-release
-		return "news", nil
-	})
+	go func() {
+		_, _ = m.readNews(func() (string, error) {
+			close(inside)
+			<-release
+			return "news", nil
+		})
+	}()
 	<-inside
 	done := make(chan struct{})
 	go func() { m.Shutdown(); close(done) }()
