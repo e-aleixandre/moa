@@ -410,3 +410,26 @@ func TestForYouSnapshotNotAddedWhenContinuingARestoredContinuation(t *testing.T)
 		})
 	}
 }
+
+// Past the soft threshold, a restored continuation is still resent as it
+// stands: not compacted (which would summarize its snapshot away), so the
+// state it was sent with stays in the request.
+func TestRestoredContinuationIsNotCompacted(t *testing.T) {
+	scene := &snapScene{text: "Q1"}
+	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 100, KeepRecent: 200}
+	ag, _ := newSnapAgent(t, scene, AgentConfig{Model: core.Model{ID: "test-model", Provider: "mock", MaxInput: 1000}, Compaction: &settings},
+		simpleTextResponse("## Goal\nsummary"), simpleTextResponse("finished"))
+	snap := core.WrapMessage(core.NewUserMessage("SNAP(Q1)"))
+	snap.Custom = map[string]any{"source": core.SourceForYouSnapshot, core.CustomSnapshotEpoch: 0}
+	paused := core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent(strings.Repeat("x", 3000))}, StopReason: "pause_turn"})
+	if err := ag.LoadState([]core.AgentMessage{core.WrapMessage(core.NewUserMessage(strings.Repeat("u", 600))), snap, paused}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ag.Continue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	reqs := scene.requests()
+	if len(reqs) != 1 || reqs[0][1] != "user:SNAP(Q1)" || ag.CompactionEpoch() != 0 {
+		t.Fatalf("requests = %v, epoch = %d: want the resend alone, uncompacted", reqs, ag.CompactionEpoch())
+	}
+}
