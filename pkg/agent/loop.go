@@ -180,6 +180,20 @@ func (cfg *loopConfig) appendForYouSnapshot() {
 	cfg.state.Messages = append(cfg.state.Messages, msg)
 }
 
+// endsInBoundContinuation reports whether the conversation ends in a reply
+// the provider said is not finished (pause_turn, Responses continue): the next
+// request resends it as it stands. Within a run justPaused says the same; this
+// also covers a run that Continue starts over a restored conversation.
+func endsInBoundContinuation(msgs []core.AgentMessage) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if !msgs[i].IsLLMMessage() {
+			continue
+		}
+		return msgs[i].Role == "assistant" && (msgs[i].StopReason == "pause_turn" || msgs[i].StopReason == "continue")
+	}
+	return false
+}
+
 // snapshotEpoch is the compaction epoch a For you snapshot was added under,
 // -1 when it does not say. A saved one comes back from JSON as a float64.
 func snapshotEpoch(m core.AgentMessage) int {
@@ -617,7 +631,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// The previous step is complete (tool results and steers are in): an
 		// ordinary request observes For you here, before the receipt and the
 		// capacity check count it. A continuation resends what it continues.
-		if !justPaused {
+		if !justPaused && !endsInBoundContinuation(cfg.history()) {
 			cfg.appendForYouSnapshot()
 		}
 		seededEpoch := cfg.state.CompactionEpoch
@@ -833,7 +847,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 		// A compaction adopted above owes the new context its For you state,
 		// re-seeded from the sources before this request reads it.
-		if !justPaused && cfg.state.CompactionEpoch != seededEpoch {
+		if !justPaused && cfg.state.CompactionEpoch != seededEpoch && !endsInBoundContinuation(cfg.history()) {
 			cfg.appendForYouSnapshot()
 			if err := cfg.saveAdmissions(ctx); err != nil {
 				loopErr = err

@@ -59,3 +59,19 @@ func TestSerializeForSummarySkipsSnapshots(t *testing.T) {
 		t.Fatalf("serialized = %q", out)
 	}
 }
+
+// A snapshot right after a large tool batch is not a cut boundary: cutting
+// there would summarize the batch and keep only the snapshot.
+func TestFindCutPointNeverCutsAtASnapshot(t *testing.T) {
+	settings := core.CompactionSettings{Enabled: true, ReserveTokens: 1000, KeepRecent: 2000}
+	msgs := []core.AgentMessage{
+		core.WrapMessage(core.NewUserMessage(strings.Repeat("u", 4000))),
+		core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.ToolCallContent("c1", "read", nil)}}),
+		core.WrapMessage(core.Message{Role: "tool_result", ToolCallID: "c1", Content: []core.Content{core.TextContent(strings.Repeat("r", 20000))}}),
+		forYouSnap("<foryou_snapshot>Q1</foryou_snapshot>"),
+	}
+	cut := FindCutPoint(msgs, 0, 20_000, settings)
+	if cut != 1 {
+		t.Fatalf("cut = %d (%s), want 1: keep the assistant with its result", cut, msgs[cut].Role)
+	}
+}

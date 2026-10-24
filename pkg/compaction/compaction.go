@@ -122,9 +122,11 @@ func FindCutPoint(msgs []core.AgentMessage, contextTokens, contextWindow int, se
 			// turn or a summary). Never cut on a tool_result: that would keep
 			// it while summarizing the tool_use that produced it, leaving an
 			// orphan the provider rejects.
+			// A For you snapshot is no boundary: it follows a tool batch, and
+			// cutting at it would summarize the batch it follows.
 			for j := i; j < len(msgs); j++ {
 				r := msgs[j].Role
-				if r == "user" || r == "assistant" || r == "compaction_summary" {
+				if (r == "user" && !core.IsForYouSnapshot(msgs[j])) || r == "assistant" || r == "compaction_summary" {
 					return j
 				}
 			}

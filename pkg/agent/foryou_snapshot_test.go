@@ -385,3 +385,28 @@ func snapNoopRegistry(t *testing.T, onCall func()) *core.Registry {
 	}
 	return reg
 }
+
+// Continue over a restored conversation that ends in an unfinished reply
+// resends it as it stands: the state change waits for the next ordinary
+// request.
+func TestForYouSnapshotNotAddedWhenContinuingARestoredContinuation(t *testing.T) {
+	for _, reason := range []string{"pause_turn", "continue"} {
+		t.Run(reason, func(t *testing.T) {
+			scene := &snapScene{text: "Q2"}
+			ag, _ := newSnapAgent(t, scene, AgentConfig{}, simpleTextResponse("finished"))
+			snap := core.WrapMessage(core.NewUserMessage("SNAP(Q1)"))
+			snap.Custom = map[string]any{"source": core.SourceForYouSnapshot, core.CustomSnapshotEpoch: 0}
+			paused := core.WrapMessage(core.Message{Role: "assistant", Content: []core.Content{core.TextContent("Thinking...")}, StopReason: reason})
+			if err := ag.LoadState([]core.AgentMessage{core.WrapMessage(core.NewUserMessage("task")), snap, paused}, 0); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ag.Continue(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"user:task", "user:SNAP(Q1)", "assistant:Thinking..."}
+			if got := scene.requests()[0]; !slices.Equal(got, want) {
+				t.Fatalf("continuation = %v, want %v", got, want)
+			}
+		})
+	}
+}
