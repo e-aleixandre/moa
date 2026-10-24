@@ -411,7 +411,7 @@ func TestForYouSnapshotNotAddedWhenContinuingARestoredContinuation(t *testing.T)
 	}
 }
 
-// Past the soft threshold, a restored continuation is still resent as it
+// Past the compaction threshold, a restored continuation is still resent as it
 // stands: not compacted (which would summarize its snapshot away), so the
 // state it was sent with stays in the request.
 func TestRestoredContinuationIsNotCompacted(t *testing.T) {
