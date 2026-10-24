@@ -66,7 +66,11 @@ type Dialect struct {
 	SupportsServiceTier              bool
 	// SupportsAccessPrograms gates access_programs: only the ChatGPT plan
 	// transport is known to honour it.
-	SupportsAccessPrograms  bool
+	SupportsAccessPrograms bool
+	// SupportsToolSearch lets deferred tools load on demand through the
+	// native client-executed tool_search. Verified only on the ChatGPT plan
+	// transport (/codex/responses).
+	SupportsToolSearch      bool
 	AllowedReasoningEfforts []string
 }
 
@@ -89,7 +93,8 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 		r.AccessPrograms = &accessPrograms{Cyber: program}
 	}
 
-	r.Input = convertMessagesForProgram(req.Messages, dialect, program)
+	search := newToolSearch(req, dialect)
+	r.Input = convertMessagesWith(req.Messages, dialect, program, search)
 
 	if dialect.SupportsExplicitCacheBreakpoints {
 		// GPT-5.6+ places a single implicit breakpoint at the latest user/tool
@@ -113,7 +118,7 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 	}
 
 	if len(req.Tools) > 0 {
-		r.Tools = convertToolSpecs(req.Tools)
+		r.Tools = convertToolSpecs(req.Tools, search)
 		r.ToolChoice = "auto"
 	}
 
@@ -202,6 +207,12 @@ func convertMessages(msgs []core.Message, dialect Dialect) []map[string]any {
 // given access program ("" = standard). Assistant state recorded under another
 // program is replayed as another model's would be.
 func convertMessagesForProgram(msgs []core.Message, dialect Dialect, program string) []map[string]any {
+	return convertMessagesWith(msgs, dialect, program, nil)
+}
+
+// convertMessagesWith is convertMessagesForProgram for a request that loads
+// deferred tools through search (nil when it does not).
+func convertMessagesWith(msgs []core.Message, dialect Dialect, program string, search *toolSearch) []map[string]any {
 	var result []map[string]any
 
 	// A function_call with no output right after it is rejected on every
@@ -209,7 +220,7 @@ func convertMessagesForProgram(msgs []core.Message, dialect Dialect, program str
 	msgs = core.DropUnansweredToolCalls(msgs)
 
 	for i, msg := range msgs {
-		items := convertMessageForProgram(msg, dialect, program, i)
+		items := convertMessageForProgram(msg, dialect, program, i, search)
 		result = append(result, items...)
 	}
 
@@ -217,10 +228,10 @@ func convertMessagesForProgram(msgs []core.Message, dialect Dialect, program str
 }
 
 func convertMessageForDialect(msg core.Message, dialect Dialect, msgIndex int) []map[string]any {
-	return convertMessageForProgram(msg, dialect, msg.AccessProgram, msgIndex)
+	return convertMessageForProgram(msg, dialect, msg.AccessProgram, msgIndex, nil)
 }
 
-func convertMessageForProgram(msg core.Message, dialect Dialect, program string, msgIndex int) []map[string]any {
+func convertMessageForProgram(msg core.Message, dialect Dialect, program string, msgIndex int, search *toolSearch) []map[string]any {
 	switch msg.Role {
 	case "user":
 		content := convertUserContent(msg.Content, dialect.SupportsDocuments)
@@ -235,9 +246,12 @@ func convertMessageForProgram(msg core.Message, dialect Dialect, program string,
 		}
 
 	case "assistant":
-		return convertAssistantMessageForProgram(msg, dialect.Provider, dialect.Model, program, msgIndex)
+		return convertAssistantMessageForProgram(msg, dialect.Provider, dialect.Model, program, msgIndex, search)
 
 	case "tool_result":
+		if search.answers(msg.ToolCallID) {
+			return []map[string]any{search.output(msg)}
+		}
 		item := map[string]any{
 			"type":    "function_call_output",
 			"call_id": msg.ToolCallID,
@@ -328,14 +342,14 @@ func hasImage(blocks []core.Content) bool {
 // message is cross-model — a message id is not pairing-validated, and always
 // sending one reduces early stopping (matches pi).
 func convertAssistantMessageForDialect(msg core.Message, provider, modelID string, msgIndex int) []map[string]any {
-	return convertAssistantMessageForProgram(msg, provider, modelID, msg.AccessProgram, msgIndex)
+	return convertAssistantMessageForProgram(msg, provider, modelID, msg.AccessProgram, msgIndex, nil)
 }
 
 // convertAssistantMessageForProgram is convertAssistantMessageForDialect for a
 // request sent with program. Encrypted reasoning produced under one access
 // program is not known to be valid under another, so a program change is
 // treated like a model change.
-func convertAssistantMessageForProgram(msg core.Message, provider, modelID, program string, msgIndex int) []map[string]any {
+func convertAssistantMessageForProgram(msg core.Message, provider, modelID, program string, msgIndex int, search *toolSearch) []map[string]any {
 	// Responses messages written before model provenance was added still carry
 	// their provider. Preserve that known-provider legacy metadata, while
 	// continuing to reject unknown-provider and explicitly cross-model state.
@@ -387,6 +401,10 @@ func convertAssistantMessageForProgram(msg core.Message, provider, modelID, prog
 			if args == nil {
 				args = map[string]any{}
 			}
+			if search.answers(c.ToolCallID) {
+				items = append(items, search.call(c, args, foreignModel))
+				continue
+			}
 			argsJSON, _ := json.Marshal(args)
 			fc := map[string]any{
 				"type":      "function_call",
@@ -394,7 +412,9 @@ func convertAssistantMessageForProgram(msg core.Message, provider, modelID, prog
 				"name":      c.ToolName,
 				"arguments": string(argsJSON),
 			}
-			if c.ToolCallItemID != "" && !foreignModel {
+			// A search recorded as a native tool_search_call carries that
+			// item's id, which no function_call may claim.
+			if c.ToolCallItemID != "" && !foreignModel && !strings.HasPrefix(c.ToolCallItemID, toolSearchCallIDPrefix) {
 				fc["id"] = c.ToolCallItemID
 			}
 			items = append(items, fc)
@@ -480,23 +500,41 @@ func extractTextParts(blocks []core.Content) string {
 	return strings.Join(parts, "")
 }
 
-func convertToolSpecs(specs []core.ToolSpec) []map[string]any {
+// convertToolSpecs maps specs to Responses tools. With search, the deferred
+// definitions stay out (a tool_search_output loads them) and tool_search goes
+// as the native client-executed tool; without it, every spec is a function.
+func convertToolSpecs(specs []core.ToolSpec, search *toolSearch) []map[string]any {
 	result := make([]map[string]any, 0, len(specs))
 	for _, s := range specs {
-		tool := map[string]any{
-			"type":        "function",
-			"name":        s.Name,
-			"description": s.Description,
+		switch {
+		case search != nil && s.Deferred:
+			continue
+		case search != nil && s.Name == core.ToolSearchName:
+			tool := functionTool(s)
+			tool["type"] = "tool_search"
+			tool["execution"] = "client"
+			delete(tool, "name")
+			result = append(result, tool)
+		default:
+			result = append(result, functionTool(s))
 		}
-		if len(s.Parameters) > 0 {
-			var schema any
-			if err := json.Unmarshal(s.Parameters, &schema); err == nil {
-				tool["parameters"] = schema
-			}
-		}
-		result = append(result, tool)
 	}
 	return result
+}
+
+func functionTool(s core.ToolSpec) map[string]any {
+	tool := map[string]any{
+		"type":        "function",
+		"name":        s.Name,
+		"description": s.Description,
+	}
+	if len(s.Parameters) > 0 {
+		var schema any
+		if err := json.Unmarshal(s.Parameters, &schema); err == nil {
+			tool["parameters"] = schema
+		}
+	}
+	return tool
 }
 
 func explicitCacheBreakpoint() map[string]any {

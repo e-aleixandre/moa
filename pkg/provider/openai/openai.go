@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
@@ -106,8 +108,71 @@ func (o *OpenAI) supportsExplicitCacheBreakpoints(modelID string) bool {
 	return o.endpoint == apiEndpoint && modelSupportsExplicitCacheBreakpoints(modelID)
 }
 
+// SupportsDeferredTools reports whether modelID loads deferred tools through
+// tool_search: on the plan transport, where it was probed for every model the
+// plan serves (GPT-5.4 and later), unless a request was already refused for
+// it (see Stream). The paid API was never probed and keeps the full list.
+func (o *OpenAI) SupportsDeferredTools(modelID string) bool {
+	if !o.oauth || o.endpoint != codexEndpoint {
+		return false
+	}
+	if _, refused := toolSearchRefused.Load(toolSearchKey(o.baseURL, modelID)); refused {
+		return false
+	}
+	return modelSupportsToolSearch(modelID)
+}
+
+// modelSupportsToolSearch is true from GPT-5.4 on, the first release with
+// tool_search, and for the Daybreak alias.
+func modelSupportsToolSearch(modelID string) bool {
+	id := strings.ToLower(modelID)
+	if strings.HasPrefix(id, "gpt-daybreak") {
+		return true
+	}
+	rest, ok := strings.CutPrefix(id, "gpt-")
+	if !ok {
+		return false
+	}
+	major, minor, ok := parseLeadingVersion(rest)
+	return ok && (major > 5 || major == 5 && minor >= 4)
+}
+
+// toolSearchRefused remembers, for the life of the process, the endpoint and
+// model combinations that refused tool search, so their later requests send
+// the full list straight away. Providers are built per request, so this
+// cannot live on one.
+var toolSearchRefused sync.Map
+
+func toolSearchKey(baseURL, modelID string) string {
+	return baseURL + "|" + modelID
+}
+
+func hasDeferred(specs []core.ToolSpec) bool {
+	for _, s := range specs {
+		if s.Deferred {
+			return true
+		}
+	}
+	return false
+}
+
+// withoutDeferral is req with every tool loaded up front: tool_search is then
+// an ordinary function and its results go as text.
+func withoutDeferral(req core.Request) core.Request {
+	tools := make([]core.ToolSpec, len(req.Tools))
+	for i, s := range req.Tools {
+		s.Deferred = false
+		tools[i] = s
+	}
+	req.Tools = tools
+	return req
+}
+
 // Stream sends a request and returns a channel of normalized AssistantEvents.
 func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	// The fallback without tool search resends the request as the caller
+	// made it: the adjustments below are not idempotent.
+	original := req
 	// GPT-6 Astra rejects temperature. The normal agent path does not set it,
 	// but clearing it here also keeps direct provider callers on the documented
 	// contract without changing other OpenAI models.
@@ -149,12 +214,14 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		// API prices a priority tier.
 		SupportsServiceTier:     o.endpoint == apiEndpoint,
 		SupportsAccessPrograms:  o.oauth,
+		SupportsToolSearch:      o.SupportsDeferredTools(req.Model.ID),
 		AllowedReasoningEfforts: core.ReasoningEffortsForModel(req.Model),
 	}
 	body, err := responses.BuildRequestBody(req, dialect)
 	if err != nil {
 		return nil, fmt.Errorf("openai: building request: %w", err)
 	}
+	searching := dialect.SupportsToolSearch && hasDeferred(req.Tools)
 
 	request := func(token string) func() (*http.Request, error) {
 		return func() (*http.Request, error) {
@@ -252,6 +319,21 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 		// UI can show "limit reached, resets in X".
 		if resp.StatusCode == http.StatusTooManyRequests && isUsageLimitBody(errBody) {
 			return nil, quotaErrorFrom(resp, errBody)
+		}
+		// A model or backend that does not take tool search refuses the
+		// request outright. The same request with every tool loaded keeps the
+		// session going; only if that one is accepted was tool search the
+		// cause, and the combination is remembered so later requests skip
+		// the round trip.
+		refusal := resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity
+		if refusal && searching {
+			ch, err := o.Stream(ctx, withoutDeferral(original))
+			if err == nil {
+				toolSearchRefused.Store(toolSearchKey(o.baseURL, req.Model.ID), true)
+				// No body: an upstream error can echo what was sent.
+				slog.Warn("openai: tool search refused; sending the full tool list", "model", req.Model.ID, "status", resp.StatusCode)
+			}
+			return ch, err
 		}
 		return nil, fmt.Errorf("openai: HTTP %d: %s", resp.StatusCode, errText)
 	}

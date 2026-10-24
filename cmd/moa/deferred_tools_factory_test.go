@@ -11,7 +11,7 @@ import (
 )
 
 // The per-request provider wrapper must not hide deferral: the agent asks it,
-// not the concrete Anthropic provider. OpenAI stays without it.
+// not the concrete provider. Both Anthropic and the OpenAI plan defer.
 func TestRuntimeFactoryExposesDeferredTools(t *testing.T) {
 	clearProviderEnv(t)
 	client := &http.Client{Transport: &round2Capture{}}
@@ -28,7 +28,7 @@ func TestRuntimeFactoryExposesDeferredTools(t *testing.T) {
 		want  bool
 	}{
 		{core.Model{Provider: "anthropic", ID: "claude-opus-5-5"}, true},
-		{core.Model{Provider: "openai", ID: "gpt-6.1-sol"}, false},
+		{core.Model{Provider: "openai", ID: "gpt-6.1-sol"}, true},
 	} {
 		built, err := buildProviderWithClient(c.model, store, client)
 		if err != nil {
