@@ -336,7 +336,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		Ctx:                 sessionCtx,
 		EnableAskUser:       true,
 		AsyncQuestions:      askAsync,
-		EphemeralContext:    m.ephemeralContext(askAsync, id, &notifyOn, func() *ManagedSession { return sess }),
+		ForYouSnapshot:      m.forYouSnapshot(askAsync, id, &notifyOn, func() *ManagedSession { return sess }),
 		EnableSecretActions: true,
 		OwnerSession:        opts != nil && opts.ownerSession,
 		CreatorTZ:           creatorTZ,

@@ -60,11 +60,7 @@ type f1Provider struct {
 	mu     sync.Mutex
 	reqs   []core.Request
 	script func(core.Request) <-chan core.AssistantEvent
-	// implicitCache makes the fake declare an implicit-prefix-cache provider.
-	implicitCache bool
 }
-
-func (p *f1Provider) ImplicitPrefixCache(string) bool { return p.implicitCache }
 
 func (p *f1Provider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	if isTestAutoTitleRequest(req) {
@@ -111,7 +107,7 @@ func (p *f1Provider) lastSession(t *testing.T, sessionID string) core.Request {
 	return core.Request{}
 }
 
-// An ephemeral inventory may follow the real input. Fixture control must
+// A For you snapshot may follow the real input. Fixture control must
 // not depend on the inventory's role or formatting.
 func f1LatestFixtureInput(req core.Request) string {
 	for i := len(req.Messages) - 1; i >= 0; i-- {
@@ -159,7 +155,7 @@ func f1ToolCall(args map[string]any) <-chan core.AssistantEvent {
 
 func f1LastUser(req core.Request) string {
 	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == "user" {
+		if req.Messages[i].Role == "user" && !f1IsSnapshot(req.Messages[i]) {
 			var b strings.Builder
 			for _, c := range req.Messages[i].Content {
 				b.WriteString(c.Text)
@@ -177,6 +173,12 @@ func f1HasResult(req core.Request) bool {
 		}
 	}
 	return false
+}
+
+// f1IsSnapshot recognizes a For you snapshot on the wire, where Custom does
+// not travel: fixtures steer on what the user or an event said, not on it.
+func f1IsSnapshot(m core.Message) bool {
+	return len(m.Content) == 1 && strings.HasPrefix(m.Content[0].Text, "<foryou_snapshot>")
 }
 
 func f1LastUserIsAnswer(req core.Request) bool {
@@ -748,16 +750,16 @@ func TestF1BisREDStartFreshKeepsOpenQuestion(t *testing.T) {
 	}
 }
 
-// 6. The next request carries an ephemeral block about the open question
-// that never reaches the persisted history.
-func TestF1BisREDEphemeralBlockNotPersisted(t *testing.T) {
+// 6. The next request carries a For you snapshot listing the open question.
+// It is persisted, so the request prefix survives a restart, but as moa's
+// snapshot: never in the system prompt and never shown as the user's words.
+func TestF1BisForYouSnapshotPersistedAsMoas(t *testing.T) {
 	f1Each(t, func(t *testing.T, kind string) {
 		e := f1NewEnv(t, t.TempDir(), t.TempDir(), &f1Provider{script: f1Script(false)})
 		sess := e.session(kind)
 		e.send(sess, "F1-TRIGGER please ask")
 		f1AwaitAck(t, sess) // precondition: async ack, else the run never ends
 		f1Settle(t, sess)
-		histBefore := f1CountIn(f1Blob(sess.History()), f1Question)
 
 		calls := e.prov.countSession(t, sess.ID)
 		e.send(sess, "F1-NEXT anything new?")
@@ -768,29 +770,42 @@ func TestF1BisREDEphemeralBlockNotPersisted(t *testing.T) {
 		if f1CountIn(req.System, f1Question) != 0 {
 			t.Fatal("open question was injected into the system prompt")
 		}
-		reqMsgs, _ := json.Marshal(req.Messages)
-		inRequest := f1CountIn(string(reqMsgs), f1Question)
-		if inRequest <= histBefore {
-			t.Fatalf("question text appears %d time(s) in the request and %d in history: no ephemeral block about the open question", inRequest, histBefore)
+		var snaps []core.AgentMessage
+		for _, m := range sess.History() {
+			if core.IsForYouSnapshot(m) {
+				snaps = append(snaps, m)
+			}
 		}
-		if got := f1CountIn(f1Blob(sess.History()), f1Question); got != histBefore {
-			t.Fatalf("the open-question block leaked into history: %d -> %d occurrences", histBefore, got)
+		if len(snaps) == 0 || f1CountIn(f1MsgText(snaps[len(snaps)-1]), f1Question) == 0 {
+			t.Fatalf("no snapshot in history lists the open question: %d snapshots", len(snaps))
+		}
+		carried := false
+		for _, m := range req.Messages {
+			carried = carried || (f1IsSnapshot(m) && strings.Contains(m.Content[0].Text, f1Question))
+		}
+		if !carried {
+			t.Fatal("the request carries no snapshot listing the question")
+		}
+		for _, m := range displayed(t, sess) {
+			if m.Role == "user" && strings.Contains(f1MsgText(m), "<foryou_snapshot>") && !core.IsForYouSnapshot(m) {
+				t.Fatal("a snapshot lost its source on the way to the transcript")
+			}
 		}
 		if err := sess.runtime.Flush(); err != nil {
-			t.Fatalf("flush before checking the ephemeral block: %v", err)
+			t.Fatalf("flush: %v", err)
 		}
 		snapshot, _, err := session.FindSessionReadOnly(e.mgr.sessionBaseDir, sess.ID)
 		if err != nil {
 			t.Fatalf("read saved transcript: %v", err)
 		}
-		var saved []core.AgentMessage
+		saved := 0
 		for _, entry := range snapshot.Entries {
-			if entry.Message.Role != "" {
-				saved = append(saved, entry.Message)
+			if core.IsForYouSnapshot(entry.Message) {
+				saved++
 			}
 		}
-		if got := f1CountIn(f1Blob(saved), f1Question); got != histBefore {
-			t.Fatalf("the open-question block leaked into the saved transcript: %d -> %d occurrences", histBefore, got)
+		if saved != len(snaps) {
+			t.Fatalf("saved transcript holds %d snapshots, history %d", saved, len(snaps))
 		}
 	})
 }

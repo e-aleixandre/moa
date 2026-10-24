@@ -352,6 +352,7 @@ when it is about the project itself and should reach everyone who clones it.
 | `MOA_SERVE_TOKEN` | Shared secret for `moa serve` opt-in authentication; equivalent to `--token` (see [Web UI](./serve.md#security)) |
 | `MOA_AUTOMATION_TOKEN` | Shared secret enabling the inbound [Automation API](./automation.md); equivalent to `--automation-token`. Separate from `MOA_SERVE_TOKEN` |
 | `MOA_NO_UPDATE_CHECK=1` | Disables the best-effort GitHub release check for this process |
+| `MOA_DEBUG_CACHE=1` | Prompt-cache diagnostics, off by default; set it in the service environment and restart. Logs one `request shape` line per request, a `request fingerprint` line per Anthropic request (first block that differs from the previous request, where the shared prefix ends, cache marks with their TTL, and whether the previous request is still a prefix — across runs too) and an `anthropic response` line with the `request-id`. Hashes, sizes and positions only: never message content, tokens or secrets. Failure logs are always on. The plan-quota percentage and reset of each window are always stored on the assistant message (`rate_limit`), flag or not; a request that fails without producing a message leaves no record |
 | `MOA_ATTACHMENTS_DIR` | Base directory for `moa serve` attachment staging (default `/tmp/moa-<uid>`); detailed in [Web UI](./serve.md) |
 | `MOA_SERVE_STATIC_DIR` | Serve the web UI from this directory instead of the build embedded in the binary; for frontend development (see [Web UI](./serve.md#frontend-development)) |
 

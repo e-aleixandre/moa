@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -132,96 +131,98 @@ func (cfg *loopConfig) toolCallOrigin(toolCallID string) string {
 	return ""
 }
 
-// ephemeralBlock evaluates the per-request block, flagged so providers keep
-// their cache breakpoint off it. nil when there is none.
-func (cfg *loopConfig) ephemeralBlock() *core.Message {
-	if cfg.ephemeralContext == nil {
-		return nil
-	}
-	block := cfg.ephemeralContext()
-	if block == nil {
-		return nil
-	}
-	eph := *block
-	eph.Ephemeral = true
-	return &eph
-}
-
-// frozenEphemeral is the block an ordinary request carried and where it sat in
-// that request's messages. The continuations of that request (a transport
-// repair, a pause_turn or truncation resubmit) resend it in the same place:
-// they finish a request that was already sent, so they must not rewrite what
-// the model was shown. The next ordinary request evaluates it afresh.
+// appendForYouSnapshot adds the session's For you state at the end of the
+// conversation when it is not what the context already carries: when it
+// differs from the last snapshot there, or when that snapshot predates the
+// current compaction epoch (a compaction, trim or fresh cut since: the state
+// is re-seeded from its sources, never from a summary). Without an earlier
+// snapshot an empty state adds nothing.
 //
-// On a provider with implicit prefix caching (OpenAI Responses over OAuth, no
-// breakpoints) an ordinary request keeps the previous block where it sat while
-// it is unchanged (see reuse): re-anchoring it at the end every time displaces
-// the previous request's tail, which may keep the whole previous request from
-// being reused as a prefix. A provider that binds thinking to the prefix
-// (Anthropic) anchors it too: its breakpoint stays on the last durable block
-// either way, but removing the block from where the previous request carried
-// it drops the thinking of every turn after it. A changed block still moves to
-// the end and breaks the cached prefix from where the old one sat.
-type frozenEphemeral struct {
-	msg *core.Message
-	at  int
-	// epoch and model are what the messages before at were built under; a
-	// compaction or trim (epoch) or another model rewrites that prefix.
-	epoch int
-	model core.Model
-	// prefix hashes the messages before at, so an anchor kept across runs is
-	// only trusted while that history is byte-identical.
-	prefix string
-}
-
-// reuse reports whether the anchored block may serve an ordinary request that
-// evaluated block afresh: same content, same prefix before it, still inside
-// the history. Timestamp and MsgID are regenerated per evaluation and ignored.
-func (f frozenEphemeral) reuse(block *core.Message, epoch int, model core.Model, history int) bool {
-	if f.msg == nil || block == nil || f.at > history || f.epoch != epoch || !sameModel(f.model, model) {
-		return false
+// Earlier snapshots are never edited, moved or removed: moving the block that
+// changed rewrote the request prefix from where it sat, which costs the cached
+// prefix and, on Anthropic, the signed thinking of every turn after it. The
+// latest one governs; its text says so.
+//
+// Called only at an ordinary request boundary, with every step before it
+// complete (an assistant's tool calls are all answered), never on the
+// continuation of a request already sent. The snapshot asks for a durable
+// admission, so saveAdmissions puts it on disk before the model reads it.
+func (cfg *loopConfig) appendForYouSnapshot() {
+	if cfg.forYouSnapshot == nil {
+		return
 	}
-	return f.msg.Role == block.Role && reflect.DeepEqual(f.msg.Content, block.Content)
-}
-
-// into returns msgs with the block in its place, msgs itself when there is none.
-func (f frozenEphemeral) into(msgs []core.Message) []core.Message {
-	if f.msg == nil {
-		return msgs
+	text, empty := cfg.forYouSnapshot()
+	cfg.stateMu.Lock()
+	defer cfg.stateMu.Unlock()
+	epoch := cfg.state.CompactionEpoch
+	msgs := cfg.state.Messages
+	last := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if core.IsForYouSnapshot(msgs[i]) {
+			last = i
+			break
+		}
 	}
-	at := min(f.at, len(msgs))
-	out := make([]core.Message, 0, len(msgs)+1)
-	out = append(out, msgs[:at]...)
-	out = append(out, *f.msg)
-	return append(out, msgs[at:]...)
+	if last < 0 {
+		if empty {
+			return
+		}
+	} else if c := msgs[last].Content; len(c) == 1 && c[0].Text == text && snapshotEpoch(msgs[last]) == epoch {
+		return
+	}
+	msg := core.WrapMessage(core.NewUserMessage(text))
+	msg.Custom = map[string]any{
+		"source":                    core.SourceForYouSnapshot,
+		core.CustomSnapshotEpoch:    epoch,
+		core.CustomDurableAdmission: true,
+	}
+	msg.EnsureMsgID()
+	cfg.state.Messages = append(cfg.state.Messages, msg)
 }
 
-// recalledAnchor returns the anchor the agent's previous run left, when the
-// history before it is unchanged; the zero value otherwise.
-func (cfg *loopConfig) recalledAnchor(msgs []core.Message) frozenEphemeral {
+// endsInBoundContinuation reports whether the conversation ends in a reply
+// the provider said is not finished (pause_turn, Responses continue): the next
+// request resends it as it stands.
+func endsInBoundContinuation(msgs []core.AgentMessage) bool {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if !msgs[i].IsLLMMessage() {
+			continue
+		}
+		return msgs[i].Role == "assistant" && (msgs[i].StopReason == "pause_turn" || msgs[i].StopReason == "continue")
+	}
+	return false
+}
+
+// snapshotEpoch is the compaction epoch a For you snapshot was added under,
+// -1 when it does not say. A saved one comes back from JSON as a float64.
+func snapshotEpoch(m core.AgentMessage) int {
+	switch v := m.Custom[core.CustomSnapshotEpoch].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	}
+	return -1
+}
+
+// recalledShape and rememberShape carry the request-shape link from one run to
+// the next, so prev_is_prefix compares a run's first request with the last one
+// of the previous run instead of starting blank.
+func (cfg *loopConfig) recalledShape() requestShape {
 	if cfg.agent == nil {
-		return frozenEphemeral{}
+		return requestShape{}
 	}
 	cfg.agent.mu.Lock()
-	f := cfg.agent.ephemeralAnchor
-	cfg.agent.mu.Unlock()
-	if f.msg == nil || f.at > len(msgs) {
-		return frozenEphemeral{}
-	}
-	if _, h := messagesChain(msgs[:f.at], 0); h == "" || h != f.prefix {
-		return frozenEphemeral{}
-	}
-	return f
+	defer cfg.agent.mu.Unlock()
+	return cfg.agent.shape
 }
 
-// rememberAnchor keeps f for the agent's next run. Request-only: it is never
-// part of the state, the saved tree or any snapshot.
-func (cfg *loopConfig) rememberAnchor(f frozenEphemeral) {
+func (cfg *loopConfig) rememberShape(s requestShape) {
 	if cfg.agent == nil {
 		return
 	}
 	cfg.agent.mu.Lock()
-	cfg.agent.ephemeralAnchor = f
+	cfg.agent.shape = s
 	cfg.agent.mu.Unlock()
 }
 
@@ -346,8 +347,8 @@ type loopConfig struct {
 	// (nil when there is nothing to append), and a callback to clear it once
 	// consumed. Nil when no checkpoint slot is wired.
 	readCheckpoint func() (string, *uint64, func())
-	// ephemeralContext: see AgentConfig.EphemeralContext.
-	ephemeralContext func() *core.Message
+	// forYouSnapshot: see AgentConfig.ForYouSnapshot.
+	forYouSnapshot func() (text string, empty bool)
 	// ephemeralCompaction is set for a /prepare-compact preparation run, whose
 	// conversation is discarded: its automatic compactions are flagged so the
 	// session does not record them.
@@ -417,16 +418,13 @@ func sameModel(a, b core.Model) bool {
 
 // contextExceeds reports whether the conversation is past the compaction
 // threshold of s's model — the same judgement the compaction check makes.
-//
-// extra is what the next request carries beyond the conversation (the
-// ephemeral block), which the conversation's own estimate does not see.
-func contextExceeds(cfg *loopConfig, s requestSettings, toolSpecs []core.ToolSpec, extra int) bool {
+func contextExceeds(cfg *loopConfig, s requestSettings, toolSpecs []core.ToolSpec) bool {
 	c := s.compaction
 	if c == nil || !c.Enabled || s.model.MaxInput <= 0 {
 		return false
 	}
 	estimate := core.EstimateContextTokens(cfg.history(), cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
-	return core.ShouldCompact(estimate.Tokens+extra, c.EffectiveWindow(s.model.MaxInput), *c)
+	return core.ShouldCompact(estimate.Tokens, c.EffectiveWindow(s.model.MaxInput), *c)
 }
 
 // hardCapacity is the most context s's model accepts: its window minus the
@@ -574,10 +572,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	// resubmit (compacting between a pause and its resubmit would replace the
 	// paused message and lose the continuation).
 	pauseResubmits := 0
-	justPaused := false
-	// The ephemeral block of the last ordinary request, for its continuations.
-	var frozen frozenEphemeral
-	var shape requestShape
+	// A run that Continue starts over a restored conversation ending in an
+	// unfinished reply is that reply's resubmit, exactly as within one run.
+	justPaused := endsInBoundContinuation(cfg.history())
+	shape := cfg.recalledShape()
+	defer func() { cfg.rememberShape(shape) }()
 	// Local to this admitted work, never inherited by another Send or child.
 	// A tool result can change ordinary settings without being a new entry
 	// into API while this work's OAuth restriction still makes return early.
@@ -630,6 +629,14 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			return loopErr
 		}
 
+		// The previous step is complete (tool results and steers are in): an
+		// ordinary request observes For you here, before the receipt and the
+		// capacity check count it. A continuation resends what it continues.
+		if !justPaused {
+			cfg.appendForYouSnapshot()
+		}
+		seededEpoch := cfg.state.CompactionEpoch
+
 		// Receipt before inference: nothing below (compaction included) may
 		// call the provider with an admitted answer the disk has not seen.
 		if err := cfg.saveAdmissions(ctx); err != nil {
@@ -664,22 +671,10 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 		// The model whose window the check below judges the context against.
 		checkedFor := cfg.model
-		// What the request will carry beyond the conversation. A continuation
-		// carries the block of the request it finishes; an ordinary request a
-		// fresh one, which is the one it will send if nothing changes.
-		ephemeralTokens := 0
-		if justPaused {
-			if frozen.msg != nil {
-				ephemeralTokens = core.EstimateTokens(*frozen.msg)
-			}
-		} else if block := cfg.ephemeralBlock(); block != nil {
-			ephemeralTokens = core.EstimateTokens(*block)
-		}
 		if !justPaused && compactionSettings != nil && compactionSettings.Enabled && cfg.model.MaxInput > 0 {
 			estimate := core.EstimateContextTokens(
 				cfg.history(), cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch,
 			)
-			estimate.Tokens += ephemeralTokens
 			window := compactionSettings.EffectiveWindow(cfg.model.MaxInput)
 
 			// Warn before the threshold, not at it: an automatic compaction
@@ -851,12 +846,21 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				}
 			}
 		}
+		// A compaction adopted above owes the new context its For you state,
+		// re-seeded from the sources before this request reads it.
+		if !justPaused && cfg.state.CompactionEpoch != seededEpoch {
+			cfg.appendForYouSnapshot()
+			if err := cfg.saveAdmissions(ctx); err != nil {
+				loopErr = err
+				return loopErr
+			}
+		}
 		// A continuation is never compacted or rewritten. If it no longer fits
 		// the window minus the reserve, stop instead of sending it oversized.
 		if justPaused && cfg.background && cfg.settings != nil {
 			if c := cfg.settings().compaction; c != nil && c.Enabled && cfg.model.MaxInput > 0 {
 				estimate := core.EstimateContextTokens(cfg.history(), cfg.systemPrompt, toolSpecs, cfg.state.CompactionEpoch)
-				if estimate.Tokens+ephemeralTokens > cfg.model.MaxInput-c.ReserveTokens {
+				if estimate.Tokens > cfg.model.MaxInput-c.ReserveTokens {
 					loopErr = fmt.Errorf("%w: a continuation cannot be compacted", ErrContextCapacity)
 					return loopErr
 				}
@@ -949,7 +953,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				hard := hardCapacity(next)
 				shrunk := (window > 0 && (checkedWindow == 0 || window < checkedWindow)) ||
 					(hard > 0 && (checkedHard == 0 || hard < checkedHard))
-				if (!sameModel(next.model, checkedFor) || shrunk) && contextExceeds(cfg, next, toolSpecs, ephemeralTokens) {
+				if (!sameModel(next.model, checkedFor) || shrunk) && contextExceeds(cfg, next, toolSpecs) {
 					recheckContext = true
 					break
 				}
@@ -957,24 +961,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				requestCompaction = next.compaction
 			}
 			bound := justPaused || repairPartial != nil
-			if !bound {
-				block := cfg.ephemeralBlock()
-				anchored := core.ProviderHasImplicitPrefixCache(cfg.provider, cfg.model.ID) ||
-					core.ProviderBindsThinkingPrefix(cfg.provider, cfg.model.ID)
-				if anchored && frozen.msg == nil {
-					frozen = cfg.recalledAnchor(baseMessages)
-				}
-				if !anchored || !frozen.reuse(block, cfg.state.CompactionEpoch, cfg.model, len(baseMessages)) {
-					frozen = frozenEphemeral{msg: block, at: len(baseMessages), epoch: cfg.state.CompactionEpoch, model: cfg.model}
-					if anchored {
-						if block != nil {
-							_, frozen.prefix = messagesChain(baseMessages, 0)
-						}
-						cfg.rememberAnchor(frozen)
-					}
-				}
-			}
-			reqMessages := frozen.into(baseMessages)
+			reqMessages := baseMessages
 			if repairPartial != nil {
 				reqMessages = append(append([]core.Message{}, reqMessages...), *repairPartial, streamContinueHint())
 			}

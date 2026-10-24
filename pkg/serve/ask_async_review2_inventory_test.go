@@ -34,12 +34,16 @@ func TestReviewInventoryDeclaredEightBy400Bound(t *testing.T) {
 	f1Settle(t, s)
 	text := ""
 	for _, message := range p.lastSession(t, s.ID).Messages {
-		if message.Ephemeral {
-			text = message.Content[0].Text
+		if body := message.Content[0].Text; strings.HasPrefix(body, "<foryou_snapshot>") {
+			start := strings.Index(body, "<open_questions>")
+			end := strings.Index(body, "</open_questions>")
+			if start >= 0 && end > start {
+				text = body[start : end+len("</open_questions>")]
+			}
 		}
 	}
 	if text == "" {
-		t.Fatal("real provider request has no inventory block")
+		t.Fatal("real provider request has no open-questions section")
 	}
 	if len(text) > inventoryMaxBytes {
 		t.Fatalf("inventory is %d bytes, bound is %d", len(text), inventoryMaxBytes)

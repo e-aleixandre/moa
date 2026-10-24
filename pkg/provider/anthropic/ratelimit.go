@@ -30,6 +30,8 @@ func parseRateLimit(h http.Header) *core.RateLimit {
 		SevenDayUtil:        parseUtil(h.Get(prefix + "7d-utilization")),
 		OverageStatus:       overageStatus,
 		OverageUtil:         parseUtil(h.Get(prefix + "overage-utilization")),
+		FiveHourResetAt:     parseResetAt(h.Get(prefix + "5h-reset")),
+		SevenDayResetAt:     parseResetAt(h.Get(prefix + "7d-reset")),
 	}
 }
 
@@ -48,4 +50,13 @@ func parseUtil(s string) float64 {
 		return 1
 	}
 	return f
+}
+
+// parseResetAt parses a reset header (Unix seconds); 0 means unknown.
+func parseResetAt(s string) int64 {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }

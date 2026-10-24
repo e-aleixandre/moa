@@ -14,7 +14,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
-	"github.com/e-aleixandre/moa/pkg/provider/openai"
 )
 
 type round2Capture struct{ bodies [][]byte }
@@ -49,24 +48,22 @@ func round2BuiltProvider(t *testing.T) (core.Provider, *round2Capture, core.Mode
 	}
 	return built.Provider, tr, m
 }
-func TestRound2RuntimeFactoryExposesImplicitCaching(t *testing.T) {
-	p, _, m := round2BuiltProvider(t)
-	if !core.ProviderHasImplicitPrefixCache(openai.NewOAuth("offline-unused", "offline-account", nil), m.ID) {
-		t.Fatal("concrete control not implicit")
-	}
-	if !core.ProviderHasImplicitPrefixCache(p, m.ID) {
-		t.Fatalf("production factory returned %T, which hides implicit-prefix capability", p)
-	}
-}
-func TestRound2RuntimeFactoryKeepsPrefixAcrossRuns(t *testing.T) {
+
+// Through the production provider wrapper, a For you change between runs is
+// appended: the previous request stays a byte-exact prefix of the next.
+func TestRuntimeFactoryForYouChangeKeepsPrefixAcrossRuns(t *testing.T) {
 	p, tr, m := round2BuiltProvider(t)
-	a, err := agent.New(agent.AgentConfig{Provider: p, Model: m, SystemPrompt: "fixed", MaxTurns: 3, MaxRunDuration: 5 * time.Second, EphemeralContext: func() *core.Message { m := core.NewUserMessage("stable inventory"); return &m }})
+	state := "inventory A"
+	a, err := agent.New(agent.AgentConfig{Provider: p, Model: m, SystemPrompt: "fixed", MaxTurns: 3, MaxRunDuration: 5 * time.Second,
+		ForYouSnapshot: func() (string, bool) { return state, false }})
 	if err != nil {
 		t.Fatal(err)
 	}
+	a.SetProviderWaitSave(func(context.Context) error { return nil })
 	if _, err := a.Run(context.Background(), "first"); err != nil {
 		t.Fatal(err)
 	}
+	state = "inventory B"
 	if _, err := a.Send(context.Background(), "second"); err != nil {
 		t.Fatal(err)
 	}
@@ -84,27 +81,7 @@ func TestRound2RuntimeFactoryKeepsPrefixAcrossRuns(t *testing.T) {
 	}
 	for i, b := range before.Input {
 		if i >= len(next.Input) || !bytes.Equal(b, next.Input[i]) {
-			t.Fatalf("production wrapper still moves inventory: first mismatch input[%d], %d -> %d items; all HTTP intercepted locally", i, len(before.Input), len(next.Input))
+			t.Fatalf("production wrapper rewrote the prefix: first mismatch input[%d], %d -> %d items; all HTTP intercepted locally", i, len(before.Input), len(next.Input))
 		}
-	}
-}
-
-func TestRuntimeFactoryExposesAnthropicThinkingPrefixBinding(t *testing.T) {
-	clearProviderEnv(t)
-	client := &http.Client{Transport: &round2Capture{}}
-	store := auth.NewStoreWithHTTPClient(filepath.Join(t.TempDir(), "auth.json"), client)
-	if _, err := store.CommitLogin("anthropic", "", auth.Credential{Type: "oauth", Access: "offline-review-no-valid-token", Refresh: "offline-refresh", Expires: time.Now().Add(time.Hour).UnixMilli()}); err != nil {
-		t.Fatal(err)
-	}
-	m := core.Model{Provider: "anthropic", ID: "claude-opus-5-5"}
-	built, err := buildProviderWithClient(m, store, client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !core.ProviderBindsThinkingPrefix(built.Provider, m.ID) {
-		t.Fatalf("production factory returned %T, which hides thinking-prefix binding", built.Provider)
-	}
-	if core.ProviderHasImplicitPrefixCache(built.Provider, m.ID) {
-		t.Fatal("Anthropic places its own breakpoints; it must not report an implicit prefix cache")
 	}
 }

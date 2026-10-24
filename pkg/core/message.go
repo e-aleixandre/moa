@@ -183,19 +183,17 @@ type Message struct {
 	AccessProgram  string          `json:"access_program,omitempty"`
 	ProviderSource *ProviderSource `json:"provider_source,omitempty"`
 	Usage          *Usage          `json:"usage,omitempty"`
-	StopReason     string          `json:"stop_reason,omitempty"`
-	ErrorMessage   string          `json:"error_message,omitempty"`
+	// RateLimit is the plan-quota state the provider reported on the response
+	// that produced this message (percent used and reset per window, no
+	// content). Absent when the provider sent none.
+	RateLimit    *RateLimit `json:"rate_limit,omitempty"`
+	StopReason   string     `json:"stop_reason,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
 
 	// tool_result-only
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	ToolName   string `json:"tool_name,omitempty"`
 	IsError    bool   `json:"is_error,omitempty"`
-
-	// Ephemeral marks a message that exists only in the request being sent: it
-	// is never stored, and a provider that caches the conversation must not
-	// place its cache breakpoint on it, since the next request will not have
-	// it.
-	Ephemeral bool `json:"-"`
 }
 
 // CustomDurableAdmission is the Custom key of a message whose admission to the
@@ -204,6 +202,23 @@ type Message struct {
 // save ends the run without inferring, so a receipt (the message in the saved
 // transcript) always precedes the work that message causes.
 const CustomDurableAdmission = "durable_admission"
+
+// SourceForYouSnapshot is the Custom "source" of a user-role message that
+// carries the session's For you state as moa observed it (its open questions
+// and recent News). The loop appends one when that state changes, and never
+// edits or moves an earlier one: the latest in the context governs, the
+// earlier ones are history. It is moa talking to the model, not the user.
+const SourceForYouSnapshot = "foryou_snapshot"
+
+// CustomSnapshotEpoch is the Custom key of a For you snapshot holding the
+// compaction epoch it was added under, so a context rebuilt after a
+// compaction (even across a restart) knows it still owes a fresh one.
+const CustomSnapshotEpoch = "snapshot_epoch"
+
+// IsForYouSnapshot reports whether m is a For you snapshot.
+func IsForYouSnapshot(m AgentMessage) bool {
+	return m.Role == "user" && m.Custom != nil && m.Custom["source"] == SourceForYouSnapshot
+}
 
 // EnsureMsgID assigns a stable identifier when the message does not have one.
 func (m *Message) EnsureMsgID() {
@@ -375,6 +390,10 @@ type RateLimit struct {
 	SevenDayUtil        float64 `json:"seven_day_util"`                 // [0,1], or -1 if unknown
 	OverageStatus       string  `json:"overage_status,omitempty"`
 	OverageUtil         float64 `json:"overage_util"` // [0,1], or -1 if unknown
+	// FiveHourResetAt and SevenDayResetAt are when each window resets, in Unix
+	// seconds; 0 when the provider did not say.
+	FiveHourResetAt int64 `json:"five_hour_reset_at,omitempty"`
+	SevenDayResetAt int64 `json:"seven_day_reset_at,omitempty"`
 }
 
 // OnOverage reports whether the request is currently being served from extra

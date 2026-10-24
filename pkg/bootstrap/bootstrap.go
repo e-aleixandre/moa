@@ -137,8 +137,8 @@ type SessionConfig struct {
 	// answer (see agentcontext.SystemPromptOptions.AsyncQuestions).
 	AsyncQuestions bool
 
-	// EphemeralContext is AgentConfig.EphemeralContext for this session.
-	EphemeralContext func() *core.Message
+	// ForYouSnapshot is AgentConfig.ForYouSnapshot for this session.
+	ForYouSnapshot func() (text string, empty bool)
 
 	// BeforeWrite is called before write/edit tools modify a file.
 	// Used by the checkpoint system to capture pre-edit state.
@@ -798,25 +798,27 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 	// 12. Agent.
 	agentCfg := agent.AgentConfig{
-		Provider:            cfg.Provider,
-		Model:               cfg.Model,
-		SystemPrompt:        systemPrompt,
-		ThinkingLevel:       cfg.ThinkingLevel,
-		Fast:                cfg.Fast,
-		Daybreak:            cfg.Daybreak,
-		CacheTTL:            core.GetCacheTTL(moaCfg),
-		PromptCacheKey:      core.PromptCacheKey(cfg.SessionID),
-		Tools:               toolReg,
-		CompactStrategy:     core.GetCompactStrategy(moaCfg),
-		WorkspaceRoot:       cfg.CWD,
-		MaxTurns:            maxTurns,
-		MaxToolCallsPerTurn: maxToolCallsPerTurn,
-		MaxRunDuration:      maxRunDuration,
-		MaxBudget:           maxBudget,
-		MaterializeContent:  cfg.MaterializeContent,
-		AttachmentScope:     cfg.AttachmentScope,
-		SessionCheckpoint:   sessionCheckpoint,
-		EphemeralContext:    cfg.EphemeralContext,
+		Provider:       cfg.Provider,
+		Model:          cfg.Model,
+		SystemPrompt:   systemPrompt,
+		ThinkingLevel:  cfg.ThinkingLevel,
+		Fast:           cfg.Fast,
+		Daybreak:       cfg.Daybreak,
+		CacheTTL:       core.GetCacheTTL(moaCfg),
+		PromptCacheKey: core.PromptCacheKey(cfg.SessionID),
+		// nil unless MOA_DEBUG_CACHE=1: per-request body fingerprint diff.
+		OnRequestFingerprint: agent.NewCacheDiag(core.PromptCacheKey(cfg.SessionID)),
+		Tools:                toolReg,
+		CompactStrategy:      core.GetCompactStrategy(moaCfg),
+		WorkspaceRoot:        cfg.CWD,
+		MaxTurns:             maxTurns,
+		MaxToolCallsPerTurn:  maxToolCallsPerTurn,
+		MaxRunDuration:       maxRunDuration,
+		MaxBudget:            maxBudget,
+		MaterializeContent:   cfg.MaterializeContent,
+		AttachmentScope:      cfg.AttachmentScope,
+		SessionCheckpoint:    sessionCheckpoint,
+		ForYouSnapshot:       cfg.ForYouSnapshot,
 		// The GLOBAL default only. A resumed session's own compact_at is applied
 		// afterwards via SetCompactAt, and the agent keeps the two apart, which is
 		// what lets a session's own choice win here without erasing the global

@@ -106,18 +106,27 @@ func FindCutPoint(msgs []core.AgentMessage, contextTokens, contextWindow int, se
 		targetKeep = settings.KeepRecent
 	}
 
-	// Walk backwards, accumulating token cost of kept messages.
+	// Walk backwards, accumulating token cost of kept messages. For you
+	// snapshots ride along in the kept suffix but are not charged to it: they
+	// are state moa re-seeds after the cut, and charging them would keep less
+	// of the conversation the more often that state changed. They still count
+	// towards the context size that decides when to compact.
 	accumulated := 0
 	for i := len(msgs) - 1; i >= 0; i-- {
+		if core.IsForYouSnapshot(msgs[i]) {
+			continue
+		}
 		accumulated += core.EstimateTokens(msgs[i].Message)
 		if accumulated >= targetKeep {
 			// Snap forward to a valid cut boundary (start of a user/assistant
 			// turn or a summary). Never cut on a tool_result: that would keep
 			// it while summarizing the tool_use that produced it, leaving an
 			// orphan the provider rejects.
+			// A For you snapshot is no boundary: it follows a tool batch, and
+			// cutting at it would summarize the batch it follows.
 			for j := i; j < len(msgs); j++ {
 				r := msgs[j].Role
-				if r == "user" || r == "assistant" || r == "compaction_summary" {
+				if (r == "user" && !core.IsForYouSnapshot(msgs[j])) || r == "assistant" || r == "compaction_summary" {
 					return j
 				}
 			}
@@ -307,6 +316,12 @@ func renderMessage(m core.AgentMessage, toolBudget *int, perResult int) string {
 	var b strings.Builder
 	switch m.Role {
 	case "user":
+		// For you state is not the summary's to carry: the loop re-seeds it
+		// from its sources after the cut, and rendering it as [User] would
+		// put moa's words in the user's mouth.
+		if core.IsForYouSnapshot(m) {
+			return ""
+		}
 		b.WriteString("[User]: ")
 		b.WriteString(extractText(m.Message))
 		b.WriteByte('\n')

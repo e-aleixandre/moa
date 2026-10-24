@@ -980,6 +980,13 @@ func PromptCacheKey(sessionID string) string {
 	return "moa:session:" + sessionID
 }
 
+// CacheDebug reports whether prompt-cache diagnostics are on
+// (MOA_DEBUG_CACHE=1): the per-request shape and body-fingerprint logs and the
+// provider's response request-id. They carry hashes, sizes and positions only
+// — never message content, tokens or secrets — but are one line or more per
+// request, so they are opt-in. Failure logs do not depend on it.
+func CacheDebug() bool { return os.Getenv("MOA_DEBUG_CACHE") == "1" }
+
 // SubagentPromptCacheKey derives a child's cache key from its parent session.
 // Children of one session share the key: GPT-5.6 still reads a matching
 // instructions+tools prefix on a sibling's first request (measured on disk:

@@ -79,10 +79,6 @@ func (a *Anthropic) IsOAuth() bool {
 // API-key and OAuth auth.
 func (a *Anthropic) SupportsDocuments() bool { return true }
 
-// BindsThinkingPrefix is true for the models whose requests carry
-// block_binding: their signed thinking survives only an unchanged prefix.
-func (a *Anthropic) BindsThinkingPrefix(modelID string) bool { return bindsThinkingPrefix(modelID) }
-
 // SupportsDeferredTools reports whether modelID loads deferred tools on
 // demand: every model since the 4.5 family, unless a request was already
 // refused for it (see Stream).
@@ -285,6 +281,11 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 	// per-request plan-usage / overage awareness — and so it survives even if the
 	// stream later errors or is cancelled mid-flight.
 	rl := parseRateLimit(resp.Header)
+	if core.CacheDebug() {
+		// Joins this response to the request fingerprint line by body hash and
+		// to Anthropic's own records by request-id. Hashes only.
+		slog.Info("anthropic response", "request_id", resp.Header.Get("request-id"), "cache_key", req.Options.PromptCacheKey, "model", req.Model.ID, "body", sumHex(body)[:8])
+	}
 
 	ch := make(chan core.AssistantEvent, 64)
 
@@ -300,7 +301,7 @@ func (a *Anthropic) Stream(ctx context.Context, req core.Request) (<-chan core.A
 			ch <- core.AssistantEvent{Type: core.ProviderEventRateLimit, RateLimit: rl, Provider: "anthropic"}
 		}
 		body := io.Reader(sseutil.NewIdleTimeoutReader(resp.Body, 5*time.Minute))
-		a.consumeStream(ctx, body, ch, tools, profileOAuth)
+		a.consumeStream(ctx, body, ch, tools, profileOAuth, rl)
 	}()
 
 	return ch, nil
@@ -342,8 +343,11 @@ func (a *Anthropic) setHeaders(r *http.Request, requestKey, modelID string, oaut
 
 // consumeStream parses SSE frames and emits normalized events.
 // Guarantees exactly one terminal event ("done" or "error") before returning.
-func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, tools []core.ToolSpec, oauthMode bool) {
+func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<- core.AssistantEvent, tools []core.ToolSpec, oauthMode bool, quota ...*core.RateLimit) {
 	state := &streamState{requestTools: tools, isOAuth: oauthMode}
+	if len(quota) > 0 {
+		state.rateLimit = quota[0]
+	}
 	sentTerminal := false
 
 	defer func() {
@@ -399,17 +403,20 @@ func (a *Anthropic) consumeStream(ctx context.Context, body io.Reader, ch chan<-
 // streamState tracks the evolving message across SSE events.
 type streamState struct {
 	usageStartKnown bool
-	message         core.Message
-	contentIdx      int
-	blockType       string // current block type being built
-	jsonAccum       string // accumulated JSON for tool_use input
-	toolCallID      string
-	toolCallName    string
-	requestTools    []core.ToolSpec // original tool specs for reverse name mapping
-	isOAuth         bool            // whether this request used OAuth (for tool name mapping)
-	textAccum       strings.Builder
-	thinkingAccum   strings.Builder
-	signatureAccum  strings.Builder
+	// rateLimit is the quota the response headers reported, stamped on the
+	// message so it is persisted with it.
+	rateLimit      *core.RateLimit
+	message        core.Message
+	contentIdx     int
+	blockType      string // current block type being built
+	jsonAccum      string // accumulated JSON for tool_use input
+	toolCallID     string
+	toolCallName   string
+	requestTools   []core.ToolSpec // original tool specs for reverse name mapping
+	isOAuth        bool            // whether this request used OAuth (for tool name mapping)
+	textAccum      strings.Builder
+	thinkingAccum  strings.Builder
+	signatureAccum strings.Builder
 
 	// Partial JSON parsing for streaming tool call arguments.
 	partialParser jsonutil.PartialParser
@@ -509,6 +516,10 @@ func (a *Anthropic) handleMessageStart(data string, state *streamState) *core.As
 		Model:     payload.Message.Model,
 		Usage:     usage,
 		Timestamp: time.Now().Unix(),
+	}
+	if state.rateLimit != nil {
+		rl := *state.rateLimit
+		state.message.RateLimit = &rl
 	}
 	state.usageStartKnown = usageFieldPresent(data, "message", "input_tokens")
 	state.message.ProviderSource = &core.ProviderSource{InputTransformations: readInputTransformations(data, "message")}

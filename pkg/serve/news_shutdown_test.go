@@ -9,11 +9,13 @@ import (
 func TestShutdownWaitsForNewsReadsAndClosesAdmission(t *testing.T) {
 	m := NewManager(context.Background(), ManagerConfig{WorkspaceRoot: t.TempDir()})
 	inside, release := make(chan struct{}), make(chan struct{})
-	go m.readNews(func() string {
-		close(inside)
-		<-release
-		return "news"
-	})
+	go func() {
+		_, _ = m.readNews(func() (string, error) {
+			close(inside)
+			<-release
+			return "news", nil
+		})
+	}()
 	<-inside
 	done := make(chan struct{})
 	go func() { m.Shutdown(); close(done) }()
@@ -28,7 +30,7 @@ func TestShutdownWaitsForNewsReadsAndClosesAdmission(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Shutdown did not finish after the read returned")
 	}
-	if got := m.readNews(func() string { t.Error("read admitted after Shutdown"); return "x" }); got != "" {
-		t.Fatalf("read after Shutdown = %q, want empty", got)
+	if got, err := m.readNews(func() (string, error) { t.Error("read admitted after Shutdown"); return "x", nil }); got != "" || err == nil {
+		t.Fatalf("read after Shutdown = %q, %v; want a failure, not an empty list", got, err)
 	}
 }

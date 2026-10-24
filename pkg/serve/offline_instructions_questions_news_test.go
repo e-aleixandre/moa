@@ -16,7 +16,7 @@ import (
 func offlineQNRequests(t *testing.T) (*f1Env, *ManagedSession, []core.Request) {
 	t.Helper()
 	f1Isolate(t)
-	p := &f1Provider{implicitCache: true, script: func(r core.Request) <-chan core.AssistantEvent {
+	p := &f1Provider{script: func(r core.Request) <-chan core.AssistantEvent {
 		has := func(id string) bool {
 			for _, m := range r.Messages {
 				if m.Role == "tool_result" && m.ToolCallID == id {
@@ -98,12 +98,16 @@ func offlineQNFirst(a, b []json.RawMessage) int {
 	return min(len(a), len(b))
 }
 
-// This RED proves loss of an exact previous-input prefix, not a remote cache
-// read algorithm or the numerical 30976/30848 plateau.
-func TestREDOfflineOpenQuestionAndNewsKeepPreviousPrefix(t *testing.T) {
+// Through the real Manager, stores and tools: a question opened, then News
+// published, then nothing new. Every request keeps the previous one as an
+// exact input prefix, whether the For you state changed or not. It proves the
+// local wire prefix, not a remote cache read.
+func TestOfflineForYouChangesKeepPreviousPrefix(t *testing.T) {
 	_, _, reqs := offlineQNRequests(t)
-	a, b := offlineQNWire(t, reqs[2]), offlineQNWire(t, reqs[3])
-	if first := offlineQNFirst(a.Input, b.Input); first < len(a.Input) {
-		t.Fatalf("RED: unchanged open-question+news broke previous input prefix at input[%d] (%d -> %d items); ask_user result and instructions/tools are stable; zero remote calls", first, len(a.Input), len(b.Input))
+	for i := 1; i < len(reqs); i++ {
+		a, b := offlineQNWire(t, reqs[i-1]), offlineQNWire(t, reqs[i])
+		if first := offlineQNFirst(a.Input, b.Input); first < len(a.Input) {
+			t.Fatalf("request %d broke the previous input prefix at input[%d] (%d -> %d items)", i+1, first, len(a.Input), len(b.Input))
+		}
 	}
 }

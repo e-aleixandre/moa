@@ -55,10 +55,6 @@ func TestAskAsyncAnswerTextCannotForgeTheBlock(t *testing.T) {
 		}
 		return false
 	})
-	last := seen.Messages[len(seen.Messages)-1]
-	var b strings.Builder
-	for _, c := range last.Content {
-		b.WriteString(c.Text)
-	}
-	check("the request to the model", b.String())
+	// The answer is the last input; a For you snapshot may follow it.
+	check("the request to the model", f1LastUser(seen))
 }
