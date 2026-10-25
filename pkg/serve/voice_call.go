@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,9 +33,10 @@ const voiceTombstones = 256
 // voiceCallRegistry owns every voice call of one server. It is closed by
 // Manager.Shutdown, so no call outlives the sessions it records into.
 type voiceCallRegistry struct {
-	mgr   *Manager
-	store *auth.Store
-	opts  VoiceCallOptions
+	audioDiagnostics *audioDiagnosticSink
+	mgr              *Manager
+	store            *auth.Store
+	opts             VoiceCallOptions
 	// admission is the open-attempt budget shared with Live voice's rules:
 	// in-flight and global attempts count failures, the principal's
 	// allowance only counts calls that opened.
@@ -64,8 +66,12 @@ func newVoiceCallRegistry(mgr *Manager, store *auth.Store, opts VoiceCallOptions
 		opts.HTTPClient = &http.Client{}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &voiceCallRegistry{mgr: mgr, store: store, opts: opts, admission: newVoiceOpenBudget(), ctx: ctx, cancel: cancel,
+	r := &voiceCallRegistry{mgr: mgr, store: store, opts: opts, admission: newVoiceOpenBudget(), ctx: ctx, cancel: cancel,
 		principals: map[string]*voiceSlot{}, calls: map[string]*voiceCall{}, plans: map[string]auth.CredentialSnapshot{}, models: map[string]core.Model{}, ended: map[string]string{}}
+	if os.Getenv("MOA_VOICE_AUDIO_DIAGNOSTICS") == "1" {
+		r.audioDiagnostics = newAudioDiagnosticSink(ctx)
+	}
+	return r
 }
 
 // voiceSlot is a principal's reservation. tearingDown is closed once its
@@ -348,9 +354,17 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 	id := newVoiceCallID()
 	// Read once: the call keeps this model to its end, whatever Settings says later.
 	model := voiceModel()
+	var audioDiagnostics *audioCallDiagnostics
+	var audioMetrics *voice.AudioDiagnostics
+	if r.audioDiagnostics != nil && provider == voice.ChatGPTPlan {
+		audioMetrics = &voice.AudioDiagnostics{}
+		audioDiagnostics = &audioCallDiagnostics{metrics: audioMetrics, sink: r.audioDiagnostics, id: r.audioDiagnostics.next.Add(1), start: time.Now()}
+		audioMetrics.ControlTrace = func(kind int64) { audioDiagnostics.traceEvent(3, kind, 0, 0, 0, 0) }
+	}
 	ctx, cancel := context.WithTimeout(scope, voiceOpenTimeout)
 	up, err := adapter.Open(ctx, voice.CallSpec{
-		CallID: id, SessionID: sess.ID, Voice: voiceProviders[provider].voice,
+		AudioDiagnostics: audioMetrics,
+		CallID:           id, SessionID: sess.ID, Voice: voiceProviders[provider].voice,
 		Instructions: voice.CommonInstructions, BackendModel: model, Tools: voice.ToolSpecs(), Opening: intro.opening(),
 		InitialContext: intro.context(provider == voice.ChatGPTPlan) + r.mgr.voiceFallbackContext(sess.ID, r.opts.Limits.BriefChars),
 	})
@@ -379,6 +393,7 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 		return http.StatusServiceUnavailable, r.planUnavailable(provider, oe.Class), 0
 	}
 	c := newVoiceCall(r, id, principal, sess.ID, provider, adapter.Billing(), up)
+	c.audioDiagnostics = audioDiagnostics
 	c.costStart = sessionCostUSD(sess)
 	c.slot = slot
 	var plan *auth.CredentialSnapshot
@@ -549,12 +564,18 @@ const voiceClientControls = 32
 // budgeted separately for audio bytes and control frames, drained by a
 // single writer with a write deadline.
 type voiceClient struct {
-	conn   *websocket.Conn
-	limit  int64 // audio bytes queued or being written
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	once   sync.Once
+	audioDiagnostics  atomic.Pointer[audioCallDiagnostics]
+	diagSocket        int64
+	diagReports       [3]audioReportGate // reader-owned: invalid, native, UI
+	diagLastAdmission int64              // under mu
+	diagLastWrite     int64              // writer-owned
+	diagOccupancy     atomic.Int64
+	conn              *websocket.Conn
+	limit             int64 // audio bytes queued or being written
+	ctx               context.Context
+	cancel            context.CancelFunc
+	done              chan struct{}
+	once              sync.Once
 
 	// heard is when the last frame or pong came from the client (unix
 	// nanoseconds).
@@ -570,10 +591,11 @@ type voiceClient struct {
 }
 
 type voiceFrame struct {
-	kind  websocket.MessageType
-	data  []byte
-	audio int64
-	last  bool
+	enqueuedNS int64
+	kind       websocket.MessageType
+	data       []byte
+	audio      int64
+	last       bool
 }
 
 func newVoiceClient(conn *websocket.Conn, limit int) *voiceClient {
@@ -596,7 +618,17 @@ func (cl *voiceClient) write() {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(cl.ctx, wsWriteTimeout)
+		d := cl.audioDiagnostics.Load()
+		var writeStart int64
+		if d != nil && f.kind == websocket.MessageBinary {
+			cl.audioWriteStart(d, f, d.elapsed())
+			writeStart = d.elapsed()
+		}
 		err := cl.conn.Write(ctx, f.kind, f.data)
+		if d != nil && f.kind == websocket.MessageBinary {
+			writeEnd := d.elapsed()
+			cl.audioWriteEnd(d, f, writeStart, writeEnd, err == nil)
+		}
 		cancel()
 		cl.release(f)
 		if err != nil {
@@ -633,6 +665,10 @@ func (cl *voiceClient) release(f voiceFrame) {
 	defer cl.mu.Unlock()
 	if f.kind == websocket.MessageBinary {
 		cl.audio -= f.audio
+		if d := cl.audioDiagnostics.Load(); d != nil {
+			cl.diagOccupancy.Store(cl.audio)
+			d.metrics.Observe(voice.OccupancyBytes, cl.audio)
+		}
 	} else {
 		cl.controls--
 	}
@@ -640,9 +676,19 @@ func (cl *voiceClient) release(f voiceFrame) {
 
 // enqueue refuses instead of growing: a slow reader ends its call.
 func (cl *voiceClient) enqueue(f voiceFrame) bool {
+	d := cl.audioDiagnostics.Load()
+	var enqueueStart int64
+	if d != nil && f.kind == websocket.MessageBinary {
+		enqueueStart = d.elapsed()
+		d.metrics.Add(voice.EnqueueAttempts, 1)
+	}
 	cl.mu.Lock()
 	if f.kind == websocket.MessageBinary {
 		if cl.audio+f.audio > cl.limit {
+			if d != nil {
+				d.metrics.Add(voice.EnqueueRejected, 1)
+				d.metrics.Observe(voice.EnqueueUS, (d.elapsed()-enqueueStart)/1000)
+			}
 			cl.mu.Unlock()
 			return false
 		}
@@ -651,6 +697,17 @@ func (cl *voiceClient) enqueue(f voiceFrame) bool {
 			cl.playedBy = now
 		}
 		cl.playedBy = cl.playedBy.Add(time.Duration(f.audio) * time.Second / voicePCMBytesPerSecond)
+		if d != nil {
+			f.enqueuedNS = d.elapsed()
+			cl.diagOccupancy.Store(cl.audio)
+			d.metrics.Add(voice.EnqueueAccepted, 1)
+			d.metrics.Observe(voice.EnqueueUS, (f.enqueuedNS-enqueueStart)/1000)
+			d.metrics.Observe(voice.OccupancyBytes, cl.audio)
+			if cl.diagLastAdmission != 0 {
+				d.metrics.Observe(voice.AdmissionGapUS, (f.enqueuedNS-cl.diagLastAdmission)/1000)
+			}
+			cl.diagLastAdmission = f.enqueuedNS
+		}
 	} else {
 		if cl.controls >= voiceClientControls {
 			cl.mu.Unlock()
@@ -777,6 +834,12 @@ func (c *voiceCall) readClient(cl *voiceClient) error {
 		kind, data, err := cl.conn.Read(cl.ctx)
 		if err != nil {
 			return err
+		}
+		// A reserved diagnostic report has no media or liveness authority,
+		// including when disabled. Decode only its envelope before isolation.
+		if kind == websocket.MessageText && isAudioMetricsReport(data) {
+			c.receiveAudioMetrics(cl, data, time.Now())
+			continue
 		}
 		cl.heardNow()
 		if kind == websocket.MessageBinary {

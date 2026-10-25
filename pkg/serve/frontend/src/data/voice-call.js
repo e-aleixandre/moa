@@ -10,6 +10,8 @@
 // record the server saves in the conversation. onMinutes/onResult are not
 // part of this API and are never called.
 
+import { voiceStateDiagnostics } from './voice-state-diagnostics.js';
+
 const REQUEST_HEADERS = { 'Content-Type': 'application/json', 'X-Moa-Request': '1' };
 
 // Captured audio waiting in the socket beyond this is dropped instead of
@@ -135,7 +137,8 @@ export class VoiceCallController {
     return this.s;
   }
 
-  set(patch) {
+  set(patch, cause = 7) {
+    if (patch.phase && patch.phase !== this.s.phase) this.diagnostics?.event(20, cause, this.s.phase, patch.phase);
     this.s = { ...this.s, ...patch };
     this.s.active = ACTIVE.has(this.s.phase);
     this.onState(this.s);
@@ -204,9 +207,11 @@ export class VoiceCallController {
   fail(error, reason, paidOption) {
     this.audio?.stop?.();
     this.set({ phase: 'failed', error, reason, message: startFailureMessage(error, reason), paidOption });
+    this.diagnostics?.stop(); this.diagnostics = null;
   }
 
   async connect(gen, { call_id: callId, ws_url: wsURL }) {
+    this.diagnostics?.stop(); this.diagnostics = null;
     const loc = globalThis.location;
     const path = typeof wsURL === 'string' && wsURL.startsWith('/') ? wsURL : `/api/voice/calls/${encodeURIComponent(callId)}/ws`;
     const url = `${loc?.protocol === 'http:' ? 'ws:' : 'wss:'}//${loc?.host}${path}`;
@@ -256,7 +261,7 @@ export class VoiceCallController {
     this.audioReady = true;
     // What the server said while the microphone was being granted is shown
     // now, when the call can actually be heard.
-    if (this.heldPhase && this.s.phase === 'connecting') this.set({ phase: this.heldPhase });
+    if (this.heldPhase && this.s.phase === 'connecting') this.set({ phase: this.heldPhase }, 6);
     this.heldPhase = '';
     if (this.s.muted) this.audio.setMuted?.(true);
   }
@@ -291,8 +296,10 @@ export class VoiceCallController {
 
   playback(event) {
     const type = event?.type;
-    if (type === 'playing' && this.s.phase === 'listening') this.set({ phase: 'speaking' });
-    else if (type === 'drained' && this.s.phase === 'speaking') this.set({ phase: 'listening' });
+    const cause = this.diagnosticInterrupt ? 4 : type === 'playing' ? 1 : 2;
+    if (type === 'playing' || type === 'drained') this.diagnostics?.event(22, cause, this.s.phase, this.s.phase);
+    if (type === 'playing' && this.s.phase === 'listening') this.set({ phase: 'speaking' }, cause);
+    else if (type === 'drained' && this.s.phase === 'speaking') this.set({ phase: 'listening' }, cause);
   }
 
   receive(data) {
@@ -309,7 +316,13 @@ export class VoiceCallController {
     }
     switch (msg?.type) {
       case 'state': {
-        if (msg.interrupt) this.audio.interrupt();
+        if (!this.diagnostics) this.diagnostics = voiceStateDiagnostics(msg.audio_diagnostics, this.ws, this.gen);
+        const cause = msg.interrupt ? 4 : 3;
+        this.diagnostics?.event(21, cause, this.s.phase, msg.state);
+        if (msg.interrupt) {
+          this.diagnosticInterrupt = true;
+          try { this.audio.interrupt(); } finally { this.diagnosticInterrupt = false; }
+        }
         if (this.s.phase === 'ending') return;
         const patch = {};
         if (!this.s.startedAt) patch.startedAt = this.now();
@@ -320,12 +333,13 @@ export class VoiceCallController {
           if (this.audioReady === false) this.heldPhase = msg.state;
           else patch.phase = msg.state;
         }
-        this.set(patch);
+        this.set(patch, cause);
         return;
       }
       case 'speech_started':
+        this.diagnostics?.event(21, 5, this.s.phase, 'listening');
         this.audio.interrupt();
-        if (this.s.phase === 'speaking') this.set({ phase: 'listening' });
+        if (this.s.phase === 'speaking') this.set({ phase: 'listening' }, 5);
         return;
       case 'needs_tap':
         if (typeof msg.item_id === 'string') {
@@ -397,6 +411,7 @@ export class VoiceCallController {
       try { ws.close(); } catch { /* gone */ }
     }
     this.set({ phase: 'ended', endedReason: reason, message: endedMessage(reason), needsTap: null });
+    this.diagnostics?.stop(); this.diagnostics = null;
   }
 
   // dispose ends a call whose screen is going away for good.

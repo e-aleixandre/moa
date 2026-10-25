@@ -100,16 +100,17 @@ const voiceNoteQueue = 32
 // voiceCall is one call. A single controller goroutine (run) owns its state
 // transitions and the ending sequence; a single worker executes tools.
 type voiceCall struct {
-	reg       *voiceCallRegistry
-	id        string
-	principal string
-	slot      *voiceSlot
-	sessionID string
-	provider  voice.ProviderID
-	billing   voice.Billing
-	up        voice.Upstream
-	limits    VoiceCallLimits
-	started   time.Time
+	audioDiagnostics *audioCallDiagnostics
+	reg              *voiceCallRegistry
+	id               string
+	principal        string
+	slot             *voiceSlot
+	sessionID        string
+	provider         voice.ProviderID
+	billing          voice.Billing
+	up               voice.Upstream
+	limits           VoiceCallLimits
+	started          time.Time
 
 	endOnce  sync.Once
 	endCh    chan struct{}
@@ -226,6 +227,9 @@ func (c *voiceCall) requestEndDiag(reason string, d *voice.Diagnostic) {
 		c.reason = reason
 		c.diag = d
 		c.reasonMu.Unlock()
+		if c.audioDiagnostics != nil {
+			c.audioDiagnostics.current.Store(nil)
+		}
 		close(c.endCh)
 	})
 }
@@ -259,6 +263,12 @@ func (c *voiceCall) detach(cl *voiceClient) {
 }
 
 func (c *voiceCall) run() {
+	var diagTick <-chan time.Time
+	if c.audioDiagnostics != nil {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		diagTick = ticker.C
+	}
 	c.openJournal()
 	go c.worker()
 	c.submit(voiceJob{do: c.requestBrief})
@@ -277,6 +287,8 @@ func (c *voiceCall) run() {
 loop:
 	for {
 		select {
+		case <-diagTick:
+			c.audioDiagnostics.snapshot(false, client)
 		case <-c.endCh:
 			break loop
 		case <-maxT.C:
@@ -285,17 +297,30 @@ loop:
 			c.requestEnd("client_lost")
 		case cl := <-c.attachCh:
 			if client != nil {
+				if c.audioDiagnostics != nil {
+					c.audioDiagnostics.current.Store(nil)
+				}
 				client.kill()
 			}
 			client = cl
 			grace.Stop()
-			c.toClient(client, map[string]any{"type": "state", "state": "listening"})
+			state := map[string]any{"type": "state", "state": "listening"}
+			if d := c.audioDiagnostics; d != nil {
+				cl.diagSocket = d.sockets.Add(1)
+				cl.audioDiagnostics.Store(d)
+				d.current.Store(cl)
+				state["audio_diagnostics"] = map[string]any{"v": 1, "active": true, "interval_ms": 1000}
+			}
+			c.toClient(client, state, 1)
 			if !attached {
 				attached = true
 				for _, pcm := range early {
 					if !client.sendAudio(pcm) {
 						c.requestEnd("slow_client")
 						break
+					}
+					if d := c.audioDiagnostics; d != nil {
+						d.metrics.Add(voice.EarlyFlushed, 1)
 					}
 				}
 				early = nil
@@ -304,6 +329,9 @@ loop:
 			c.toClient(client, v)
 		case cl := <-c.detachCh:
 			if cl == client {
+				if c.audioDiagnostics != nil {
+					c.audioDiagnostics.current.Store(nil)
+				}
 				client = nil
 				grace.Reset(c.limits.Grace)
 			}
@@ -316,6 +344,11 @@ loop:
 			if !attached && ev.Kind == voice.EventAudio && earlyBytes+len(ev.PCM) <= c.limits.BufferedBytes {
 				early = append(early, ev.PCM)
 				earlyBytes += len(ev.PCM)
+				if d := c.audioDiagnostics; d != nil {
+					d.metrics.Add(voice.EarlyRetained, 1)
+				}
+			} else if !attached && ev.Kind == voice.EventAudio && c.audioDiagnostics != nil {
+				c.audioDiagnostics.metrics.Add(voice.EarlyDiscarded, 1)
 			}
 			c.handle(ev, client)
 		}
@@ -386,8 +419,20 @@ func (c *voiceCall) journalLine() *voiceJournal {
 	return c.journal
 }
 
-func (c *voiceCall) toClient(client *voiceClient, v any) {
-	if client != nil && !client.sendJSON(v) {
+func (c *voiceCall) toClient(client *voiceClient, v any, origins ...int64) {
+	origin := int64(3) // asynchronous session note
+	if len(origins) != 0 {
+		origin = origins[0]
+	}
+	admission := int64(0)
+	if client != nil {
+		admission = 1
+		if !client.sendJSON(v) {
+			admission = 2
+		}
+	}
+	c.traceServerState(v, origin, admission)
+	if admission == 2 {
 		c.requestEnd("slow_client")
 	}
 }
@@ -398,6 +443,9 @@ const voiceMaxLatencySamples = 1000
 func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 	switch ev.Kind {
 	case voice.EventAudio:
+		if c.audioDiagnostics != nil {
+			c.audioDiagnostics.event(len(ev.PCM), client != nil)
+		}
 		if !c.speechStopped.IsZero() {
 			c.mu.Lock()
 			if len(c.speechLat) < voiceMaxLatencySamples {
@@ -430,7 +478,7 @@ func (c *voiceCall) handle(ev voice.Event, client *voiceClient) {
 		c.turnEnded = time.Time{}
 		c.speechStopped = time.Time{} // the user kept talking: not a turn end
 		// Every provider's barge-in empties the client's playback the same way.
-		c.toClient(client, map[string]any{"type": "state", "state": "listening", "interrupt": true})
+		c.toClient(client, map[string]any{"type": "state", "state": "listening", "interrupt": true}, 2)
 	case voice.EventTranscript:
 		if ev.Role == "user" && !ev.Final {
 			c.turnEnded = time.Time{} // the user is still talking: not a turn end
@@ -551,6 +599,9 @@ func (c *voiceCall) finishCall(client *voiceClient, events <-chan voice.Event) {
 	}
 	_ = c.journalLine().append(voiceJournalLine{Kind: "ending", Reason: reason, Diagnostic: c.endDiagnostic()}, true)
 	c.ending.Store(true)
+	if c.audioDiagnostics != nil {
+		c.audioDiagnostics.current.Store(nil)
+	}
 	if client != nil {
 		client.finish(map[string]any{"type": "ended", "reason": reason})
 	}
@@ -648,6 +699,9 @@ drain:
 		slog.Warn("voice call transcript only in its journal", "call", c.id, "path", j.path)
 	}
 	c.reg.finish(c)
+	if c.audioDiagnostics != nil {
+		c.audioDiagnostics.snapshot(true, client)
+	}
 	close(c.done)
 }
 
