@@ -263,12 +263,6 @@ func (c *voiceCall) detach(cl *voiceClient) {
 }
 
 func (c *voiceCall) run() {
-	var diagTick <-chan time.Time
-	if c.audioDiagnostics != nil {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		diagTick = ticker.C
-	}
 	c.openJournal()
 	go c.worker()
 	c.submit(voiceJob{do: c.requestBrief})
@@ -287,8 +281,6 @@ func (c *voiceCall) run() {
 loop:
 	for {
 		select {
-		case <-diagTick:
-			c.audioDiagnostics.snapshot(false, client)
 		case <-c.endCh:
 			break loop
 		case <-maxT.C:
@@ -306,10 +298,9 @@ loop:
 			grace.Stop()
 			state := map[string]any{"type": "state", "state": "listening"}
 			if d := c.audioDiagnostics; d != nil {
-				cl.diagSocket = d.sockets.Add(1)
+				d.sockets.Add(1)
 				cl.audioDiagnostics.Store(d)
 				d.current.Store(cl)
-				state["audio_diagnostics"] = map[string]any{"v": 1, "active": true, "interval_ms": 1000}
 			}
 			c.toClient(client, state, 1)
 			if !attached {
@@ -319,7 +310,7 @@ loop:
 						c.requestEnd("slow_client")
 						break
 					}
-					if d := c.audioDiagnostics; d != nil {
+					if d := c.audioDiagnostics; d != nil && d.metrics.Epoch() != 0 {
 						d.metrics.Add(voice.EarlyFlushed, 1)
 					}
 				}
@@ -344,10 +335,10 @@ loop:
 			if !attached && ev.Kind == voice.EventAudio && earlyBytes+len(ev.PCM) <= c.limits.BufferedBytes {
 				early = append(early, ev.PCM)
 				earlyBytes += len(ev.PCM)
-				if d := c.audioDiagnostics; d != nil {
+				if d := c.audioDiagnostics; d != nil && d.metrics.Epoch() != 0 {
 					d.metrics.Add(voice.EarlyRetained, 1)
 				}
-			} else if !attached && ev.Kind == voice.EventAudio && c.audioDiagnostics != nil {
+			} else if !attached && ev.Kind == voice.EventAudio && c.audioDiagnostics != nil && c.audioDiagnostics.metrics.Epoch() != 0 {
 				c.audioDiagnostics.metrics.Add(voice.EarlyDiscarded, 1)
 			}
 			c.handle(ev, client)

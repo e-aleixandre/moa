@@ -21,7 +21,7 @@ func TestAudioDiagnosticsSequenceAndTimestamps(t *testing.T) {
 	seq := []uint16{65534, 65535, 1, 0, 65535, 1, 2, 65534}
 	ts := []uint32{4294966816, 0, 1200, 600, 0, 1200, 3120, 0}
 	for i, s := range seq {
-		o.packet(s, ts[i], i+1, 48000, now.Add(time.Duration(i)*time.Millisecond))
+		o.packet(d.Epoch(), s, ts[i], i+1, 48000, now.Add(time.Duration(i)*time.Millisecond))
 	}
 	got := d.Snapshot()
 	for k, want := range map[AudioCounter]int64{RTPPackets: 8, RTPForward: 4, RTPGapSlots: 1, RTPLate: 1, RTPDuplicate: 3, RTPBytes: 36} {
@@ -48,7 +48,7 @@ func TestAudioDiagnosticsWindowBoundaries(t *testing.T) {
 	d := &AudioDiagnostics{}
 	o := rtpObservation{d: d}
 	for _, s := range []uint16{100, 170, 100, 106, 106, 99, 32938} {
-		o.packet(s, 0, 0, 48000, time.Now())
+		o.packet(d.Epoch(), s, 0, 0, 48000, time.Now())
 	}
 	got := d.Snapshot()
 	for k, w := range map[AudioCounter]int64{RTPForward: 2, RTPGapSlots: 69, RTPOldUnknown: 4, RTPHalfRange: 1, RTPLate: 0, RTPDuplicate: 0} {
@@ -56,8 +56,8 @@ func TestAudioDiagnosticsWindowBoundaries(t *testing.T) {
 			t.Fatalf("%s=%d want%d", AudioCounterNames[k], got.Counts[k], w)
 		}
 	}
-	o.packet(107, 0, 0, 48000, time.Now())
-	o.packet(107, 0, 0, 48000, time.Now())
+	o.packet(d.Epoch(), 107, 0, 0, 48000, time.Now())
+	o.packet(d.Epoch(), 107, 0, 0, 48000, time.Now())
 	if got := d.Snapshot(); got.Counts[RTPLate] != 1 || got.Counts[RTPDuplicate] != 1 {
 		t.Fatal(got)
 	}
@@ -67,18 +67,18 @@ func TestAudioDiagnosticsTimestampValidityAndBounded(t *testing.T) {
 	o := rtpObservation{d: d}
 	now := time.Now()
 	for i, ts := range []uint32{0, 0, 1 << 31, 1<<31 + 120} {
-		o.packet(uint16(i), ts, 1, 48000, now)
+		o.packet(d.Epoch(), uint16(i), ts, 1, 48000, now)
 	}
-	o.packet(4, 1<<31+240, 1, 24000, now)
+	o.packet(d.Epoch(), 4, 1<<31+240, 1, 24000, now)
 	got := d.Snapshot()
 	if got.Counts[RTPTSZero] != 1 || got.Counts[RTPTSInvalid] != 2 || got.Stats[RTPTicks].Sum != 120 {
 		t.Fatal(got)
 	}
-	if allocs := testing.AllocsPerRun(100, func() { o.packet(o.last+1, o.ts+960, 10, 48000, now) }); allocs != 0 {
+	if allocs := testing.AllocsPerRun(100, func() { o.packet(d.Epoch(), o.last+1, o.ts+960, 10, 48000, now) }); allocs != 0 {
 		t.Fatal(allocs)
 	}
 	for i := 0; i < 1000000; i++ {
-		o.packet(o.last+1, o.ts+960, 10, 48000, now)
+		o.packet(d.Epoch(), o.last+1, o.ts+960, 10, 48000, now)
 	}
 	d.Add(RTPBytes, math.MaxInt64)
 	d.Add(RTPBytes, 1)
@@ -90,12 +90,14 @@ func TestAudioDiagnosticsTimestampValidityAndBounded(t *testing.T) {
 // This exercises the production ReadRTP/decode/gate path with adversarial
 // sequence numbers; a helper-only comparison cannot establish PCM parity.
 func TestAudioDiagnosticsRealPeerParity(t *testing.T) {
-	run := func(enabled bool) ([][]byte, AudioSnapshot) {
-		d := &AudioDiagnostics{}
+	run := func(mode string) ([][]byte, AudioSnapshot) {
+		gate := &AudioDiagnosticGate{}
+		gate.SetEnabled(mode == "on")
+		d := &AudioDiagnostics{Gate: gate}
 		engine := loopbackEngine()
 		engine.DisableSRTPReplayProtection(true)
 		cfg := PeerConfig{ICEServers: []webrtc.ICEServer{}, SettingEngine: engine}
-		if enabled {
+		if mode != "nil" {
 			cfg.AudioDiagnostics = d
 		}
 		p, err := NewPeer(cfg)
@@ -165,8 +167,12 @@ func TestAudioDiagnosticsRealPeerParity(t *testing.T) {
 		}
 		return out, d.Snapshot()
 	}
-	off, _ := run(false)
-	on, got := run(true)
+	off, _ := run("nil")
+	cachedOff, disabled := run("off")
+	if !reflect.DeepEqual(off, cachedOff) || disabled != (AudioSnapshot{}) {
+		t.Fatal("stable OFF peer changed PCM or counters")
+	}
+	on, got := run("on")
 	if !reflect.DeepEqual(off, on) || len(on) != 5 {
 		t.Fatalf("PCM parity off=%d on=%d equal=%v", len(off), len(on), bytes.Equal(bytes.Join(off, nil), bytes.Join(on, nil)))
 	}
@@ -190,7 +196,7 @@ func TestAudioDiagnosticsConcurrentSnapshot(t *testing.T) {
 		o := rtpObservation{d: d}
 		now := time.Now()
 		for i := 0; i < 10000; i++ {
-			o.packet(uint16(i), uint32(i*960), 10, 48000, now)
+			o.packet(d.Epoch(), uint16(i), uint32(i*960), 10, 48000, now)
 		}
 	}()
 	for {

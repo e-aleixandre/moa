@@ -11,15 +11,49 @@ import (
 // Snapshots are weak concurrent cuts, not accounting transactions.
 type AudioDiagnostics struct {
 	// Set once before Open. The diagnostic sink must be nonblocking.
-	ControlTrace func(int64) `json:"-"`
+	ControlTrace func(int64)          `json:"-"`
+	Gate         *AudioDiagnosticGate `json:"-"`
 	counts       [audioCounterCount]atomic.Int64
 	stats        [audioStatCount]audioStat
+}
+
+// AudioDiagnosticGate is shared by a registry and every peer opened by it.
+// Odd generations are ON; every transition advances the generation so even a
+// paused observer detects a complete OFF/ON interval. SetEnabled is control-only.
+type AudioDiagnosticGate struct{ state atomic.Uint64 }
+
+func (g *AudioDiagnosticGate) SetEnabled(on bool) {
+	for {
+		old := g.state.Load()
+		if (old&1 != 0) == on {
+			return
+		}
+		if g.state.CompareAndSwap(old, old+1) {
+			return
+		}
+	}
+}
+func (g *AudioDiagnosticGate) Epoch() uint64 {
+	state := g.state.Load()
+	if state&1 == 0 {
+		return 0
+	}
+	return state
+}
+func (d *AudioDiagnostics) Epoch() uint64 {
+	if d == nil {
+		return 0
+	}
+	if d.Gate == nil {
+		return 1
+	}
+	return d.Gate.Epoch()
 }
 
 // Only recognized control kinds cross this boundary. No raw type, status,
 // content, IDs or provider errors are retained, including for ignored events.
 func (d *AudioDiagnostics) observeControl(data []byte) {
-	if d.ControlTrace == nil {
+	if d.Epoch() == 0 || d.ControlTrace == nil {
 		return
 	}
 	var e struct {
@@ -101,14 +135,6 @@ const (
 	WriteOK
 	WriteError
 	WrittenBytes
-	ClientAccepted
-	ClientGate
-	ClientStale
-	ClientSize
-	ClientRate
-	ClientSchema
-	ClientRange
-	ClientOrder
 	NumericSaturated
 	audioCounterCount
 )
@@ -118,7 +144,7 @@ var AudioCounterNames = [audioCounterCount]string{
 	"rtp_empty_payload", "rtp_decode_error", "rtp_decode_zero", "rtp_decoded_packets", "rtp_samples24k", "rtp_pcm_bytes", "rtp_channel_switches", "rtp_pcm_overflow", "rtp_ts_zero", "rtp_ts_invalid",
 	"event_frames", "event_bytes", "event_samples", "event_no_client", "early_retained", "early_flushed", "early_discarded",
 	"enqueue_attempts", "enqueue_accepted", "enqueue_rejected", "write_attempts", "write_ok", "write_error", "written_bytes",
-	"client_accepted", "client_gate", "client_stale", "client_size", "client_rate", "client_schema", "client_range", "client_order", "numeric_saturated",
+	"numeric_saturated",
 }
 
 type AudioStat int
@@ -166,12 +192,15 @@ func satAdd(a *atomic.Int64, n int64) bool {
 	}
 }
 func (d *AudioDiagnostics) Add(k AudioCounter, n int64) {
+	if d.Epoch() == 0 {
+		return
+	}
 	if satAdd(&d.counts[k], n) && k != NumericSaturated {
 		satAdd(&d.counts[NumericSaturated], 1)
 	}
 }
 func (d *AudioDiagnostics) Observe(k AudioStat, v int64) {
-	if v < 0 {
+	if d.Epoch() == 0 || v < 0 {
 		return
 	}
 	s := &d.stats[k]
@@ -212,6 +241,7 @@ func (d *AudioDiagnostics) Snapshot() (out AudioSnapshot) {
 // rtpObservation belongs to one readTrack, never to a shared SSRC history.
 type rtpObservation struct {
 	d        *AudioDiagnostics
+	epoch    uint64
 	started  bool
 	last     uint16
 	seen     uint64
@@ -220,8 +250,17 @@ type rtpObservation struct {
 	channels int
 }
 
-func (o *rtpObservation) packet(seq uint16, ts uint32, size int, clock uint32, now time.Time) {
+func (o *rtpObservation) packet(epoch uint64, seq uint16, ts uint32, size int, clock uint32, now time.Time) {
 	d := o.d
+	if epoch == 0 || d.Epoch() != epoch {
+		return
+	}
+	if o.epoch != epoch {
+		if o.epoch == 0 {
+			d.Add(RTPTracks, 1)
+		}
+		*o = rtpObservation{d: d, epoch: epoch}
+	}
 	d.Add(RTPPackets, 1)
 	d.Add(RTPBytes, int64(size))
 	d.Observe(RTPPayloadBytes, int64(size))
@@ -278,6 +317,9 @@ func (o *rtpObservation) packet(seq uint16, ts uint32, size int, clock uint32, n
 }
 func (o *rtpObservation) decoded(channels, n int, err error, elapsed time.Duration) {
 	d := o.d
+	if o.epoch != d.Epoch() || o.epoch == 0 {
+		return
+	}
 	d.Observe(DecodeUS, elapsed.Microseconds())
 	if o.channels != 0 && o.channels != channels {
 		d.Add(RTPSwitches, 1)

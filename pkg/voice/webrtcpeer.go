@@ -374,18 +374,15 @@ func (p *Peer) readTrack(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 	buf := make([]int16, 2*peerMaxOpusSamples)
 	var last uint16
 	started := false
-	var observation rtpObservation
-	if p.audioDiagnostics != nil {
-		observation.d = p.audioDiagnostics
-		observation.d.Add(RTPTracks, 1)
-	}
+	observation := rtpObservation{d: p.audioDiagnostics}
 	for {
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
 			return
 		}
-		if observation.d != nil {
-			observation.packet(pkt.SequenceNumber, pkt.Timestamp, len(pkt.Payload), track.Codec().ClockRate, time.Now())
+		epoch := observation.d.Epoch()
+		if epoch != 0 {
+			observation.packet(epoch, pkt.SequenceNumber, pkt.Timestamp, len(pkt.Payload), track.Codec().ClockRate, time.Now())
 		}
 		if started && !seqNewer(last, pkt.SequenceNumber) {
 			continue
@@ -399,11 +396,11 @@ func (p *Peer) readTrack(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 			channels, dec = 2, &stereo
 		}
 		var decodeStart time.Time
-		if observation.d != nil {
+		if epoch != 0 && observation.d.Epoch() == epoch {
 			decodeStart = time.Now()
 		}
 		n, err := dec.DecodeToInt16(pkt.Payload, buf)
-		if observation.d != nil {
+		if !decodeStart.IsZero() && observation.d.Epoch() == epoch {
 			observation.decoded(channels, n, err, time.Since(decodeStart))
 		}
 		if err != nil || n == 0 {
@@ -430,7 +427,7 @@ func (p *Peer) readTrack(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		}
 		p.pcmMu.Unlock()
 		if !ok {
-			if observation.d != nil {
+			if observation.d.Epoch() != 0 {
 				observation.d.Add(RTPOverflow, 1)
 			}
 			p.fail(errPCMOverflow)

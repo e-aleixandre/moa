@@ -7,9 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D0000000000000000000A003 /* VoiceAudioMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000A003 /* VoiceAudioMetrics.swift */; };
-		D0000000000000000000A004 /* VoiceAudioMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000A003 /* VoiceAudioMetrics.swift */; };
-		D0000000000000000000A005 /* VoiceAudioMetricsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000A005 /* VoiceAudioMetricsTests.swift */; };
 		E0000000000000000000C001 /* CarPlayOwners.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000C001 /* CarPlayOwners.swift */; };
 		E0000000000000000000C002 /* CarPlayCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000C002 /* CarPlayCall.swift */; };
 		E0000000000000000000C003 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1000000000000000000C003 /* CarPlaySceneDelegate.swift */; };
@@ -105,8 +102,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		D1000000000000000000A003 /* VoiceAudioMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioMetrics.swift; sourceTree = "<group>"; };
-		D1000000000000000000A005 /* VoiceAudioMetricsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioMetricsTests.swift; sourceTree = "<group>"; };
 		E1000000000000000000C001 /* CarPlayOwners.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayOwners.swift; sourceTree = "<group>"; };
 		E1000000000000000000C002 /* CarPlayCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayCall.swift; sourceTree = "<group>"; };
 		E1000000000000000000C003 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
@@ -247,7 +242,6 @@
 				B10000000000000000000002 /* NativePushRegistration.swift */,
 				B10000000000000000000003 /* NativePushBridge.swift */,
 				D1000000000000000000A001 /* NativeVoiceCall.swift */,
-				D1000000000000000000A003 /* VoiceAudioMetrics.swift */,
 				D1000000000000000000A002 /* NativeIncomingCall.swift */,
 				E1000000000000000000C001 /* CarPlayOwners.swift */,
 				E1000000000000000000C002 /* CarPlayCall.swift */,
@@ -304,7 +298,6 @@
 			isa = PBXGroup;
 			children = (
 				B1000000000000000000000A /* PushEnvelopeVectorsTests.swift */,
-				D1000000000000000000A005 /* VoiceAudioMetricsTests.swift */,
 				C10000000000000000000004 /* SavedSecretsModelTests.swift */,
 				C10000000000000000000007 /* SavedSecretsStoreKeychainTests.swift */,
 				0EECAF3668F257616C41EFCE /* ShareLogicTests.swift */,
@@ -554,7 +547,6 @@
 				B00000000000000000000002 /* NativePushRegistration.swift in Sources */,
 				B00000000000000000000003 /* NativePushBridge.swift in Sources */,
 				D0000000000000000000A001 /* NativeVoiceCall.swift in Sources */,
-				D0000000000000000000A003 /* VoiceAudioMetrics.swift in Sources */,
 				D0000000000000000000A002 /* NativeIncomingCall.swift in Sources */,
 				E0000000000000000000C001 /* CarPlayOwners.swift in Sources */,
 				E0000000000000000000C002 /* CarPlayCall.swift in Sources */,
@@ -578,8 +570,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				B00000000000000000000009 /* PushEnvelope.swift in Sources */,
-				D0000000000000000000A004 /* VoiceAudioMetrics.swift in Sources */,
-				D0000000000000000000A005 /* VoiceAudioMetricsTests.swift in Sources */,
 				B0000000000000000000000A /* PushEnvelopeVectorsTests.swift in Sources */,
 				C00000000000000000000004 /* SavedSecretsModel.swift in Sources */,
 				C00000000000000000000006 /* SavedSecretsStore.swift in Sources */,

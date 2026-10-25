@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,9 +67,7 @@ func newVoiceCallRegistry(mgr *Manager, store *auth.Store, opts VoiceCallOptions
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &voiceCallRegistry{mgr: mgr, store: store, opts: opts, admission: newVoiceOpenBudget(), ctx: ctx, cancel: cancel,
 		principals: map[string]*voiceSlot{}, calls: map[string]*voiceCall{}, plans: map[string]auth.CredentialSnapshot{}, models: map[string]core.Model{}, ended: map[string]string{}}
-	if os.Getenv("MOA_VOICE_AUDIO_DIAGNOSTICS") == "1" {
-		r.audioDiagnostics = newAudioDiagnosticSink(ctx)
-	}
+	r.startAudioDiagnostics()
 	return r
 }
 
@@ -357,7 +354,7 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 	var audioDiagnostics *audioCallDiagnostics
 	var audioMetrics *voice.AudioDiagnostics
 	if r.audioDiagnostics != nil && provider == voice.ChatGPTPlan {
-		audioMetrics = &voice.AudioDiagnostics{}
+		audioMetrics = &voice.AudioDiagnostics{Gate: r.audioDiagnostics.gate}
 		audioDiagnostics = &audioCallDiagnostics{metrics: audioMetrics, sink: r.audioDiagnostics, id: r.audioDiagnostics.next.Add(1), start: time.Now()}
 		audioMetrics.ControlTrace = func(kind int64) { audioDiagnostics.traceEvent(3, kind, 0, 0, 0, 0) }
 	}
@@ -564,18 +561,17 @@ const voiceClientControls = 32
 // budgeted separately for audio bytes and control frames, drained by a
 // single writer with a write deadline.
 type voiceClient struct {
-	audioDiagnostics  atomic.Pointer[audioCallDiagnostics]
-	diagSocket        int64
-	diagReports       [3]audioReportGate // reader-owned: invalid, native, UI
-	diagLastAdmission int64              // under mu
-	diagLastWrite     int64              // writer-owned
-	diagOccupancy     atomic.Int64
-	conn              *websocket.Conn
-	limit             int64 // audio bytes queued or being written
-	ctx               context.Context
-	cancel            context.CancelFunc
-	done              chan struct{}
-	once              sync.Once
+	audioDiagnostics   atomic.Pointer[audioCallDiagnostics]
+	diagAdmissionEpoch uint64 // under mu
+	diagWriteEpoch     uint64 // writer-owned
+	diagLastAdmission  int64  // under mu
+	diagLastWrite      int64  // writer-owned
+	conn               *websocket.Conn
+	limit              int64 // audio bytes queued or being written
+	ctx                context.Context
+	cancel             context.CancelFunc
+	done               chan struct{}
+	once               sync.Once
 
 	// heard is when the last frame or pong came from the client (unix
 	// nanoseconds).
@@ -591,11 +587,16 @@ type voiceClient struct {
 }
 
 type voiceFrame struct {
+	kind        websocket.MessageType
+	data        []byte
+	diagnostics *voiceFrameDiagnostics
+	last        bool
+}
+
+// Keep per-frame diagnostic storage out of the OFF queue's allocation footprint.
+type voiceFrameDiagnostics struct {
+	epoch      uint64
 	enqueuedNS int64
-	kind       websocket.MessageType
-	data       []byte
-	audio      int64
-	last       bool
 }
 
 func newVoiceClient(conn *websocket.Conn, limit int) *voiceClient {
@@ -620,12 +621,16 @@ func (cl *voiceClient) write() {
 		ctx, cancel := context.WithTimeout(cl.ctx, wsWriteTimeout)
 		d := cl.audioDiagnostics.Load()
 		var writeStart int64
+		var epoch uint64
 		if d != nil && f.kind == websocket.MessageBinary {
-			cl.audioWriteStart(d, f, d.elapsed())
+			epoch = d.metrics.Epoch()
+		}
+		if epoch != 0 {
 			writeStart = d.elapsed()
+			cl.audioWriteStart(d, f, epoch, writeStart)
 		}
 		err := cl.conn.Write(ctx, f.kind, f.data)
-		if d != nil && f.kind == websocket.MessageBinary {
+		if epoch != 0 && d.metrics.Epoch() == epoch {
 			writeEnd := d.elapsed()
 			cl.audioWriteEnd(d, f, writeStart, writeEnd, err == nil)
 		}
@@ -664,9 +669,8 @@ func (cl *voiceClient) release(f voiceFrame) {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
 	if f.kind == websocket.MessageBinary {
-		cl.audio -= f.audio
-		if d := cl.audioDiagnostics.Load(); d != nil {
-			cl.diagOccupancy.Store(cl.audio)
+		cl.audio -= int64(len(f.data))
+		if d := cl.audioDiagnostics.Load(); d != nil && d.metrics.Epoch() != 0 {
 			d.metrics.Observe(voice.OccupancyBytes, cl.audio)
 		}
 	} else {
@@ -677,6 +681,13 @@ func (cl *voiceClient) release(f voiceFrame) {
 // enqueue refuses instead of growing: a slow reader ends its call.
 func (cl *voiceClient) enqueue(f voiceFrame) bool {
 	d := cl.audioDiagnostics.Load()
+	var epoch uint64
+	if d != nil {
+		epoch = d.metrics.Epoch()
+		if epoch == 0 {
+			d = nil
+		}
+	}
 	var enqueueStart int64
 	if d != nil && f.kind == websocket.MessageBinary {
 		enqueueStart = d.elapsed()
@@ -684,29 +695,39 @@ func (cl *voiceClient) enqueue(f voiceFrame) bool {
 	}
 	cl.mu.Lock()
 	if f.kind == websocket.MessageBinary {
-		if cl.audio+f.audio > cl.limit {
-			if d != nil {
-				d.metrics.Add(voice.EnqueueRejected, 1)
-				d.metrics.Observe(voice.EnqueueUS, (d.elapsed()-enqueueStart)/1000)
+		audio := int64(len(f.data))
+		if cl.audio+audio > cl.limit {
+			if d != nil && d.metrics.Epoch() == epoch {
+				enqueueEnd := d.elapsed()
+				if d.metrics.Epoch() == epoch {
+					d.metrics.Add(voice.EnqueueRejected, 1)
+					d.metrics.Observe(voice.EnqueueUS, (enqueueEnd-enqueueStart)/1000)
+				}
 			}
 			cl.mu.Unlock()
 			return false
 		}
-		cl.audio += f.audio
+		cl.audio += audio
 		if now := time.Now(); cl.playedBy.Before(now) {
 			cl.playedBy = now
 		}
-		cl.playedBy = cl.playedBy.Add(time.Duration(f.audio) * time.Second / voicePCMBytesPerSecond)
-		if d != nil {
-			f.enqueuedNS = d.elapsed()
-			cl.diagOccupancy.Store(cl.audio)
-			d.metrics.Add(voice.EnqueueAccepted, 1)
-			d.metrics.Observe(voice.EnqueueUS, (f.enqueuedNS-enqueueStart)/1000)
-			d.metrics.Observe(voice.OccupancyBytes, cl.audio)
-			if cl.diagLastAdmission != 0 {
-				d.metrics.Observe(voice.AdmissionGapUS, (f.enqueuedNS-cl.diagLastAdmission)/1000)
+		cl.playedBy = cl.playedBy.Add(time.Duration(audio) * time.Second / voicePCMBytesPerSecond)
+		if d != nil && d.metrics.Epoch() == epoch {
+			enqueuedNS := d.elapsed()
+			if d.metrics.Epoch() == epoch {
+				f.diagnostics = &voiceFrameDiagnostics{epoch: epoch, enqueuedNS: enqueuedNS}
+				if cl.diagAdmissionEpoch != epoch {
+					cl.diagAdmissionEpoch = epoch
+					cl.diagLastAdmission = 0
+				}
+				d.metrics.Add(voice.EnqueueAccepted, 1)
+				d.metrics.Observe(voice.EnqueueUS, (enqueuedNS-enqueueStart)/1000)
+				d.metrics.Observe(voice.OccupancyBytes, cl.audio)
+				if cl.diagLastAdmission != 0 {
+					d.metrics.Observe(voice.AdmissionGapUS, (enqueuedNS-cl.diagLastAdmission)/1000)
+				}
+				cl.diagLastAdmission = enqueuedNS
 			}
-			cl.diagLastAdmission = f.enqueuedNS
 		}
 	} else {
 		if cl.controls >= voiceClientControls {
@@ -725,7 +746,7 @@ func (cl *voiceClient) enqueue(f voiceFrame) bool {
 }
 
 func (cl *voiceClient) sendAudio(pcm []byte) bool {
-	return cl.enqueue(voiceFrame{kind: websocket.MessageBinary, data: pcm, audio: int64(len(pcm))})
+	return cl.enqueue(voiceFrame{kind: websocket.MessageBinary, data: pcm})
 }
 
 func (cl *voiceClient) sendJSON(v any) bool {
@@ -834,12 +855,6 @@ func (c *voiceCall) readClient(cl *voiceClient) error {
 		kind, data, err := cl.conn.Read(cl.ctx)
 		if err != nil {
 			return err
-		}
-		// A reserved diagnostic report has no media or liveness authority,
-		// including when disabled. Decode only its envelope before isolation.
-		if kind == websocket.MessageText && isAudioMetricsReport(data) {
-			c.receiveAudioMetrics(cl, data, time.Now())
-			continue
 		}
 		cl.heardNow()
 		if kind == websocket.MessageBinary {

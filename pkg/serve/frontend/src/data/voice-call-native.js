@@ -64,8 +64,6 @@ export function createNativeCallDeps(bridge, { name = () => '', sessionId = () =
     constructor(url) {
       this.readyState = 0;
       this.bufferedAmount = 0;
-      // The fire-and-forget bridge cannot bound periodic diagnostic sends.
-      this.audioDiagnosticsSupported = false;
       this.binaryType = 'arraybuffer';
       this.onopen = null;
       this.onclose = null;

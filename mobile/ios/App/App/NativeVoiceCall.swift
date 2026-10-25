@@ -5,10 +5,6 @@ import os
 
 private let callLog = Logger(subsystem: "com.ealeixandre.moa.app", category: "voice-call")
 
-private func voiceMetricsNowUs() -> Int64 {
-    Int64(DispatchTime.now().uptimeNanoseconds / 1_000)
-}
-
 // `window.MoaNativeCall` for the paired frontend's voice calls. The call's
 // WebSocket, microphone and speaker run here, in the app process, as a
 // CallKit call: it goes on with the screen locked, routes to headphones and
@@ -161,9 +157,6 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         var callKit = true
         weak var observer: NativeCallObserver?
         var interruptionObserver: NSObjectProtocol?
-        var metrics: VoiceAudioMetrics?
-        var metricsTimer: DispatchSourceTimer?
-        var diagnosticsStarted = false
         init(id: String, name: String, sessionId: String, callId: String, origin: String, task: URLSessionWebSocketTask,
              uuid: UUID = UUID(), incoming: Bool = false) {
             self.id = id
@@ -311,7 +304,6 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
                 let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                 AVAudioSession.InterruptionType(rawValue: raw) == .began
             else { return }
-            call.metrics?.beginGeneration(interrupt: true)
             self.finish(call, remote: false, why: "interrupted")
         }
         self.call = call
@@ -404,16 +396,11 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         call.audioWanted = false
         call.audio?.stop()
         call.audio = nil
-        stopDiagnostics(call)
     }
 
     private func interrupt(_ call: Call) {
-        if let metrics = call.metrics {
-            for chunk in call.pending { metrics.pendingDropped(byteCount: chunk.count) }
-        }
         call.pending = []
         call.pendingBytes = 0
-        if call.audio == nil { call.metrics?.beginGeneration(interrupt: true) }
         call.audio?.interrupt()
     }
 
@@ -441,7 +428,6 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
             case .failure(let error):
                 self.finish(call, remote: true, why: "receive \(Self.code(error))")
             case .success(.data(let data)):
-                call.metrics?.received(byteCount: data.count, nowUs: voiceMetricsNowUs())
                 self.play(call, data)
                 self.receive(call)
             case .success(.string(let text)):
@@ -464,9 +450,6 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         case "speech_started":
             interrupt(call)
         case "state":
-            if msg["state"] as? String == "listening" {
-                enableDiagnostics(call, data: data)
-            }
             if msg["interrupt"] as? Bool == true { interrupt(call) }
         case "ended":
             call.serverEnded = true
@@ -483,7 +466,6 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         call.pending.append(data)
         call.pendingBytes += data.count
         while call.pendingBytes > Self.pendingMaxBytes, !call.pending.isEmpty {
-            call.metrics?.pendingDropped(byteCount: call.pending[0].count)
             call.pendingBytes -= call.pending.removeFirst().count
         }
     }
@@ -491,7 +473,6 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
     private func startEngine(_ call: Call) {
         guard call.audioWanted, call.audio == nil, !call.finished else { return }
         let audio = NativeCallAudio()
-        audio.metrics = call.metrics
         audio.muted = call.muted
         audio.onFrame = NativeCallAudio.sender(for: call.task)
         audio.onPlayback = { [weak self] event in
@@ -541,7 +522,6 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         call.finished = true
         call.audio?.stop()
         call.audio = nil
-        stopDiagnostics(call)
         let reason = Self.closeReason("native:\(why.isEmpty ? "unspecified" : why) mic=\(Self.micPermission())")
         callLog.error("voice call ending: \(reason, privacy: .public)")
         call.task.cancel(with: .normalClosure, reason: reason.data(using: .utf8))
@@ -643,7 +623,6 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         call.audioWanted = false
         call.audio?.stop()
         call.audio = nil
-        stopDiagnostics(call)
         call.hangingUp = true
         if call.open {
             call.task.send(.string("{\"type\":\"hangup\"}")) { _ in }
@@ -673,71 +652,6 @@ final class NativeVoiceCallManager: NSObject, CXProviderDelegate, URLSessionWebS
         call.sessionActive = false
         call.audio?.stop()
         call.audio = nil
-        stopDiagnostics(call)
-    }
-
-    private struct DiagnosticsState: Decodable {
-        let audioDiagnostics: VoiceAudioMetrics.Activation
-
-        private enum CodingKeys: String, CodingKey {
-            case audioDiagnostics = "audio_diagnostics"
-        }
-    }
-
-    private func enableDiagnostics(_ call: Call, data: Data) {
-        guard self.call === call, !call.finished, !call.hangingUp, !call.diagnosticsStarted,
-              let config = try? JSONDecoder().decode(DiagnosticsState.self, from: data).audioDiagnostics,
-              config.enabled else { return }
-        let metrics = VoiceAudioMetrics(nowUs: voiceMetricsNowUs(), queuedSamples: call.audio?.accountedSamples ?? 0)
-        call.diagnosticsStarted = true
-        call.metrics = metrics
-        if let audio = call.audio {
-            audio.metrics = metrics
-            metrics.beginGeneration(queuedSamples: audio.accountedSamples)
-        }
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        call.metricsTimer = timer
-        timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
-        timer.setEventHandler { [weak self, weak call, weak metrics] in
-            guard let self, let call, let metrics, self.call === call,
-                  !call.finished, call.metrics === metrics, metrics.active else { return }
-            let now = voiceMetricsNowUs()
-            metrics.timerFired(nowUs: now)
-            call.audio?.observeMetrics()
-            self.sendDiagnosticReport(call, metrics: metrics, nowUs: now)
-            if !metrics.active { self.stopDiagnostics(call) }
-        }
-        timer.resume()
-    }
-
-    private func sendDiagnosticReport(_ call: Call, metrics: VoiceAudioMetrics, nowUs: Int64, force: Bool = false) {
-        guard let report = metrics.takeReport(nowUs: nowUs, force: force) else { return }
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        guard let data = try? encoder.encode(report), data.count <= 4096,
-              let text = String(data: data, encoding: .utf8) else {
-            metrics.reportFailed(traceCount: report.trace.count)
-            metrics.reportFinished(sequence: report.seq)
-            return
-        }
-        call.task.send(.string(text)) { [weak self, weak call, weak metrics] error in
-            let failed = error != nil
-            DispatchQueue.main.async {
-                guard let self, let call, let metrics, self.call === call,
-                      !call.finished, call.metrics === metrics else { return }
-                if failed { metrics.reportFailed(traceCount: report.trace.count) }
-                metrics.reportFinished(sequence: report.seq)
-            }
-        }
-    }
-
-    private func stopDiagnostics(_ call: Call) {
-        if let metrics = call.metrics { sendDiagnosticReport(call, metrics: metrics, nowUs: voiceMetricsNowUs(), force: true) }
-        call.metricsTimer?.cancel()
-        call.metricsTimer = nil
-        call.metrics?.stop()
-        call.metrics = nil
-        call.audio?.metrics = nil
     }
 
     // MARK: URLSessionWebSocketDelegate
@@ -860,8 +774,6 @@ final class NativeCallAudio {
     var onFrame: ((Data) -> Void)?
     var onPlayback: ((String) -> Void)?
     var onFailure: (() -> Void)?
-    weak var metrics: VoiceAudioMetrics?
-    var accountedSamples: Int { queuedSamples }
     var muted: Bool {
         get { lock.lock(); defer { lock.unlock() }; return mutedValue }
         set { lock.lock(); mutedValue = newValue; lock.unlock() }
@@ -887,7 +799,6 @@ final class NativeCallAudio {
         engine.connect(player, to: engine.mainMixerNode, format: playFormat)
         try startGraph()
         running = true
-        metrics?.beginGeneration(queuedSamples: queuedSamples)
         configObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in self?.restart() }
@@ -914,19 +825,16 @@ final class NativeCallAudio {
 
     private func restart() {
         guard running else { return }
-        metrics?.transition(kind: 5, nowUs: voiceMetricsNowUs(), before: queuedSamples, after: queuedSamples, frames: queued)
         callLog.info("voice audio route changed: \(AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","), privacy: .public)")
         engine.stop()
         player.stop()
         let was = queued > 0
-        metrics?.beginGeneration(discardedFrames: queued, discardedSamples: queuedSamples, restart: true)
         generation += 1
         queued = 0
         queuedSamples = 0
         if was { onPlayback?("drained") }
         do {
             try startGraph()
-            metrics?.transition(kind: 6, nowUs: voiceMetricsNowUs(), before: 0, after: queuedSamples, frames: queued)
         } catch {
             callLog.error("voice audio restart: \(error.localizedDescription, privacy: .public)")
             let failed = onFailure
@@ -963,17 +871,12 @@ final class NativeCallAudio {
     }
 
     func play(_ data: Data) {
-        let metrics = self.metrics
-        let startedUs = metrics.map { _ in voiceMetricsNowUs() }
         let count = data.count / 2
         // Over the bound the new audio is dropped, as on the web.
         guard running, count > 0, queuedSamples + count <= Self.maxQueuedSamples,
               let buffer = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: AVAudioFrameCount(count)),
               let out = buffer.floatChannelData?[0]
-        else {
-            metrics?.playbackDropped(samples: count)
-            return
-        }
+        else { return }
         buffer.frameLength = AVAudioFrameCount(count)
         data.withUnsafeBytes { raw in
             for i in 0..<count {
@@ -981,80 +884,43 @@ final class NativeCallAudio {
             }
         }
         let gen = generation
-        if queued == 0 {
-            metrics?.transition(kind: 1, nowUs: voiceMetricsNowUs(), before: queuedSamples, after: queuedSamples + count, frames: queued + 1)
-            onPlayback?("playing")
-        }
+        if queued == 0 { onPlayback?("playing") }
         queued += 1
         queuedSamples += count
-        let metricGeneration = metrics?.generation
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            let callbackUs = metricGeneration.map { _ in voiceMetricsNowUs() }
-            DispatchQueue.main.async {
-                if let metrics, let metricGeneration, let callbackUs, self?.metrics === metrics {
-                    metrics.completed(samples: count, generation: metricGeneration,
-                                      callbackUs: callbackUs, mainUs: voiceMetricsNowUs())
-                }
-                self?.played(gen, count)
-            }
-        }
-        if let metrics, let metricGeneration, let startedUs {
-            metrics.scheduled(samples: count, generation: metricGeneration,
-                              startedUs: startedUs, endedUs: voiceMetricsNowUs())
+            DispatchQueue.main.async { self?.played(gen, count) }
         }
     }
 
     private func played(_ gen: Int, _ count: Int) {
         guard gen == generation, queued > 0 else { return }
-        let before = queuedSamples
         queued -= 1
         queuedSamples = max(0, queuedSamples - count)
-        metrics?.observeQueued(samples: queuedSamples)
-        if queued == 0 {
-            metrics?.transition(kind: 2, nowUs: voiceMetricsNowUs(), before: before, after: queuedSamples, frames: queued)
-            onPlayback?("drained")
-        }
+        if queued == 0 { onPlayback?("drained") }
     }
 
     func interrupt() {
         guard running else { return }
-        metrics?.transition(kind: 3, nowUs: voiceMetricsNowUs(), before: queuedSamples, after: queuedSamples, frames: queued)
-        metrics?.beginGeneration(discardedFrames: queued, discardedSamples: queuedSamples, interrupt: true)
         generation += 1
         let was = queued > 0
         queued = 0
         queuedSamples = 0
         player.stop()
         player.play()
-        metrics?.transition(kind: 4, nowUs: voiceMetricsNowUs(), before: 0, after: queuedSamples, frames: queued)
         if was { onPlayback?("drained") }
     }
 
     func stop() {
         guard running else { return }
-        metrics?.transition(kind: 7, nowUs: voiceMetricsNowUs(), before: queuedSamples, after: queuedSamples, frames: queued)
-        metrics?.beginGeneration(discardedFrames: queued, discardedSamples: queuedSamples)
         running = false
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
         configObserver = nil
         engine.inputNode.removeTap(onBus: 0)
         player.stop()
         engine.stop()
-        metrics?.transition(kind: 8, nowUs: voiceMetricsNowUs(), before: queuedSamples, after: queuedSamples, frames: queued)
         onFrame = nil
         onPlayback = nil
         onFailure = nil
-    }
-
-    func observeMetrics() {
-        guard let metrics else { return }
-        metrics.observeQueued(samples: queuedSamples)
-        if running, let nodeTime = player.lastRenderTime,
-           let time = player.playerTime(forNodeTime: nodeTime), time.isSampleTimeValid {
-            metrics.observeRender(sampleTime: time.sampleTime, sampleRate: time.sampleRate, generation: metrics.generation)
-        } else {
-            metrics.observeRender(sampleTime: nil, sampleRate: nil, generation: metrics.generation)
-        }
     }
 
     // sender sends captured frames on the call's socket, dropping fresh ones
