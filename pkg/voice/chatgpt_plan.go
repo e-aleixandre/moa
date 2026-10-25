@@ -10,9 +10,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
 // ChatGPTCallsURL creates a direct v3 voice call on the ChatGPT plan (INFORME
@@ -116,6 +119,24 @@ func (a *chatGPTPlan) Open(ctx context.Context, spec CallSpec) (Upstream, error)
 	return nil, &OpenError{Class: ClassUnavailable}
 }
 
+// chatGPTSessionBody omits "model" while the hot switch file exists, leaving
+// the choice to the server. Read per call start, like the audio diagnostics.
+func chatGPTSessionBody(offer, instructions, voice string) ([]byte, string) {
+	session := map[string]any{
+		"instructions": instructions,
+		"audio":        map[string]any{"output": map[string]any{"voice": voice}},
+		"delegation":   map[string]any{"type": "client"},
+	}
+	mode := "server-default"
+	path := core.ConfigSubdir("voice-model-server-default")
+	if info, err := os.Stat(path); path == "" || err != nil || !info.Mode().IsRegular() {
+		session["model"] = chatGPTVoiceModel
+		mode = chatGPTVoiceModel
+	}
+	body, _ := json.Marshal(map[string]any{"sdp": offer, "session": session})
+	return body, mode
+}
+
 func (a *chatGPTPlan) open(ctx context.Context, spec CallSpec, peer *Peer, client *http.Client, creds *chatGPTStartupCredentials) (*chatGPTUpstream, error) {
 	offer, err := peer.Offer(ctx)
 	if err != nil {
@@ -125,12 +146,8 @@ func (a *chatGPTPlan) open(ctx context.Context, spec CallSpec, peer *Peer, clien
 	if spec.InitialContext != "" {
 		instructions += "\n\n" + spec.InitialContext
 	}
-	body, _ := json.Marshal(map[string]any{"sdp": offer, "session": map[string]any{
-		"model":        chatGPTVoiceModel,
-		"instructions": instructions,
-		"audio":        map[string]any{"output": map[string]any{"voice": spec.Voice}},
-		"delegation":   map[string]any{"type": "client"},
-	}})
+	body, mode := chatGPTSessionBody(offer, instructions, spec.Voice)
+	slog.Info("voice session model", "provider", ChatGPTPlan, "model", mode)
 	thread, err := newUUID()
 	if err != nil {
 		return nil, &OpenError{Class: ClassUnavailable}
