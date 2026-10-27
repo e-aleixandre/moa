@@ -340,7 +340,7 @@ func TestGPT61TerraPricingAndEfforts(t *testing.T) {
 	if model.MaxInput != 1_050_000 || model.MaxOutput != 128_000 {
 		t.Fatalf("limits = %d/%d", model.MaxInput, model.MaxOutput)
 	}
-	want := Pricing{Input: 1, Output: 5, CacheRead: 0.05, CacheWrite: 1.25, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_000, Input: 2, Output: 7.5, CacheRead: 0.1, CacheWrite: 2.5}}}
+	want := Pricing{Input: 1, Output: 5, CacheRead: 0.05, CacheWrite: 1.25, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_001, Input: 2, Output: 7.5, CacheRead: 0.1, CacheWrite: 2.5}}}
 	if !reflect.DeepEqual(*model.Pricing, want) {
 		t.Fatalf("pricing = %+v, want %+v", *model.Pricing, want)
 	}
@@ -348,7 +348,14 @@ func TestGPT61TerraPricingAndEfforts(t *testing.T) {
 	if got, w := model.Pricing.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.27749805; math.Abs(got-w) > 1e-12 {
 		t.Fatalf("short cost = %v, want %v", got, w)
 	}
-	// The whole request is billed at the long-context rates from 272K input.
+	// Exactly 272K is still short context; one token more is long.
+	if got, w := model.Pricing.Cost(Usage{Input: 272_000}), 0.272; math.Abs(got-w) > 1e-12 {
+		t.Fatalf("272K cost = %v, want %v", got, w)
+	}
+	if got, w := model.Pricing.Cost(Usage{Input: 272_001}), 0.544002; math.Abs(got-w) > 1e-12 {
+		t.Fatalf("272,001 cost = %v, want %v", got, w)
+	}
+	// The whole request is billed at the long-context rates above 272K input.
 	if got, w := model.Pricing.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.5565001; math.Abs(got-w) > 1e-12 {
 		t.Fatalf("long cost = %v, want %v", got, w)
 	}

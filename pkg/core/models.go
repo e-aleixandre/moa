@@ -103,11 +103,11 @@ var knownModels = map[string]Model{
 		Name: "GPT-6.1 Terra", MaxInput: 1_050_000, MaxOutput: 128_000,
 		// Short-context (up to 272K input) pricing is $1/$5 input/output.
 		// OpenAI bills the whole request at 2x input and cache rates and 1.5x
-		// output above it.
+		// output above it, so the tier starts one token past 272K.
 		Pricing: &Pricing{
 			Input: 1, Output: 5, CacheRead: 0.05, CacheWrite: 1.25,
 			Tiers: []PricingTier{
-				{Threshold: 272_000, Input: 2, Output: 7.5, CacheRead: 0.1, CacheWrite: 2.5},
+				{Threshold: 272_001, Input: 2, Output: 7.5, CacheRead: 0.1, CacheWrite: 2.5},
 			},
 		},
 	},
