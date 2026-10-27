@@ -456,7 +456,7 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 			return "", fmt.Errorf("invalid Meta thinking level %q (choose: low, medium, high, xhigh)", level)
 		}
 	}
-	if strings.EqualFold(model.ID, "gpt-6-astra") || strings.EqualFold(model.ID, "gpt-6.1-sol") {
+	if usesShiftedGPT6Efforts(model) {
 		switch level {
 		case "off":
 			return "low", nil
@@ -492,13 +492,23 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 	return level, nil
 }
 
+// usesShiftedGPT6Efforts reports the models whose selector positions are
+// shifted one notch up onto low..max (no "none" below low).
+func usesShiftedGPT6Efforts(model Model) bool {
+	switch strings.ToLower(model.ID) {
+	case "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra":
+		return true
+	}
+	return false
+}
+
 // ThinkingPosition is the inverse of EffectiveThinkingLevel for the models
-// that shift selector positions onto other efforts (GPT-6 Astra, GPT-6.1 Sol):
+// that shift selector positions onto other efforts (GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra):
 // it turns a persisted or running effort back into the selector position that
 // produced it. Re-feeding an effort as a position would raise it one notch on
 // every pass (high -> xhigh -> max). Other models use the same words for both.
 func ThinkingPosition(model Model, effort string) string {
-	if strings.EqualFold(model.ID, "gpt-6-astra") || strings.EqualFold(model.ID, "gpt-6.1-sol") {
+	if usesShiftedGPT6Efforts(model) {
 		switch effort {
 		case "low":
 			return "off"

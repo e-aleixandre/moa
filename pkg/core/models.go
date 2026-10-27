@@ -98,6 +98,19 @@ var knownModels = map[string]Model{
 			},
 		},
 	},
+	"gpt-6.1-terra": {
+		ID: "gpt-6.1-terra", Provider: "openai", API: "openai-chat",
+		Name: "GPT-6.1 Terra", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (up to 272K input) pricing is $1/$5 input/output.
+		// OpenAI bills the whole request at 2x input and cache rates and 1.5x
+		// output above it.
+		Pricing: &Pricing{
+			Input: 1, Output: 5, CacheRead: 0.05, CacheWrite: 1.25,
+			Tiers: []PricingTier{
+				{Threshold: 272_000, Input: 2, Output: 7.5, CacheRead: 0.1, CacheWrite: 2.5},
+			},
+		},
+	},
 	"gpt-6-sol": {
 		ID: "gpt-6-sol", Provider: "openai", API: "openai-chat",
 		Name: "GPT-6 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
@@ -264,7 +277,7 @@ var knownModels = map[string]Model{
 // accepts. A nil result preserves the Responses API's existing behavior for
 // models without an explicit capability declaration.
 func ReasoningEffortsForModel(model Model) []string {
-	if strings.EqualFold(model.ID, "gpt-6-astra") || strings.EqualFold(model.ID, "gpt-6.1-sol") {
+	if usesShiftedGPT6Efforts(model) {
 		return gpt6AstraReasoningEfforts
 	}
 	return nil
@@ -292,7 +305,7 @@ var modelAliases = map[string]string{
 	"astra":       "gpt-6-astra",
 	"gpt-6":       "gpt-6-astra",
 	"sol":         "gpt-6.1-sol",
-	"terra":       "gpt-5.6-terra",
+	"terra":       "gpt-6.1-terra",
 	"luna":        "gpt-6-luna",
 	"gpt-5.6":     "gpt-5.6-sol",
 	"gpt5":        "gpt-5.5",
@@ -473,6 +486,7 @@ var modelDisplayOrder = []string{
 	// OpenAI
 	"gpt-6-astra",
 	"gpt-6.1-sol",
+	"gpt-6.1-terra",
 	"gpt-6-sol",
 	"gpt-6-luna",
 	"gpt-5.6-sol",

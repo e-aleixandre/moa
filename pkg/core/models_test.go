@@ -244,7 +244,7 @@ func mustPricing(t *testing.T, id string) *Pricing {
 }
 
 func TestGPT56TerraPricing(t *testing.T) {
-	model, ok := ResolveModel("terra")
+	model, ok := ResolveModel("gpt-5.6-terra")
 	if !ok || model.Pricing == nil {
 		t.Fatal("Terra pricing missing")
 	}
@@ -324,6 +324,44 @@ func TestEffectiveThinkingLevel_GPT61SolNeverNone(t *testing.T) {
 	} {
 		got, err := EffectiveThinkingLevel(model, input)
 		if err != nil || got != want || got == "none" || got == "minimal" {
+			t.Errorf("EffectiveThinkingLevel(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if got := ReasoningEffortsForModel(model); !reflect.DeepEqual(got, []string{"low", "medium", "high", "xhigh", "max"}) {
+		t.Errorf("efforts = %v", got)
+	}
+}
+
+func TestGPT61TerraPricingAndEfforts(t *testing.T) {
+	model, ok := ResolveModel("gpt-6.1-terra")
+	if !ok || model.Pricing == nil {
+		t.Fatalf("gpt-6.1-terra must resolve with pricing: %+v, %v", model, ok)
+	}
+	if model.MaxInput != 1_050_000 || model.MaxOutput != 128_000 {
+		t.Fatalf("limits = %d/%d", model.MaxInput, model.MaxOutput)
+	}
+	want := Pricing{Input: 1, Output: 5, CacheRead: 0.05, CacheWrite: 1.25, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_000, Input: 2, Output: 7.5, CacheRead: 0.1, CacheWrite: 2.5}}}
+	if !reflect.DeepEqual(*model.Pricing, want) {
+		t.Fatalf("pricing = %+v, want %+v", *model.Pricing, want)
+	}
+	// 269_998*1 + 1*0.05 + 2000*1.25 + 1000*5 per MTok.
+	if got, w := model.Pricing.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.27749805; math.Abs(got-w) > 1e-12 {
+		t.Fatalf("short cost = %v, want %v", got, w)
+	}
+	// The whole request is billed at the long-context rates from 272K input.
+	if got, w := model.Pricing.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.5565001; math.Abs(got-w) > 1e-12 {
+		t.Fatalf("long cost = %v, want %v", got, w)
+	}
+	if alias, _ := ResolveModel("terra"); alias.ID != "gpt-6.1-terra" {
+		t.Fatalf("terra alias = %s, want gpt-6.1-terra", alias.ID)
+	}
+	if old, ok := ResolveModel("gpt-5.6-terra"); !ok || old.ID != "gpt-5.6-terra" {
+		t.Fatalf("gpt-5.6-terra must stay selectable by ID: %+v, %v", old, ok)
+	}
+	for input, want := range map[string]string{
+		"off": "low", "low": "medium", "medium": "high", "high": "xhigh", "xhigh": "max",
+	} {
+		if got, err := EffectiveThinkingLevel(model, input); err != nil || got != want {
 			t.Errorf("EffectiveThinkingLevel(%q) = %q, %v; want %q", input, got, err, want)
 		}
 	}
@@ -414,9 +452,9 @@ func TestEffectiveThinkingLevel_GPT6Astra(t *testing.T) {
 
 	// The internal Astra-only max value must return to an option the selector
 	// can represent when switching models.
-	other, ok := ResolveModel("terra")
+	other, ok := ResolveModel("gpt-5.6-terra")
 	if !ok {
-		t.Fatal("terra must resolve")
+		t.Fatal("gpt-5.6-terra must resolve")
 	}
 	if got, err := EffectiveThinkingLevel(other, "max"); err != nil || got != "xhigh" {
 		t.Fatalf("switching Astra max to Terra = %q, %v; want xhigh", got, err)
@@ -819,7 +857,7 @@ func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 	cases := map[string]string{
 		"Sol":             "gpt-6.1-sol",
 		"SOL":             "gpt-6.1-sol",
-		"Terra":           "gpt-5.6-terra",
+		"Terra":           "gpt-6.1-terra",
 		"Luna":            "gpt-6-luna",
 		"Astra":           "gpt-6-astra",
 		"Opus":            "claude-opus-5-5",

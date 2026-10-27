@@ -3291,7 +3291,7 @@ func TestSubagentLiveAllowlist_AcceptsModelAddedAfterConstruction(t *testing.T) 
 		ProviderFactory:   func(core.Model) (core.Provider, error) { return provider, nil },
 	})
 
-	allowed = []string{"gpt-5.6-terra"}
+	allowed = []string{"gpt-6.1-terra"}
 	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "model": "terra"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -3302,7 +3302,7 @@ func TestSubagentLiveAllowlist_AcceptsModelAddedAfterConstruction(t *testing.T) 
 }
 
 func TestSubagentLiveAllowlist_RejectsModelRemovedAfterConstruction(t *testing.T) {
-	allowed := []string{"gpt-5.6-terra"}
+	allowed := []string{"gpt-6.1-terra"}
 	sub, _, _ := newSubagentTools(t, Config{
 		DefaultModel:      core.Model{ID: "claude-sonnet-5", Provider: "anthropic"},
 		AllowedModels:     allowed,
@@ -3360,7 +3360,7 @@ func TestSubagentSchema_LiveAllowlistRefreshesDescription(t *testing.T) {
 	allowed := []string{"gpt-6.1-sol"}
 	tool := newSubagent(Config{LoadAllowedModels: func() []string { return allowed }}, &jobStore{})
 
-	allowed = []string{"gpt-5.6-terra"}
+	allowed = []string{"gpt-6.1-terra"}
 	var parsed struct {
 		Properties struct {
 			Model struct {
