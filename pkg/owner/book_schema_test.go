@@ -301,3 +301,16 @@ func TestRolePromptSaysWhenToSendToAnotherOwner(t *testing.T) {
 		}
 	}
 }
+
+// The book section must not reward skipping the code: a sheet that is wrong
+// about how something works would otherwise be echoed back by every session
+// (decisions/owner-derecho-a-mirar.md left this cut for a separate step).
+func TestBookSectionDoesNotRankTheBookAboveTheCode(t *testing.T) {
+	section := BookSection("Winerim", "# Project\n")
+	if strings.Contains(section, "faster than reading the code") || strings.Contains(section, "compare your work against") {
+		t.Fatalf("the book section still discourages reading the code:\n%s", section)
+	}
+	if !strings.Contains(section, "read its sheet with the book tool") {
+		t.Fatal("the book section no longer asks to read the sheet first")
+	}
+}

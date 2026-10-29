@@ -17,8 +17,7 @@ func BookSection(ownerName, projectIndex string) string {
 	fmt.Fprintf(&sb, "This project has an owner: %s. The book below is the owner's curated "+
 		"record of it. Decisions written there are the owner's; do not reopen them on your "+
 		"own. Before you change an area, read its sheet with the book tool (search first, "+
-		"then read); it is faster than reading the code and it is what the owner will "+
-		"compare your work against. If a product decision is missing, ask with ask_user "+
+		"then read). If a product decision is missing, ask with ask_user "+
 		"rather than inventing one — the owner sees it.\n\n", ownerName)
 	// The delta is asked for here, in the child's own prompt, because the owner
 	// cannot diff the book against work it never saw. It is extracted from the
