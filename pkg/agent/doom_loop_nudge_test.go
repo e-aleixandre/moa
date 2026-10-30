@@ -198,18 +198,30 @@ func TestLoop_DoomLoopNudge_DifferentCallResetsStreak(t *testing.T) {
 	}
 }
 
-func TestResultSignature_IgnoresAttachmentOccurrenceID(t *testing.T) {
-	slot := func(id string) toolExecSlot {
-		return toolExecSlot{tc: core.ToolCallContent("c", "read", nil), result: core.Result{Content: []core.Content{
+func TestResultSignature_HashesAttachmentContentNotOccurrenceID(t *testing.T) {
+	slot := func(id string) []toolExecSlot {
+		return []toolExecSlot{{tc: core.ToolCallContent("c", "read", nil), result: core.Result{Content: []core.Content{
 			{Type: "image", MimeType: "image/png", AttachmentID: id, AttachmentSize: 42},
-		}}}
+		}}}}
 	}
-	if resultSignature([]toolExecSlot{slot("att_a")}) != resultSignature([]toolExecSlot{slot("att_b")}) {
-		t.Error("same image under different occurrence IDs must have the same signature")
+	// The blob store stand-in: ids a1/a2 hold the same bytes, b1 other bytes
+	// of the same size and type.
+	bytesOf := map[string]string{"a1": "AAAA", "a2": "AAAA", "b1": "BBBB"}
+	resolve := func(blocks []core.Content) []core.Content {
+		out := make([]core.Content, len(blocks))
+		for i, c := range blocks {
+			c.Data = bytesOf[c.AttachmentID]
+			out[i] = c
+		}
+		return out
 	}
-	other := slot("att_a")
-	other.result.Content[0].AttachmentSize = 43
-	if resultSignature([]toolExecSlot{slot("att_a")}) == resultSignature([]toolExecSlot{other}) {
-		t.Error("different image size must change the signature")
+	if resultSignature(slot("a1"), resolve) != resultSignature(slot("a2"), resolve) {
+		t.Error("same bytes under different occurrence IDs must share a signature")
+	}
+	if resultSignature(slot("a1"), resolve) == resultSignature(slot("b1"), resolve) {
+		t.Error("different bytes of equal size and type must differ")
+	}
+	if resultSignature(slot("a1"), nil) != resultSignature(slot("a2"), nil) {
+		t.Error("without a resolver the occurrence ID must still be ignored")
 	}
 }

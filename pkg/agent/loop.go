@@ -2025,20 +2025,41 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			rejectedCount++
 		}
 	}
-	return batch.steers, nonExempt > 0 && nonExempt == rejectedCount, resultSignature(slots)
+	return batch.steers, nonExempt > 0 && nonExempt == rejectedCount, resultSignature(slots, attachmentResolver(ctx, cfg))
+}
+
+// attachmentResolver returns the loop's materializer as a content resolver,
+// or nil when attachments are not externalized.
+func attachmentResolver(ctx context.Context, cfg *loopConfig) func([]core.Content) []core.Content {
+	if cfg.materializeContent == nil {
+		return nil
+	}
+	return func(blocks []core.Content) []core.Content {
+		out, err := cfg.materializeContent(ctx, []core.Message{{Role: "user", Content: blocks}})
+		if err != nil || len(out) != 1 {
+			return blocks
+		}
+		return out[0].Content
+	}
 }
 
 // resultSignature hashes the results of a batch's non-exempt calls, in call
-// order, so the doom-loop detector can tell a stuck run from progress.
-func resultSignature(slots []toolExecSlot) string {
+// order, so the doom-loop detector can tell a stuck run from progress. An
+// attachment ID names one occurrence of the bytes, not the bytes (re-reading
+// an unchanged image mints a fresh ID), so externalized blocks are resolved
+// and hashed by content; if that fails the ID is dropped and the size and MIME
+// type stand in.
+func resultSignature(slots []toolExecSlot, resolve func([]core.Content) []core.Content) string {
 	h := sha256.New()
 	for i := range slots {
 		if doomLoopExemptTools[slots[i].tc.ToolName] {
 			continue
 		}
-		for _, c := range slots[i].result.Content {
-			// An attachment ID names one occurrence of the bytes, not the
-			// bytes: re-reading an unchanged image mints a fresh ID each time.
+		blocks := slots[i].result.Content
+		if resolve != nil && hasAttachment(blocks) {
+			blocks = resolve(blocks)
+		}
+		for _, c := range blocks {
 			c.AttachmentID = ""
 			if b, err := json.Marshal(c); err == nil {
 				h.Write(b)
@@ -2050,6 +2071,15 @@ func resultSignature(slots []toolExecSlot) string {
 		h.Write([]byte{0})
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func hasAttachment(blocks []core.Content) bool {
+	for _, c := range blocks {
+		if c.AttachmentID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func appendPermissionFeedback(result core.Result, feedback string) core.Result {
