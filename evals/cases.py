@@ -452,7 +452,8 @@ for invalid in (None, 3, True, b"tag", object()):
 '''
 
 
-def _read_events_errors(work: Path, events: list[dict]) -> list[str]:
+def _read_events_errors(work: Path, events: list[dict], files=None) -> list[str]:
+    files = _LONG_FILES if files is None else files
     observed = []
     pending = None
     used_ids = set()
@@ -487,7 +488,7 @@ def _read_events_errors(work: Path, events: list[dict]) -> list[str]:
             relative = path.resolve().relative_to(work.resolve()).as_posix()
         except (OSError, ValueError):
             continue
-        if relative not in _LONG_FILES:
+        if relative not in files:
             continue
         if pending is not None:
             return ["Compaction evidence reads must finish before starting the next batch"]
@@ -504,12 +505,12 @@ def _read_events_errors(work: Path, events: list[dict]) -> list[str]:
         if limit is None or (type(limit) is int and limit < 1):
             limit = 2000
         if (type(offset) is not int or offset > 1 or type(limit) is not int or
-                limit < len(_LONG_FILES[relative].splitlines())):
+                limit < len(files[relative].splitlines())):
             return [f"Compaction evidence must be read in full: {relative}"]
         pending = (call_id, relative)
     if pending is not None:
         return ["Compaction evidence read has no successful terminal event"]
-    if observed != list(_LONG_FILES):
+    if observed != list(files):
         return ["Compaction process requires twelve complete sequential read calls, batches 01..12"]
     if not compacted_after_initial:
         return ["Compaction must occur after the initial evidence read completes"]
@@ -518,6 +519,8 @@ def _read_events_errors(work: Path, events: list[dict]) -> list[str]:
 
 def check(case_id: str, work: Path, answer: str, events: list[dict]) -> list[str]:
     """Return objective failures without changing the workspace."""
+    if case_id.startswith("hard-"):
+        return hard_cases.check(sys.modules[__name__], case_id, Path(work), answer, events)
     case = CASES[case_id]
     work = Path(work)
     errors = _preserved(case, work)
@@ -587,3 +590,11 @@ def check(case_id: str, work: Path, answer: str, events: list[dict]) -> list[str
                     not re.search(r"\bdays?\b|\bd[ií]as?\b", question, re.I)):
                 errors.append("question must ask the owner for the retention period in days")
     return errors
+
+
+try:
+    from . import hard_cases
+except ImportError:
+    import hard_cases
+
+CASES.update(hard_cases.register(sys.modules[__name__]))

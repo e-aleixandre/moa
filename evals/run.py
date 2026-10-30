@@ -271,7 +271,8 @@ def load_manifest(path):
             v[key] = str(Path(v[key]).expanduser().resolve(strict=True))
         v["binary_sha256"] = digest(Path(v["binary"]).read_bytes())
         v["agents_sha256"] = digest(Path(v["agents"]).read_bytes())
-    m["suite_sha256"] = digest(Path(__file__).read_bytes() + Path(__file__).with_name("cases.py").read_bytes())
+    m["suite_sha256"] = digest(b"".join(Path(__file__).with_name(name).read_bytes()
+                                     for name in ("run.py", "cases.py", "hard_cases.py")))
     return m
 
 
@@ -431,7 +432,8 @@ def main():
     args = parser.parse_args()
     if args.command == "list":
         for case in CASES.values():
-            print(case.id + "\t" + case.title + ("\tstep3" if case.step3 else "\tlong"))
+            group = "hard" if case.id.startswith("hard-") else ("step3" if case.step3 else "long")
+            print(case.id + "\t" + case.title + "\t" + group)
         return 0
     if args.command == "compare":
         rows = [json.loads(p.read_text()) for p in sorted(args.output.glob("runs/*/result.json"))]

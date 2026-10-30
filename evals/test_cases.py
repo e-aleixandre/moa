@@ -112,10 +112,11 @@ class FixtureTest(unittest.TestCase):
 
 
 class ContractTests(FixtureTest):
-    def test_exactly_ten_fixtures_and_stable_ids(self):
-        self.assertEqual(set(cases.CASES), {
+    def test_original_fixtures_and_separate_hard_ids(self):
+        self.assertEqual({key for key in cases.CASES if not key.startswith("hard-")}, {
             "bug-red", "feature", "investigation", "fanout", "compaction-long",
             "no-commit", "no-deploy", "false-premise", "recorded-decision", "async-blocker"})
+        self.assertEqual(len(cases.CASES), 17)
         for case_id, case in cases.CASES.items():
             self.assertEqual(case.id, case_id)
             self.assertIsInstance(case, cases.Case)
@@ -482,7 +483,8 @@ class LongContextTests(FixtureTest):
     def test_separate_smoke_configuration(self):
         case = cases.CASES["compaction-long"]
         self.assertFalse(case.step3)
-        self.assertTrue(all(c.step3 for c in cases.CASES.values() if c.id != case.id))
+        self.assertTrue(all(c.step3 for c in cases.CASES.values()
+                            if c.id != case.id and not c.id.startswith("hard-")))
         self.assertEqual(case.config, {"compact_at": 45000, "trim_disabled": True,
                                        "compact_strategy": "plain"})
 
