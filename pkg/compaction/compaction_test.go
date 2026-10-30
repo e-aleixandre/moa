@@ -882,3 +882,46 @@ func TestAppendCheckpoint_CountsTowardTokensAfter(t *testing.T) {
 		t.Fatal("checkpoint tokens must be reflected in TokensAfter")
 	}
 }
+
+func TestCompact_ReportsCallInfo(t *testing.T) {
+	cases := []struct {
+		name       string
+		report     func(*core.AppliedOutputCap)
+		wantCap    string
+		wantTokens int
+	}{
+		{"applied", func(c *core.AppliedOutputCap) { c.Report(8000) }, core.SummarizerCapApplied, 8000},
+		{"none", func(c *core.AppliedOutputCap) { c.Report(0) }, core.SummarizerCapNone, 0},
+		{"unknown", func(*core.AppliedOutputCap) {}, core.SummarizerCapUnknown, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prov := &reportingProvider{report: tc.report}
+			var msgs []core.AgentMessage
+			for i := 0; i < 6; i++ {
+				msgs = append(msgs,
+					core.AgentMessage{Message: core.NewUserMessage(strings.Repeat("question ", 300))},
+					core.AgentMessage{Message: core.Message{Role: "assistant", Content: []core.Content{core.TextContent(strings.Repeat("answer ", 300))}}})
+			}
+			res, _, err := Compact(context.Background(), prov, core.Model{ID: "m", MaxInput: 4000}, core.StreamOptions{}, msgs, 9000, 4000,
+				core.CompactionSettings{Enabled: true, ReserveTokens: 100, KeepRecent: 200}, "")
+			if err != nil || res == nil {
+				t.Fatalf("res=%v err=%v", res, err)
+			}
+			if res.Call.StopReason != "max_tokens" || res.Call.OutputCap != tc.wantCap || res.Call.MaxOutputTokens != tc.wantTokens {
+				t.Errorf("call = %+v", res.Call)
+			}
+		})
+	}
+}
+
+type reportingProvider struct{ report func(*core.AppliedOutputCap) }
+
+func (p *reportingProvider) Stream(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	p.report(req.Options.AppliedCap)
+	ch := make(chan core.AssistantEvent, 2)
+	m := core.Message{Role: "assistant", Content: []core.Content{core.TextContent("sum")}, StopReason: "max_tokens", Usage: &core.Usage{Input: 1}}
+	ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &m}
+	close(ch)
+	return ch, nil
+}

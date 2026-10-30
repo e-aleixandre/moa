@@ -130,6 +130,11 @@ func BuildRequestBody(req core.Request, dialect Dialect) ([]byte, error) {
 		maxTokens := core.ResolveMaxOutputTokens(req.Model, req.Options.MaxTokens)
 		r.MaxTokens = &maxTokens
 	}
+	if r.MaxTokens != nil {
+		req.Options.AppliedCap.Report(*r.MaxTokens)
+	} else {
+		req.Options.AppliedCap.Report(0)
+	}
 	if req.Options.Temperature != nil {
 		r.Temperature = req.Options.Temperature
 	}

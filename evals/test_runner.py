@@ -25,6 +25,31 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result["agent_request_shapes"], 1)
         self.assertIsNone(result["http_requests"])
         self.assertIsNone(result["tool_calls_children"])
+        self.assertIsNone(result["summarizer_usage"])
+
+    def test_child_tools_and_summarizer_usage(self):
+        events = [
+            {"type": "agent_start", "telemetry": ["subagent_tools", "compaction_usage"]},
+            {"type": "tool_execution_start", "tool_name": "read"},
+            {"type": "tool_execution_start", "tool_name": "grep", "subagent_id": "c1"},
+            {"type": "tool_execution_start", "tool_name": "grep", "subagent_id": "c1"},
+            {"type": "compaction_end", "summarizer": {"input": 100, "output": 7, "cache_read": 5,
+                                                      "stop_reason": "max_tokens", "output_cap": "none"}},
+            {"type": "compaction_end", "background": True, "summarizer": {"input": 999, "output": 999}},
+            {"type": "compaction_usage", "input": 50, "output": 3},
+        ]
+        result = run.measure(events, "")
+        self.assertEqual(result["tool_calls_main"], 1)
+        self.assertEqual(result["tool_calls_children"], 2)
+        self.assertEqual(result["tools_children_by_name"], {"grep": 2})
+        self.assertEqual(result["summarizer_usage"], {"input": 150, "cache_read": 5, "cache_write": 0, "output": 10})
+        self.assertEqual(result["summarizer_calls"], 2)
+        self.assertEqual(result["summarizer_stop_reasons"], ["max_tokens"])
+        self.assertEqual(result["summarizer_output_caps"], ["none"])
+
+    def test_no_child_tools_is_zero_when_cli_reports_them(self):
+        result = run.measure([{"type": "agent_start", "telemetry": ["subagent_tools"]}], "")
+        self.assertEqual(result["tool_calls_children"], 0)
 
     def test_missing_usage_is_unknown_not_zero(self):
         self.assertIsNone(run.measure([], "")["usage"])
