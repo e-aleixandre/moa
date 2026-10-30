@@ -9,7 +9,7 @@ import { expect, test } from "bun:test";
 import {
   BLINK_MS, NUDGE_MS, createFaceScheduler, facePersonality, motionScript,
 } from "./faceMotion.js";
-import { combineGaze, poseVars } from "./OwnerFace.jsx";
+import { combineGaze, poseVars, syncPose } from "./OwnerFace.jsx";
 import { AVATAR_SHAPES, DEFAULT_AVATAR_SHAPES, defaultAvatar, ownerAvatar } from "./avatar-identity.js";
 
 // A fake clock: timers fire only when the test advances time.
@@ -232,6 +232,20 @@ test("state poses: working rests low and aside, asks is pinned on you", () => {
   const v = poseVars(p, "circle", 1, 0);
   expect(v["--rs"]).toBeLessThan(v["--ls"]);
   expect(v["--rs"]).toBeLessThan(0.7);
+});
+test("a state change writes the rest pose over the scheduler's last gaze", () => {
+  // The scheduler sets custom properties on the element behind the renderer's
+  // back; the rendered style does not change for idle → saved / asks, so the
+  // stale gaze has to be overwritten explicitly.
+  const p = facePersonality("k");
+  const style = new Map();
+  const el = { style: { setProperty: (k, v) => style.set(k, v) } };
+  syncPose(el, poseVars(p, "circle", 0.6, -0.4));
+  expect(Number(style.get("--lx"))).not.toBe(Number(poseVars(p, "circle", 0, 0)["--lx"]));
+  for (const eyes of ["saved", "asks"]) {
+    syncPose(el, poseVars(p, "circle", ...combineGaze(eyes, 0, 0)));
+    for (const [k, v] of Object.entries(poseVars(p, "circle", ...combineGaze(eyes, 0, 0)))) expect(style.get(k)).toBe(String(v));
+  }
 });
 test("each state has its own deterministic script", () => {
   for (const mode of ["idle", "working", "asks"]) {

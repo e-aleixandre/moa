@@ -89,14 +89,23 @@ export function faceBodyColor(colorId, tone) {
   return `oklch(${l} ${c} ${h})`;
 }
 
+// syncPose writes a pose's custom properties straight to the element. The
+// scheduler does the same behind the renderer's back, so the last gaze it sent
+// would survive a state change whose rendered style is unchanged (idle →
+// saved, idle → asks): the rest pose is written again whenever the state is.
+export function syncPose(el, vars) {
+  for (const k in vars) el.style.setProperty(k, String(vars[k]));
+}
+
 let faceSeq = 0;
 
 // useFaceMotion registers a mounted face with the shared scheduler and
 // applies what it sends: blink / live / nudge classes and the gaze, turned
 // into custom properties by `pose`. Exported for the catalog's alternative
 // drawings, which move on the same clock.
-export function useFaceMotion(ref, { p, eyes, mode, follow, pinned, pose }) {
+export function useFaceMotion(ref, { p, eyes, mode, follow, pinned, pose, rest }) {
   useEffect(() => {
+    if (rest && ref.current) syncPose(ref.current, rest);
     // A shut face is resting on purpose: it does not blink or look anywhere.
     if (eyes === "saved" || pinned) return undefined;
     const el = ref.current;
@@ -106,8 +115,7 @@ export function useFaceMotion(ref, { p, eyes, mode, follow, pinned, pose }) {
       if ("blink" in ev) return void el.classList.toggle("is-blink", ev.blink);
       if ("live" in ev) return void el.classList.toggle("is-live", ev.live);
       if ("nudge" in ev) return void el.classList.toggle("is-nudge", ev.nudge);
-      const vars = pose(ev.gx, ev.gy);
-      for (const k in vars) el.style.setProperty(k, String(vars[k]));
+      syncPose(el, pose(ev.gx, ev.gy));
     };
     const off = motion.register({
       el,
@@ -153,7 +161,7 @@ export function OwnerFace({
   const rest = poseVars(p, s, g0x, g0y);
   const pose = (gx, gy) => poseVars(p, s, ...combineGaze(eyes, gx, gy));
   pose.key = s;
-  useFaceMotion(ref, { p, eyes, mode: eyes, follow, pinned: !!gaze, pose });
+  useFaceMotion(ref, { p, eyes, mode: eyes, follow, pinned: !!gaze, pose, rest });
 
   const style = {
     "--of-body": muted ? "#4a4b5c" : faceBodyColor(av.color, av.tone),
