@@ -220,6 +220,8 @@ func (u *vpUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	case origin == "api.openai.com" && r.URL.Path == "/v1/live/sessions":
 		provider = "openai-live-api"
+	case origin == "api.phonic.ai" && r.URL.Path == "/v1/sts/ws":
+		provider = "phonic"
 	}
 	if provider == "" {
 		http.NotFound(w, r)
@@ -247,10 +249,15 @@ func (u *vpUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(data, &v) != nil {
 			return
 		}
+		if provider == "phonic" && v["type"] == "audio_chunk" && vpSilent(v) {
+			continue // the input clock, not audio moa captured
+		}
 		p.mu.Lock()
 		p.frames = append(p.frames, v)
 		p.mu.Unlock()
 		switch v["type"] {
+		case "config":
+			_ = p.send(r.Context(), map[string]any{"type": "conversation_created", "conversation_id": "VP-UPSTREAM-CALL"})
 		case "session.update":
 			_ = p.send(r.Context(), map[string]any{"type": "session.updated", "session": v["session"]})
 		case "session.start":
@@ -262,6 +269,21 @@ func (u *vpUpstream) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// vpSilent reports a Phonic input-clock frame: all-zero PCM.
+func vpSilent(v map[string]any) bool {
+	audio, _ := v["audio"].(string)
+	pcm, err := base64.StdEncoding.DecodeString(audio)
+	if err != nil {
+		return false
+	}
+	for _, b := range pcm {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 type vpTransport struct {
 	target *url.URL
 	base   http.RoundTripper
@@ -269,7 +291,7 @@ type vpTransport struct {
 
 func (rt vpTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	switch r.URL.Host {
-	case "api.x.ai", "api.openai.com", "chatgpt.com", "auth.x.ai", "auth.openai.com", "cli-chat-proxy.grok.com":
+	case "api.x.ai", "api.openai.com", "chatgpt.com", "auth.x.ai", "auth.openai.com", "cli-chat-proxy.grok.com", "api.phonic.ai":
 	default:
 		return nil, fmt.Errorf("test forbids external origin %s", r.URL.Host)
 	}
@@ -377,6 +399,8 @@ func (p *vpPeer) tool(t *testing.T, id, name string, args any) {
 		p.emit(t, map[string]any{"type": "response.event", "delegation_id": "delegation-" + id, "event": map[string]any{"type": "response.created", "response": map[string]any{"id": "response-" + id, "status": "in_progress", "output": []any{}, "tools": []any{}, "instructions": nil}}})
 		p.emit(t, map[string]any{"type": "response.event", "delegation_id": "delegation-" + id, "event": map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "call_id": id, "name": name, "arguments": string(b)}}})
 		p.emit(t, map[string]any{"type": "response.event", "delegation_id": "delegation-" + id, "event": map[string]any{"type": "response.completed", "response": map[string]any{"id": "response-" + id, "status": "completed", "output": []any{}, "tools": []any{}, "instructions": nil}}})
+	case "phonic":
+		p.emit(t, map[string]any{"type": "tool_call", "tool_call_id": id, "tool_name": name, "parameters": args})
 	default:
 		p.emit(t, map[string]any{"type": "response.function_call_arguments.done", "call_id": id, "name": name, "arguments": string(b)})
 		p.emit(t, map[string]any{"type": "response.done", "response": map[string]any{"status": "completed"}})
@@ -412,6 +436,16 @@ func (p *vpPeer) result(t *testing.T, id string) map[string]any {
 			}
 			return json.Unmarshal([]byte(text.String()), &result) == nil && result != nil
 		})
+		return result
+	}
+	if p.provider == "phonic" {
+		v := p.await(t, "phonic tool output "+id, func(v map[string]any) bool {
+			return v["type"] == "tool_call_output" && v["tool_call_id"] == id
+		})
+		result, ok := v["output"].(map[string]any)
+		if !ok {
+			t.Fatalf("phonic tool output is not a JSON object: %#v", v["output"])
+		}
 		return result
 	}
 	v := p.await(t, "upstream result "+id, func(v map[string]any) bool {

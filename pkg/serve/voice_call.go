@@ -316,6 +316,11 @@ func (r *voiceCallRegistry) openCallWith(scope context.Context, principal, provi
 		return http.StatusConflict, map[string]any{"error": "request_withdrawn"}, 0
 	}
 	provider := voice.ProviderID(providerName)
+	// Calls moa places (answer != nil) always carry the provider they were
+	// asked with; the switch only applies to an unnamed call of the user.
+	if provider == "" && answer == nil && phonicSwitchOn() {
+		provider = voice.Phonic
+	}
 	if provider == "" {
 		p, found := r.defaultPlan()
 		if !found {

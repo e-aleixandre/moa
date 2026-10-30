@@ -23,11 +23,13 @@ const (
 	XAIAPI        ProviderID = "xai-api"
 	ChatGPTPlan   ProviderID = "chatgpt-plan"
 	OpenAILiveAPI ProviderID = "openai-live-api"
+	// Phonic is experimental: used only when named or switched on.
+	Phonic ProviderID = "phonic"
 )
 
 // Paid reports whether the provider bills per minute to an API key. A paid
 // provider is only ever used when the caller names it explicitly.
-func (p ProviderID) Paid() bool { return p == XAIAPI || p == OpenAILiveAPI }
+func (p ProviderID) Paid() bool { return p == XAIAPI || p == OpenAILiveAPI || p == Phonic }
 
 // EventKind classifies an upstream Event.
 type EventKind string

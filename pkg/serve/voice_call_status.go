@@ -24,13 +24,16 @@ type voiceProviderStatus struct {
 }
 
 type voiceStatus struct {
-	Provider     string                `json:"provider"`
-	PaidProvider string                `json:"paid_provider"`
-	BackendModel string                `json:"backend_model"`
-	Default      voice.ProviderID      `json:"default"` // plan an unnamed call uses now; "" when none is signed in
-	Providers    []voiceProviderStatus `json:"providers"`
-	ActiveCalls  int                   `json:"active_calls"`
-	Recent       []voiceUsage          `json:"recent"` // newest first
+	Provider     string           `json:"provider"`
+	PaidProvider string           `json:"paid_provider"`
+	BackendModel string           `json:"backend_model"`
+	Default      voice.ProviderID `json:"default"` // plan an unnamed call uses now; "" when none is signed in
+	// OutgoingProvider is what a call the user places without naming one
+	// uses now: Default, or phonic while its experimental switch is on.
+	OutgoingProvider voice.ProviderID      `json:"outgoing_provider,omitempty"`
+	Providers        []voiceProviderStatus `json:"providers"`
+	ActiveCalls      int                   `json:"active_calls"`
+	Recent           []voiceUsage          `json:"recent"` // newest first
 	// Calls are the owner-call settings; OwnerCallsPaidProvider is the paid
 	// provider whose cost activating an owner needs accepted when no plan is
 	// signed in ("" with a plan, or with no paid key at all).
@@ -172,6 +175,10 @@ func (r *voiceCallRegistry) status() voiceStatus {
 	if p, ok := r.defaultPlan(); ok {
 		out.Default = p
 	}
+	out.OutgoingProvider = out.Default
+	if phonicSwitchOn() {
+		out.OutgoingProvider = voice.Phonic
+	}
 	for _, p := range voiceProviderOrder {
 		state := "not_connected"
 		if r.selectable(p) {
@@ -215,7 +222,8 @@ func (r *voiceCallRegistry) handleSettings(w http.ResponseWriter, req *http.Requ
 		voiceError(w, http.StatusBadRequest, map[string]any{"error": "invalid_provider"})
 		return
 	}
-	if paid != nil && *paid != "" && !voice.ProviderID(*paid).Paid() {
+	// Phonic is experimental: only its switch selects it, never Settings.
+	if paid != nil && *paid != "" && (!voice.ProviderID(*paid).Paid() || *paid == string(voice.Phonic)) {
 		voiceError(w, http.StatusBadRequest, map[string]any{"error": "invalid_paid_provider"})
 		return
 	}

@@ -54,8 +54,11 @@ func handleLogin(ctx context.Context, providerName string, authStore *auth.Store
 	case "openai-transcribe":
 		handleTranscribeKeySetup(authStore)
 
+	case "phonic":
+		handlePhonicKeySetup(authStore)
+
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai, xai, meta, openai-transcribe\n", providerName)
+		fmt.Fprintf(os.Stderr, "Unknown provider %q. Supported: anthropic, openai, xai, meta, openai-transcribe, phonic\n", providerName)
 		os.Exit(1)
 	}
 }
@@ -167,6 +170,16 @@ func handleTranscribeKeySetup(authStore *auth.Store) {
 		Key:  key,
 	})
 	fmt.Println("✓ OpenAI auxiliary key saved. Voice input and Pulse Realtime are now available.")
+}
+
+// handlePhonicKeySetup stores the API key of the experimental phonic voice
+// provider. It is read from stdin (hidden on a terminal) so it can be piped
+// from a vault without touching a file, an argument or the environment.
+func handlePhonicKeySetup(authStore *auth.Store) {
+	gen := loginGeneration(authStore, "phonic")
+	key := readSecretInput("Enter your Phonic API key: ")
+	saveLogin(authStore, "phonic", gen, auth.Credential{Type: "api_key", Key: key})
+	fmt.Println("✓ Phonic key saved. Calls use it only while the voice-provider-phonic switch is on.")
 }
 
 // loginGeneration captures the stored generation before a login starts, so

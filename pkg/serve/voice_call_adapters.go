@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -81,6 +82,8 @@ func WithVoiceCalls(o VoiceCallOptions) ServerOption {
 //   - OpenAI GPT-Live (gpt-live-1): $0.05 / min, billed per second,
 //     https://platform.openai.com/docs/pricing ("GPT-Live sessions").
 //     Backend model and tool usage are billed separately.
+//   - Phonic (phonic-1), Starter: $0.07 / min, https://phonic.ai/pricing
+//     (checked 2026-10-30). Experimental; empty voice = Phonic's default.
 var voiceProviders = map[voice.ProviderID]struct {
 	store   string
 	voice   string
@@ -90,6 +93,7 @@ var voiceProviders = map[voice.ProviderID]struct {
 	voice.XAIAPI:        {"xai", "eve", voice.Billing{Kind: "per_minute", USDPerMinute: 0.08}},
 	voice.ChatGPTPlan:   {"openai", "cove", voice.Billing{Kind: "plan_unverified"}},
 	voice.OpenAILiveAPI: {"openai", "marin", voice.Billing{Kind: "per_minute", USDPerMinute: 0.05}},
+	voice.Phonic:        {"phonic", "", voice.Billing{Kind: "per_minute", USDPerMinute: 0.07}},
 }
 
 // pairedPaid is the explicit paid choice offered when a plan fails.
@@ -171,6 +175,8 @@ func (r *voiceCallRegistry) adapter(p voice.ProviderID) (voice.Adapter, *storeVo
 		return voice.NewRealtimeWS(voice.RealtimeWSConfig{ID: p, HTTPClient: r.opts.HTTPClient, Credentials: creds, OAuth: p == voice.GrokPlan, Billing: info.billing}), creds, true
 	case voice.OpenAILiveAPI:
 		return voice.NewLiveWS(voice.LiveWSConfig{HTTPClient: r.opts.HTTPClient, Credentials: creds, Billing: info.billing}), creds, true
+	case voice.Phonic:
+		return voice.NewPhonic(voice.PhonicConfig{HTTPClient: r.opts.HTTPClient, Credentials: creds, Billing: info.billing}), creds, true
 	case voice.ChatGPTPlan:
 		return voice.NewChatGPTPlan(voice.ChatGPTPlanConfig{HTTPClient: r.opts.HTTPClient, Credentials: creds, Billing: info.billing,
 			Peer: voice.PeerConfig{ICEServers: r.opts.ICEServers, SettingEngine: r.opts.PeerSettings}}), creds, true
@@ -199,6 +205,17 @@ func (r *voiceCallRegistry) selectable(p voice.ProviderID) bool {
 // in Settings applies to the next call without a restart.
 func voiceSettings() core.VoiceConfig {
 	return core.GetVoiceConfig(core.LoadGlobalConfig())
+}
+
+// phonicSwitchOn reports the experimental hot switch: while the regular file
+// voice-provider-phonic exists in moa's config directory, a call the user
+// places without naming a provider uses Phonic (paid, per minute; creating
+// the file is that consent). Read per call; removing it reverts the next
+// call. It never touches defaultPlan, so owners' calls keep their provider.
+func phonicSwitchOn() bool {
+	path := core.ConfigSubdir("voice-provider-phonic")
+	info, err := os.Stat(path)
+	return path != "" && err == nil && info.Mode().IsRegular()
 }
 
 // defaultPlan picks a plan provider when the caller named none: the plan

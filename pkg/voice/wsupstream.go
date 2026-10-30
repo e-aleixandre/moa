@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -61,6 +62,54 @@ func dialWS(ctx context.Context, client *http.Client, url string, h http.Header)
 }
 
 // wsEvent is the envelope every JSON dialect shares.
+
+// streamCapture records the upgraded stream of one dial so it can be closed
+// directly (see wsUpstream.abort). It only observes the response.
+type streamCapture struct {
+	base http.RoundTripper
+	mu   sync.Mutex
+	body io.Closer
+}
+
+func (c *streamCapture) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := c.base.RoundTrip(r)
+	if err == nil && resp.StatusCode == http.StatusSwitchingProtocols {
+		c.mu.Lock()
+		c.body = resp.Body
+		c.mu.Unlock()
+	}
+	return resp, err
+}
+
+func (c *streamCapture) close() {
+	c.mu.Lock()
+	b := c.body
+	c.mu.Unlock()
+	if b != nil {
+		_ = b.Close()
+	}
+}
+
+// dialWSAbortable is dialWS that also returns a function closing the
+// upgraded stream itself.
+func dialWSAbortable(ctx context.Context, client *http.Client, url string, h http.Header) (*websocket.Conn, func(), error) {
+	cp := http.Client{}
+	if client != nil {
+		cp = *client
+	}
+	base := cp.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	capture := &streamCapture{base: base}
+	cp.Transport = capture
+	conn, err := dialWS(ctx, &cp, url, h)
+	if err != nil {
+		return nil, nil, err
+	}
+	return conn, capture.close, nil
+}
+
 type wsEvent struct {
 	Type string `json:"type"`
 }
@@ -88,6 +137,27 @@ type wsUpstream struct {
 	closeOnce    sync.Once
 	closeSent    bool // written once under closeOnce
 	teardownOnce sync.Once
+	// openFrame asks the provider to speak first; nil means response.create.
+	openFrame any
+	// errorFatal classifies a provider error frame; nil means
+	// providerErrorFatal (the OpenAI/xAI envelope).
+	errorFatal func([]byte) (bool, *Diagnostic)
+	// closeWS ends the call with a WebSocket close handshake written by the
+	// writer itself, so no frame races it and the reader is not cancelled
+	// before the peer's answer (dialects without a closing frame).
+	closeWS   bool
+	wsClosing atomic.Bool
+	// admitMu orders admissions against the terminal close command: once
+	// wsClosing is set under the write lock, nothing is queued behind it.
+	admitMu sync.RWMutex
+	// abort, when set, closes the upgraded stream itself: the library's
+	// close handshake reads with its own context, so cancelling ours does
+	// not end it when the reader is not inside Read.
+	abort func()
+	// silence, when set, is written by the writer whenever no capture audio
+	// has been written for silenceGap and none is pending: a provider that
+	// expects a continuous input clock keeps it while moa has no audio.
+	silence []byte
 	// heard is set once the user's speech is seen (OpenOnSilence).
 	heard atomic.Bool
 	// openMu orders a pending opening against Close: once closing is set
@@ -124,7 +194,7 @@ func (u *wsUpstream) read() {
 		_, data, err := u.conn.Read(u.ctx)
 		if err != nil {
 			ev := Event{Kind: EventClosed, Reason: "upstream_closed", Diagnostic: &Diagnostic{Cause: "upstream_closed"}}
-			if u.ctx.Err() != nil {
+			if u.ctx.Err() != nil || u.wsClosing.Load() {
 				ev = Event{Kind: EventClosed, Reason: "closed"}
 			} else if code := websocket.CloseStatus(err); code != -1 {
 				c := int(code)
@@ -138,7 +208,11 @@ func (u *wsUpstream) read() {
 			continue
 		}
 		if env.Type == "error" {
-			if fatal, d := providerErrorFatal(data); fatal {
+			classify := u.errorFatal
+			if classify == nil {
+				classify = providerErrorFatal
+			}
+			if fatal, d := classify(data); fatal {
 				u.emit(Event{Kind: EventFailed, Reason: FailProviderError, Diagnostic: d})
 				return
 			}
@@ -211,7 +285,10 @@ func (u *wsUpstream) Usage() *Usage {
 // open starts the call as opening says. Both dialects ask for a response
 // with the same frame.
 func (u *wsUpstream) open(opening Opening) error {
-	speak := map[string]any{"type": "response.create"}
+	var speak any = map[string]any{"type": "response.create"}
+	if u.openFrame != nil {
+		speak = u.openFrame
+	}
 	switch opening {
 	case OpenNow:
 		return u.send(speak)
@@ -247,28 +324,70 @@ func (u *wsUpstream) emit(ev Event) bool {
 
 func (u *wsUpstream) write() {
 	defer u.workers.Done()
+	var tick <-chan time.Time
+	if u.silence != nil {
+		t := time.NewTicker(silenceTick)
+		defer t.Stop()
+		tick = t.C
+	}
+	lastAudio := time.Now()
 	for {
 		select {
 		case <-u.ctx.Done():
 			return
+		case <-tick:
+			// pendingAudio includes the frame in flight, so silence never
+			// lands between the chunks of one capture frame.
+			if u.wsClosing.Load() || u.pendingAudio.Load() != 0 || time.Since(lastAudio) < silenceGap {
+				continue
+			}
+			if !u.writeFrame(u.silence) {
+				return
+			}
 		case f := <-u.out:
-			ctx, cancel := context.WithTimeout(u.ctx, upstreamWriteTimeout)
-			err := u.conn.Write(ctx, websocket.MessageText, f.data)
-			cancel()
+			if f.wsClose {
+				// Never cancel the reader first: that aborts the handshake.
+				_ = u.conn.Close(websocket.StatusNormalClosure, "call ended")
+				u.closedOnce.Do(func() { close(u.closedSignal) })
+				return
+			}
+			ok := u.writeFrame(f.data)
 			u.pendingAudio.Add(-f.audio)
-			if err != nil {
-				u.cancel()
+			if f.audio > 0 {
+				lastAudio = time.Now()
+			}
+			if !ok {
 				return
 			}
 		}
 	}
 }
 
+// writeFrame writes one text frame; a failure cancels the upstream.
+func (u *wsUpstream) writeFrame(b []byte) bool {
+	ctx, cancel := context.WithTimeout(u.ctx, upstreamWriteTimeout)
+	err := u.conn.Write(ctx, websocket.MessageText, b)
+	cancel()
+	if err != nil {
+		u.cancel()
+		return false
+	}
+	return true
+}
+
+// silenceTick paces filler frames; silenceGap is how long capture audio may
+// be missing before filler starts (client jitter is not a gap).
+const (
+	silenceTick = 20 * time.Millisecond
+	silenceGap  = 100 * time.Millisecond
+)
+
 // outFrame is one queued JSON frame; audio carries the PCM bytes it holds so
 // the pending-audio bound is released when it is written.
 type outFrame struct {
-	data  []byte
-	audio int64
+	data    []byte
+	audio   int64
+	wsClose bool
 }
 
 func (u *wsUpstream) send(v any) error { return u.enqueue(v, 0) }
@@ -277,6 +396,11 @@ func (u *wsUpstream) enqueue(v any, audio int64) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
+	}
+	u.admitMu.RLock()
+	defer u.admitMu.RUnlock()
+	if u.wsClosing.Load() {
+		return errors.New("voice upstream closed")
 	}
 	select {
 	case <-u.ctx.Done():
@@ -313,6 +437,23 @@ func (u *wsUpstream) sendAudio(typ string, pcm []byte) error {
 
 func (u *wsUpstream) Events() <-chan Event { return u.events }
 
+// teardown cancels both workers and drops the connection. CloseNow waits
+// for a close handshake already started (up to the library's own 10 s), so
+// with closeWS the stream is aborted directly and CloseNow never blocks.
+func (u *wsUpstream) teardown() {
+	u.teardownOnce.Do(func() {
+		u.cancel()
+		if u.abort != nil {
+			u.abort()
+		}
+		if u.closeWS {
+			go func() { _ = u.conn.CloseNow() }()
+			return
+		}
+		_ = u.conn.CloseNow()
+	})
+}
+
 // close sends the dialect's closing frame when there is one, waits for its
 // confirmation within ctx, then tears the socket and both workers down.
 // Every caller waits within its own ctx: only the frame is sent once.
@@ -321,6 +462,17 @@ func (u *wsUpstream) close(ctx context.Context) error {
 	u.closing = true
 	u.openMu.Unlock()
 	u.closeOnce.Do(func() {
+		if u.closeWS {
+			u.admitMu.Lock()
+			u.wsClosing.Store(true)
+			select {
+			case u.out <- outFrame{wsClose: true}:
+				u.closeSent = true
+			default: // a full queue or a dead writer: teardown aborts
+			}
+			u.admitMu.Unlock()
+			return
+		}
 		u.closeSent = u.closeFrame != nil && u.send(u.closeFrame) == nil
 	})
 	if u.closeSent {
@@ -330,10 +482,7 @@ func (u *wsUpstream) close(ctx context.Context) error {
 		case <-ctx.Done():
 		}
 	}
-	u.teardownOnce.Do(func() {
-		u.cancel()
-		_ = u.conn.CloseNow()
-	})
+	u.teardown()
 	done := make(chan struct{})
 	go func() { u.workers.Wait(); close(done) }()
 	select {
