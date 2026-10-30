@@ -35,3 +35,15 @@ func TestBuildSystemPrompt_BuilderPinsTail(t *testing.T) {
 		t.Fatal("expected pinned git section")
 	}
 }
+
+// A child has no ask_user, so "do not ask" used to mean "guess". It must hand a
+// blocker that affects correctness, scope or authorization back to the parent.
+func TestBuildSystemPrompt_ChildReportsBlockersInsteadOfGuessing(t *testing.T) {
+	p := buildSystemPrompt(agentcontext.BuildSystemPrompt, "", nil, "/test", "", "")
+	if strings.Contains(p, "work with what you have") {
+		t.Fatal("the preamble still tells the child to work with what it has")
+	}
+	if !strings.Contains(p, "stop and report the blocker instead of guessing") {
+		t.Fatal("the preamble does not route blockers to the parent")
+	}
+}

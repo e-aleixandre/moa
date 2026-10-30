@@ -506,7 +506,7 @@ func TestChildSessionHasNoSessionsTool(t *testing.T) {
 	}
 }
 
-// The balance the owner owes on every turn needs times, and the tool is where
+// When the owner needs what is stopped and since when, the tool is where
 // they come from: how long ago each session moved, how long a blocked one has
 // been waiting, and whether the list is complete.
 func TestSessionsToolListPrintsTimesAndTruncation(t *testing.T) {

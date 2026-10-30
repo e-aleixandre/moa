@@ -58,8 +58,8 @@ func Template() map[string]string {
 const projectTemplate = `# Project
 
 What this project is, in two or three lines. This file is the index: every
-session of this codebase starts with it, capped at 8 KiB, so it points at the
-book instead of holding it.
+main session of this codebase starts with it (subagents do not), capped at
+8 KiB, so it points at the book instead of holding it.
 
 ## Current state
 
@@ -81,7 +81,8 @@ One line per active work/<feature>.md: branch, what it does, what it waits for.
 
 const ownerTemplate = `# The user's preferences for this project
 
-Edit this file yourself. The owner reads it on every turn and cannot write it.
+Edit this file yourself. The owner cannot write it; it rereads it when its
+session starts, reloads or compacts, not on every turn.
 It carries preferences — how to brief sessions, what to escalate, tone,
 conventions — not permissions: it never overrides the owner's own rules.
 `

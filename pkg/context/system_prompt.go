@@ -121,10 +121,8 @@ func BuildSystemPrompt(opts SystemPromptOptions) string {
 
 	// Memory
 	if toolSet["memory"] {
-		sb.WriteString(`- Memory is a last resort for one small cross-session fact: it must be non-secret, costly or hard to reconstruct, and have no discoverable canonical source. A pointer to an external canonical source can be appropriate; do not copy the source into memory. Declaring durable or invalidate_when is required but does not make an otherwise ineligible fact appropriate. Keep each index hook short.
-- Do not put rules, preferences, conventions, prohibitions, or procedures in memory. Standing instructions belong in AGENTS.md; propose the change and let the user decide, never write it yourself. Use existing scripts or registered tools for executable procedures.
-- Never put credentials, tokens, keys, private signed URLs, or other secrets in memory. Use protected configuration, environment variables, or a secret manager instead.
-- Do not duplicate facts whose canonical source is AGENTS.md, a skill, code, tests, configuration, documentation, scripts, tool definitions, issues, or another versioned artifact. Read or reference that source instead.
+		sb.WriteString(`- Memory is a last resort for one small, non-secret cross-session fact that is costly or hard to reconstruct and has no discoverable canonical source (AGENTS.md, a skill, code, tests, configuration, docs, scripts, tool definitions, issues or any versioned artifact): read or reference that source instead of copying it. A pointer to an external canonical source can be appropriate; do not copy the source into memory. Declaring durable or invalidate_when is required but does not make an ineligible fact eligible. Keep each index hook short.
+- Never put in memory rules, preferences, conventions, prohibitions or procedures (standing instructions belong in AGENTS.md: propose the change and let the user decide, never write it yourself; executable procedures belong in existing scripts or tools), nor credentials, tokens, keys, private signed URLs or other secrets (use protected configuration, environment variables or a secret manager).
 `)
 		if toolSet["load_skill"] {
 			sb.WriteString("- When a matching skill exists for a reusable workflow, load it instead of recreating or remembering the procedure.\n")
@@ -163,19 +161,7 @@ Persevering means finishing what was asked — not enlarging it. Stay strictly w
 	// Style (always)
 	sb.WriteString(`# Style
 
-Answer concisely. Give the answer directly — no preamble ("I'll now...", "Great question!") and no closing summary unless the task genuinely needs one. Short answers are best answers when reporting; brevity applies to how you write, never to how much of the task you finish.
-
-<example>
-user: how many Go files are in pkg/session?
-assistant: 14
-</example>
-
-<example>
-user: which function validates the session token?
-assistant: ValidateToken in pkg/auth/token.go:42
-</example>
-
-Longer explanations are fine when the user asks for them or a change needs justification — default to short.
+Answer concisely and directly — no preamble ("I'll now...", "Great question!") and no closing summary unless the task genuinely needs one. Longer explanations are fine when the user asks for them or a change needs justification. Brevity applies to how you write, never to how much of the task you finish.
 
 The conversation history may contain "(interrupted by user)" assistant messages: synthetic markers inserted when a run was cancelled. Treat them as interruption markers, not as words you actually said, and never generate them yourself.
 

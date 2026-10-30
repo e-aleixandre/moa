@@ -24,6 +24,20 @@ type Result struct {
 	ReadFiles     []string
 	ModifiedFiles []string
 	Usage         *core.Usage // LLM usage for the summarization call
+	// Call is what the summarization call reported besides its usage. Also set
+	// on the partial Result returned with an error.
+	Call CallInfo
+}
+
+// CallInfo is the observable outcome of one summarization call, for telemetry
+// only: it never influences what is compacted.
+type CallInfo struct {
+	// StopReason is the provider's finish reason; empty when none was reported.
+	StopReason string
+	// OutputCap is a core.SummarizerCap* value; MaxOutputTokens is the cap sent
+	// when OutputCap is "applied".
+	OutputCap       string
+	MaxOutputTokens int
 }
 
 // checkpointBegin and checkpointEnd delimit the ephemeral session checkpoint
@@ -494,6 +508,12 @@ func (f FileOps) Modified() []string {
 // tells the summarizer what to keep in the foreground; it is advisory and never
 // replaces the structured format.
 func GenerateSummary(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, previousSummary, focus string) (string, *core.Usage, error) {
+	summary, usage, _, err := generateSummary(ctx, provider, model, opts, msgs, previousSummary, focus)
+	return summary, usage, err
+}
+
+// generateSummary is GenerateSummary plus the call's telemetry.
+func generateSummary(ctx context.Context, provider core.Provider, model core.Model, opts core.StreamOptions, msgs []core.AgentMessage, previousSummary, focus string) (string, *core.Usage, CallInfo, error) {
 	serialized := SerializeForSummary(msgs, model.MaxInput)
 	prompt := buildPrompt(serialized, previousSummary, focus)
 
@@ -507,6 +527,8 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 	// is written, making the summary smaller than the ceiling this budget is
 	// meant to lift.
 	opts.ThinkingLevel = ""
+	applied := &core.AppliedOutputCap{}
+	opts.AppliedCap = applied
 
 	req := core.Request{
 		Model:  model,
@@ -519,7 +541,7 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 
 	ch, err := provider.Stream(ctx, req)
 	if err != nil {
-		return "", nil, fmt.Errorf("summarization request: %w", err)
+		return "", nil, CallInfo{}, fmt.Errorf("summarization request: %w", err)
 	}
 
 	var text strings.Builder
@@ -531,7 +553,7 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 		case core.ProviderEventDone:
 			finalMsg = event.Message
 		case core.ProviderEventError:
-			return "", nil, fmt.Errorf("summarization: %w", event.Error)
+			return "", nil, CallInfo{}, fmt.Errorf("summarization: %w", event.Error)
 		}
 	}
 
@@ -546,15 +568,23 @@ func GenerateSummary(ctx context.Context, provider core.Provider, model core.Mod
 	}
 
 	var usage *core.Usage
+	info := CallInfo{OutputCap: core.SummarizerCapUnknown}
+	if applied.Reported {
+		info.OutputCap = core.SummarizerCapNone
+		if applied.Tokens > 0 {
+			info.OutputCap, info.MaxOutputTokens = core.SummarizerCapApplied, applied.Tokens
+		}
+	}
 	if finalMsg != nil {
 		usage = finalMsg.Usage
+		info.StopReason = finalMsg.StopReason
 	}
 	// The provider reported its usage even when the text is unusable: it was
 	// spent, so it travels with the error.
 	if strings.TrimSpace(result) == "" {
-		return "", usage, fmt.Errorf("summarization produced empty output")
+		return "", usage, info, fmt.Errorf("summarization produced empty output")
 	}
-	return result, usage, nil
+	return result, usage, info, nil
 }
 
 // Compact orchestrates context compaction. Returns nil Result if nothing
@@ -581,13 +611,13 @@ func Compact(ctx context.Context, provider core.Provider, model core.Model, opts
 
 	fileOps := ExtractFileOps(toSummarize)
 
-	summary, usage, err := GenerateSummary(ctx, provider, model, opts, toSummarize, previousSummary, focus)
+	summary, usage, call, err := generateSummary(ctx, provider, model, opts, toSummarize, previousSummary, focus)
 	if err != nil {
 		// A partial Result carries only the usage already spent; it is never a
 		// compaction to adopt, and the error stays non-nil.
 		var spent *Result
 		if usage != nil {
-			spent = &Result{Usage: usage}
+			spent = &Result{Usage: usage, Call: call}
 		}
 		return spent, msgs, fmt.Errorf("compaction: %w", err)
 	}
@@ -618,6 +648,7 @@ func Compact(ctx context.Context, provider core.Provider, model core.Model, opts
 		ReadFiles:     fileOps.ReadOnly(),
 		ModifiedFiles: fileOps.Modified(),
 		Usage:         usage,
+		Call:          call,
 	}, compacted, nil
 }
 

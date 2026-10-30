@@ -1935,7 +1935,7 @@ func runChild(ctx context.Context, child *agent.Agent, task string, seedMsgs []c
 }
 
 func buildSystemPrompt(promptBuilder func(agentcontext.SystemPromptOptions) string, agentsMD string, specs []core.ToolSpec, cwd, skillsIndex, memoryIndex string) string {
-	const preamble = "You are a focused subagent. Complete the delegated task thoroughly and report your findings concisely. Do not ask clarifying questions — work with what you have.\n\n"
+	const preamble = "You are a focused subagent. Complete the delegated task thoroughly and report your findings concisely. Route clarifications to the parent: if missing information affects correctness, scope or authorization, stop and report the blocker instead of guessing.\n\n"
 	return preamble + promptBuilder(agentcontext.SystemPromptOptions{
 		AgentsMD:    agentsMD,
 		Tools:       specs,

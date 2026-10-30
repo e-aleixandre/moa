@@ -57,14 +57,14 @@ func NewTool(dir string, writable bool) core.Tool {
 func newTool(dir string, writable, hideReserved bool) core.Tool {
 	description := "Read the project book: the owner's curated record of this project " +
 		"(decisions and why they were taken, people and what they ask for, deep context per " +
-		"area). PROJECT.md is its index and is already in your context; use this to read the " +
-		"detail behind a line. The book is the owner's: you read it, you do not write it."
+		"area). PROJECT.md is its index; if it is not in your context, read it first. Use this to " +
+		"read the detail behind a line. The book is the owner's: you read it, you do not write it."
 	actions := `["list", "read", "search"]`
 	effect := core.EffectReadOnly
 	if writable {
 		description = "Read and write the project book: your curated record of this project " +
 			"(decisions and why, people and what they ask for, deep context per area). " +
-			"PROJECT.md is the index every session of this project is given — keep it accurate " +
+			"PROJECT.md is the index every main session of this project is given — keep it accurate " +
 			"and short, and put the detail in other files. Write what you decided and why, " +
 			"when you decided it, not a summary of what you did."
 		actions = `["list", "read", "search", "write", "append"]`

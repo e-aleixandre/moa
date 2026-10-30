@@ -865,13 +865,13 @@ func TestLoop_DoomLoop_MixedStatusAndEdit(t *testing.T) {
 }
 
 // TestLoop_DoomLoop_InterleavedPollingDoesNotReset verifies exempt-only turns
-// between identical edits do not reset the streak: edit, poll, edit, poll, edit
-// must still trip on the third edit.
+// between identical edits do not reset the streak: six times
+// must still trip on the sixth.
 func TestLoop_DoomLoop_InterleavedPollingDoesNotReset(t *testing.T) {
 	poll := toolCallHandler(core.ToolCallContent("tc-poll", "bash_status", map[string]any{"job_id": "j1"}))
 	edit := toolCallHandler(core.ToolCallContent("tc-edit", "noop", map[string]any{"x": "same"}))
 	handlers := []func(core.Request) (<-chan core.AssistantEvent, error){
-		edit, poll, edit, poll, edit, poll, edit,
+		edit, poll, edit, poll, edit, poll, edit, poll, edit, poll, edit, poll, edit,
 	}
 	provider := NewMockProvider(handlers...)
 	noopTool := core.Tool{

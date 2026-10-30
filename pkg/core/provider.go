@@ -8,6 +8,21 @@ import (
 	"time"
 )
 
+// AppliedOutputCap reports the output cap of a built request. Reported is false
+// until a provider has built the request; Tokens is 0 when the request carries
+// no cap (e.g. the ChatGPT OAuth backend rejects max_output_tokens).
+type AppliedOutputCap struct {
+	Reported bool
+	Tokens   int
+}
+
+// Report records the cap of a built request. Safe on a nil receiver.
+func (c *AppliedOutputCap) Report(tokens int) {
+	if c != nil {
+		c.Reported, c.Tokens = true, tokens
+	}
+}
+
 // Provider streams LLM responses. Each provider (Anthropic, OpenAI, etc.)
 // implements this interface, emitting normalized AssistantEvents.
 //
@@ -240,8 +255,12 @@ type StreamOptions struct {
 	ProviderRetryAttempt int               `json:"-"`
 	Temperature          *float64          `json:"temperature,omitempty"`
 	MaxTokens            *int              `json:"max_tokens,omitempty"`
-	APIKey               string            `json:"-"`
-	ThinkingLevel        string            `json:"thinking_level,omitempty"`
+	// AppliedCap, when set, is filled by the provider with the output cap the
+	// wire request really carries. It is telemetry for the caller (the
+	// compaction record) and never part of a provider payload.
+	AppliedCap    *AppliedOutputCap `json:"-"`
+	APIKey        string            `json:"-"`
+	ThinkingLevel string            `json:"thinking_level,omitempty"`
 	// CacheRetention selects the prompt-cache TTL: "" is the provider default
 	// (5 minutes), "1h" opts into the long TTL, and CacheOff suppresses cache
 	// writes entirely.
@@ -456,7 +475,7 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 			return "", fmt.Errorf("invalid Meta thinking level %q (choose: low, medium, high, xhigh)", level)
 		}
 	}
-	if strings.EqualFold(model.ID, "gpt-6-astra") || strings.EqualFold(model.ID, "gpt-6.1-sol") {
+	if usesShiftedGPT6Efforts(model) {
 		switch level {
 		case "off":
 			return "low", nil
@@ -492,13 +511,23 @@ func EffectiveThinkingLevel(model Model, level string) (string, error) {
 	return level, nil
 }
 
+// usesShiftedGPT6Efforts reports the models whose selector positions are
+// shifted one notch up onto low..max (no "none" below low).
+func usesShiftedGPT6Efforts(model Model) bool {
+	switch strings.ToLower(model.ID) {
+	case "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra":
+		return true
+	}
+	return false
+}
+
 // ThinkingPosition is the inverse of EffectiveThinkingLevel for the models
-// that shift selector positions onto other efforts (GPT-6 Astra, GPT-6.1 Sol):
+// that shift selector positions onto other efforts (GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra):
 // it turns a persisted or running effort back into the selector position that
 // produced it. Re-feeding an effort as a position would raise it one notch on
 // every pass (high -> xhigh -> max). Other models use the same words for both.
 func ThinkingPosition(model Model, effort string) string {
-	if strings.EqualFold(model.ID, "gpt-6-astra") || strings.EqualFold(model.ID, "gpt-6.1-sol") {
+	if usesShiftedGPT6Efforts(model) {
 		switch effort {
 		case "low":
 			return "off"

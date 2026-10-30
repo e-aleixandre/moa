@@ -20,7 +20,7 @@ const {
   AVATAR_COLORS, AVATAR_SHAPES, AVATAR_TONES, DEFAULT_AVATAR_SHAPES, SHAPE_PATHS, EYE_CENTER,
   defaultAvatar, ownerAvatar, proposeAvatar, storedAvatar,
 } = await import("./avatar-identity.js");
-const { OwnerFace, SerenaEyes, faceBodyColor } = await import("./OwnerFace.jsx");
+const { OwnerFace, faceBodyColor } = await import("./OwnerFace.jsx");
 
 function nodes(node, out = []) {
   if (node == null || typeof node !== "object") return out;
@@ -45,8 +45,6 @@ test("every added shape draws its own outline with its eyes inside it", () => {
     // Not sent back to the circle.
     expect(fill.props.d).not.toBe(SHAPE_PATHS.circle);
     expect(tree.props.class).toContain("is-idle");
-    expect(tree.props.class).toContain("of-serena");
-    expect(tree.props.class).not.toContain("of-mirada");
   }
 });
 
@@ -54,37 +52,20 @@ test("the tone sets the body, and pale draws the same eyes in ink", () => {
   for (const tone of AVATAR_TONES) {
     for (const state of ["idle", "working", "asks", "saved"]) {
       const tree = OwnerFace({ shape: "ghost", color: "peach", tone, state, size: 20, gaze: [0, 0] });
-      expect(tree.props.class.split(" ")).toContain("of-serena");
       expect(tree.props.class).toContain(`is-tone-${tone}`);
       expect(tree.props.class).toContain(`is-${state}`);
       expect(tree.props.style["--of-body"]).toBe(faceBodyColor("peach", tone));
-      // SerenaEyes is a pure function component: expand it to see its parts.
-      const el = nodes(tree).find((n) => n.type === SerenaEyes);
-      const all = nodes(SerenaEyes(el.props));
-      // The same drawings in every tone: per state, arcs + dots at rest and
-      // awake, two level lines when saved.
-      const count = (cls) => all.filter((n) => n.props?.class === cls).length;
-      expect(count("of-arc")).toBe(state === "saved" ? 0 : 2);
-      expect(count("of-dot")).toBe(state === "saved" ? 0 : 2);
-      expect(count("of-line")).toBe(state === "saved" ? 2 : 0);
+      const all = nodes(tree);
+      // The eyes are the same drawing in every tone: open strokes, or the shut
+      // arcs when saved.
+      expect(all.some((n) => n.type?.name === "MiradaEyes")).toBe(state !== "saved");
+      expect(all.some((n) => n.type?.name === "MiradaShut")).toBe(state === "saved");
     }
   }
   const css = readFileSync(new URL("./OwnerFace.css", import.meta.url), "utf8");
-  // One variable carries the eye colour for arcs, dots and lines alike, and
-  // pale turns it to ink.
-  expect(css).toContain(".of-serena.is-tone-pale { --of-eye: var(--of-ink); }");
-  for (const part of ["of-arc svg", "of-dot", "of-line"]) {
-    expect(css).toMatch(new RegExp(`\\.of-serena \\.${part} \\{[^}]*var\\(--of-eye\\)`));
-  }
+  expect(css).toContain(".of-mirada.is-tone-pale .of-lid { background: var(--of-ink); }");
+  expect(css).toContain(".of-mirada.is-tone-pale .of-m-shut { stroke: var(--of-ink); }");
   expect(css).toMatch(/\.is-tone-dark\.is-saved \{ opacity: 0\.8; \}/);
-  // The rules the component relies on are Serena's, not a leftover face's.
-  for (const rule of [
-    ".of-serena .of-dot {",
-    ".of-serena.is-idle .of-eyes { transform: none; }",
-    ".of-serena.is-saved { opacity: 0.66; }",
-    "@media (prefers-reduced-motion: reduce) {\n  .of-serena .of-head,",
-  ]) expect(css).toContain(rule);
-  expect(css).not.toContain("of-mirada");
 });
 
 test("deep is today's body exactly, and an absent or unknown tone is deep", () => {

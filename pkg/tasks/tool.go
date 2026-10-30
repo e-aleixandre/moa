@@ -187,7 +187,7 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 }
 
 const toolDescription = "Your task checklist, your requests to the owner, and your project's shared backlog. " +
-	"create adds to your checklist; ask files a request to the owner without blocking you (ask_user does block); " +
+	"create adds to your checklist; ask files a request to the owner without blocking you (ask_user is for a decision only the user can make; its description says whether it waits); " +
 	"claim takes a pending backlog task of your project; list before creating to avoid duplicates. " +
 	"create with when schedules the task to run later or repeat, in this session only; only when the user asks to schedule, otherwise omit when. when is plain text such as " +
 	"\"in 20m\", \"tomorrow at 09:00\", \"monday at 09:00\", \"2026-10-05 15:30\" or \"every weekday at 08:30\" " +

@@ -6,22 +6,20 @@ import { facePersonality, faceMotion } from "./faceMotion.js";
 import "./OwnerAvatar.css";
 import "./OwnerFace.css";
 
-// OwnerFace — the owner's "Serena" face, drawn through OwnerAvatar: a flat
-// ball of the identity colour whose eyes are content and shut (ᵕ ᵕ) while all
-// is well, open dots when it has something to look at, and two level lines
-// when it is saved. The HEAD does the looking — body and eyes turn and lean
-// together — so the marks never slide on a body that is at rest. The eyes
-// run on the owner's own deterministic script (faceMotion.js).
+// OwnerFace — the owner's "Mirada" face, drawn through OwnerAvatar: a flat
+// ball of the identity colour with two short, rounded white strokes for eyes,
+// each leaning its own way. The eyes are alive — they blink, look around and
+// behave by state — on the owner's own deterministic script (faceMotion.js).
+// The pair turns like a head.
 //
 // BEHAVIOUR BY STATE complements the words on the row, it never replaces
-// them: idle breathes, wanders its head and now and then peeks (the dots open
-// fast and close slowly); working keeps the dots open, low and aside, head
-// bowed, and blinks into the arcs for a moment; asks looks straight at you
-// and pulses its dots every few seconds; saved is two level lines and does
-// not move.
+// them: idle breathes and looks around, working narrows its eyes on a point
+// low and aside with quick saccades, asks looks straight at you with a small
+// nudge every few seconds, saved rests with its eyes shut and does not move.
 //
-// The alternatives it was chosen over (Mirada, Pupilas, Sobria) live in the
-// catalog only, so the product bundle carries none of their code.
+// The two proposals it was chosen over (Pupilas, Sobria) live in the catalog
+// only (src/catalog/owner-faces-alt.jsx), so the product bundle carries none
+// of their code.
 
 export const facePath = (shape) => SHAPE_PATHS[shape] || SHAPE_PATHS.circle;
 export const eyeCenter = (shape) => EYE_CENTER[shape] || EYE_CENTER.circle;
@@ -44,36 +42,46 @@ export function combineGaze(eyes, gx, gy) {
   return [clamp(s.x + gx * s.scale, -1, 1), clamp(s.y + gy * s.scale, -1, 1)];
 }
 
-// Serena's pose: the head (--bx/--by/--rot) always follows the gaze; the eyes
-// (--ex/--ey) slide on the body only while open — the CSS ignores them at
-// rest. Asking is pinned on you, so the head does not turn.
-export function serenaPose(eyes, gx, gy) {
+// How far the "head" reaches for each outline: the radius of the sphere the
+// eyes are projected on. Smaller than the outline so a turned eye never lands
+// on the rim — a drop narrows at eye height, a pill is wide.
+const HEAD_R = {
+  circle: 11, squircle: 11.5, blob: 10.5, hexagon: 10.5, drop: 10, pill: 12.5, triangle: 8, cloud: 10,
+  flower: 10.5, ghost: 11, bean: 10.5, diamond: 9, shield: 11, bell: 8,
+};
+
+// poseVars turns a gaze (gx, gy in −1..1, already combined with the state)
+// into the custom properties the CSS reads. Pure, so the tests can check a
+// pose without a DOM.
+//
+// A head turn: each eye sits on a sphere at ±φ from the facing direction, so
+// it moves by R·sin and is foreshortened by cos. The far eye thins and the
+// pair bunches towards the edge, which reads as "turned" rather than as two
+// marks sliding.
+export function poseVars(p, shape, gx, gy) {
+  const R = HEAD_R[shape] || 11;
+  const phi = Math.asin(Math.min(0.9, p.eyeGap / R));
+  const yaw = gx * 0.72;
+  const eye = (side) => {
+    const th = yaw + side * phi;
+    return {
+      x: R * Math.sin(th) - side * p.eyeGap,
+      s: Math.max(0.3, Math.cos(th) / Math.cos(phi)),
+    };
+  };
+  const l = eye(-1);
+  const r = eye(1);
   return {
-    "--bx": r3(gx * 1.8),
-    "--by": r3(gy * 1.6),
-    "--ex": r3(gx * 2.4),
-    "--ey": r3(gy * 2.4),
-    "--rot": r3(eyes === "asks" ? 0 : gx * 5),
+    "--lx": r3(l.x), "--ls": r3(l.s), "--rx": r3(r.x), "--rs": r3(r.s),
+    "--gy": r3(gy * 2.6), "--sy": r3(1 - 0.14 * Math.abs(gy)),
+    "--bx": r3(gx * 0.45), "--by": r3(gy * 0.3),
   };
 }
 
-// Serena's eye geometry in viewBox units; chip sizes get heavier marks so the
-// eyes do not dissolve into the colour.
-export function serenaGeometry(p, small) {
-  return {
-    w: small ? 2.6 : 2.3, // half-width of the arc and the line
-    h: small ? 1.9 : 1.7, // depth of the arc
-    dr: small ? 2.2 : 2.0, // dot radius
-    gap: p.eyeGap + (small ? 0.5 : 0.3),
-    arcSw: small ? 2.8 : 2.4,
-    lineSw: small ? 2.1 : 2.2,
-  };
-}
-
-// Serena's body: the identity hue at the owner's tone (avatar-identity.js,
+// Mirada's body: the identity hue at the owner's tone (avatar-identity.js,
 // AVATAR_TONES). The default `deep` is the hue one step DEEPER than the
 // palette's L 0.80, which white eyes cannot stand on (a lilac ball with white
-// eyes is a blank at 24px). Same hue, lower lightness — computed from the
+// strokes is a blank at 24px). Same hue, lower lightness — computed from the
 // palette's own oklch so the eight stay as far apart as they were chosen to be.
 // Mixing with black was tried first and turned peach into brown.
 export function faceBodyColor(colorId, tone) {
@@ -87,14 +95,6 @@ export function faceBodyColor(colorId, tone) {
 // saved, idle → asks): the rest pose is written again whenever the state is.
 export function syncPose(el, vars) {
   for (const k in vars) el.style.setProperty(k, String(vars[k]));
-}
-
-// At rest a blink is a peek, and a column of owners peeking on every blink
-// was too busy: only every second one opens the eyes. Closing always goes
-// through (removing an absent class is a no-op). Awake blinks are untouched.
-export function peekGate(eyes) {
-  let n = 0;
-  return (blink) => eyes !== "idle" || !blink || n++ % 2 === 1;
 }
 
 let faceSeq = 0;
@@ -111,9 +111,8 @@ export function useFaceMotion(ref, { p, eyes, mode, follow, pinned, pose, rest }
     const el = ref.current;
     const motion = faceMotion();
     if (!el || !motion) return undefined;
-    const peek = peekGate(eyes);
     const apply = (ev) => {
-      if ("blink" in ev) return void (peek(ev.blink) && el.classList.toggle("is-blink", ev.blink));
+      if ("blink" in ev) return void el.classList.toggle("is-blink", ev.blink);
       if ("live" in ev) return void el.classList.toggle("is-live", ev.live);
       if ("nudge" in ev) return void el.classList.toggle("is-nudge", ev.nudge);
       syncPose(el, pose(ev.gx, ev.gy));
@@ -159,16 +158,15 @@ export function OwnerFace({
   // `gaze` pins the eyes (the lab's pose sheet and the picker's swatches); a
   // pinned face does not move.
   const [g0x, g0y] = combineGaze(eyes, gaze?.[0] || 0, gaze?.[1] || 0);
-  const rest = serenaPose(eyes, g0x, g0y);
-  const pose = (gx, gy) => serenaPose(eyes, ...combineGaze(eyes, gx, gy));
-  pose.key = eyes;
-  const small = size <= 24;
+  const rest = poseVars(p, s, g0x, g0y);
+  const pose = (gx, gy) => poseVars(p, s, ...combineGaze(eyes, gx, gy));
+  pose.key = s;
   useFaceMotion(ref, { p, eyes, mode: eyes, follow, pinned: !!gaze, pose, rest });
 
   const style = {
     "--of-body": muted ? "#4a4b5c" : faceBodyColor(av.color, av.tone),
-    // One viewBox unit in CSS pixels: the head and the eyes move, and the
-    // strokes are drawn, in the units the body was drawn in.
+    // One viewBox unit in CSS pixels: the HTML eyes move in the same units
+    // the SVG was drawn in.
     "--of-u": `${size / 32}px`,
     // The breath: each owner its own period and phase, so a column of idle
     // owners never inhales in unison.
@@ -187,13 +185,13 @@ export function OwnerFace({
   return (
     <span
       ref={ref}
-      class={`of ow-av of-serena is-${size} is-${eyes}${muted ? "" : ` is-tone-${av.tone}`}${small ? " is-small" : ""}${breathes ? " is-breathe" : ""}${sheen ? " has-sheen" : ""}`}
+      class={`of ow-av of-mirada is-${size} is-${eyes}${muted ? "" : ` is-tone-${av.tone}`}${breathes ? " is-breathe" : ""}${sheen ? " has-sheen" : ""}`}
       style={{ ...style, width: `${size}px`, height: `${size}px` }}
       role={title ? "img" : undefined}
       aria-label={title}
       aria-hidden={title ? undefined : "true"}
     >
-      <span class="of-head">
+      <span class="of-bodybox">
         <svg class="of-svg" viewBox="0 0 32 32" width={size} height={size} aria-hidden="true">
           {sheen && (
             <defs>
@@ -217,11 +215,17 @@ export function OwnerFace({
             {sheen && <path class="of-sheen" d={d} fill={`url(#${uid}s)`} />}
             {sheen && <path class="of-sheen" d={d} fill={`url(#${uid}d)`} />}
           </g>
+          {eyes === "saved" && <MiradaShut p={p} shape={s} />}
         </svg>
-        <SerenaEyes p={p} shape={s} eyes={eyes} small={small} />
       </span>
+      {eyes !== "saved" && <MiradaEyes p={p} shape={s} size={size} />}
     </span>
   );
+}
+
+// OwnerFaceFor mirrors OwnerAvatarFor: the one-argument form.
+export function OwnerFaceFor({ owner, ...rest }) {
+  return <OwnerFace owner={owner} {...rest} />;
 }
 
 // ShutEyes are two closed arcs, the same drawing as the previous mark's.
@@ -235,70 +239,59 @@ export function ShutEyes({ cx, cy, dx, cls }) {
 }
 
 /* ── The eyes ────────────────────────────────────────────────────────────
-   The animated eye layers are HTML, not SVG. Measured with CDP over 10 s on 8 faces: when
+   The eyes are HTML, not SVG. Measured with CDP over 10 s on 8 faces: when
    they were SVG groups every frame of every gaze/blink transition cost a
    style recalc AND a layout on the main thread (~380 layouts per 10 s on a
    desktop sidebar, 11% of a 4×-throttled phone), because Chrome runs no SVG
-   animation on the compositor. As HTML boxes the same transform and opacity
-   transitions are composited, and the main thread only pays for the event
-   that starts them.
+   animation on the compositor. As HTML boxes the same transform transitions
+   are composited, and the main thread only pays for the event that starts
+   them.
 
-   Structure: .of-eyes (the pair, translated by --ex/--ey when open) > per
-   eye a square box centred on the eye and turned by the owner's own tilt >
-   its drawings, which exist only for the states that use them:
-     arc   (idle, working, asks) — a round-capped curve, static SVG in an HTML box: ᵕ
-     dot   (idle, working, asks) — a circle, scaled 0 ↔ 1
-     line  (saved)               — a level pill, static
-   Geometry is in viewBox units turned into % of the box, so one drawing
-   serves every size; stroke widths are in --of-u units. */
+   Per eye, four boxes sharing one centre, so each transform-origin: center
+   is the stroke's centre, exactly like the SVG groups they replace:
+     gaze  (head-turn translate + foreshortening, set by faceMotion)
+     lean  (the stroke's own tilt, static)
+     open  (narrowed when working, wider when asking)
+     lid   (blink) — the white pill itself.
+   Geometry is in viewBox units turned into % of the face, so one drawing
+   serves every size. */
 
-const EYE_BOX = 12; // viewBox units: each eye's box, centred on the eye
-
-export function SerenaEyes({ p, shape, eyes, small }) {
+function MiradaEyes({ p, shape, size }) {
   const [cx, cy0] = eyeCenter(shape);
-  // A touch lower than the tile's eyes: more forehead reads as a head.
-  const cy = cy0 + 1.2;
-  const g = serenaGeometry(p, small);
+  // A touch lower than the tile's eyes: more forehead reads as a head, and a
+  // head is what this drawing turns.
+  const cy = cy0 + 1;
+  // At chip and row sizes a 2.6 stroke is under 2px; a little heavier keeps
+  // the eyes from dissolving into the colour.
+  const sw = size <= 24 ? 3 : 2.6;
+  // A round-capped line of length L and width w is a w × (L + w) pill.
+  const h = p.strokeLen + sw;
   const pct = (n) => `${r3((n / 32) * 100)}%`;
-  const q = (n) => `${r3(((n + EYE_BOX / 2) / EYE_BOX) * 100)}%`; // local → % of the eye box
-  const qs = (n) => `${r3((n / EYE_BOX) * 100)}%`;
-  // The arc ᵕ is the lab's own curve, a round-capped quadratic, drawn in a
-  // static SVG that fills the eye's box. Only its HTML wrapper animates
-  // (opacity), so the tween stays on the compositor.
-  const E = EYE_BOX / 2;
-  const arcD = `M${r3(-g.w)} ${r3(-g.h * 0.45)}Q0 ${r3(g.h * 1.55)} ${g.w} ${r3(-g.h * 0.45)}`;
   const eye = (side) => (
     <span
-      class="of-eye"
+      class={`of-gaze of-gaze-${side < 0 ? "l" : "r"}`}
       style={{
-        left: pct(cx + side * g.gap - EYE_BOX / 2),
-        top: pct(cy - EYE_BOX / 2),
-        width: pct(EYE_BOX),
-        height: pct(EYE_BOX),
-        transform: `rotate(${r3(p.tilt * 0.45 + side * p.skew * 0.3)}deg)`,
+        left: pct(cx + side * p.eyeGap - sw / 2),
+        top: pct(cy - h / 2),
+        width: pct(sw),
+        height: pct(h),
       }}
     >
-      {eyes === "saved" ? (
-        <span
-          class="of-line"
-          style={{ left: q(-g.w - g.lineSw / 2), top: q(0.3 - g.lineSw / 2), width: qs(2 * g.w + g.lineSw), height: qs(g.lineSw) }}
-        />
-      ) : (
-        <>
-          <span class="of-arc">
-            <svg viewBox={`${-E} ${-E} ${EYE_BOX} ${EYE_BOX}`} aria-hidden="true">
-              <path d={arcD} stroke-width={g.arcSw} />
-            </svg>
-          </span>
-          <span class="of-dot" style={{ left: q(-g.dr), top: q(0.2 - g.dr), width: qs(2 * g.dr), height: qs(2 * g.dr) }} />
-        </>
-      )}
+      <span class="of-lean" style={{ transform: `rotate(${p.tilt + side * p.skew}deg)` }}>
+        <span class="of-open"><span class="of-lid" /></span>
+      </span>
     </span>
   );
   return (
-    <span class="of-eyes" aria-hidden="true">
+    <span class="of-m-eyes" aria-hidden="true">
       {eye(-1)}
       {eye(1)}
     </span>
   );
+}
+
+// Shut eyes never move, so they stay in the SVG.
+function MiradaShut({ p, shape }) {
+  const [cx, cy0] = eyeCenter(shape);
+  return <ShutEyes cx={cx} cy={cy0 + 1} dx={p.eyeGap - 0.4} cls="of-m-shut" />;
 }

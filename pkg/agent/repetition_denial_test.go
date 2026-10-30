@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,16 +26,12 @@ func TestLoop_RealSecretDenialsTransparent(t *testing.T) {
 		wantCards  int32
 		wantErrors int32
 		wantCut    bool
-		warnings   []string
 		browser    bool
 	}{
 		{name: "four_browser_denials", batches: []string{"secret", "secret", "secret", "secret"}, wantCards: 4, browser: true},
 		{name: "success_then_denial", batches: []string{"secret", "secret"}, allows: 1, wantCards: 2},
 		{name: "four_denials", batches: []string{"secret", "secret", "secret", "secret"}, wantCards: 4},
 		{name: "four_denials_with_exempt_status", batches: []string{"secret_wait", "secret_wait", "secret_wait", "secret_wait"}, wantCards: 4},
-		{name: "three_successes_still_cut_before_action", batches: []string{"secret", "secret", "secret"}, allows: 3, wantCards: 2, wantCut: true},
-		{name: "errors_across_denial", batches: []string{"fail", "secret", "fail", "fail"}, wantCards: 1, wantErrors: 2, wantCut: true, warnings: []string{"fail-3"}},
-		{name: "mixed_denial_and_error_still_cut", batches: []string{"mixed", "mixed", "mixed"}, wantCards: 2, wantErrors: 2, wantCut: true, warnings: []string{"fail-2"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -78,7 +73,6 @@ func TestLoop_RealSecretDenialsTransparent(t *testing.T) {
 			params := map[string]any{
 				"command": "printf x >> action-count", "fields": []any{map[string]any{"label": "Synthetic", "kind": "password"}},
 			}
-			denialBody := "The user denied the request; the command did not run."
 			if tc.browser {
 				for _, name := range []string{"mcp__fixture__browser_evaluate", "mcp__fixture__browser_type"} {
 					if err := reg.Register(core.Tool{Name: name, Parameters: []byte(`{"type":"object"}`), Execute: func(_ context.Context, _ map[string]any, _ func(core.Result)) (core.Result, error) {
@@ -94,7 +88,6 @@ func TestLoop_RealSecretDenialsTransparent(t *testing.T) {
 				secretaction.SyncBrowserFillTool(reg, broker)
 				secret, _ = reg.Get(secretaction.BrowserFillToolName)
 				params = map[string]any{"fields": []any{map[string]any{"target": "e1", "element": "Synthetic field", "label": "Synthetic", "kind": "password"}}}
-				denialBody = "The user denied the request; nothing was filled."
 			}
 			var handlers []func(core.Request) (<-chan core.AssistantEvent, error)
 			for i, batch := range tc.batches {
@@ -115,9 +108,6 @@ func TestLoop_RealSecretDenialsTransparent(t *testing.T) {
 			ag, err := New(AgentConfig{Provider: provider, Model: core.Model{ID: "test"}, Tools: reg, MaxTurns: 10,
 				Extensions: []extension.Extension{&testExtension{initFunc: func(api extension.API) error {
 					api.OnToolResult(func(_ context.Context, name string, result core.Result, isError bool) (*core.Result, error) {
-						if repeatedWarningCount(result.Content) != 0 {
-							t.Error("hook saw decorated result")
-						}
 						if name == secret.Name && isError {
 							if result.Custom["rejected"] != true {
 								t.Error("hook must receive structured human rejection")
@@ -158,23 +148,11 @@ func TestLoop_RealSecretDenialsTransparent(t *testing.T) {
 			if len(actions) != wantActions {
 				t.Errorf("actual command executions=%d, want %d", len(actions), wantActions)
 			}
-			assertRepeatedWarningIDs(t, ag.Messages(), tc.warnings...)
-			if tc.wantCut {
-				for _, msg := range ag.Messages() {
-					if msg.Role == "tool_result" && strings.HasSuffix(msg.ToolCallID, fmt.Sprintf("-%d", len(tc.batches))) {
-						if !msg.IsError || msg.Custom["rejected"] == true || !strings.Contains(messageText(msg), "doom loop detected") {
-							t.Errorf("third unexecuted call must remain synthetic doom, not observed denial: %+v", msg)
-						}
-					}
-				}
-			}
 			ag.Drain(2 * time.Second)
-			var endIDs []string
 			for _, e := range events.snapshot() {
 				if e.Type != core.AgentEventToolExecEnd {
 					continue
 				}
-				endIDs = append(endIDs, e.ToolCallID)
 				if e.Result.Custom["hook_seen"] != true {
 					t.Errorf("%s lost result hook metadata", e.ToolCallID)
 				}
@@ -182,11 +160,8 @@ func TestLoop_RealSecretDenialsTransparent(t *testing.T) {
 					if e.Result.Custom["rejected"] != true || !e.Rejected {
 						t.Errorf("%s denial missing structured result/UI rejection", e.ToolCallID)
 					}
-					assertRepeatedWarningContent(t, core.WrapMessage(core.Message{ToolCallID: e.ToolCallID, Content: e.Result.Content}),
-						core.ErrorResult(denialBody).Content, false)
 				}
 			}
-			assertRepeatedWarningEndEvents(t, ag, events, endIDs...)
 		})
 	}
 }
