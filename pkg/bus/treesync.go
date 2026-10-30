@@ -414,6 +414,7 @@ func compactionEntry(p *core.CompactionPayload, marker *core.AgentMessage) sessi
 			TokensBefore:     p.TokensBefore,
 			ReadFiles:        p.ReadFiles,
 			ModifiedFiles:    p.ModifiedFiles,
+			Summarizer:       p.Summarizer.Clone(),
 		},
 	}
 }

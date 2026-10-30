@@ -811,7 +811,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 					for i := range compacted {
 						compacted[i].EnsureMsgID()
 					}
-					payload := compactionPayload(result, compacted, fallbackNotice, sumModel.Pricing)
+					payload := compactionPayload(result, compacted, fallbackNotice, sumModel)
 					payload.Ephemeral = cfg.ephemeralCompaction
 					// Account for compaction LLM call cost, at the rates of
 					// the model that wrote the summary. It was paid whether

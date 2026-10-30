@@ -149,8 +149,23 @@ def measure(events, stderr):
     summaries = [e for e in events if e["type"] == "summary"]
     compactions = sum(e["type"] == "compaction_end" for e in events)
     children = [e for e in events if e["type"] == "subagent_end"]
-    tools = collections.Counter(e.get("tool_name", "unknown") for e in events
-                                if e["type"] == "tool_execution_start")
+    started = [e for e in events if e["type"] == "tool_execution_start"]
+    tools = collections.Counter(e.get("tool_name", "unknown") for e in started
+                                if not e.get("subagent_id"))
+    # A CLI that predates child tool events cannot say "zero": keep unknown.
+    child_visible = any("subagent_tools" in (e.get("telemetry") or [])
+                        for e in events if e["type"] == "agent_start")
+    child_tools = collections.Counter(e.get("tool_name", "unknown") for e in started
+                                      if e.get("subagent_id"))
+    # Foreground summaries ride on compaction_end; background ones are settled
+    # by compaction_usage (their compaction_end repeats the same usage).
+    summarizer_calls = [e["summarizer"] for e in events
+                        if e["type"] == "compaction_end" and not e.get("background")
+                        and isinstance(e.get("summarizer"), dict)]
+    background_calls = [e for e in events if e["type"] == "compaction_usage"]
+    summarizer_seen = child_visible and (summarizer_calls or background_calls or compactions == 0)
+    summarizer_usage = {k: sum(c.get(k, 0) for c in summarizer_calls + background_calls)
+                        for k in ("input", "cache_read", "cache_write", "output")}
     # Sum message_usage ONCE, not both it and each cumulative summary.
     usage = {k: sum(e.get(k, 0) for e in usage_events)
              for k in ("input", "cache_read", "cache_write", "output")}
@@ -162,13 +177,19 @@ def measure(events, stderr):
                                  for e in events[last_summary + 1:] if e["type"] == "subagent_end")
     return {"usage": usage if usage_events else None,
             "usage_scope": "assistant_messages_main_and_children_excludes_compaction",
+            "summarizer_usage": summarizer_usage if summarizer_seen else None,
+            "summarizer_calls": len(summarizer_calls) + len(background_calls) if summarizer_seen else None,
+            "summarizer_stop_reasons": [c.get("stop_reason", "") for c in summarizer_calls],
+            "summarizer_output_caps": [c.get("max_output_tokens") if c.get("output_cap") == "applied"
+                                       else c.get("output_cap") for c in summarizer_calls],
             "cost_usd": cost, "cost_scope": "last_cumulative_cli_summary_plus_child_tail",
             "assistant_messages": len(usage_events), "cli_summaries": len(summaries),
             "agent_request_shapes": len(re.findall(r'(?:msg="request shape"|INFO request shape )', stderr)),
             "request_scope": "prepared_agent_requests_main_and_children_excludes_summarizer",
             "http_requests": None,
             "tool_calls_main": sum(tools.values()), "tools_main_by_name": dict(tools),
-            "tool_calls_children": None, "child_completions": len(children),
+            "tool_calls_children": sum(child_tools.values()) if child_visible else None,
+            "tools_children_by_name": dict(child_tools) if child_visible else None, "child_completions": len(children),
             "usage_by_model": summaries[-1].get("by_model", []) if summaries else [],
             "compactions": compactions}
 

@@ -93,7 +93,9 @@ func (w *jsonLineWriter) subscribeAll(b bus.EventBus, done chan bus.RunEnded) {
 
 		switch e := event.(type) {
 		case bus.AgentStarted:
-			w.emit(map[string]any{"type": "agent_start"})
+			// "telemetry" lets a consumer tell "no child tool calls" from a CLI
+			// that predates child tool events.
+			w.emit(map[string]any{"type": "agent_start", "telemetry": []string{"subagent_tools", "compaction_usage"}})
 
 		case bus.TurnStarted:
 			w.turnCount++
@@ -113,8 +115,32 @@ func (w *jsonLineWriter) subscribeAll(b bus.EventBus, done chan bus.RunEnded) {
 			w.recordMessageUsage("main", "", e.Message)
 
 		case bus.SubagentEvent:
-			if messageEnded, ok := e.Inner.(bus.MessageEnded); ok {
-				w.recordMessageUsage("subagent", e.JobID, messageEnded.Message)
+			switch inner := e.Inner.(type) {
+			case bus.MessageEnded:
+				w.recordMessageUsage("subagent", e.JobID, inner.Message)
+			case bus.ToolExecStarted:
+				// Children's tool calls carry subagent_id so a consumer can
+				// tell them from the main agent's, which have none.
+				w.emit(map[string]any{
+					"type":         "tool_execution_start",
+					"subagent_id":  e.JobID,
+					"tool_call_id": inner.ToolCallID,
+					"tool_name":    inner.ToolName,
+					"args":         inner.Args,
+				})
+			case bus.ToolExecEnded:
+				entry := map[string]any{
+					"type":         "tool_execution_end",
+					"subagent_id":  e.JobID,
+					"tool_call_id": inner.ToolCallID,
+					"tool_name":    inner.ToolName,
+					"is_error":     inner.IsError,
+				}
+				if inner.Rejected {
+					entry["rejected"] = true
+					entry["reason"] = inner.Result
+				}
+				w.emit(entry)
 			}
 
 		case bus.SubagentEnded:
@@ -193,7 +219,26 @@ func (w *jsonLineWriter) subscribeAll(b bus.EventBus, done chan bus.RunEnded) {
 			w.emit(map[string]any{"type": "compaction_start"})
 
 		case bus.CompactionEnded:
-			w.emit(map[string]any{"type": "compaction_end"})
+			end := map[string]any{"type": "compaction_end"}
+			if e.Background {
+				end["background"] = true
+			}
+			if s := compactionSummarizerFields(e.Payload); s != nil {
+				end["summarizer"] = s
+			}
+			w.emit(end)
+
+		case bus.CompactionUsage:
+			// A background summary call is settled apart from its
+			// compaction_end (and is billed even when its result is dropped).
+			w.emit(map[string]any{
+				"type":        "compaction_usage",
+				"job_id":      e.JobID,
+				"input":       e.Usage.Input,
+				"output":      e.Usage.Output,
+				"cache_read":  e.Usage.CacheRead,
+				"cache_write": e.Usage.CacheWrite,
+			})
 		}
 	})
 }
@@ -315,4 +360,29 @@ func (w *jsonLineWriter) sortedFiles() []string {
 
 func (w *jsonLineWriter) emit(v map[string]any) {
 	w.enc.Encode(v) //nolint:errcheck // stdout write — nothing useful to do on error
+}
+
+// compactionSummarizerFields renders the summarizer telemetry of a compaction
+// for the JSON-lines stream; nil when the payload carries none.
+func compactionSummarizerFields(p *core.CompactionPayload) map[string]any {
+	if p == nil || p.Summarizer == nil {
+		return nil
+	}
+	s := p.Summarizer
+	out := map[string]any{
+		"provider":    s.Provider,
+		"model":       s.Model,
+		"stop_reason": s.StopReason,
+		"output_cap":  s.OutputCap,
+	}
+	if s.OutputCap == core.SummarizerCapApplied {
+		out["max_output_tokens"] = s.MaxOutputTokens
+	}
+	if s.Usage != nil {
+		out["input"] = s.Usage.Input
+		out["output"] = s.Usage.Output
+		out["cache_read"] = s.Usage.CacheRead
+		out["cache_write"] = s.Usage.CacheWrite
+	}
+	return out
 }

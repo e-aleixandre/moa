@@ -195,6 +195,7 @@ func buildRequestBodyWith(req core.Request, profileOAuth, oauthIdentity bool, mu
 	// 3. Last content block of the last user message (caches conversation history)
 	addCacheBreakpoints(&ar, req.Options.CacheRetention)
 
+	req.Options.AppliedCap.Report(ar.MaxTokens)
 	if mutate != nil {
 		mutate(&ar)
 	}

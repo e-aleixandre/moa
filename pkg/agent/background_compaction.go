@@ -319,7 +319,7 @@ func (a *Agent) runBackgroundCompaction(job *backgroundCompactionJob, provider c
 		for i := range compacted {
 			compacted[i].EnsureMsgID()
 		}
-		payload = compactionPayload(result, compacted, notice, model.Pricing)
+		payload = compactionPayload(result, compacted, notice, model)
 	}
 
 	// Known usage is settled once, whatever becomes of the result. Emitted

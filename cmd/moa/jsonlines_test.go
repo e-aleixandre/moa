@@ -516,3 +516,49 @@ func TestJSONLineWriter_TurnStartCountsInProgress(t *testing.T) {
 		t.Errorf("expected turns=2, got %v", progress["turns"])
 	}
 }
+
+func TestJSONLineWriter_SubagentToolsAndSummarizerTelemetry(t *testing.T) {
+	cap := 8000
+	payload := &core.CompactionPayload{Summarizer: &core.CompactionSummarizer{
+		Provider: "openai", Model: "gpt-x", StopReason: "max_tokens",
+		OutputCap: core.SummarizerCapApplied, MaxOutputTokens: cap,
+		Usage: &core.Usage{Input: 10, Output: 2, CacheRead: 3, CacheWrite: 4},
+	}}
+	lines := captureJSONLines(t, func() {
+		b := bus.NewLocalBus()
+		defer b.Close()
+		jw := newJSONLineWriter()
+		jw.subscribeAll(b, nil)
+		publishAndDrain(b,
+			bus.AgentStarted{},
+			bus.ToolExecStarted{ToolCallID: "m1", ToolName: "read"},
+			bus.SubagentEvent{JobID: "child-1", Inner: bus.ToolExecStarted{ToolCallID: "c1", ToolName: "grep", Args: map[string]any{"pattern": "x"}}},
+			bus.SubagentEvent{JobID: "child-1", Inner: bus.ToolExecEnded{ToolCallID: "c1", ToolName: "grep", IsError: true}},
+			bus.CompactionEnded{Payload: payload},
+			bus.CompactionUsage{JobID: 7, Usage: core.Usage{Input: 5, Output: 1}},
+		)
+	})
+	byType := map[string][]map[string]any{}
+	for _, l := range lines {
+		byType[l["type"].(string)] = append(byType[l["type"].(string)], l)
+	}
+	if caps, _ := byType["agent_start"][0]["telemetry"].([]any); len(caps) == 0 {
+		t.Errorf("agent_start does not advertise telemetry: %#v", byType["agent_start"][0])
+	}
+	starts := byType["tool_execution_start"]
+	if len(starts) != 2 || starts[0]["subagent_id"] != nil || starts[1]["subagent_id"] != "child-1" || starts[1]["tool_name"] != "grep" {
+		t.Errorf("tool starts = %#v", starts)
+	}
+	ends := byType["tool_execution_end"]
+	if len(ends) != 1 || ends[0]["subagent_id"] != "child-1" || ends[0]["is_error"] != true {
+		t.Errorf("tool ends = %#v", ends)
+	}
+	s, _ := byType["compaction_end"][0]["summarizer"].(map[string]any)
+	if s["model"] != "gpt-x" || s["stop_reason"] != "max_tokens" || s["output_cap"] != "applied" ||
+		s["max_output_tokens"] != float64(cap) || s["input"] != float64(10) || s["cache_write"] != float64(4) {
+		t.Errorf("summarizer = %#v", s)
+	}
+	if u := byType["compaction_usage"]; len(u) != 1 || u[0]["input"] != float64(5) {
+		t.Errorf("compaction_usage = %#v", u)
+	}
+}
