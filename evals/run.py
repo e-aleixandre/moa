@@ -188,7 +188,7 @@ def measure(events, stderr):
                                  for e in events[last_summary + 1:] if e["type"] == "subagent_end")
     return {"usage": usage if usage_events else None,
             "usage_scope": "assistant_messages_main_and_children_excludes_compaction",
-            "summarizer_usage": summarizer_usage if summarizer_seen else None,
+            "summarizer_usage": summarizer_usage if summarizer_seen and (with_usage or not calls) else None,
             "summarizer_calls": len(calls) if summarizer_seen else None,
             "summarizer_calls_without_usage": len(calls) - len(with_usage) if summarizer_seen else None,
             "summarizer_stop_reasons": [c.get("stop_reason", "") for c in calls if "model" in c],

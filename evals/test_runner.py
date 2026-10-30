@@ -56,6 +56,7 @@ class RunnerTests(unittest.TestCase):
         result = run.measure(events, "")
         self.assertEqual(result["summarizer_calls"], 1)
         self.assertEqual(result["summarizer_calls_without_usage"], 1)
+        self.assertIsNone(result["summarizer_usage"])
 
     def test_no_child_tools_is_zero_when_cli_reports_them(self):
         result = run.measure([{"type": "agent_start", "telemetry": ["subagent_tools"]}], "")
