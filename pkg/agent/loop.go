@@ -2036,8 +2036,13 @@ func resultSignature(slots []toolExecSlot) string {
 		if doomLoopExemptTools[slots[i].tc.ToolName] {
 			continue
 		}
-		if b, err := json.Marshal(slots[i].result.Content); err == nil {
-			h.Write(b)
+		for _, c := range slots[i].result.Content {
+			// An attachment ID names one occurrence of the bytes, not the
+			// bytes: re-reading an unchanged image mints a fresh ID each time.
+			c.AttachmentID = ""
+			if b, err := json.Marshal(c); err == nil {
+				h.Write(b)
+			}
 		}
 		if slots[i].isError {
 			h.Write([]byte{1})

@@ -197,3 +197,19 @@ func TestLoop_DoomLoopNudge_DifferentCallResetsStreak(t *testing.T) {
 		t.Fatalf("want one nudge after call-6, got %v", idx)
 	}
 }
+
+func TestResultSignature_IgnoresAttachmentOccurrenceID(t *testing.T) {
+	slot := func(id string) toolExecSlot {
+		return toolExecSlot{tc: core.ToolCallContent("c", "read", nil), result: core.Result{Content: []core.Content{
+			{Type: "image", MimeType: "image/png", AttachmentID: id, AttachmentSize: 42},
+		}}}
+	}
+	if resultSignature([]toolExecSlot{slot("att_a")}) != resultSignature([]toolExecSlot{slot("att_b")}) {
+		t.Error("same image under different occurrence IDs must have the same signature")
+	}
+	other := slot("att_a")
+	other.result.Content[0].AttachmentSize = 43
+	if resultSignature([]toolExecSlot{slot("att_a")}) == resultSignature([]toolExecSlot{other}) {
+		t.Error("different image size must change the signature")
+	}
+}
