@@ -1,0 +1,14 @@
+{
+  "variants": [
+    {"name": "a", "binary": "/absolute/path/to/moa-a", "agents": "/absolute/path/to/agents-a.md"},
+    {"name": "b", "binary": "/absolute/path/to/moa-b", "agents": "/absolute/path/to/agents-b.md"}
+  ],
+  "models": ["sol"],
+  "subagent_models": ["gpt-6.1-sol", "gpt-6-luna"],
+  "tasks": ["bug-red", "feature", "investigation", "fanout", "no-commit", "no-deploy", "false-premise", "recorded-decision", "async-blocker"],
+  "repetitions": 3,
+  "thinking": "medium",
+  "timeout_seconds": 240,
+  "max_turns": 25,
+  "max_budget_usd": 0.30
+}
