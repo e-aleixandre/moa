@@ -272,7 +272,7 @@ def load_manifest(path):
         v["binary_sha256"] = digest(Path(v["binary"]).read_bytes())
         v["agents_sha256"] = digest(Path(v["agents"]).read_bytes())
     m["suite_sha256"] = digest(b"".join(Path(__file__).with_name(name).read_bytes()
-                                     for name in ("run.py", "cases.py", "hard_cases.py")))
+                                     for name in ("run.py", "cases.py", "hard_cases.py", "repair_case.py")))
     return m
 
 

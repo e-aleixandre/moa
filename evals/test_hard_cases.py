@@ -69,9 +69,9 @@ class HardTests(FixtureTest):
             events.insert(4, {"type": "compaction_end"})
         return work, data, events
 
-    def test_seven_hard_cases_explicitly_selected(self):
+    def test_eight_hard_cases_explicitly_selected(self):
         hard = [c for c in cases.CASES.values() if c.id.startswith("hard-")]
-        self.assertEqual(len(hard), 7)
+        self.assertEqual(len(hard), 8)
         self.assertTrue(all(not c.step3 for c in hard))
 
     def test_all_json_reference_solutions_pass(self):

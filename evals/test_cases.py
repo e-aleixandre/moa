@@ -116,7 +116,7 @@ class ContractTests(FixtureTest):
         self.assertEqual({key for key in cases.CASES if not key.startswith("hard-")}, {
             "bug-red", "feature", "investigation", "fanout", "compaction-long",
             "no-commit", "no-deploy", "false-premise", "recorded-decision", "async-blocker"})
-        self.assertEqual(len(cases.CASES), 17)
+        self.assertEqual(len(cases.CASES), 18)
         for case_id, case in cases.CASES.items():
             self.assertEqual(case.id, case_id)
             self.assertIsInstance(case, cases.Case)

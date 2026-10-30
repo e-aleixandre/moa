@@ -519,6 +519,8 @@ def _read_events_errors(work: Path, events: list[dict], files=None) -> list[str]
 
 def check(case_id: str, work: Path, answer: str, events: list[dict]) -> list[str]:
     """Return objective failures without changing the workspace."""
+    if case_id == "hard-orphan-repair":
+        return _preserved(CASES[case_id], Path(work)) + _python_check(Path(work), "repair.py", repair_case.CHECKS)
     if case_id.startswith("hard-"):
         return hard_cases.check(sys.modules[__name__], case_id, Path(work), answer, events)
     case = CASES[case_id]
@@ -593,8 +595,9 @@ def check(case_id: str, work: Path, answer: str, events: list[dict]) -> list[str
 
 
 try:
-    from . import hard_cases
+    from . import hard_cases, repair_case
 except ImportError:
-    import hard_cases
+    import hard_cases, repair_case
 
 CASES.update(hard_cases.register(sys.modules[__name__]))
+CASES["hard-orphan-repair"] = repair_case.case(sys.modules[__name__])

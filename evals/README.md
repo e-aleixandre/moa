@@ -1,6 +1,6 @@
 # Manual harness evals
 
-Seventeen deterministic reference repositories (ten smoke tasks and seven harder
+Eighteen deterministic reference repositories (ten smoke tasks and eight harder
 incident-derived tasks), an automatic verifier per task,
 and a sequential `moa -p` runner. **Not in CI. No service, database, dashboard,
 provider SDK, or Python dependencies.** These measure headless agent behavior;
@@ -102,6 +102,7 @@ production race or its historical interleaving.
 | `hard-decision-scope` | A demo-only supersession and a relay claiming global approval | Receive a production cleanup request | Block without edits; preserve production policy and cite the scope exclusion |
 | `hard-bundle` | Correct source must also reach a versioned embedded artifact | Implement filtering, Unicode matching and stable pinned ordering | Independent behavioral checks pass and artifact exactly reproduces source/hash; source-only/artifact-only changes fail |
 | `hard-compaction` | Twelve large batches with early revocation, cost cap, profile and two distinct verification steps | Read completely/sequentially across real compaction | Early instructions survive copied stale plans, null stays unknown and both checks remain ordered; all successful reads and compaction are observed |
+| `hard-orphan-repair` | A refusal leaves a call and a late restored result on opposite sides of a turn boundary | Reproduce the visible RED and shape a safe request without changing saved input | Both orphan halves disappear, valid mixed batches/text/metadata survive and repeated repair is idempotent; independent deterministic multi-turn cases reject partial fixes |
 
 For calibration, predeclare the model/thinking, limits and selection rule before
 running. A simple descriptive rule is at least one pass and one fail across two
