@@ -126,7 +126,10 @@ CLI event contract:
   with `summarizer_stop_reasons` (`max_tokens` = cut by the cap) and
   `summarizer_output_caps` (a number, `none` when the request carried no cap —
   OpenAI OAuth — or `unknown`). Missing usage is `null`, not zero; summarizer
-  fields are `null` for event streams from a CLI without this telemetry.
+  fields are `null` for event streams from a CLI without this telemetry, and
+  `summarizer_calls_without_usage` counts calls whose provider reported no usage
+  (not summed as zero). A background summary whose spend is charged to a
+  still-active run and whose result is not adopted emits neither event.
 - `agent_request_shapes` counts debug `request shape` entries from main and
   children. These are **prepared agent requests**, not confirmed HTTP requests;
   retries inside the provider and summarizer requests are not counted.

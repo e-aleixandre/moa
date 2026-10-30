@@ -222,6 +222,7 @@ func (w *jsonLineWriter) subscribeAll(b bus.EventBus, done chan bus.RunEnded) {
 			end := map[string]any{"type": "compaction_end"}
 			if e.Background {
 				end["background"] = true
+				end["job_id"] = e.JobID
 			}
 			if s := compactionSummarizerFields(e.Payload); s != nil {
 				end["summarizer"] = s
