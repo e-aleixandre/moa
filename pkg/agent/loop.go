@@ -21,9 +21,14 @@ import (
 	"github.com/e-aleixandre/moa/pkg/toolsearch"
 )
 
-// doomLoopThreshold is the number of consecutive identical tool-call sets
-// that triggers a forced stop. Prevents infinite loops burning tokens.
-const doomLoopThreshold = 3
+// A doom loop is a run of consecutive turns whose tool calls AND results are
+// identical. At doomLoopNudgeAt the model gets one warning; at doomLoopStopAt
+// the run is stopped. Repeating a call whose result keeps changing (polling,
+// a build that makes progress) is not a loop and never counts.
+const (
+	doomLoopNudgeAt = 3
+	doomLoopStopAt  = 6
+)
 
 // doomLoopExemptTools are read-only status/wait tools that legitimately repeat
 // while a model waits on background async work. Polling them (or blocking on a
@@ -566,6 +571,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 	// Doom loop detection: track consecutive identical tool-call sets.
 	var lastToolSig string
 	repeatCount := 0
+	nudged := false
 
 	// pause_turn tracking: count consecutive pause_turn continuations, and note
 	// when the previous iteration was a pause so we can skip compaction on the
@@ -1356,39 +1362,6 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// Extract tool calls from assistant message
 		toolCalls := extractToolCalls(assistantMsg)
 
-		// Doom loop detection: if tool calls are identical to the previous
-		// turn N times in a row, stop to prevent infinite token burn. Turns
-		// consisting only of exempt status/wait tools (polling background async
-		// work) are skipped entirely so they neither trip nor reset the streak.
-		repeated := false
-		// A batch the human fully refused is not the model repeating itself;
-		// the streak is restored after the batch when that turns out to be it.
-		prevSig, prevCount := lastToolSig, repeatCount
-		if nonExempt := filterDoomLoopCalls(toolCalls); len(nonExempt) > 0 {
-			sig := toolCallSignature(nonExempt)
-			if sig == lastToolSig {
-				repeatCount++
-			} else {
-				lastToolSig = sig
-				repeatCount = 1
-			}
-			repeated = repeatCount == doomLoopThreshold-1
-			if repeatCount >= doomLoopThreshold {
-				// Log the repeated tool calls for debugging
-				var callNames []string
-				for _, tc := range nonExempt {
-					callNames = append(callNames, fmt.Sprintf("%s(%v)", tc.ToolName, tc.Arguments))
-				}
-				loopErr = fmt.Errorf("%w: identical tool calls repeated %d times in a row: %v", ErrDoomLoop, repeatCount, callNames)
-
-				// Inject tool_result messages for every pending tool_call so
-				// the conversation stays valid (Anthropic requires a tool_result
-				// immediately after every tool_use).
-				injectErrorToolResults(cfg, toolCalls, loopErr.Error())
-				return loopErr
-			}
-		}
-
 		if len(toolCalls) == 0 {
 			// Check the budget even on the final message so callers know when
 			// a run blew through the limit. Without usage of its own the run
@@ -1413,12 +1386,33 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			}
 			ka.tools(ctx, names)
 		}
-		claimed, allRejected := executeTools(ctx, cfg, toolCalls, repeated)
+		claimed, allRejected, resultSig := executeTools(ctx, cfg, toolCalls)
 		if ka != nil {
 			ka.tools(ctx, nil)
 		}
-		if allRejected {
-			lastToolSig, repeatCount = prevSig, prevCount
+
+		// Doom loop detection: consecutive turns with identical tool calls and
+		// identical results. Turns made only of exempt status/wait tools
+		// (polling background async work) neither count nor reset the streak,
+		// and a batch the human fully refused is not the model repeating itself.
+		var doomErr error
+		if nonExempt := filterDoomLoopCalls(toolCalls); len(nonExempt) > 0 && !allRejected {
+			sig := toolCallSignature(nonExempt) + resultSig
+			if sig == lastToolSig {
+				repeatCount++
+			} else {
+				lastToolSig, repeatCount, nudged = sig, 1, false
+			}
+			if repeatCount >= doomLoopStopAt {
+				var callNames []string
+				for _, tc := range nonExempt {
+					callNames = append(callNames, fmt.Sprintf("%s(%v)", tc.ToolName, tc.Arguments))
+				}
+				doomErr = fmt.Errorf("%w: identical tool calls with identical results repeated %d times in a row: %v", ErrDoomLoop, repeatCount, callNames)
+			} else if repeatCount >= doomLoopNudgeAt && !nudged {
+				nudged = true
+				cfg.appendState(doomLoopNudge(repeatCount))
+			}
 		}
 		if cfg.steerMu != nil {
 			cfg.steerMu.Lock()
@@ -1458,6 +1452,11 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		// tool_result messages for every tool_call (no dangling calls).
 		if spent, limit, over := cfg.overBudget(); over {
 			loopErr = &BudgetExceededError{Spent: spent, Limit: limit}
+			return loopErr
+		}
+
+		if doomErr != nil {
+			loopErr = doomErr
 			return loopErr
 		}
 
@@ -1855,11 +1854,9 @@ func preflightToolCall(ctx context.Context, cfg *loopConfig, slot *toolExecSlot,
 // calls. The caller owns them: they are no longer in the live queue and must
 // reach history, even when the run was stopped meanwhile. It also reports
 // whether every non-exempt call (and at least one) was refused by the human.
-func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content, repeated bool) ([]core.SteerItem, bool) {
+func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content) ([]core.SteerItem, bool, string) {
 	slots := make([]toolExecSlot, len(toolCalls))
 	batch := &toolBatch{}
-	// repeated arms a single warning for the batch's first eligible error.
-	pendingWarning := repeated
 
 	// Phase 1: pre-flight (sequential). A rejected call never runs, so it is
 	// reported ended right away; its result is appended in order with the rest.
@@ -1870,7 +1867,7 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 		preflightToolCall(ctx, cfg, &slots[i], i)
 		if !slots[i].approved {
 			slots[i].humanRejected = slots[i].rejectKind == rejectKindPermission
-			endRejectedToolCall(cfg, &slots[i], &pendingWarning)
+			endRejectedToolCall(cfg, &slots[i])
 		}
 	}
 	onlyWaits := true
@@ -2007,7 +2004,6 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			custom["rejected"] = true
 			result.Custom = custom
 		}
-		result = decorateRepeatedError(&pendingWarning, &slots[i], result)
 		slots[i].result, slots[i].isError = result, result.IsError
 		cfg.emitter.Emit(core.AgentEvent{
 			Type:       core.AgentEventToolExecEnd,
@@ -2029,23 +2025,61 @@ func executeTools(ctx context.Context, cfg *loopConfig, toolCalls []core.Content
 			rejectedCount++
 		}
 	}
-	return batch.steers, nonExempt > 0 && nonExempt == rejectedCount
+	return batch.steers, nonExempt > 0 && nonExempt == rejectedCount, resultSignature(slots, attachmentResolver(ctx, cfg))
 }
 
-const repeatedToolErrorWarning = "\n\nRepeated tool error.\nChange the arguments or use a different\napproach; the next identical tool-call\nbatch will stop this run."
-
-// decorateRepeatedError appends the warning, once per batch, to the final
-// error result of a non-exempt call that failed validation or actually ran.
-// Content is cloned so the tool's own result is left untouched.
-func decorateRepeatedError(pending *bool, slot *toolExecSlot, result core.Result) core.Result {
-	if !*pending || doomLoopExemptTools[slot.tc.ToolName] || !result.IsError || slot.humanRejected || (!slot.validationError && !slot.executed) {
-		return result
+// attachmentResolver returns the loop's materializer as a content resolver,
+// or nil when attachments are not externalized.
+func attachmentResolver(ctx context.Context, cfg *loopConfig) func([]core.Content) []core.Content {
+	if cfg.materializeContent == nil {
+		return nil
 	}
-	*pending = false
-	content := make([]core.Content, len(result.Content), len(result.Content)+1)
-	copy(content, result.Content)
-	result.Content = append(content, core.TextContent(repeatedToolErrorWarning))
-	return result
+	return func(blocks []core.Content) []core.Content {
+		out, err := cfg.materializeContent(ctx, []core.Message{{Role: "user", Content: blocks}})
+		if err != nil || len(out) != 1 {
+			return blocks
+		}
+		return out[0].Content
+	}
+}
+
+// resultSignature hashes the results of a batch's non-exempt calls, in call
+// order, so the doom-loop detector can tell a stuck run from progress. An
+// attachment ID names one occurrence of the bytes, not the bytes (re-reading
+// an unchanged image mints a fresh ID), so externalized blocks are resolved
+// and hashed by content; if that fails the ID is dropped and the size and MIME
+// type stand in.
+func resultSignature(slots []toolExecSlot, resolve func([]core.Content) []core.Content) string {
+	h := sha256.New()
+	for i := range slots {
+		if doomLoopExemptTools[slots[i].tc.ToolName] {
+			continue
+		}
+		blocks := slots[i].result.Content
+		if resolve != nil && hasAttachment(blocks) {
+			blocks = resolve(blocks)
+		}
+		for _, c := range blocks {
+			c.AttachmentID = ""
+			if b, err := json.Marshal(c); err == nil {
+				h.Write(b)
+			}
+		}
+		if slots[i].isError {
+			h.Write([]byte{1})
+		}
+		h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func hasAttachment(blocks []core.Content) bool {
+	for _, c := range blocks {
+		if c.AttachmentID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func appendPermissionFeedback(result core.Result, feedback string) core.Result {
@@ -2191,7 +2225,7 @@ func runToolInBatch(ctx context.Context, cfg *loopConfig, tc core.Content, batch
 // endRejectedToolCall reports a rejected call (skipped, blocked, permission
 // denied, or failed validation) as ended and keeps its error result in the
 // slot, for executeTools to append in call order.
-func endRejectedToolCall(cfg *loopConfig, slot *toolExecSlot, pendingWarning *bool) {
+func endRejectedToolCall(cfg *loopConfig, slot *toolExecSlot) {
 	if !slot.startEmitted {
 		cfg.emitter.Emit(core.AgentEvent{
 			Type:       core.AgentEventToolExecStart,
@@ -2204,7 +2238,7 @@ func endRejectedToolCall(cfg *loopConfig, slot *toolExecSlot, pendingWarning *bo
 	if reason == "" {
 		reason = "Tool call rejected"
 	}
-	result := decorateRepeatedError(pendingWarning, slot, core.ErrorResult(reason))
+	result := core.ErrorResult(reason)
 	slot.result, slot.isError = result, true
 	cfg.emitter.Emit(core.AgentEvent{
 		Type:       core.AgentEventToolExecEnd,
@@ -2328,6 +2362,19 @@ func strategyAllowsNotice(cfg *loopConfig) bool {
 		return true
 	}
 	return false
+}
+
+// doomLoopNudge warns the model once per streak, as an internal user-role
+// message after the tool results: appending keeps the prompt cache intact,
+// which rewriting an earlier result would not.
+func doomLoopNudge(repeats int) core.AgentMessage {
+	text := fmt.Sprintf(
+		"<system-reminder>\nYou have made the same tool call %d times in a row and got the same result each time. Repeating it again will not help: change your approach, or explain what is blocking you. The run will be stopped if this continues.\n</system-reminder>",
+		repeats,
+	)
+	msg := core.WrapMessage(core.NewUserMessage(text))
+	msg.Custom = map[string]any{"source": "doom_loop_nudge", "internal": true}
+	return msg
 }
 
 // compactionNotice is the message the agent sees as its context fills up.
