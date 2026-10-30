@@ -155,14 +155,24 @@ CLI event contract:
 
 - Tokens are sums of `message_usage`, split into **input, cache_read, cache_write,
   output**. They include main and child assistant messages, but **exclude
-  summarizer usage**. Missing usage is `null`, not zero.
+  summarizer usage**, reported apart in `summarizer_usage` (foreground summaries
+  from `compaction_end.summarizer`, background ones from `compaction_usage`),
+  with `summarizer_stop_reasons` (`max_tokens` = cut by the cap) and
+  `summarizer_output_caps` (a number, `none` when the request carried no cap —
+  OpenAI OAuth — or `unknown`). Missing usage is `null`, not zero; summarizer
+  fields are `null` for event streams from a CLI without this telemetry, and
+  `summarizer_calls_without_usage` counts calls whose provider reported no usage
+  (not summed as zero). A background summary whose spend is charged to a
+  still-active run and whose result is not adopted emits neither event.
 - `agent_request_shapes` counts debug `request shape` entries from main and
   children. These are **prepared agent requests**, not confirmed HTTP requests;
   retries inside the provider and summarizer requests are not counted.
   `http_requests` is unknown (`null`).
 - `tool_calls_main` counts attempted main tool calls, including errors and
-  delegations. `tools_main_by_name` exposes handoffs/reads/waits. **Child tool
-  calls are not emitted by this CLI and remain `null`**, not silently zero.
+  delegations. `tools_main_by_name` exposes handoffs/reads/waits. Child tool
+  calls are emitted with a `subagent_id` and counted in `tool_calls_children` /
+  `tools_children_by_name`; both stay `null` when the stream's `agent_start`
+  lacks the `subagent_tools` capability (older CLI), not silently zero.
 - `child_completions` and `compactions` count terminal child and main compaction
   events. `compaction_end` is an observed cycle, not proof of successful durable
   summary adoption. The long fixture additionally checks process and answer.
@@ -178,8 +188,9 @@ CLI event contract:
 
 For handoff/compaction comparisons, report these scope limits with every result.
 Do not interpret fewer *main* tools as fewer *total* tools. Full HTTP counts,
-child tool counts, child restriction attempts and compaction tokens need additive
-CLI instrumentation in a separate change, not guessed totals or a proxy platform.
+counts still need additive CLI instrumentation in a separate change, not guessed
+totals or a proxy platform. Child restriction attempts are now visible as child
+`tool_execution_start` events.
 
 ## Isolation and credentials
 

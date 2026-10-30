@@ -25,6 +25,42 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result["agent_request_shapes"], 1)
         self.assertIsNone(result["http_requests"])
         self.assertIsNone(result["tool_calls_children"])
+        self.assertIsNone(result["summarizer_usage"])
+
+    def test_child_tools_and_summarizer_usage(self):
+        events = [
+            {"type": "agent_start", "telemetry": ["subagent_tools", "compaction_usage"]},
+            {"type": "tool_execution_start", "tool_name": "read"},
+            {"type": "tool_execution_start", "tool_name": "grep", "subagent_id": "c1"},
+            {"type": "tool_execution_start", "tool_name": "grep", "subagent_id": "c1"},
+            {"type": "compaction_end", "summarizer": {"model": "m", "input": 100, "output": 7, "cache_read": 5,
+                                                      "stop_reason": "max_tokens", "output_cap": "none"}},
+            {"type": "compaction_end", "background": True, "job_id": 1,
+             "summarizer": {"model": "m", "input": 50, "output": 3, "stop_reason": "end_turn", "output_cap": "applied",
+                            "max_output_tokens": 8000}},
+            {"type": "compaction_usage", "job_id": 1, "input": 50, "output": 3},
+            {"type": "compaction_usage", "job_id": 2, "input": 7, "output": 1},
+        ]
+        result = run.measure(events, "")
+        self.assertEqual(result["tool_calls_main"], 1)
+        self.assertEqual(result["tool_calls_children"], 2)
+        self.assertEqual(result["tools_children_by_name"], {"grep": 2})
+        self.assertEqual(result["summarizer_usage"], {"input": 157, "cache_read": 5, "cache_write": 0, "output": 11})
+        self.assertEqual(result["summarizer_calls"], 3)
+        self.assertEqual(result["summarizer_stop_reasons"], ["max_tokens", "end_turn"])
+        self.assertEqual(result["summarizer_output_caps"], ["none", 8000])
+
+    def test_summarizer_without_usage_is_not_a_zero(self):
+        events = [{"type": "agent_start", "telemetry": ["subagent_tools"]},
+                  {"type": "compaction_end", "summarizer": {"model": "m", "output_cap": "unknown"}}]
+        result = run.measure(events, "")
+        self.assertEqual(result["summarizer_calls"], 1)
+        self.assertEqual(result["summarizer_calls_without_usage"], 1)
+        self.assertIsNone(result["summarizer_usage"])
+
+    def test_no_child_tools_is_zero_when_cli_reports_them(self):
+        result = run.measure([{"type": "agent_start", "telemetry": ["subagent_tools"]}], "")
+        self.assertEqual(result["tool_calls_children"], 0)
 
     def test_missing_usage_is_unknown_not_zero(self):
         self.assertIsNone(run.measure([], "")["usage"])

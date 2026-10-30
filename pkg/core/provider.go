@@ -8,6 +8,21 @@ import (
 	"time"
 )
 
+// AppliedOutputCap reports the output cap of a built request. Reported is false
+// until a provider has built the request; Tokens is 0 when the request carries
+// no cap (e.g. the ChatGPT OAuth backend rejects max_output_tokens).
+type AppliedOutputCap struct {
+	Reported bool
+	Tokens   int
+}
+
+// Report records the cap of a built request. Safe on a nil receiver.
+func (c *AppliedOutputCap) Report(tokens int) {
+	if c != nil {
+		c.Reported, c.Tokens = true, tokens
+	}
+}
+
 // Provider streams LLM responses. Each provider (Anthropic, OpenAI, etc.)
 // implements this interface, emitting normalized AssistantEvents.
 //
@@ -240,8 +255,12 @@ type StreamOptions struct {
 	ProviderRetryAttempt int               `json:"-"`
 	Temperature          *float64          `json:"temperature,omitempty"`
 	MaxTokens            *int              `json:"max_tokens,omitempty"`
-	APIKey               string            `json:"-"`
-	ThinkingLevel        string            `json:"thinking_level,omitempty"`
+	// AppliedCap, when set, is filled by the provider with the output cap the
+	// wire request really carries. It is telemetry for the caller (the
+	// compaction record) and never part of a provider payload.
+	AppliedCap    *AppliedOutputCap `json:"-"`
+	APIKey        string            `json:"-"`
+	ThinkingLevel string            `json:"thinking_level,omitempty"`
 	// CacheRetention selects the prompt-cache TTL: "" is the provider default
 	// (5 minutes), "1h" opts into the long TTL, and CacheOff suppresses cache
 	// writes entirely.

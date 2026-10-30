@@ -1208,3 +1208,19 @@ func TestConvertMessages_RestoredSessionHasNoOrphanToolBlocks(t *testing.T) {
 		t.Fatalf("tool_use=%d tool_result=%d, want 1/1", uses, results)
 	}
 }
+
+func TestBuildRequestBody_ReportsAppliedCap(t *testing.T) {
+	maxOut := 8000
+	var cap core.AppliedOutputCap
+	req := core.Request{
+		Model:    core.Model{ID: "claude-sonnet-4-6", MaxOutput: 64_000},
+		Messages: []core.Message{core.NewUserMessage("Hello")},
+		Options:  core.StreamOptions{MaxTokens: &maxOut, AppliedCap: &cap},
+	}
+	if _, err := buildRequestBody(req, false); err != nil {
+		t.Fatal(err)
+	}
+	if !cap.Reported || cap.Tokens != 8000 {
+		t.Errorf("cap = %+v, want reported 8000", cap)
+	}
+}

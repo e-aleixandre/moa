@@ -1775,7 +1775,7 @@ func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	for i := range compacted {
 		compacted[i].EnsureMsgID()
 	}
-	payload := compactionPayload(result, compacted, fallbackNotice, sumModel.Pricing)
+	payload := compactionPayload(result, compacted, fallbackNotice, sumModel)
 	if commit != nil {
 		originals := append([]core.AgentMessage(nil), msgs...)
 		if err := commit(ctx, core.CompactionCommit{Originals: originals, Payload: payload, Trims: a.trimsEmitted.Load(), CheckpointGeneration: checkpointGen}); err != nil {
@@ -1798,7 +1798,7 @@ func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus str
 // compactionPayload describes a compaction whose result is compacted. The
 // boundary identity is minted here, once, so every projection of this
 // compaction (the durable entry, the live marker) names the same row.
-func compactionPayload(result *compaction.Result, compacted []core.AgentMessage, notice string, pricing *core.Pricing) *core.CompactionPayload {
+func compactionPayload(result *compaction.Result, compacted []core.AgentMessage, notice string, model core.Model) *core.CompactionPayload {
 	firstKept := ""
 	if len(compacted) > 1 {
 		firstKept = compacted[1].MsgID
@@ -1813,8 +1813,16 @@ func compactionPayload(result *compaction.Result, compacted []core.AgentMessage,
 		FirstKeptMsgID:   firstKept,
 		Usage:            result.Usage,
 		SummarizerNotice: notice,
-		Pricing:          pricing,
-		BoundaryID:       core.NewMsgID(),
+		Pricing:          model.Pricing,
+		Summarizer: &core.CompactionSummarizer{
+			Provider:        model.Provider,
+			Model:           model.ID,
+			Usage:           result.Usage,
+			StopReason:      result.Call.StopReason,
+			OutputCap:       result.Call.OutputCap,
+			MaxOutputTokens: result.Call.MaxOutputTokens,
+		},
+		BoundaryID: core.NewMsgID(),
 	}
 }
 
