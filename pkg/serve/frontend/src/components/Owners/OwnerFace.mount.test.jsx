@@ -4,7 +4,7 @@
 // state change whose rendered style is unchanged must still rewrite the rest
 // pose. Calling syncPose directly cannot catch that effect being dropped.
 
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, mock, test } from "bun:test";
 import { h, render } from "preact";
 import { act } from "preact/test-utils";
 import { combineGaze, poseVars } from "./OwnerFace.jsx";
@@ -49,11 +49,13 @@ class Node_ {
 
 let timers; let clock; let seq;
 const saved = {};
-const globals = ["window", "document", "performance"];
+const globals = ["window", "document", "performance", "IntersectionObserver"];
 
 beforeAll(() => {
   for (const k of globals) saved[k] = Object.getOwnPropertyDescriptor(globalThis, k);
   timers = new Map(); clock = 0; seq = 0;
+  // Without an observer every face counts as visible; another file may leave one behind.
+  delete globalThis.IntersectionObserver;
   globalThis.document = {
     hidden: false,
     createElement: (n) => new Node_(n, 1),
@@ -86,7 +88,22 @@ const advance = (ms) => {
   clock = end;
 };
 
+// Several suites replace "preact/hooks" with a stub for the whole process
+// (bun's mock.module does not reset between files). This test needs real
+// effects, so it installs the real module for its duration and puts back
+// whatever it found.
 test("OwnerFace rewrites the rest pose when its state changes", async () => {
+  const found = { ...(await import("preact/hooks")) };
+  const real = await import("../../../node_modules/preact/hooks/dist/hooks.module.js");
+  mock.module("preact/hooks", () => ({ ...real }));
+  try {
+    await body();
+  } finally {
+    mock.module("preact/hooks", () => found);
+  }
+});
+
+async function body() {
   const { OwnerFace } = await import("./OwnerFace.jsx");
   const { faceMotion } = await import("./faceMotion.js");
   // The scheduler is a singleton bound to the window it first saw.
@@ -136,4 +153,4 @@ test("OwnerFace rewrites the rest pose when its state changes", async () => {
   expect(face().props.get("--lx")).toBe(String(idleRest["--lx"]));
   await act(() => render(null, root));
   __resetFaceMotionForTests();
-});
+}
