@@ -85,6 +85,10 @@ type CompactionPayload struct {
 	// to know when judging it.
 	SummarizerNotice string `json:"summarizer_notice,omitempty"`
 	Usage            *Usage `json:"usage,omitempty"`
+	// Summarizer is the telemetry of the call that wrote the summary: which
+	// model, what it spent and why it stopped. Optional: old payloads and
+	// producers that do not know it leave it nil.
+	Summarizer *CompactionSummarizer `json:"summarizer,omitempty"`
 	// Pricing is the rate card of the model that wrote the summary, for
 	// charging Usage. Not persisted: cost is settled when the event is seen.
 	Pricing *Pricing `json:"-"`
@@ -308,4 +312,43 @@ func ShouldWarnBeforeCompact(contextTokens, contextWindow int, settings Compacti
 		return false, 0
 	}
 	return true, effective - contextTokens
+}
+
+// Output cap states of a summarizer call.
+const (
+	// SummarizerCapNone: the request carried no output cap.
+	SummarizerCapNone = "none"
+	// SummarizerCapApplied: the request carried MaxOutputTokens.
+	SummarizerCapApplied = "applied"
+	// SummarizerCapUnknown: the provider did not report what it sent.
+	SummarizerCapUnknown = "unknown"
+)
+
+// CompactionSummarizer records which model wrote a summary, what the call
+// spent and why it ended, so a summary cut short by a cap can be told apart
+// from one that finished. It is observation only: it never drives behavior.
+type CompactionSummarizer struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model"`
+	Usage    *Usage `json:"usage,omitempty"`
+	// StopReason is the provider's finish reason ("max_tokens" when the cap
+	// cut the summary), empty when the provider reported none.
+	StopReason string `json:"stop_reason,omitempty"`
+	// OutputCap is one of the SummarizerCap* constants; MaxOutputTokens is
+	// the cap sent, only when OutputCap is "applied".
+	OutputCap       string `json:"output_cap,omitempty"`
+	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
+}
+
+// Clone returns a deep copy; nil stays nil.
+func (s *CompactionSummarizer) Clone() *CompactionSummarizer {
+	if s == nil {
+		return nil
+	}
+	c := *s
+	if s.Usage != nil {
+		u := *s.Usage
+		c.Usage = &u
+	}
+	return &c
 }

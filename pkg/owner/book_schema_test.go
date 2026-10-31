@@ -161,23 +161,44 @@ func TestRolePromptPlacesPreferencesUnderTheRules(t *testing.T) {
 	}
 }
 
-// The balance the prompt demands has to be computable with the tools the owner
-// actually has, in an order it can follow: list, act on what is actionable,
-// then report. And every report is read, decided and acted on — not merely
-// mined for a delta.
+// The balance is only what changed (the user's decision of 17/10): the owner
+// acts on what is actionable first, then reports the delta in one or two
+// lines, and reads what is stopped from its tools rather than from memory.
+// Every report is read, decided and acted on — not merely mined for a delta.
 func TestRolePromptGivesAnOperatingSequence(t *testing.T) {
 	prompt := RolePrompt("Winerim", "master", "")
-	listAt := strings.Index(prompt, "The sessions tool, list")
-	actAt := strings.Index(prompt, "Act on what is actionable before reporting it")
-	balanceAt := strings.Index(prompt, "Then the balance")
-	if listAt < 0 || actAt < listAt || balanceAt < actAt {
-		t.Fatalf("the operating sequence is not list → act → balance:\n%s", prompt)
+	actAt := strings.Index(prompt, "act on what is actionable before reporting")
+	balanceAt := strings.Index(prompt, "report only what\nchanged since your last balance")
+	if actAt < 0 || balanceAt < actAt {
+		t.Fatalf("the operating sequence is not act → balance:\n%s", prompt)
 	}
 	for _, want := range []string{
-		"at most 40 and says so when there are more",
+		"one or two lines",
+		"do not repeat an\nunchanged inventory",
 		"read it, decide what it means for the project, and act",
-		"not from memory",
+		"not\nfrom memory",
 		"no sheets under areas/",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("role prompt missing %q", want)
+		}
+	}
+	if strings.Contains(prompt, "End EVERY turn") || strings.Contains(prompt, "Only\n  what is in the book survives") {
+		t.Fatal("the role prompt still demands the per-turn ritual or claims only the book survives a restart")
+	}
+}
+
+// Integration follows the authorization the user recorded for the project
+// (decisions/integrar-al-aprobar.md in moa); it never extends to deployments,
+// and the owner cannot grant it to itself.
+func TestRolePromptBoundsMergeAuthorization(t *testing.T) {
+	prompt := strings.Join(strings.Fields(RolePrompt("Winerim", "master", "")), " ")
+	for _, want := range []string{
+		"Permissions, deployments, releases, and any product question",
+		"Merges follow the integration authorization the user recorded",
+		"without one, ask",
+		"You never grant that authorization yourself",
+		"never covers a deployment or a release",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("role prompt missing %q", want)
@@ -278,5 +299,18 @@ func TestRolePromptSaysWhenToSendToAnotherOwner(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("role prompt lacks %q", want)
 		}
+	}
+}
+
+// The book section must not reward skipping the code: a sheet that is wrong
+// about how something works would otherwise be echoed back by every session
+// (decisions/owner-derecho-a-mirar.md left this cut for a separate step).
+func TestBookSectionDoesNotRankTheBookAboveTheCode(t *testing.T) {
+	section := BookSection("Winerim", "# Project\n")
+	if strings.Contains(section, "faster than reading the code") || strings.Contains(section, "compare your work against") {
+		t.Fatalf("the book section still discourages reading the code:\n%s", section)
+	}
+	if !strings.Contains(section, "read its sheet with the book tool") {
+		t.Fatal("the book section no longer asks to read the sheet first")
 	}
 }

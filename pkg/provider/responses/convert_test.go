@@ -457,3 +457,24 @@ func TestConvertMessages_DropsUnansweredFunctionCall(t *testing.T) {
 		t.Fatal("persisted history was modified")
 	}
 }
+
+func TestBuildRequestBody_ReportsAppliedCap(t *testing.T) {
+	maxOut := 8000
+	for _, tc := range []struct {
+		supports bool
+		want     int
+	}{{true, 8000}, {false, 0}} {
+		var cap core.AppliedOutputCap
+		req := core.Request{
+			Model:    core.Model{ID: "m", MaxOutput: 128_000},
+			Messages: []core.Message{core.NewUserMessage("Hello")},
+			Options:  core.StreamOptions{MaxTokens: &maxOut, AppliedCap: &cap},
+		}
+		if _, err := buildRequestBody(req, tc.supports, tc.supports); err != nil {
+			t.Fatal(err)
+		}
+		if !cap.Reported || cap.Tokens != tc.want {
+			t.Errorf("supports=%v: cap = %+v, want reported %d", tc.supports, cap, tc.want)
+		}
+	}
+}

@@ -45,6 +45,9 @@ type CompactionData struct {
 	TokensBefore     int      `json:"tokens_before"`
 	ReadFiles        []string `json:"read_files,omitempty"`
 	ModifiedFiles    []string `json:"modified_files,omitempty"`
+	// Summarizer is the optional telemetry of the summarizing call; entries
+	// written before it existed load with nil.
+	Summarizer *core.CompactionSummarizer `json:"summarizer,omitempty"`
 }
 
 // TrimData records a context trim: every eligible tool result between the
@@ -111,6 +114,7 @@ func DeepCopyEntry(e Entry) Entry {
 		if e.Compaction.ModifiedFiles != nil {
 			e.Compaction.ModifiedFiles = append([]string(nil), e.Compaction.ModifiedFiles...)
 		}
+		e.Compaction.Summarizer = e.Compaction.Summarizer.Clone()
 	}
 	return e
 }

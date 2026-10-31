@@ -144,7 +144,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
 | `muse` | `muse-spark-1.3` (Meta) |
 | `sol` | `gpt-6.1-sol` |
-| `terra` | `gpt-5.6-terra` |
+| `terra` | `gpt-6.1-terra` |
 | `luna` | `gpt-6-luna` |
 | `gpt-5.6` | `gpt-5.6-sol` |
 | `gpt5` | `gpt-5.5` |
@@ -189,7 +189,7 @@ CLI flag, and only some models can serve it:
 | Provider | Models that support it | What it costs |
 |---|---|---|
 | Anthropic | Opus models only | 2.5× faster, billed as separate usage credits |
-| OpenAI | `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna` | Fast mode, 2× the token rate |
+| OpenAI | `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna` | Fast mode, 2× the token rate |
 | OpenAI | `gpt-5.6-sol` | up to 2.5× faster, burns credits 2× |
 | OpenAI | `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4-mini`, `gpt-5.3-codex` | Fast mode, burns credits 2× |
 | OpenAI | `gpt-5.5` | Fast mode, burns credits 2.5× |

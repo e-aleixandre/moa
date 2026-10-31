@@ -14,9 +14,12 @@ func TestBuildSystemPrompt_MemoryAndCheckpointGuidanceWithoutIndex(t *testing.T)
 	prompt := BuildSystemPrompt(SystemPromptOptions{Tools: []core.ToolSpec{{Name: "memory"}, {Name: "checkpoint"}, {Name: "load_skill"}, {Name: "tasks"}}, CWD: "/test"})
 	for _, want := range []string{
 		"Memory is a last resort",
+		"costly or hard to reconstruct",
+		"A pointer to an external canonical source can be appropriate",
 		"durable or invalidate_when is required but does not make",
-		"Standing instructions belong in AGENTS.md",
-		"Never put credentials",
+		"standing instructions belong in AGENTS.md",
+		"never write it yourself",
+		"credentials, tokens, keys, private signed URLs or other secrets",
 		"canonical source",
 		"matching skill exists",
 		"Keep your checklist in tasks; list before creating duplicates; use ask for something you need from the owner, then continue work; claim only from your project's backlog",
