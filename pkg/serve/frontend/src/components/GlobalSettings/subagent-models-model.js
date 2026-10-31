@@ -83,3 +83,42 @@ export function createAllowedModelsWriter({ send, apply, onError }) {
     },
   };
 }
+
+const REMEMBERED_KEY = "moa.subagentModels.lastRestricted";
+let rememberedInMemory = [];
+
+function storage() {
+  try { return globalThis.localStorage || null; } catch { return null; }
+}
+
+// rememberRestricted keeps the last non-empty list so that flipping to "All
+// models" (which persists [] server-side) does not lose the user's selection.
+// The server format is untouched; this is a client-side convenience.
+export function rememberRestricted(ids) {
+  if (!ids || !ids.length) return;
+  rememberedInMemory = [...ids];
+  try { storage()?.setItem(REMEMBERED_KEY, JSON.stringify(rememberedInMemory)); } catch { /* storage unavailable */ }
+}
+
+export function recalledRestricted() {
+  if (rememberedInMemory.length) return rememberedInMemory;
+  try {
+    const parsed = JSON.parse(storage()?.getItem(REMEMBERED_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+// selectedScopeList is the list to persist when switching to "Selected only":
+// the remembered selection minus models gone from the catalog, else everything.
+export function selectedScopeList(models) {
+  const known = new Set((models || []).map((model) => model.catalogId));
+  const kept = recalledRestricted().filter((id) => known.has(id));
+  return kept.length ? kept : (models || []).map((model) => model.catalogId);
+}
+
+export function resetRememberedRestricted() {
+  rememberedInMemory = [];
+  try { storage()?.removeItem(REMEMBERED_KEY); } catch { /* storage unavailable */ }
+}
