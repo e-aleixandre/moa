@@ -42,10 +42,12 @@ test('liveTrayAgents includes only live child sessions for an owner', () => {
 test('liveTrayAgents keeps an idle child whose async jobs are still alive, with its idle state', () => {
   const ownerSession = { id: 'owner-session', kind: 'owner', messages: [], subagents: {} };
   const sessions = {
-    polled: { id: 'polled', ownerId: 'owner-1', title: 'Fan-out', state: 'idle', backgroundJobs: 2 },
+    polled: { id: 'polled', ownerId: 'owner-1', title: 'Fan-out', state: 'idle', backgroundJobs: 2, jobsFrom: 'roster' },
     watched: { id: 'watched', ownerId: 'owner-1', title: 'Watched', state: 'idle', subagentCount: 1 },
     bash: { id: 'bash', ownerId: 'owner-1', title: 'Dev server', state: 'idle', subagents: { b1: { status: 'running', kind: 'bash' } } },
     done: { id: 'done', ownerId: 'owner-1', title: 'Finished', state: 'idle', backgroundJobs: 0, subagentCount: 0 },
+    stale: { id: 'stale', ownerId: 'owner-1', title: 'Hidden, jobs ended', state: 'idle', backgroundJobs: 0, jobsFrom: 'roster', subagentCount: 1 },
+    fresh: { id: 'fresh', ownerId: 'owner-1', title: 'Just opened', state: 'idle', backgroundJobs: 1, jobsFrom: 'socket', subagentCount: 0 },
   };
   const chips = liveTrayAgents(ownerSession, sessions, [{ id: 'owner-1', session_id: 'owner-session' }])
     .filter((chip) => chip.kind === 'session');

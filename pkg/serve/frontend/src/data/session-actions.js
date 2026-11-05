@@ -203,9 +203,11 @@ function normalizeSessionInfo(info, existing, visible) {
     flash: existing ? existing.flash : null,
     subagentCount: existing ? existing.subagentCount : 0,
     // Live async subagents + background bash jobs as the roster counts them.
-    // A visible session's socket is fresher (subagentCount / subagents), so
-    // the poll's number only speaks for sessions nobody is watching.
-    backgroundJobs: wsOwns ? 0 : (info.background_jobs || 0),
+    // Whoever saw the session last is the authority: a visible session's
+    // socket (subagentCount / subagents, marked 'socket' by its init), or the
+    // poll for one nobody watches — whose zero must beat any stale socket state.
+    backgroundJobs: info.background_jobs || 0,
+    jobsFrom: wsOwns ? 'socket' : 'roster',
     // Live subagent transcripts are WS-only state (fed by subagent_start/
     // event/end); the poll response knows nothing about them, so always
     // carry them over or the agent tray vanishes on every poll tick.
