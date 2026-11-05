@@ -36,7 +36,9 @@ export function loadNotes(sessionId, fileId, storage = globalThis.localStorage) 
 export function saveNotes(sessionId, fileId, notes, storage = globalThis.localStorage) {
   try {
     if (!notes.length) storage.removeItem(draftKey(sessionId, fileId));
-    else storage.setItem(draftKey(sessionId, fileId), JSON.stringify(notes));
+    // The full-size crop of an area note stays in memory: a draft keeps only
+    // its thumbnail and rectangle, so ten of them cannot fill the storage.
+    else storage.setItem(draftKey(sessionId, fileId), JSON.stringify(notes.map(({ crop, ...rest }) => rest)));
   } catch (_) { /* a full storage loses the draft, never the send */ }
 }
 
@@ -151,4 +153,40 @@ export function parseDocNotes(text) {
     url: fileLine.slice('file: '.length).trim(),
     notes: notes.map((note) => ({ ...note, comment: note.comment.join('\n').trim() })),
   };
+}
+
+// textInRect — the text of a PDF page that falls inside a box, for the note
+// of a dragged area. `items` are pdf.js text items; `toViewport` maps a point
+// of the page's user space to the viewport the `rect` is measured in. An item
+// belongs to the box when its centre does: a word the box only grazes is not
+// what the reader pointed at. Reading order: lines top to bottom, each left to
+// right; a scanned page has no items and gives "".
+export function textInRect(items, toViewport, rect) {
+  const inside = [];
+  for (const it of items || []) {
+    if (!it || typeof it.str !== 'string' || !it.str.trim() || !Array.isArray(it.transform)) continue;
+    const [x, y] = [it.transform[4], it.transform[5]];
+    const height = it.height || Math.abs(it.transform[3]) || 0;
+    const [x1, y1] = toViewport(x, y);
+    const [x2, y2] = toViewport(x + (it.width || 0), y + height);
+    const left = Math.min(x1, x2);
+    const right = Math.max(x1, x2);
+    const top = Math.min(y1, y2);
+    const bottom = Math.max(y1, y2);
+    const cx = (left + right) / 2;
+    const cy = (top + bottom) / 2;
+    if (cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom) {
+      inside.push({ str: it.str.trim(), left, cy, h: bottom - top });
+    }
+  }
+  inside.sort((a, b) => a.cy - b.cy);
+  const lines = [];
+  for (const it of inside) {
+    const line = lines[lines.length - 1];
+    if (line && Math.abs(it.cy - line.cy) < Math.max(line.h, it.h) / 2) line.items.push(it);
+    else lines.push({ cy: it.cy, h: it.h, items: [it] });
+  }
+  return lines
+    .map((line) => line.items.sort((a, b) => a.left - b.left).map((it) => it.str).join(' '))
+    .join('\n');
 }

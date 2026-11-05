@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Loader2 } from 'lucide-preact';
 import { openPdfSession } from '../../data/util/pdf-session.js';
+import { pdfPages } from './pdf-pages.js';
 import './MediaView.css';
 
 // Cap on a PDF read into memory. Video and audio never are: the element
@@ -151,6 +152,7 @@ function PdfPage({ pdf, number, width, ratio, root }) {
     let task = null;
     (async () => {
       const page = await pdf.getPage(number);
+      if (holder.current) pdfPages.set(holder.current, page);
       const base = page.getViewport({ scale: 1 });
       const scale = width / base.width;
       const ratioNow = Math.min(window.devicePixelRatio || 1, 2);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { ArrowLeft, Loader2, Trash2, X } from 'lucide-preact';
+import { ArrowLeft, Loader2, SquareDashed, Trash2, X } from 'lucide-preact';
 import { useVoiceGesture } from '../../hooks/useVoiceGesture.js';
 import { useCanTranscribe } from '../../hooks/useCanTranscribe.js';
 import { MicButton } from '../MicButton/MicButton.jsx';
@@ -8,6 +8,7 @@ import { closeArtifacts } from '../../data/artifacts.js';
 import { addToast } from '../../data/notifications.js';
 import { copyToClipboard } from '../../data/util/format.js';
 import { requestConversationPin } from '../../data/stream-scroll.js';
+import { cropOf } from './AreaLayer.jsx';
 import { clip, docNotesMessage, loadNotes, saveNotes } from '../../data/doc-notes.js';
 import './DocNotes.css';
 
@@ -25,6 +26,7 @@ export function useDocNotes(sessionId, artifact) {
   const [pick, setPick] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [reviewing, setReviewing] = useState(false);
+  const [areaMode, setAreaMode] = useState(false);
   const [sending, setSending] = useState(false);
   const [flash, setFlash] = useState('');
   // The notes that failed to go, with the document they belong to, or null.
@@ -76,7 +78,7 @@ export function useDocNotes(sessionId, artifact) {
 
   useEffect(() => {
     setNotes(fileId ? loadNotes(sessionId, fileId) : []);
-    setPick(null); setEditingId(null); setReviewing(false); setFailed(null);
+    setPick(null); setEditingId(null); setReviewing(false); setAreaMode(false); setFailed(null);
     resolvedRef.current = null;
     freshRef.current = new Set();
     typed.current = '';
@@ -108,7 +110,7 @@ export function useDocNotes(sessionId, artifact) {
     setPick(next);
   }, [flush]);
 
-  const cancel = useCallback(() => { typed.current = ''; setPick(null); setEditingId(null); }, []);
+  const cancel = useCallback(() => { typed.current = ''; setPick(null); setEditingId(null); setAreaMode(false); }, []);
 
   const add = useCallback((comment) => {
     const { notes: current, pick: p, editingId: id } = latest.current;
@@ -124,7 +126,8 @@ export function useDocNotes(sessionId, artifact) {
   // settles is identified up front: the document it started on and the notes it
   // carried. Nothing it does afterwards reads "the current" reader.
   const deliver = useCallback(async (batch, target) => {
-    const { text, attachments } = docNotesMessage({ name: artifact.name, url: artifact.url }, batch);
+    const withCrops = batch.map((n) => (n.kind === 'area' ? { ...n, crop: cropOf(n) } : n));
+    const { text, attachments } = docNotesMessage({ name: artifact.name, url: artifact.url }, withCrops);
     sendingRef.current = true;
     setSending(true);
     setFailed(null);
@@ -150,7 +153,8 @@ export function useDocNotes(sessionId, artifact) {
   const stamp = useCallback((target, batch, at) => {
     const here = latest.current.sessionId === target.sessionId && latest.current.fileId === target.fileId;
     const base = here ? latest.current.notes : loadNotes(target.sessionId, target.fileId);
-    const byId = new Map(batch.map((n) => [n.id, { ...n, sentAt: at }]));
+    // A sent area note no longer needs its picture.
+    const byId = new Map(batch.map((n) => [n.id, at ? { ...n, sentAt: at, crop: undefined, thumb: undefined } : { ...n, sentAt: at }]));
     const next = base.map((n) => byId.get(n.id) || n);
     for (const [id, n] of byId) if (!base.some((b) => b.id === id)) next.push(n);
     saveNotes(target.sessionId, target.fileId, next);
@@ -229,21 +233,32 @@ export function useDocNotes(sessionId, artifact) {
   const escape = useCallback(() => {
     const { pick: p } = latest.current;
     if (voiceRef.current?.recording) { voiceRef.current.cancel(); return true; }
+    if (areaMode) { setAreaMode(false); return true; }
     if (reviewing) { setReviewing(false); return true; }
     if (p) { cancel(); return true; }
     return false;
-  }, [reviewing, cancel]);
+  }, [reviewing, areaMode, cancel]);
 
   return {
-    notes, drafts, pick, editingId, reviewing, sending, flash, sendError, typed, voiceRef,
+    notes, drafts, pick, editingId, reviewing, areaMode, setAreaMode, sending, flash, sendError, typed, voiceRef,
     choose, cancel, add, sendNow, sendAll, remove, edit, quick, copyNotes, resolvedRef, freshRef, escape, setReviewing,
   };
 }
 
 // The dock under the reader: a hint, the tray, or the note being written.
-export function DocNotesDock({ dn }) {
+export function DocNotesDock({ dn, kind }) {
   if (dn.reviewing) return null;
-  if (dn.pick) return <NoteComposer dn={dn} key={dn.editingId || dn.pick.anchor} />;
+  if (dn.pick) return <NoteComposer dn={dn} key={dn.editingId || dn.pick.anchor || 'area'} />;
+  const areaKind = kind === 'image' || kind === 'pdf';
+  if (dn.areaMode) {
+    return (
+      <div class="dn-dock dn-dock-hint" role="status">
+        <SquareDashed size={16} aria-hidden="true" />
+        <span class="dn-hint-t">Drag over the part you mean</span>
+        <button type="button" class="dn-btn dn-btn-ghost" onClick={dn.cancel}>Cancel</button>
+      </div>
+    );
+  }
   const count = dn.drafts.length;
   return (
     <div class={`dn-dock${count ? ' has-notes' : ' dn-dock-hint'}`}>
@@ -253,7 +268,13 @@ export function DocNotesDock({ dn }) {
           <button type="button" class="dn-link" onClick={dn.copyNotes}>Copy notes</button>
         </span>
       )}
-      {!count && !dn.flash && !dn.sendError && <span class="dn-hint-t">Tap a paragraph to comment</span>}
+      {areaKind && (
+        <button type="button" class={`dn-btn ${count ? 'dn-btn-icon' : 'dn-btn-ghost dn-area-btn'}`} onClick={() => dn.setAreaMode(true)} aria-label="Mark an area">
+          <SquareDashed size={16} aria-hidden="true" />
+          {!count && <span>Mark an area to comment</span>}
+        </button>
+      )}
+      {!areaKind && !count && !dn.flash && !dn.sendError && <span class="dn-hint-t">Tap a paragraph to comment</span>}
       {dn.flash && !count && <span class="dn-hint-t dn-flash">{dn.flash}</span>}
       {count > 0 && (
         <>
@@ -312,7 +333,8 @@ function NoteComposer({ dn }) {
   return (
     <div class="dn-dock dn-compose" onKeyDown={onKey}>
       <div class="dn-quote">
-        <span class="dn-quote-q">«{clip(pick.quote)}»</span>
+        {pick.thumb && <img class="dn-quote-crop" src={pick.thumb} alt="" />}
+        {pick.quote && <span class="dn-quote-q">«{clip(pick.quote)}»</span>}
         {pick.where && <span class="dn-quote-where">{pick.where}</span>}
         <button type="button" class="dn-x" aria-label="Discard note" onClick={dn.cancel}><X size={16} /></button>
       </div>
@@ -362,7 +384,8 @@ export function NotesReview({ dn }) {
           <li key={note.id} class="dn-item">
             <button type="button" class="dn-item-body" onClick={() => dn.edit(note.id)} aria-label="Edit note">
               {note.where && <span class="dn-quote-where">{note.where}</span>}
-              <span class="dn-item-q">«{clip(note.quote)}»</span>
+              {note.thumb && <img class="dn-item-crop" src={note.thumb} alt="" />}
+              {note.quote && <span class="dn-item-q">«{clip(note.quote)}»</span>}
               <span class="dn-item-c">{note.comment}</span>
             </button>
             <button type="button" class="dn-x" aria-label="Delete note" onClick={() => dn.remove(note.id)}><Trash2 size={16} /></button>

@@ -16,10 +16,11 @@ import { ArtifactRow, KindIcon, ShareButton } from './ArtifactRow.jsx';
 import { ArtifactContent, ARTIFACT_ESCAPE, ARTIFACT_SWIPE } from './ArtifactContent.jsx';
 import { groupArtifactsByDay } from './artifact-groups.js';
 import { useDocNotes, DocNotesDock, NotesReview } from '../DocNotes/DocNotes.jsx';
+import { AreaLayer } from '../DocNotes/AreaLayer.jsx';
 import './Artifacts.css';
 
-// What can be commented on while reading it (text the reader can pick from).
-const NOTE_KINDS = new Set(['markdown', 'html']);
+// What can be commented on while reading it: text to pick from, or a picture to box.
+const NOTE_KINDS = new Set(['markdown', 'html', 'pdf', 'image']);
 
 // The same focusable set the Sheet traps on, plus the reader's iframe: an HTML
 // artifact is part of the dialog, so Tab must reach it instead of stepping
@@ -246,7 +247,7 @@ export function ArtifactsDrawer() {
   const back = () => (fromList ? backToArtifactsList() : closeArtifacts());
   const onPointerDown = (event) => {
     // A drag on a player's scrubber or volume is the player's, not navigation.
-    if (event.pointerType !== 'touch' || event.target.closest('.af-image-wrap.is-zoomed, .mv-stage, .mv-pdf')) return;
+    if (event.pointerType !== 'touch' || dn.areaMode || event.target.closest('.af-image-wrap.is-zoomed, .mv-stage, .mv-pdf')) return;
     activeTouchPointers.current.add(event.pointerId);
     // A pinch belongs to the image zoomer, never to collection navigation.
     if (activeTouchPointers.current.size !== 1) {
@@ -370,6 +371,7 @@ export function ArtifactsDrawer() {
       ) : artifact ? (
         <div class="af-document-body" onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={(event) => { activeTouchPointers.current.delete(event.pointerId); swipeStart.current = null; }}>
           <ArtifactContent key={artifact.id} artifact={artifact} dn={dn} />
+          <AreaLayer dn={dn} />
           {dn.reviewing && <NotesReview dn={dn} />}
         </div>
       ) : slice.status === 'loading' ? (
@@ -381,7 +383,7 @@ export function ArtifactsDrawer() {
           <button type="button" class="af-text-button" onClick={backToArtifactsList}>See all artifacts</button>
         </div>
       )}
-      {!list && artifact && NOTE_KINDS.has(artifactKind(artifact)) && <DocNotesDock dn={dn} />}
+      {!list && artifact && NOTE_KINDS.has(artifactKind(artifact)) && <DocNotesDock dn={dn} kind={artifactKind(artifact)} />}
     </aside>
   );
 

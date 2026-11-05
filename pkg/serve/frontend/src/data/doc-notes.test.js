@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import {
   DOC_NOTES_MARKER, QUICK_REPLIES, clip, docNotesMessage, draftKey, loadNotes,
-  parseDocNotes, questionMarker, resolveAnchors, saveNotes,
+  parseDocNotes, questionMarker, resolveAnchors, saveNotes, textInRect,
 } from "./doc-notes.js";
 
 function memoryStorage() {
@@ -171,4 +171,41 @@ test("a note comes back when the paragraph it quotes comes back", () => {
   const note = { id: "a", anchor: 3, quote: "Mi párrafo" };
   expect(resolveAnchors(["x", "y"], [note]).has("a")).toBe(false);
   expect(resolveAnchors(["x", "Mi párrafo", "y"], [note]).get("a")).toBe(1);
+});
+
+test("area crops live in memory only: a saved draft keeps the thumbnail and the rectangle", () => {
+  const storage = memoryStorage();
+  saveNotes("S1", "F1", [{ id: "a", kind: "area", crop: "data:image/jpeg;base64,FULL", thumb: "data:image/jpeg;base64,T", rect: { page: 1, x: 0.1, y: 0.2, w: 0.5, h: 0.3 }, comment: "x" }], storage);
+  const [note] = loadNotes("S1", "F1", storage);
+  expect(note.crop).toBeUndefined();
+  expect(note.thumb).toBe("data:image/jpeg;base64,T");
+  expect(note.rect).toEqual({ page: 1, x: 0.1, y: 0.2, w: 0.5, h: 0.3 });
+});
+
+// A page of 600x800 user-space units, y up, shown with y down at scale 1.
+const toViewport = (x, y) => [x, 800 - y];
+const item = (str, x, y, width, height = 12) => ({ str, transform: [height, 0, 0, height, x, y], width, height });
+
+test("text inside the box is returned in reading order, lines apart", () => {
+  const items = [
+    item("Opción B: secciones por tipo", 60, 700, 200),
+    item("Opción A: una lista", 60, 720, 150),
+    item("fuera del recuadro", 60, 300, 120),
+    item("segunda línea", 60, 680, 100),
+  ];
+  // viewport box covering y 70..140 (user y 660..730) and x 40..300
+  const text = textInRect(items, toViewport, { left: 40, top: 70, right: 300, bottom: 140 });
+  expect(text).toBe("Opción A: una lista\nOpción B: secciones por tipo\nsegunda línea");
+});
+
+test("items on the same baseline join with a space, an empty box gives nothing", () => {
+  const items = [item("Hola", 60, 700, 30), item("mundo", 100, 700, 40)];
+  expect(textInRect(items, toViewport, { left: 40, top: 80, right: 300, bottom: 120 })).toBe("Hola mundo");
+  expect(textInRect(items, toViewport, { left: 400, top: 0, right: 500, bottom: 50 })).toBe("");
+  expect(textInRect([], toViewport, { left: 0, top: 0, right: 10, bottom: 10 })).toBe("");
+});
+
+test("an item only grazed by the box is not part of it", () => {
+  const items = [item("rozado", 60, 700, 100)]; // viewport top 88..100, center 94
+  expect(textInRect(items, toViewport, { left: 0, top: 95, right: 600, bottom: 200 })).toBe("");
 });

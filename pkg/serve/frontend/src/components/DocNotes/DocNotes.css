@@ -207,3 +207,15 @@
 
 .dn-error { display: flex; flex: 1; align-items: center; gap: 10px; }
 .dn-link { padding: 8px 4px; border: 0; background: none; color: var(--zl-t1); font: inherit; text-decoration: underline; cursor: pointer; }
+
+/* Area marking over an image or PDF page. */
+.dn-area-layer { position: absolute; inset: 0; z-index: 2; cursor: crosshair; touch-action: none; background: rgba(0, 0, 0, 0.18); }
+.dn-area-box {
+  position: absolute;
+  border: 2px solid var(--zl-peach);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--zl-peach) 12%, transparent);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.32);
+}
+.dn-area-btn { flex: 1; justify-content: flex-start; }
+.dn-quote-crop { align-self: flex-start; }
