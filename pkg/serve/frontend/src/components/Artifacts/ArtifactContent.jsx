@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { Loader2 } from 'lucide-preact';
 import { renderMarkdown } from '../../data/util/markdown.js';
 import { readCapped, MAX_PREVIEW_SIZE, MAX_HIGHLIGHT_SIZE } from '../../data/util/file-preview.js';
@@ -8,6 +8,8 @@ import { usePinchZoom } from '../../hooks/usePinchZoom.js';
 import { artifactFailure, artifactKind, artifactRevision, mediaViewKey } from '../../data/artifacts-model.js';
 import { ShareButton } from './ArtifactRow.jsx';
 import { MediaView } from '../MediaView/MediaView.jsx';
+import { useMarkdownNotes, useHtmlNotes } from '../DocNotes/doc-reader.js';
+import { NOTES_BRIDGE } from '../DocNotes/notes-bridge.js';
 
 // ARTIFACT_ESCAPE — the message an HTML artifact may post to ask the reader to
 // close, mirroring the LivePreview inspector's bridge. Only a message coming
@@ -24,13 +26,19 @@ export const ARTIFACT_SWIPE = 'moa-artifact-swipe';
 // is the last observed one and the file may have grown or shrunk since, so the
 // cap is enforced against the actual response (readCapped), never against the
 // metadata the card was created with.
-export function ArtifactContent({ artifact, onEscapeFrame }) {
+// `dn` is the reader's notes (useDocNotes); without it the reader is read-only.
+export function ArtifactContent({ artifact, onEscapeFrame, dn }) {
   const [state, setState] = useState({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const revision = artifactRevision(artifact);
+  const withNotes = !!dn;
   // Same in-element pinch/pan/double-tap as the file viewer: an image opened
   // here must stay readable without zooming the whole app.
   const { containerRef, contentRef, zoomed } = usePinchZoom();
+  const articleRef = useRef(null);
+  const frameRef = useRef(null);
+  useMarkdownNotes(articleRef, dn, state.kind === 'markdown' ? state.html : null);
+  useHtmlNotes(frameRef, dn, state.kind === 'html');
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +71,7 @@ export function ArtifactContent({ artifact, onEscapeFrame }) {
       if (kind === 'html') {
         // Authored HTML keeps its own look inside the existing preview
         // boundary: same sandbox and same CSP as every other HTML preview.
-        setState({ kind: 'html', srcdoc: buildHTMLSrcdoc(text + ESCAPE_BRIDGE, '') });
+        setState({ kind: 'html', srcdoc: buildHTMLSrcdoc(text + ESCAPE_BRIDGE + (withNotes ? NOTES_BRIDGE : ''), '') });
         return;
       }
       if (kind === 'markdown' && text.length <= MAX_HIGHLIGHT_SIZE) {
@@ -100,6 +108,7 @@ export function ArtifactContent({ artifact, onEscapeFrame }) {
   if (state.kind === 'html') {
     return (
       <iframe
+        ref={frameRef}
         class="af-document-frame"
         title={artifact.title}
         sandbox={HTML_PREVIEW_SANDBOX}
@@ -114,7 +123,7 @@ export function ArtifactContent({ artifact, onEscapeFrame }) {
     // on Mocha, not an embedded light theme.
     return (
       <div class="af-markdown-scroll">
-        <article class="doc af-markdown" dangerouslySetInnerHTML={{ __html: state.html }} />
+        <article ref={articleRef} class={`doc af-markdown${dn ? ' dn-doc' : ''}`} dangerouslySetInnerHTML={{ __html: state.html }} />
       </div>
     );
   }

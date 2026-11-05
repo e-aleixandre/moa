@@ -10,12 +10,16 @@ import {
   artifactsOrigin, artifactsSlice, backToArtifactsList, closeArtifacts, moveArtifact, openArtifactFromList,
   restoreArtifactsFocus, retryArtifacts, setArtifactExpanded,
 } from '../../data/artifacts.js';
-import { artifactPosition, artifactsViewIsOpen, currentArtifact, filterArtifacts, originLabel } from '../../data/artifacts-model.js';
+import { artifactKind, artifactPosition, artifactSessionId, artifactsViewIsOpen, currentArtifact, filterArtifacts, originLabel } from '../../data/artifacts-model.js';
 import { Field } from '../../primitives/index.js';
 import { ArtifactRow, KindIcon, ShareButton } from './ArtifactRow.jsx';
 import { ArtifactContent, ARTIFACT_ESCAPE, ARTIFACT_SWIPE } from './ArtifactContent.jsx';
 import { groupArtifactsByDay } from './artifact-groups.js';
+import { useDocNotes, DocNotesDock, NotesReview } from '../DocNotes/DocNotes.jsx';
 import './Artifacts.css';
+
+// What can be commented on while reading it (text the reader can pick from).
+const NOTE_KINDS = new Set(['markdown', 'html']);
 
 // The same focusable set the Sheet traps on, plus the reader's iframe: an HTML
 // artifact is part of the dialog, so Tab must reach it instead of stepping
@@ -80,6 +84,11 @@ export function ArtifactsDrawer() {
   const position = artifactPosition(slice.items, slice.fileId);
   const swipeStart = useRef(null);
   const activeTouchPointers = useRef(new Set());
+  // Notes on the document being read go to the conversation that delivered it:
+  // the session in the artifact's own URL (a subagent's file lives in its parent).
+  const dn = useDocNotes(artifact ? (artifactSessionId(artifact.url) || slice.ownerSessionId) : slice.ownerSessionId, slice.view === 'reader' ? artifact : null);
+  const dnRef = useRef(dn);
+  dnRef.current = dn;
 
   useEffect(() => { if (!list) { setSearching(false); setQuery(''); } }, [list]);
   useEffect(() => { setQuery(''); }, [slice.ownerSessionId]);
@@ -122,6 +131,12 @@ export function ArtifactsDrawer() {
     // its own layer, so that is what must be on top for the key to be ours.
     const ownId = () => (fromList ? 'artifact-reader' : 'artifacts');
     const onKey = (event) => {
+      if (event.key === 'Escape' && isTopLayer(ownId()) && dnRef.current.escape()) {
+        // A recording, the notes page or an open note closes before the reader.
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (event.key === 'Escape') {
         // This handler is on capture, so it also sees keys aimed at overlays
         // ABOVE the drawer (an HtmlResourceInfo Sheet opened from a row).
@@ -164,7 +179,7 @@ export function ArtifactsDrawer() {
     const onMessage = (event) => {
       const frame = panel.current?.querySelector('iframe');
       if (!frame || event.source !== frame.contentWindow) return;
-      if (event.data?.type === ARTIFACT_ESCAPE) dismiss();
+      if (event.data?.type === ARTIFACT_ESCAPE && !dnRef.current.escape()) dismiss();
       if (event.data?.type === ARTIFACT_SWIPE) {
         const direction = swipeDirection(event.data.start, event.data.end);
         if (direction !== null) moveArtifact(direction);
@@ -354,7 +369,8 @@ export function ArtifactsDrawer() {
         </div>
       ) : artifact ? (
         <div class="af-document-body" onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={(event) => { activeTouchPointers.current.delete(event.pointerId); swipeStart.current = null; }}>
-          <ArtifactContent key={artifact.id} artifact={artifact} />
+          <ArtifactContent key={artifact.id} artifact={artifact} dn={dn} />
+          {dn.reviewing && <NotesReview dn={dn} />}
         </div>
       ) : slice.status === 'loading' ? (
         <div class="af-loading" role="status"><Loader2 class="spin" size={16} /> Opening…</div>
@@ -365,6 +381,7 @@ export function ArtifactsDrawer() {
           <button type="button" class="af-text-button" onClick={backToArtifactsList}>See all artifacts</button>
         </div>
       )}
+      {!list && artifact && NOTE_KINDS.has(artifactKind(artifact)) && <DocNotesDock dn={dn} />}
     </aside>
   );
 

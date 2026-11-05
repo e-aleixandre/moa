@@ -15,6 +15,16 @@ export function capturePrependForSession(currentSessionId, sessionId, el) {
 // Shared transcript scroll intent for desktop and mobile. The content element
 // is observed rather than the scroller: async image loads and expanding cards
 // change its height, while the scroller's border box stays the same.
+// requestConversationPin — ask the open transcript of `sessionId` to follow its
+// tail again. Used by actions taken away from the conversation (notes sent from
+// the document reader) so the reader lands on what they just sent instead of on
+// the card they opened the document from.
+const PIN_EVENT = 'moa:pin-conversation';
+export function requestConversationPin(sessionId) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(PIN_EVENT, { detail: { sessionId } }));
+}
+
 export function useStreamScroll({ session, sessionId, pendingPromptKey: promptKey, followSignals, onScrollEl }) {
   const containerRef = useRef(null);
   const contentRef = useRef(null);
@@ -180,6 +190,12 @@ export function useStreamScroll({ session, sessionId, pendingPromptKey: promptKe
     scrollToBottomNow();
     setShowNewBtn(false);
   }, [scrollToBottomNow]);
+
+  useEffect(() => {
+    const onPin = (event) => { if (event.detail?.sessionId === currentSessionId.current) scrollToBottom(); };
+    window.addEventListener(PIN_EVENT, onPin);
+    return () => window.removeEventListener(PIN_EVENT, onPin);
+  }, [scrollToBottom]);
 
   const placeReadAnchor = useCallback((node, margin) => {
     const el = containerRef.current;

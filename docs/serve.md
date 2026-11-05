@@ -640,6 +640,22 @@ check their domains. Keep local HTML assets inline or use externally hosted asse
 publishing an HTML file does not publish the rest of its directory. Other formats,
 and files too large to preview, remain downloadable.
 
+#### Commenting while you read
+
+In a Markdown or HTML file you can answer as you read, without leaving it. Tap a
+paragraph (a click on desktop) to comment on it, or press and hold to select
+exact words. A small note opens under the document: write in it, or tap the
+microphone to dictate (the same dictation as the composer). **Add** keeps the
+note in a tray at the foot (**3 notes · Send 3**); tap the count to review, edit
+or delete them. **Send 3** posts one message to the conversation that delivered
+the file, each note with its quote and your reply; **Send now** posts just that
+note and keeps you in the document. Sent notes leave a grey mark on the
+document. Drafts live on the device, per file.
+
+A paragraph that opens with a bold number and asks a question (`**P1.** Do you
+want…?`) shows **Yes**, **No** and **Your call** under it; one tap is a whole
+note, and **Your call** tells the agent to go with its recommendation.
+
 Keep files you want to revisit in a stable location. Artifacts retain a reference
 to the original file, **not a copy or a version**:
 

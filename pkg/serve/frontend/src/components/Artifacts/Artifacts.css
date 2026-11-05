@@ -259,7 +259,7 @@
 .af-empty-actions { display: flex; align-items: center; justify-content: center; gap: 12px; }
 
 /* ── Reader ─────────────────────────────────────────────────────────────── */
-.af-document-body { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; background: var(--zl-canvas); }
+.af-document-body { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; background: var(--zl-canvas); }
 .af-document-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--zl-canvas); }
 .af-image-wrap { display: flex; align-items: center; justify-content: center; flex: 1; min-height: 0; padding: 16px; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
 .af-image-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; transform-origin: center center; will-change: transform; -webkit-touch-callout: none; }
@@ -276,6 +276,17 @@
 .af-markdown th,
 .af-markdown td { padding: 8px 12px; border-bottom: 1px solid var(--zl-line); color: var(--zl-t2); text-align: left; vertical-align: top; }
 .af-markdown th { color: var(--zl-t1); font-weight: 600; }
+/* reset.css zeroes paragraph spacing and list markers and nothing here gave
+   them back, so a long document read as one block. Tapping a paragraph to
+   comment on it needs paragraphs you can tell apart. */
+.af-markdown p { margin: 0 0 14px; line-height: 1.6; }
+.af-markdown ul, .af-markdown ol { margin: 0 0 14px; padding-left: 22px; }
+.af-markdown ul { list-style: disc; }
+.af-markdown ol { list-style: decimal; }
+.af-markdown li { margin: 0 0 6px; padding-left: 2px; line-height: 1.55; }
+.af-markdown li > p { margin: 0 0 6px; }
+.af-markdown li > ul, .af-markdown li > ol { margin: 6px 0 0; }
+.af-markdown pre { margin: 0 0 14px; }
 .af-markdown hr { margin: 24px 0; border: 0; border-top: 1px solid var(--zl-line); }
 .af-plain { margin: 0; padding: 20px; color: var(--zl-t2); font: var(--zl-fs-meta)/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; }
 .af-drawer.is-mobile .af-markdown { padding: 16px 16px 40px; }

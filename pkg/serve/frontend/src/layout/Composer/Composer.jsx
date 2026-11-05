@@ -1,9 +1,10 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Paperclip, X, Mic, Loader2, PhoneCall, PhoneOff, TriangleAlert } from "lucide-preact";
+import { Paperclip, X, Loader2, PhoneCall, PhoneOff, TriangleAlert } from "lucide-preact";
 import { MentionSuggestions } from "../../components/MentionSuggestions/MentionSuggestions.jsx";
 import { MentionMirror } from "./MentionMirror.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
+import { MicButton } from "../../components/MicButton/MicButton.jsx";
 import {
   startVoiceCall, hangupVoiceCall, showVoiceCallScreen, voiceCallSupported, voiceCallStream,
 } from "../../data/voice-call-session.js";
@@ -1391,23 +1392,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
              mic disappear the moment there was a draft — so dictating,
              fixing a word and dictating some more, the natural way to use
              it, was impossible. The second row is what buys both a seat. */
-          <button
-            type="button"
-            class={`zl-attach zl-mic${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
-            aria-label={transcribing ? "Transcribing" : recording ? "Stop recording" : "Dictate"}
-            title={
-              transcribing ? "Transcribing…"
-                : recording ? "Tap to stop & transcribe · Esc discards"
-                  : `Dictate (${formatShortcut(".", { mod: true })})`
-            }
-            disabled={transcribing || contentSendPending}
-            {...voiceHandlers}
-          >
-            {/* Recording keeps the mic glyph: a live microphone is a state of
-                MY input, not a stop control, and a square here read as the
-                same thing as the agent's Stop. The ring says "live". */}
-            {transcribing ? <Loader2 size={15} class="spin" /> : <Mic size={15} />}
-          </button>
+          <MicButton
+            voice={{ recording, transcribing, handlers: voiceHandlers }}
+            disabled={contentSendPending}
+            idleTitle={`Dictate (${formatShortcut(".", { mod: true })})`}
+          />
         )}
         {canCall && (
           /* The call button: calls this conversation, and while this
