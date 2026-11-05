@@ -18,7 +18,7 @@ function sourceAt(layer, x, y) {
 }
 
 function drawn(node) {
-  return node.tagName === 'IMG' ? node.complete && node.naturalWidth > 0 : node.width > 0 && node.height > 0;
+  return node.tagName === 'IMG' ? node.complete && node.naturalWidth > 0 : node.dataset.ready === '1';
 }
 
 // paint — the part of `node` (a canvas or an image) given as fractions of it,
@@ -102,7 +102,13 @@ export function AreaLayer({ dn }) {
   const layer = useRef(null);
   const [box, setBox] = useState(null);
   const start = useRef(null);
-  useEffect(() => { if (!dn.areaMode) setBox(null); }, [dn.areaMode]);
+  // Bumped whenever the mode ends (Escape, Cancel, another file, unmount): a
+  // box still being read when that happens must not open a note afterwards.
+  const epoch = useRef(0);
+  useEffect(() => {
+    if (!dn.areaMode) setBox(null);
+    return () => { epoch.current += 1; start.current = null; };
+  }, [dn.areaMode]);
   if (!dn.areaMode) return null;
 
   const local = (event) => {
@@ -127,7 +133,9 @@ export function AreaLayer({ dn }) {
     if (!s || !box || box.w < MIN_BOX || box.h < MIN_BOX) { setBox(null); return; }
     const r = layer.current.getBoundingClientRect();
     const screen = { left: r.left + box.x, top: r.top + box.y, right: r.left + box.x + box.w, bottom: r.top + box.y + box.h };
+    const mine = epoch.current;
     const pick = await markArea(layer.current, screen);
+    if (mine !== epoch.current) return;
     setBox(null);
     if (pick) { dn.setAreaMode(false); dn.choose(pick); }
   };

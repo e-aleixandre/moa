@@ -159,11 +159,14 @@ function PdfPage({ pdf, number, width, ratio, root }) {
       const viewport = page.getViewport({ scale: scale * ratioNow });
       const target = canvas.current;
       if (cancelled || !target) return;
+      target.dataset.ready = '';
       target.width = Math.floor(viewport.width);
       target.height = Math.floor(viewport.height);
       setHeight(Math.floor(base.height * scale));
       task = page.render({ canvasContext: target.getContext('2d'), viewport });
       await task.promise;
+      // The picture is whole only now; a canvas has size long before.
+      target.dataset.ready = '1';
     })().catch(() => {});
     return () => {
       cancelled = true;

@@ -209,3 +209,11 @@ test("an item only grazed by the box is not part of it", () => {
   const items = [item("rozado", 60, 700, 100)]; // viewport top 88..100, center 94
   expect(textInRect(items, toViewport, { left: 0, top: 95, right: 600, bottom: 200 })).toBe("");
 });
+
+test("rotated text is placed by its own axes", () => {
+  // 90° text: width runs up the page from (100, 100), height towards -x.
+  const rotated = { str: "vertical", transform: [0, 12, -12, 0, 100, 100], width: 80, height: 12 };
+  // centre in user space (94, 140) -> viewport (94, 660)
+  expect(textInRect([rotated], toViewport, { left: 80, top: 640, right: 110, bottom: 680 })).toBe("vertical");
+  expect(textInRect([rotated], toViewport, { left: 130, top: 680, right: 150, bottom: 710 })).toBe("");
+});

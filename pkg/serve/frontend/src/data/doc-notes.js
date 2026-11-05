@@ -165,18 +165,25 @@ export function textInRect(items, toViewport, rect) {
   const inside = [];
   for (const it of items || []) {
     if (!it || typeof it.str !== 'string' || !it.str.trim() || !Array.isArray(it.transform)) continue;
-    const [x, y] = [it.transform[4], it.transform[5]];
-    const height = it.height || Math.abs(it.transform[3]) || 0;
-    const [x1, y1] = toViewport(x, y);
-    const [x2, y2] = toViewport(x + (it.width || 0), y + height);
-    const left = Math.min(x1, x2);
-    const right = Math.max(x1, x2);
-    const top = Math.min(y1, y2);
-    const bottom = Math.max(y1, y2);
-    const cx = (left + right) / 2;
-    const cy = (top + bottom) / 2;
+    // The item's box is spanned by the text matrix's own axes: `width` along
+    // (a, b) and `height` along (c, d), so rotated or mirrored text is placed
+    // where it really is.
+    const [a, b, c, d, x, y] = it.transform;
+    const along = Math.hypot(a, b) || 1;
+    const up = Math.hypot(c, d) || 1;
+    const height = it.height || up;
+    const w = it.width || 0;
+    const centre = [
+      x + (a / along) * (w / 2) + (c / up) * (height / 2),
+      y + (b / along) * (w / 2) + (d / up) * (height / 2),
+    ];
+    const [cx, cy] = toViewport(centre[0], centre[1]);
+    const corner = toViewport(x, y);
+    const far = toViewport(x + (a / along) * w + (c / up) * height, y + (b / along) * w + (d / up) * height);
+    const left = Math.min(corner[0], far[0]);
+    const h = Math.abs(far[1] - corner[1]);
     if (cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom) {
-      inside.push({ str: it.str.trim(), left, cy, h: bottom - top });
+      inside.push({ str: it.str.trim(), left, cy, h });
     }
   }
   inside.sort((a, b) => a.cy - b.cy);
