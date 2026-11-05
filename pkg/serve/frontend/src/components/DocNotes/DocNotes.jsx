@@ -27,15 +27,25 @@ export function useDocNotes(sessionId, artifact) {
   const [reviewing, setReviewing] = useState(false);
   const [sending, setSending] = useState(false);
   const [flash, setFlash] = useState('');
-  // The notes that failed to go, or null.
-  const [sendError, setSendError] = useState(null);
+  // The notes that failed to go, with the document they belong to, or null.
+  const [failed, setFailed] = useState(null);
+  const sendError = failed && failed.sessionId === sessionId && failed.fileId === fileId ? failed : null;
+  // Where each text note sits in the document as it is NOW (see resolveAnchors),
+  // set by the reader. Null until the reader has resolved; then a note the
+  // document no longer holds has no place, and so never answers a tap.
+  const resolvedRef = useRef(null);
+  const anchorOf = (n) => {
+    const resolved = resolvedRef.current;
+    if (!resolved) return n.anchor;
+    return resolved.has(n.id) ? resolved.get(n.id) : null;
+  };
   const sendingRef = useRef(false);
   // What the note field holds right now, so switching to another block never
   // throws away what was typed. The field owns it; the hook only reads it.
   const typed = useRef('');
   const voiceRef = useRef(null);
   const latest = useRef({});
-  latest.current = { notes, pick, editingId, sessionId, fileId, sendError };
+  latest.current = { notes, pick, editingId, sessionId, fileId, sendError, anchorOf };
 
   const persist = useCallback((next) => {
     setNotes(next);
@@ -62,7 +72,8 @@ export function useDocNotes(sessionId, artifact) {
 
   useEffect(() => {
     setNotes(fileId ? loadNotes(sessionId, fileId) : []);
-    setPick(null); setEditingId(null); setReviewing(false); setSendError(null);
+    setPick(null); setEditingId(null); setReviewing(false); setFailed(null);
+    resolvedRef.current = null;
     typed.current = '';
     return () => { if (fileId) flush({ sessionId, fileId }); };
   }, [sessionId, fileId]);
@@ -70,7 +81,6 @@ export function useDocNotes(sessionId, artifact) {
   const drafts = notes.filter((n) => !n.sentAt);
 
   const choose = useCallback((next) => {
-    if (sendingRef.current) return;
     const { pick: p, editingId: id } = latest.current;
     // Moving the handles of a selection inside the same block refines the pick
     // being written; it is not a new note.
@@ -81,7 +91,7 @@ export function useDocNotes(sessionId, artifact) {
     const after = flush();
     // Tapping a block that already has a draft opens that draft.
     const existing = !next.precise && next.anchor != null
-      && after.find((n) => !n.sentAt && n.anchor === next.anchor && n.kind !== 'area');
+      && after.find((n) => !n.sentAt && latest.current.anchorOf(n) === next.anchor && n.kind !== 'area');
     if (existing) {
       typed.current = existing.comment || '';
       setPick({ ...existing });
@@ -112,7 +122,7 @@ export function useDocNotes(sessionId, artifact) {
     const { text, attachments } = docNotesMessage({ name: artifact.name, url: artifact.url }, batch);
     sendingRef.current = true;
     setSending(true);
-    setSendError(null);
+    setFailed(null);
     try {
       // sendMessage returns nothing when the conversation is not loaded here:
       // that is a failure the user must hear about, not a send.
@@ -120,8 +130,9 @@ export function useDocNotes(sessionId, artifact) {
       if (!action) throw new Error('not sent');
       return true;
     } catch (_) {
-      // What failed to go is what "Copy notes" must hand back.
-      setSendError(batch);
+      // What failed to go is what "Copy notes" must hand back, under the name
+      // of the document it was written on.
+      setFailed({ ...target, batch, name: artifact.name, url: artifact.url });
       return false;
     } finally {
       sendingRef.current = false;
@@ -129,31 +140,34 @@ export function useDocNotes(sessionId, artifact) {
     }
   }, [artifact]);
 
-  // markSent stamps the carried notes as sent under the key they belong to,
-  // whichever document the reader is on by now.
-  const markSent = useCallback((target, sent) => {
+  // stamp sets (or, with no time, takes back) the sent mark on `batch` under the
+  // key it belongs to, whichever document the reader is on by now.
+  const stamp = useCallback((target, batch, at) => {
     const here = latest.current.sessionId === target.sessionId && latest.current.fileId === target.fileId;
     const base = here ? latest.current.notes : loadNotes(target.sessionId, target.fileId);
-    const stamp = Date.now();
-    const ids = new Set(sent.map((n) => n.id));
-    const next = [...base.filter((n) => !ids.has(n.id)), ...sent.map((n) => ({ ...n, sentAt: stamp }))];
+    const byId = new Map(batch.map((n) => [n.id, { ...n, sentAt: at }]));
+    const next = base.map((n) => byId.get(n.id) || n);
+    for (const [id, n] of byId) if (!base.some((b) => b.id === id)) next.push(n);
     saveNotes(target.sessionId, target.fileId, next);
     if (here) setNotes(next);
     return here;
   }, []);
 
+  // Send now closes the note at once: it is stamped sent before the request
+  // goes and handed back as a draft if the request fails, so nothing typed
+  // meanwhile can collide with it.
   const sendNow = useCallback(async (comment) => {
     const { notes: current, pick: p, editingId: id, sessionId: s, fileId: f } = latest.current;
-    if (!p || sendingRef.current) return;
+    if (!p) return;
     const note = { ...(id ? current.find((n) => n.id === id) : null), ...p, id: id || newId(), comment, created: Date.now() };
     const target = { sessionId: s, fileId: f };
-    if (!(await deliver([note], target))) return;
-    if (!markSent(target, [note])) return;
+    stamp(target, [note], Date.now());
     typed.current = '';
     setPick(null); setEditingId(null);
+    if (!(await deliver([note], target))) { stamp(target, [note], undefined); return; }
     setFlash('Sent');
     setTimeout(() => setFlash(''), 1800);
-  }, [deliver, markSent]);
+  }, [deliver, stamp]);
 
   const sendAll = useCallback(async () => {
     if (sendingRef.current) return;
@@ -163,38 +177,22 @@ export function useDocNotes(sessionId, artifact) {
     const target = { sessionId: latest.current.sessionId, fileId: latest.current.fileId };
     requestConversationPin(target.sessionId);
     if (!(await deliver(batch, target))) return;
-    if (!markSent(target, batch)) return;
+    const here = stamp(target, batch, Date.now());
+    if (!here) return;
     setPick(null); setEditingId(null); setReviewing(false);
     closeArtifacts();
-  }, [deliver, flush, markSent]);
+  }, [deliver, flush, stamp]);
 
   // A quick reply is a whole note on its own; the same reply again takes it
   // back, another one replaces it.
   const quick = useCallback((target, reply) => {
-    if (sendingRef.current) return;
     const current = flush();
-    const existing = current.find((n) => !n.sentAt && n.anchor === target.anchor && n.kind !== 'area');
+    const existing = current.find((n) => !n.sentAt && latest.current.anchorOf(n) === target.anchor && n.kind !== 'area');
     if (existing && existing.comment === reply) persist(current.filter((n) => n.id !== existing.id));
     else if (existing) persist(current.map((n) => (n.id === existing.id ? { ...n, comment: reply } : n)));
     else persist([...current, { ...target, id: newId(), comment: reply, created: Date.now() }]);
     cancel();
   }, [flush, persist, cancel]);
-
-  // reanchor moves each text note to where its quote sits in the document as it
-  // is now (or to nowhere when the quote is gone), so every lookup by block
-  // index (tapping a block, a quick reply) agrees with the marks.
-  const reanchor = useCallback((resolved) => {
-    const current = latest.current.notes;
-    let changed = false;
-    const next = current.map((n) => {
-      if (n.kind === 'area' || n.anchor == null) return n;
-      const index = resolved.get(n.id) ?? null;
-      if (index === n.anchor) return n;
-      changed = true;
-      return { ...n, anchor: index };
-    });
-    if (changed) persist(next);
-  }, [persist]);
 
   const remove = useCallback((id) => {
     const next = latest.current.notes.filter((n) => n.id !== id);
@@ -203,7 +201,6 @@ export function useDocNotes(sessionId, artifact) {
   }, [persist]);
 
   const edit = useCallback((id) => {
-    if (sendingRef.current) return;
     const note = latest.current.notes.find((n) => n.id === id);
     if (!note) return;
     typed.current = note.comment || '';
@@ -213,8 +210,10 @@ export function useDocNotes(sessionId, artifact) {
   }, []);
 
   const copyNotes = useCallback(async () => {
-    const batch = Array.isArray(latest.current.sendError) ? latest.current.sendError : latest.current.notes.filter((n) => !n.sentAt);
-    const ok = await copyToClipboard(docNotesMessage({ name: artifact.name, url: artifact.url }, batch).text);
+    const failedSend = latest.current.sendError;
+    const file = failedSend ? { name: failedSend.name, url: failedSend.url } : { name: artifact.name, url: artifact.url };
+    const batch = failedSend ? failedSend.batch : latest.current.notes.filter((n) => !n.sentAt);
+    const ok = await copyToClipboard(docNotesMessage(file, batch).text);
     addToast({ title: ok ? 'Notes copied' : 'Could not copy', type: ok ? 'info' : 'error' });
   }, [artifact]);
 
@@ -230,7 +229,7 @@ export function useDocNotes(sessionId, artifact) {
 
   return {
     notes, drafts, pick, editingId, reviewing, sending, flash, sendError, typed, voiceRef,
-    choose, cancel, add, sendNow, sendAll, remove, edit, quick, reanchor, copyNotes, escape, setReviewing,
+    choose, cancel, add, sendNow, sendAll, remove, edit, quick, copyNotes, resolvedRef, escape, setReviewing,
   };
 }
 

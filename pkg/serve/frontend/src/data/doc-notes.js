@@ -66,13 +66,25 @@ const norm = (text) => String(text || '').replace(/\s+/g, ' ').trim();
 export function resolveAnchors(blockTexts, notes) {
   const blocks = blockTexts.map(norm);
   const out = new Map();
+  // A selection can run across blocks, so a quote may sit in a few contiguous
+  // ones; text from `start` on, joined, is where it is looked for.
+  const SPAN = 8;
+  const startsAt = (start, quote) => {
+    let text = '';
+    for (let i = start; i < blocks.length && i < start + SPAN; i += 1) {
+      text = text ? `${text} ${blocks[i]}` : blocks[i];
+      // The quote must BEGIN in the first block; one that begins in a later
+      // block belongs to that block, not to this start.
+      const at = text.indexOf(quote);
+      if (at >= 0) return at < blocks[start].length;
+    }
+    return false;
+  };
   for (const note of notes) {
     const quote = norm(note.quote);
     if (note.anchor == null || !quote) continue;
-    let hit = blocks[note.anchor]?.includes(quote) ? note.anchor : blocks.findIndex((b) => b.includes(quote));
-    // A selection that runs across blocks is in none of them whole: it stays
-    // where it started if that block still opens the same way.
-    if (hit < 0 && blocks[note.anchor]?.includes(quote.slice(0, 30))) hit = note.anchor;
+    let hit = startsAt(note.anchor, quote) ? note.anchor : -1;
+    for (let i = 0; hit < 0 && i < blocks.length; i += 1) if (startsAt(i, quote)) hit = i;
     if (hit >= 0) out.set(note.id, hit);
   }
   return out;

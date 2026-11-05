@@ -155,3 +155,20 @@ test("literal backslashes before a reserved prefix survive the round trip", () =
     expect(parseDocNotes(text).notes[0].comment).toBe(comment);
   }
 });
+
+test("a quote in a later block does not land on the block before it", () => {
+  const blocks = ["Intro", "Segundo párrafo exacto", "Tercero"];
+  expect(resolveAnchors(blocks, [{ id: "a", anchor: 0, quote: "Segundo párrafo exacto" }]).get("a")).toBe(1);
+});
+
+test("a prefix shared with a changed paragraph is not a match", () => {
+  const blocks = ["A shared introduction long enough to reach thirty characters, DIFFERENT conclusion"];
+  const quote = "A shared introduction long enough to reach thirty characters, ORIGINAL conclusion";
+  expect(resolveAnchors(blocks, [{ id: "a", anchor: 0, quote }]).has("a")).toBe(false);
+});
+
+test("a note comes back when the paragraph it quotes comes back", () => {
+  const note = { id: "a", anchor: 3, quote: "Mi párrafo" };
+  expect(resolveAnchors(["x", "y"], [note]).has("a")).toBe(false);
+  expect(resolveAnchors(["x", "Mi párrafo", "y"], [note]).get("a")).toBe(1);
+});

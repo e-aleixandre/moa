@@ -151,8 +151,9 @@ export function useMarkdownNotes(articleRef, dn, html) {
     blocks.forEach((el) => el.classList.remove('dn-picked', 'dn-noted', 'dn-sent'));
     root.querySelectorAll('.dn-quick.is-on').forEach((el) => el.classList.remove('is-on'));
     const resolved = resolveAnchors(blocks.map(blockQuote), dn.notes);
-    // A republished document shifts the blocks: bring the drafts with it.
-    dn.reanchor(resolved);
+    // A republished document shifts the blocks: the quotes say where the notes
+    // are now, and the hook answers taps with that, not with the stored index.
+    dn.resolvedRef.current = resolved;
     const marks = marksOf(resolved, dn);
     const at = (index) => root.querySelector(`[data-dn="${index}"]`);
     marks.sent.forEach((i) => at(i)?.classList.add('dn-sent'));
