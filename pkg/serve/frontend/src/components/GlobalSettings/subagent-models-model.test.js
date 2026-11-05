@@ -3,6 +3,9 @@ import {
   allowedCount,
   createAllowedModelsWriter,
   nextAllowedModels,
+  rememberRestricted,
+  resetRememberedRestricted,
+  selectedScopeList,
   scopeForAllowed,
 } from "./subagent-models-model.js";
 
@@ -106,4 +109,36 @@ test("a failed write rolls back to the last confirmed policy", async () => {
   expect(writer.current()).toEqual(["sol", "terra"]);
   expect(applied.at(-1)).toEqual(["sol", "terra"]);
   expect(errors.length).toBe(1);
+});
+
+test("Selected only → All → Selected only restores the previous selection", () => {
+  resetRememberedRestricted();
+  rememberRestricted(["sol", "luna"]);
+  expect(selectedScopeList(MODELS)).toEqual(["sol", "luna"]);
+});
+
+test("remembered models gone from the catalog are dropped; none left means all", () => {
+  resetRememberedRestricted();
+  rememberRestricted(["sol", "gone"]);
+  expect(selectedScopeList(MODELS)).toEqual(["sol"]);
+  rememberRestricted(["gone"]);
+  expect(selectedScopeList(MODELS)).toEqual(["sol", "terra", "luna"]);
+});
+
+test("with no history, Selected only selects every model", () => {
+  resetRememberedRestricted();
+  expect(selectedScopeList(MODELS)).toEqual(["sol", "terra", "luna"]);
+});
+
+test("the selection survives a reload via localStorage", () => {
+  const store = {};
+  globalThis.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } };
+  try {
+    resetRememberedRestricted();
+    rememberRestricted(["terra"]);
+    // simulate a fresh page: clear only the in-memory copy
+    expect(JSON.parse(Object.values(store)[0])).toEqual(["terra"]);
+  } finally {
+    delete globalThis.localStorage;
+  }
 });

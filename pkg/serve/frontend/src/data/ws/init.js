@@ -180,6 +180,7 @@ export function handleWsInit(id, data) {
     subagentCount: (data.subagents || []).filter(
       sa => sa && sa.async && (sa.status === 'running' || sa.status === 'cancelling')
     ).length,
+    jobsFrom: 'socket',
     goalActive: !!data.goal_active,
     goalObjective: data.goal_active ? (data.goal_objective || '') : null,
     goalWorkDir: data.goal_active ? (data.goal_work_dir || '') : null,

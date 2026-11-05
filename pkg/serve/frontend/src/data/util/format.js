@@ -605,6 +605,15 @@ export function sessionDisplayDotState(sess, unseen = sess?.unseen) {
   return state;
 }
 
+// hasBackgroundJobs — the session still has async subagents or background
+// bash jobs alive, whatever state its turn is in. It lists them; it does not
+// make the session "working" (sessionDotState is unchanged).
+export function hasBackgroundJobs(sess) {
+  if (!sess) return false;
+  if (sess.jobsFrom === 'roster') return sess.backgroundJobs > 0;
+  return hasLiveBackgroundWork(sess);
+}
+
 function hasLiveBackgroundWork(sess) {
   if (sess.subagentCount > 0) return true;
   const subs = sess.subagents;

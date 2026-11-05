@@ -1,0 +1,221 @@
+/* Annotating a document while reading it. */
+
+.dn-dock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  min-height: 56px;
+  padding: 8px 12px calc(8px + var(--shell-bottom, 0px));
+  border-top: 1px solid var(--zl-line);
+  background: var(--zl-raised);
+}
+.dn-dock-hint { color: var(--zl-t3); font-size: var(--zl-fs-meta); }
+.dn-hint-t { flex: 1; min-width: 0; color: var(--zl-t3); font-size: var(--zl-fs-meta); }
+.dn-flash { color: var(--zl-green); }
+
+.dn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--zl-r-md);
+  background: none;
+  color: var(--zl-t2);
+  font: inherit;
+  font-size: var(--zl-fs-meta);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dn-btn:disabled { opacity: 0.45; cursor: default; }
+.dn-btn-primary { background: var(--zl-peach); color: var(--zl-peach-ink, #1e1e2e); font-weight: 600; }
+.dn-btn-ghost { border-color: var(--zl-line-2); }
+.dn-btn-icon { width: 40px; padding: 0; border-color: var(--zl-line-2); }
+.dn-dock-hint .dn-btn-ghost:first-child { flex: 1; justify-content: flex-start; }
+@media (hover: hover) {
+  .dn-btn-ghost:not(:disabled):hover, .dn-btn-icon:hover { background: var(--zl-control); color: var(--zl-t1); }
+}
+
+.dn-tray {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--zl-t1);
+  font: inherit;
+  font-size: var(--zl-fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+.dn-tray-n {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--zl-peach) 18%, transparent);
+  color: var(--zl-peach);
+  font-family: var(--mono);
+  font-size: var(--zl-fs-meta);
+  font-weight: 600;
+}
+
+/* The note being written. */
+.dn-compose {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding-top: 10px;
+  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.28);
+}
+.dn-quote {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 36px 2px 12px;
+  border-left: 2px solid var(--zl-peach);
+}
+.dn-quote-q {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--zl-t1);
+  font-size: var(--zl-fs-meta);
+  line-height: 1.4;
+}
+.dn-quote-where { color: var(--zl-t3); font-family: var(--mono); font-size: var(--text-xs, 11px); }
+.dn-quote-crop { max-width: 120px; max-height: 64px; border-radius: 4px; object-fit: cover; outline: 1px solid var(--zl-line-2); }
+.dn-x {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--zl-r-sm);
+  background: none;
+  color: var(--zl-t3);
+  cursor: pointer;
+}
+.dn-field {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--zl-line-2);
+  border-radius: var(--zl-r-md);
+  background: var(--zl-canvas);
+}
+.dn-field:focus-within { border-color: color-mix(in srgb, var(--zl-peach) 60%, var(--zl-line-2)); }
+.dn-field textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--zl-t1);
+  font: inherit;
+  font-size: 16px; /* never under 16px: iOS zooms on focus otherwise */
+  line-height: 1.4;
+  resize: none;
+}
+.dn-field textarea::placeholder { color: var(--zl-t4); }
+.dn-error { color: var(--zl-red); font-size: var(--zl-fs-meta); }
+.dn-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Blocks in the Markdown reader. */
+.dn-doc [data-dn] { position: relative; cursor: pointer; border-radius: 4px; transition: background var(--motion-exit-fast) var(--motion-ease), box-shadow var(--motion-exit-fast) var(--motion-ease); }
+.dn-doc .dn-picked { background: color-mix(in srgb, var(--zl-peach) 12%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--zl-peach) 12%, transparent); }
+.dn-doc .dn-picked::before, .dn-doc .dn-noted::before, .dn-doc .dn-sent::before {
+  content: ""; position: absolute; left: -11px; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--zl-peach);
+}
+.dn-doc .dn-sent::before { background: var(--zl-t4); }
+.dn-doc li.dn-picked::before, .dn-doc li.dn-noted::before, .dn-doc li.dn-sent::before { left: -33px; }
+.dn-doc tr.dn-picked::before, .dn-doc tr.dn-noted::before, .dn-doc tr.dn-sent::before { display: none; }
+.dn-doc tr.dn-noted { box-shadow: inset 3px 0 0 var(--zl-peach); }
+.dn-doc tr.dn-sent { box-shadow: inset 3px 0 0 var(--zl-t4); }
+.dn-item-q { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+@media (hover: hover) {
+  .dn-doc [data-dn]:hover { background: color-mix(in srgb, var(--zl-t1) 4%, transparent); }
+}
+
+/* F3: quick replies under a numbered question. */
+.dn-quick-row { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 14px; }
+.dn-quick {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--zl-line-2);
+  border-radius: 16px;
+  background: none;
+  color: var(--zl-t2);
+  font: inherit;
+  font-size: var(--zl-fs-meta);
+  cursor: pointer;
+}
+.dn-quick.is-on { border-color: var(--zl-peach); background: color-mix(in srgb, var(--zl-peach) 14%, transparent); color: var(--zl-peach); }
+
+/* The tray as a page of the reader. */
+.dn-review { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; min-height: 0; background: var(--zl-canvas); }
+.dn-review-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--zl-line); }
+.dn-back { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 8px; border: 0; background: none; color: var(--zl-t2); font: inherit; font-size: var(--zl-fs-meta); cursor: pointer; }
+.dn-review-n { color: var(--zl-t3); font-size: var(--zl-fs-meta); }
+.dn-list { flex: 1; min-height: 0; margin: 0; padding: 8px 12px 24px; overflow: auto; list-style: none; }
+.dn-item { position: relative; border-bottom: 1px solid var(--zl-line); }
+.dn-item-body { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 14px 40px 14px 12px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dn-item-body::before { content: ""; position: absolute; left: 0; top: 16px; bottom: 16px; width: 2px; border-radius: 1px; background: var(--zl-peach); }
+.dn-item-q { color: var(--zl-t2); font-size: var(--zl-fs-meta); line-height: 1.4; }
+.dn-item-crop { max-width: 180px; max-height: 110px; border-radius: 4px; object-fit: contain; outline: 1px solid var(--zl-line-2); }
+.dn-item-c { color: var(--zl-t1); font-size: var(--zl-fs-body); line-height: 1.45; white-space: pre-wrap; }
+.dn-item .dn-x { top: 8px; right: 0; }
+
+/* Transcript: a batch of notes hanging off the message's spine. */
+.dn-msg { display: flex; flex-direction: column; gap: 12px; }
+.dn-msg-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--overlay1);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.dn-msg-head:hover { color: var(--peach); }
+.dn-msg-note { display: flex; flex-direction: column; gap: 2px; }
+.dn-msg-note .ref-spine { margin-bottom: 0; }
+.dn-msg-q { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-weight: var(--weight-normal); color: var(--subtext0); }
+.dn-msg-c { color: var(--text); white-space: pre-wrap; }
+
+.dn-error { display: flex; flex: 1; align-items: center; gap: 10px; }
+.dn-link { padding: 8px 4px; border: 0; background: none; color: var(--zl-t1); font: inherit; text-decoration: underline; cursor: pointer; }
+
+/* Area marking over an image or PDF page. */
+.dn-area-layer { position: absolute; inset: 0; z-index: 2; cursor: crosshair; touch-action: none; background: rgba(0, 0, 0, 0.18); }
+.dn-area-box {
+  position: absolute;
+  border: 2px solid var(--zl-peach);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--zl-peach) 12%, transparent);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.32);
+}
+.dn-area-btn { flex: 1; justify-content: flex-start; }
+.dn-quote-crop { align-self: flex-start; }

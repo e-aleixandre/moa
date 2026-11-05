@@ -18,7 +18,7 @@ import {
   SESSION, isCustom, normalizeChoices,
 } from "./compact-model-model.js";
 import {
-  allowedCount, createAllowedModelsWriter, nextAllowedModels, scopeForAllowed,
+  allowedCount, createAllowedModelsWriter, nextAllowedModels, rememberRestricted, scopeForAllowed, selectedScopeList,
 } from "./subagent-models-model.js";
 import {
   ACTIVE, REVOKED, deviceKind, deviceLine, deviceState, devicesValue, expiringSoon,
@@ -328,6 +328,7 @@ function useSubagentModels() {
       if (!live) return;
       setModels(deriveModelSpecs(list || []));
       const ids = policy?.allowed_models || [];
+      rememberRestricted(ids);
       writer.reset(ids);
       setAllowed(ids);
       setLoaded(true);
@@ -342,12 +343,19 @@ function useSubagentModels() {
     writer.update((currentAllowed) => {
       const base = currentAllowed.length ? currentAllowed : models.map((model) => model.catalogId);
       const ids = nextAllowedModels(models, base, id, checked);
+      rememberRestricted(ids);
       return ids.length ? ids : null; // never persist "empty" — that means unrestricted
     });
   };
 
   const setScope = (scope) => {
-    writer.update(() => (scope === "all" ? [] : models.map((model) => model.catalogId)));
+    writer.update((currentAllowed) => {
+      if (scope === "all") {
+        rememberRestricted(currentAllowed);
+        return [];
+      }
+      return selectedScopeList(models);
+    });
   };
 
   return { models, allowed, loaded, toggle, setScope, scope: scopeForAllowed(allowed) };

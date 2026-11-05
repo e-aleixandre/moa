@@ -561,6 +561,15 @@ func (sctx *SessionContext) BackgroundWork() int {
 	return n
 }
 
+// BackgroundJobs counts only the live async subagents and background bash jobs
+// (not verifiers or compaction): the jobs a user would name when asked what a
+// session still has running after its turn ended.
+func (sctx *SessionContext) BackgroundJobs() int {
+	sctx.quiescenceMu.Lock()
+	defer sctx.quiescenceMu.Unlock()
+	return len(sctx.activeSubagents) + len(sctx.activeBashJobs)
+}
+
 // setPendingRunOrigin records the provenance of the run that is about to be
 // launched. Callers hold abortMu across this and the launch.
 func (sctx *SessionContext) setPendingRunOrigin(origin RunOrigin) {

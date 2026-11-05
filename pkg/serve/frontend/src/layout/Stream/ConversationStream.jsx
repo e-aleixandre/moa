@@ -24,6 +24,8 @@ import { ProviderErrorAction } from "../../components/ProviderErrorAction/Provid
 import { turnFinalResponse } from "../../data/stream-model.js";
 import { fuseLedgerDetails } from "../../data/util/ledger-details.jsx";
 import { parsePreviewReference } from "../../data/util/preview-reference.js";
+import { parseDocNotes } from "../../data/doc-notes.js";
+import { DocNotesMessage } from "../../components/DocNotes/DocNotesMessage.jsx";
 import { parseMentions } from "../../data/util/mentions.js";
 import { MentionedText } from "../../components/UserWaypoint/MentionedText.jsx";
 import { renderMarkdown, renderMarkdownWithCaret, renderUserMarkdown } from "../../data/util/markdown.js";
@@ -190,7 +192,8 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
       const mentioned = parseMentions(block.text);
       const body = mentioned ? mentioned.comment : block.text;
       const parsed = parsePreviewReference(body);
-      const text = parsed ? parsed.comment : body;
+      const docNotes = parseDocNotes(body);
+      const text = docNotes ? "" : parsed ? parsed.comment : body;
       // Your own messages rewind to just before them and come back to the
       // composer; the owner's and the parent agent's are not yours to edit.
       const rewindEditable = !block.fromOwner && !block.fromParent;
@@ -222,6 +225,7 @@ function StreamBlock({ block, onOpenSubagent, sessionId, rewind, waypointAccent,
         >
           {/* Presentation only: block.text (rewind preview, model input) is
               untouched. Same sanitizer as assistant prose via markdown.js. */}
+          {docNotes && <DocNotesMessage parsed={docNotes} sessionId={sessionId} />}
           {text && (mentioned
             ? <MentionedText text={text} mentions={mentioned.mentions} />
             : <div class="zl-prose wp-md" dangerouslySetInnerHTML={{ __html: renderUserMarkdown(text) }} />)}

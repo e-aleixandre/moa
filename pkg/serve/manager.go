@@ -388,6 +388,11 @@ type SessionInfo struct {
 	// when it holds no socket to it or the session is not loaded. IDs only,
 	// like PendingSecretIDs; the text is GET /api/for-you's.
 	OpenQuestionIDs []string `json:"open_question_ids,omitempty"`
+	// BackgroundJobs counts the live async subagents and background bash jobs.
+	// A turn that ended with jobs still running is idle, so this is the only
+	// word a client without a socket to the session has that it still works.
+	// Additive; in memory only, so a restart reports 0 for jobs that died.
+	BackgroundJobs int `json:"background_jobs,omitempty"`
 	// MCP summarizes this session's MCP servers for the status line: a count and
 	// whether any is unhealthy, so the indicator can appear only when servers
 	// exist and turn red when one has failed or exited. The full per-server
@@ -595,6 +600,7 @@ func (s *ManagedSession) info() SessionInfo {
 		PermissionMode:    permMode,
 		CostUSD:           cost,
 		ServerInstance:    s.serverInstance,
+		BackgroundJobs:    s.runtime.BackgroundJobs(),
 
 		BriefAttempting: s.briefAttempting,
 		BriefProgress:   s.briefProgress,
