@@ -236,7 +236,7 @@ export function useDocNotes(sessionId, artifact) {
 
   return {
     notes, drafts, pick, editingId, reviewing, sending, flash, sendError, typed, voiceRef,
-    choose, cancel, add, sendNow, sendAll, remove, edit, quick, copyNotes, resolvedRef, escape, setReviewing,
+    choose, cancel, add, sendNow, sendAll, remove, edit, quick, copyNotes, resolvedRef, freshRef, escape, setReviewing,
   };
 }
 

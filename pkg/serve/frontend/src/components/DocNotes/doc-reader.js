@@ -154,6 +154,7 @@ export function useMarkdownNotes(articleRef, dn, html) {
     // A republished document shifts the blocks: the quotes say where the notes
     // are now, and the hook answers taps with that, not with the stored index.
     dn.resolvedRef.current = resolved;
+    for (const id of dn.freshRef.current) if (resolved.has(id)) dn.freshRef.current.delete(id);
     const marks = marksOf(resolved, dn);
     const at = (index) => root.querySelector(`[data-dn="${index}"]`);
     marks.sent.forEach((i) => at(i)?.classList.add('dn-sent'));
