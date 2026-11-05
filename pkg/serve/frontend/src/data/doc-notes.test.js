@@ -128,3 +128,30 @@ test("anchors follow the quote when the document changed under the draft", () =>
   expect(out.get("d")).toBe(2);
   expect(out.has("e")).toBe(false);
 });
+
+test("a literal ellipsis in a quote does not re-anchor to the wrong block", () => {
+  const blocks = ["Shared intro … NEW ending", "Shared intro … original ending"];
+  const out = resolveAnchors(blocks, [{ id: "a", anchor: 0, quote: "Shared intro … original ending" }]);
+  expect(out.get("a")).toBe(1);
+});
+
+test("a selection across blocks stays at the block it started in", () => {
+  const blocks = ["Primer párrafo largo que acaba aquí", "Segundo párrafo"];
+  const out = resolveAnchors(blocks, [{ id: "a", anchor: 0, quote: "Primer párrafo largo que acaba aquí Segundo párrafo" }]);
+  expect(out.get("a")).toBe(0);
+});
+
+test("comment strings that are Object.prototype names are plain comments", () => {
+  for (const comment of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+    const { text } = docNotesMessage(file, [{ kind: "text", quote: "q", comment }]);
+    expect(parseDocNotes(text).notes[0].comment).toBe(comment);
+  }
+});
+
+test("literal backslashes before a reserved prefix survive the round trip", () => {
+  const comments = ["\\## 2 · literal", "\\> literal", "\\\\> dos", "texto\n\\## 3 · x"];
+  for (const comment of comments) {
+    const { text } = docNotesMessage(file, [{ kind: "text", quote: "q", comment }]);
+    expect(parseDocNotes(text).notes[0].comment).toBe(comment);
+  }
+});

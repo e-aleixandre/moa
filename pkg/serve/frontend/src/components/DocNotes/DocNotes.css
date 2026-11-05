@@ -147,7 +147,8 @@
 .dn-doc .dn-sent::before { background: var(--zl-t4); }
 .dn-doc li.dn-picked::before, .dn-doc li.dn-noted::before, .dn-doc li.dn-sent::before { left: -33px; }
 .dn-doc tr.dn-picked::before, .dn-doc tr.dn-noted::before, .dn-doc tr.dn-sent::before { display: none; }
-.dn-doc tr.dn-noted, .dn-doc tr.dn-sent { box-shadow: inset 3px 0 0 var(--zl-peach); }
+.dn-doc tr.dn-noted { box-shadow: inset 3px 0 0 var(--zl-peach); }
+.dn-doc tr.dn-sent { box-shadow: inset 3px 0 0 var(--zl-t4); }
 .dn-item-q { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 @media (hover: hover) {
   .dn-doc [data-dn]:hover { background: color-mix(in srgb, var(--zl-t1) 4%, transparent); }

@@ -16,7 +16,8 @@ export const INTERACTIVE_SELECTOR = 'a, button, input, select, textarea, summary
 
 export const QUICK_REPLIES = ['Yes', 'No', 'Your call'];
 // "Your call" must reach the agent as an instruction, not as a bare phrase.
-const QUICK_MEANING = { 'Your call': 'Your call — go with your recommendation.' };
+const YOUR_CALL = 'Your call';
+const YOUR_CALL_MEANING = 'Your call — go with your recommendation.';
 
 export function draftKey(sessionId, fileId) {
   return `${DRAFT_PREFIX}${sessionId}.${fileId}`;
@@ -68,16 +69,20 @@ export function resolveAnchors(blockTexts, notes) {
   for (const note of notes) {
     const quote = norm(note.quote);
     if (note.anchor == null || !quote) continue;
-    const probe = quote.includes(' … ') ? quote.split(' … ')[0] : quote;
-    const hit = blocks[note.anchor]?.includes(probe) ? note.anchor : blocks.findIndex((b) => b.includes(probe));
+    let hit = blocks[note.anchor]?.includes(quote) ? note.anchor : blocks.findIndex((b) => b.includes(quote));
+    // A selection that runs across blocks is in none of them whole: it stays
+    // where it started if that block still opens the same way.
+    if (hit < 0 && blocks[note.anchor]?.includes(quote.slice(0, 30))) hit = note.anchor;
     if (hit >= 0) out.set(note.id, hit);
   }
   return out;
 }
 
 // A comment line that looks like the format must not be read as the format.
-const escapeLine = (line) => (/^(## |> )/.test(line) ? `\\${line}` : line);
-const unescapeLine = (line) => (/^\\(## |> )/.test(line) ? line.slice(1) : line);
+// Backslashes in front of a reserved prefix are escaped too, so a literal
+// "\## x" survives the trip.
+const escapeLine = (line) => (/^\\*(## |> )/.test(line) ? `\\${line}` : line);
+const unescapeLine = (line) => (/^\\+(## |> )/.test(line) ? line.slice(1) : line);
 
 // docNotesMessage — the message a batch becomes. Area notes (F2) carry their
 // crop as an image attachment; the note names which one, in order.
@@ -97,7 +102,7 @@ export function docNotesMessage({ name, url }, notes) {
     const lines = [`## ${index + 1}${where ? ` · ${where}` : ''}`];
     if (note.quote) lines.push(`> ${clip(note.quote)}`);
     const comment = String(note.comment || '').trim();
-    lines.push(comment ? (QUICK_MEANING[comment] || comment).split('\n').map(escapeLine).join('\n') : '(no comment)');
+    lines.push(comment ? (comment === YOUR_CALL ? YOUR_CALL_MEANING : comment).split('\n').map(escapeLine).join('\n') : '(no comment)');
     return lines.join('\n');
   });
   const head = `${DOC_NOTES_MARKER} · ${name} · ${notes.length} ${notes.length === 1 ? 'note' : 'notes'}]`;

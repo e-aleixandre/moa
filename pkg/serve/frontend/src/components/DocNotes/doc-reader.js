@@ -150,7 +150,10 @@ export function useMarkdownNotes(articleRef, dn, html) {
     const blocks = Array.from(root.querySelectorAll('[data-dn]'));
     blocks.forEach((el) => el.classList.remove('dn-picked', 'dn-noted', 'dn-sent'));
     root.querySelectorAll('.dn-quick.is-on').forEach((el) => el.classList.remove('is-on'));
-    const marks = marksOf(resolveAnchors(blocks.map(blockQuote), dn.notes), dn);
+    const resolved = resolveAnchors(blocks.map(blockQuote), dn.notes);
+    // A republished document shifts the blocks: bring the drafts with it.
+    dn.reanchor(resolved);
+    const marks = marksOf(resolved, dn);
     const at = (index) => root.querySelector(`[data-dn="${index}"]`);
     marks.sent.forEach((i) => at(i)?.classList.add('dn-sent'));
     marks.noted.forEach((i) => at(i)?.classList.add('dn-noted'));

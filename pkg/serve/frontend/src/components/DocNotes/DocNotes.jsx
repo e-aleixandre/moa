@@ -27,13 +27,15 @@ export function useDocNotes(sessionId, artifact) {
   const [reviewing, setReviewing] = useState(false);
   const [sending, setSending] = useState(false);
   const [flash, setFlash] = useState('');
-  const [sendError, setSendError] = useState(false);
+  // The notes that failed to go, or null.
+  const [sendError, setSendError] = useState(null);
+  const sendingRef = useRef(false);
   // What the note field holds right now, so switching to another block never
   // throws away what was typed. The field owns it; the hook only reads it.
   const typed = useRef('');
   const voiceRef = useRef(null);
   const latest = useRef({});
-  latest.current = { notes, pick, editingId, sessionId, fileId };
+  latest.current = { notes, pick, editingId, sessionId, fileId, sendError };
 
   const persist = useCallback((next) => {
     setNotes(next);
@@ -60,7 +62,7 @@ export function useDocNotes(sessionId, artifact) {
 
   useEffect(() => {
     setNotes(fileId ? loadNotes(sessionId, fileId) : []);
-    setPick(null); setEditingId(null); setReviewing(false); setSendError(false);
+    setPick(null); setEditingId(null); setReviewing(false); setSendError(null);
     typed.current = '';
     return () => { if (fileId) flush({ sessionId, fileId }); };
   }, [sessionId, fileId]);
@@ -68,6 +70,7 @@ export function useDocNotes(sessionId, artifact) {
   const drafts = notes.filter((n) => !n.sentAt);
 
   const choose = useCallback((next) => {
+    if (sendingRef.current) return;
     const { pick: p, editingId: id } = latest.current;
     // Moving the handles of a selection inside the same block refines the pick
     // being written; it is not a new note.
@@ -102,53 +105,73 @@ export function useDocNotes(sessionId, artifact) {
     setPick(null); setEditingId(null);
   }, [persist]);
 
-  const deliver = useCallback(async (batch) => {
-    const { sessionId: target } = latest.current;
+  // The send is slow and the reader is not frozen while it runs, so what it
+  // settles is identified up front: the document it started on and the notes it
+  // carried. Nothing it does afterwards reads "the current" reader.
+  const deliver = useCallback(async (batch, target) => {
     const { text, attachments } = docNotesMessage({ name: artifact.name, url: artifact.url }, batch);
+    sendingRef.current = true;
     setSending(true);
-    setSendError(false);
+    setSendError(null);
     try {
       // sendMessage returns nothing when the conversation is not loaded here:
       // that is a failure the user must hear about, not a send.
-      const action = await sendMessage(target, text, attachments);
+      const action = await sendMessage(target.sessionId, text, attachments);
       if (!action) throw new Error('not sent');
       return true;
     } catch (_) {
-      setSendError(true);
+      // What failed to go is what "Copy notes" must hand back.
+      setSendError(batch);
       return false;
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }, [artifact]);
 
+  // markSent stamps the carried notes as sent under the key they belong to,
+  // whichever document the reader is on by now.
+  const markSent = useCallback((target, sent) => {
+    const here = latest.current.sessionId === target.sessionId && latest.current.fileId === target.fileId;
+    const base = here ? latest.current.notes : loadNotes(target.sessionId, target.fileId);
+    const stamp = Date.now();
+    const ids = new Set(sent.map((n) => n.id));
+    const next = [...base.filter((n) => !ids.has(n.id)), ...sent.map((n) => ({ ...n, sentAt: stamp }))];
+    saveNotes(target.sessionId, target.fileId, next);
+    if (here) setNotes(next);
+    return here;
+  }, []);
+
   const sendNow = useCallback(async (comment) => {
-    const { notes: current, pick: p, editingId: id } = latest.current;
-    if (!p) return;
+    const { notes: current, pick: p, editingId: id, sessionId: s, fileId: f } = latest.current;
+    if (!p || sendingRef.current) return;
     const note = { ...(id ? current.find((n) => n.id === id) : null), ...p, id: id || newId(), comment, created: Date.now() };
-    if (!(await deliver([note]))) return;
+    const target = { sessionId: s, fileId: f };
+    if (!(await deliver([note], target))) return;
+    if (!markSent(target, [note])) return;
     typed.current = '';
-    const rest = latest.current.notes.filter((n) => n.id !== note.id);
-    persist([...rest, { ...note, sentAt: Date.now() }]);
     setPick(null); setEditingId(null);
     setFlash('Sent');
     setTimeout(() => setFlash(''), 1800);
-  }, [deliver, persist]);
+  }, [deliver, markSent]);
 
   const sendAll = useCallback(async () => {
+    if (sendingRef.current) return;
     const after = flush();
     const batch = after.filter((n) => !n.sentAt);
     if (!batch.length) return;
-    requestConversationPin(latest.current.sessionId);
-    if (!(await deliver(batch))) return;
-    const stamp = Date.now();
-    persist(after.map((n) => (n.sentAt ? n : { ...n, sentAt: stamp })));
+    const target = { sessionId: latest.current.sessionId, fileId: latest.current.fileId };
+    requestConversationPin(target.sessionId);
+    if (!(await deliver(batch, target))) return;
+    if (!markSent(target, batch)) return;
     setPick(null); setEditingId(null); setReviewing(false);
     closeArtifacts();
-  }, [deliver, flush, persist]);
+  }, [deliver, flush, markSent]);
 
   // A quick reply is a whole note on its own; the same reply again takes it
   // back, another one replaces it.
   const quick = useCallback((target, reply) => {
+    if (sendingRef.current) return;
     const current = flush();
     const existing = current.find((n) => !n.sentAt && n.anchor === target.anchor && n.kind !== 'area');
     if (existing && existing.comment === reply) persist(current.filter((n) => n.id !== existing.id));
@@ -157,6 +180,22 @@ export function useDocNotes(sessionId, artifact) {
     cancel();
   }, [flush, persist, cancel]);
 
+  // reanchor moves each text note to where its quote sits in the document as it
+  // is now (or to nowhere when the quote is gone), so every lookup by block
+  // index (tapping a block, a quick reply) agrees with the marks.
+  const reanchor = useCallback((resolved) => {
+    const current = latest.current.notes;
+    let changed = false;
+    const next = current.map((n) => {
+      if (n.kind === 'area' || n.anchor == null) return n;
+      const index = resolved.get(n.id) ?? null;
+      if (index === n.anchor) return n;
+      changed = true;
+      return { ...n, anchor: index };
+    });
+    if (changed) persist(next);
+  }, [persist]);
+
   const remove = useCallback((id) => {
     const next = latest.current.notes.filter((n) => n.id !== id);
     persist(next);
@@ -164,6 +203,7 @@ export function useDocNotes(sessionId, artifact) {
   }, [persist]);
 
   const edit = useCallback((id) => {
+    if (sendingRef.current) return;
     const note = latest.current.notes.find((n) => n.id === id);
     if (!note) return;
     typed.current = note.comment || '';
@@ -173,7 +213,7 @@ export function useDocNotes(sessionId, artifact) {
   }, []);
 
   const copyNotes = useCallback(async () => {
-    const batch = latest.current.notes.filter((n) => !n.sentAt);
+    const batch = Array.isArray(latest.current.sendError) ? latest.current.sendError : latest.current.notes.filter((n) => !n.sentAt);
     const ok = await copyToClipboard(docNotesMessage({ name: artifact.name, url: artifact.url }, batch).text);
     addToast({ title: ok ? 'Notes copied' : 'Could not copy', type: ok ? 'info' : 'error' });
   }, [artifact]);
@@ -190,7 +230,7 @@ export function useDocNotes(sessionId, artifact) {
 
   return {
     notes, drafts, pick, editingId, reviewing, sending, flash, sendError, typed, voiceRef,
-    choose, cancel, add, sendNow, sendAll, remove, edit, quick, copyNotes, escape, setReviewing,
+    choose, cancel, add, sendNow, sendAll, remove, edit, quick, reanchor, copyNotes, escape, setReviewing,
   };
 }
 
@@ -292,7 +332,7 @@ function NoteComposer({ dn }) {
         <button type="button" class="dn-btn dn-btn-ghost" disabled={!ready || dn.sending} onClick={() => dn.sendNow(text.trim())}>
           {dn.sending && <Loader2 size={14} class="spin" />}Send now
         </button>
-        <button type="button" class="dn-btn dn-btn-primary" disabled={!ready} onClick={() => dn.add(text.trim())}>
+        <button type="button" class="dn-btn dn-btn-primary" disabled={!ready || dn.sending} onClick={() => dn.add(text.trim())}>
           {dn.editingId ? 'Save' : 'Add'}
         </button>
       </div>
@@ -324,7 +364,12 @@ export function NotesReview({ dn }) {
         ))}
       </ol>
       <div class="dn-dock has-notes">
-        <span class="dn-hint-t">Tap a note to edit it</span>
+        {dn.sendError ? (
+          <span class="dn-error" role="alert">
+            Not sent
+            <button type="button" class="dn-link" onClick={dn.copyNotes}>Copy notes</button>
+          </span>
+        ) : <span class="dn-hint-t">Tap a note to edit it</span>}
         <button type="button" class="dn-btn dn-btn-primary" onClick={dn.sendAll} disabled={dn.sending || !count}>
           {dn.sending && <Loader2 size={15} class="spin" />}Send {count}
         </button>
