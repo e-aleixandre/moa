@@ -26,7 +26,12 @@ export function useDocNotes(sessionId, artifact) {
   const [pick, setPick] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [reviewing, setReviewing] = useState(false);
-  const [areaMode, setAreaMode] = useState(false);
+  const [areaMode, setAreaModeState] = useState(false);
+  // Bumped synchronously whenever area mode ends or the document changes, so a
+  // box still being read (PDF text extraction) can tell it was cancelled
+  // without waiting for a render.
+  const areaEpoch = useRef(0);
+  const setAreaMode = useCallback((on) => { if (!on) areaEpoch.current += 1; setAreaModeState(on); }, []);
   const [sending, setSending] = useState(false);
   const [flash, setFlash] = useState('');
   // The notes that failed to go, with the document they belong to, or null.
@@ -240,7 +245,7 @@ export function useDocNotes(sessionId, artifact) {
   }, [reviewing, areaMode, cancel]);
 
   return {
-    notes, drafts, pick, editingId, reviewing, areaMode, setAreaMode, sending, flash, sendError, typed, voiceRef,
+    notes, drafts, pick, editingId, reviewing, areaMode, setAreaMode, areaEpoch, sending, flash, sendError, typed, voiceRef,
     choose, cancel, add, sendNow, sendAll, remove, edit, quick, copyNotes, resolvedRef, freshRef, escape, setReviewing,
   };
 }

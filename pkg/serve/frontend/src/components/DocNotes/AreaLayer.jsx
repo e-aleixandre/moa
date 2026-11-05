@@ -102,13 +102,13 @@ export function AreaLayer({ dn }) {
   const layer = useRef(null);
   const [box, setBox] = useState(null);
   const start = useRef(null);
-  // Bumped whenever the mode ends (Escape, Cancel, another file, unmount): a
-  // box still being read when that happens must not open a note afterwards.
-  const epoch = useRef(0);
+  // A box still being read when the mode ends (Escape, Cancel, another file)
+  // must not open a note afterwards: the hook's epoch moves synchronously then.
   useEffect(() => {
     if (!dn.areaMode) setBox(null);
-    return () => { epoch.current += 1; start.current = null; };
+    return () => { start.current = null; };
   }, [dn.areaMode]);
+  useEffect(() => () => { dn.areaEpoch.current += 1; }, []);
   if (!dn.areaMode) return null;
 
   const local = (event) => {
@@ -133,9 +133,9 @@ export function AreaLayer({ dn }) {
     if (!s || !box || box.w < MIN_BOX || box.h < MIN_BOX) { setBox(null); return; }
     const r = layer.current.getBoundingClientRect();
     const screen = { left: r.left + box.x, top: r.top + box.y, right: r.left + box.x + box.w, bottom: r.top + box.y + box.h };
-    const mine = epoch.current;
+    const mine = dn.areaEpoch.current;
     const pick = await markArea(layer.current, screen);
-    if (mine !== epoch.current) return;
+    if (mine !== dn.areaEpoch.current) return;
     setBox(null);
     if (pick) { dn.setAreaMode(false); dn.choose(pick); }
   };
