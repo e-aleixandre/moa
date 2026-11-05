@@ -39,6 +39,24 @@ test('liveTrayAgents includes only live child sessions for an owner', () => {
   expect(chips.find((chip) => chip.id === 'failed').time).toBeUndefined();
 });
 
+test('liveTrayAgents keeps an idle child whose async jobs are still alive, with its idle state', () => {
+  const ownerSession = { id: 'owner-session', kind: 'owner', messages: [], subagents: {} };
+  const sessions = {
+    polled: { id: 'polled', ownerId: 'owner-1', title: 'Fan-out', state: 'idle', backgroundJobs: 2 },
+    watched: { id: 'watched', ownerId: 'owner-1', title: 'Watched', state: 'idle', subagentCount: 1 },
+    bash: { id: 'bash', ownerId: 'owner-1', title: 'Dev server', state: 'idle', subagents: { b1: { status: 'running', kind: 'bash' } } },
+    done: { id: 'done', ownerId: 'owner-1', title: 'Finished', state: 'idle', backgroundJobs: 0, subagentCount: 0 },
+  };
+  const chips = liveTrayAgents(ownerSession, sessions, [{ id: 'owner-1', session_id: 'owner-session' }])
+    .filter((chip) => chip.kind === 'session');
+  expect(chips.map((c) => c.id)).toEqual(['polled', 'watched', 'bash']);
+  expect(chips.every((c) => c.state === 'idle' && c.action === 'Idle' && c.time === undefined)).toBe(true);
+  // Once the last job ends the usual rule applies again.
+  sessions.polled.backgroundJobs = 0;
+  expect(liveTrayAgents(ownerSession, sessions, [{ id: 'owner-1', session_id: 'owner-session' }])
+    .some((c) => c.id === 'polled')).toBe(false);
+});
+
 test('liveTrayAgents adds no session chips for a non-owner session', () => {
   const chips = liveTrayAgents(
     { id: 'ordinary', messages: [], subagents: {} },

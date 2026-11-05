@@ -534,6 +534,11 @@ func (r *SessionRuntime) BackgroundWork() int {
 	return r.sctx.BackgroundWork()
 }
 
+// BackgroundJobs is the number of live async subagents and background bash jobs.
+func (r *SessionRuntime) BackgroundJobs() int {
+	return r.sctx.BackgroundJobs()
+}
+
 // DoIfQuiescent runs fn atomically with respect to run-start if the session is
 // quiescent, returning whether it ran. It holds the state lock across fn (via
 // StateMachine.DoIfIdle) so a run cannot begin between the quiescence check and

@@ -158,6 +158,7 @@ import {
   bookWrites,
   shortModel,
   modelCodename,
+  hasBackgroundJobs,
 } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
 import { splitAskResponder, answererLabel } from './ask-user-machine.js';
@@ -1023,8 +1024,11 @@ export function liveTrayAgents(session, sessions = {}, owners = []) {
   const owner = (owners || []).find((candidate) => candidate?.session_id === session.id);
   if (!owner) return chips;
   for (const child of Object.values(sessions || {})) {
-    if (!child || (child.ownerId || child.owner_id) !== owner.id ||
-      (child.state !== 'running' && child.state !== 'permission' && child.state !== 'error')) continue;
+    if (!child || (child.ownerId || child.owner_id) !== owner.id) continue;
+    // An idle child whose turn ended with async jobs still alive stays in the
+    // list: the owner reads these names as "what is moving".
+    const lingering = child.state === 'idle' && hasBackgroundJobs(child);
+    if (child.state !== 'running' && child.state !== 'permission' && child.state !== 'error' && !lingering) continue;
     const chip = {
       id: child.id,
       kind: 'session',
@@ -1032,11 +1036,11 @@ export function liveTrayAgents(session, sessions = {}, owners = []) {
       action: child.state === 'error' ? 'Stopped with an error'
         : child.state === 'permission' && child.secretIds?.length > 0 ? 'Needs password'
         : (child.briefProgress || child.briefAttempting || '').trim() ||
-          (child.state === 'permission' ? 'Waiting for permission' : 'Running'),
+          (child.state === 'permission' ? 'Waiting for permission' : lingering ? 'Idle' : 'Running'),
       state: child.state,
       lock: child.state === 'permission' && child.secretIds?.length > 0,
     };
-    if (child.state !== 'error' && child.runStartedAtMs > 0) {
+    if (child.state !== 'error' && !lingering && child.runStartedAtMs > 0) {
       chip.time = formatElapsed(Math.max(0, Date.now() - child.runStartedAtMs));
     }
     chips.push(chip);
