@@ -34,9 +34,13 @@ export function useDocNotes(sessionId, artifact) {
   // set by the reader. Null until the reader has resolved; then a note the
   // document no longer holds has no place, and so never answers a tap.
   const resolvedRef = useRef(null);
+  // Notes made since the reader last resolved are placed on the block they
+  // were taken on; the next resolution takes them over.
+  const freshRef = useRef(new Set());
+  const mint = () => { const id = newId(); freshRef.current.add(id); return id; };
   const anchorOf = (n) => {
     const resolved = resolvedRef.current;
-    if (!resolved) return n.anchor;
+    if (!resolved || freshRef.current.has(n.id)) return n.anchor;
     return resolved.has(n.id) ? resolved.get(n.id) : null;
   };
   const sendingRef = useRef(false);
@@ -64,7 +68,7 @@ export function useDocNotes(sessionId, artifact) {
     if (!p || !comment) return current;
     const next = id
       ? current.map((n) => (n.id === id ? { ...n, comment } : n))
-      : [...current, { ...p, id: newId(), comment, created: Date.now() }];
+      : [...current, { ...p, id: mint(), comment, created: Date.now() }];
     if (at) saveNotes(at.sessionId, at.fileId, next);
     else persist(next);
     return next;
@@ -74,6 +78,7 @@ export function useDocNotes(sessionId, artifact) {
     setNotes(fileId ? loadNotes(sessionId, fileId) : []);
     setPick(null); setEditingId(null); setReviewing(false); setFailed(null);
     resolvedRef.current = null;
+    freshRef.current = new Set();
     typed.current = '';
     return () => { if (fileId) flush({ sessionId, fileId }); };
   }, [sessionId, fileId]);
@@ -111,7 +116,7 @@ export function useDocNotes(sessionId, artifact) {
     typed.current = '';
     persist(id
       ? current.map((n) => (n.id === id ? { ...n, comment } : n))
-      : [...current, { ...p, id: newId(), comment, created: Date.now() }]);
+      : [...current, { ...p, id: mint(), comment, created: Date.now() }]);
     setPick(null); setEditingId(null);
   }, [persist]);
 
@@ -159,7 +164,7 @@ export function useDocNotes(sessionId, artifact) {
   const sendNow = useCallback(async (comment) => {
     const { notes: current, pick: p, editingId: id, sessionId: s, fileId: f } = latest.current;
     if (!p) return;
-    const note = { ...(id ? current.find((n) => n.id === id) : null), ...p, id: id || newId(), comment, created: Date.now() };
+    const note = { ...(id ? current.find((n) => n.id === id) : null), ...p, id: id || mint(), comment, created: Date.now() };
     const target = { sessionId: s, fileId: f };
     stamp(target, [note], Date.now());
     typed.current = '';
@@ -179,7 +184,9 @@ export function useDocNotes(sessionId, artifact) {
     if (!(await deliver(batch, target))) return;
     const here = stamp(target, batch, Date.now());
     if (!here) return;
-    setPick(null); setEditingId(null); setReviewing(false);
+    // Someone who started another note while this went out keeps their reader.
+    if (latest.current.pick) return;
+    setReviewing(false);
     closeArtifacts();
   }, [deliver, flush, stamp]);
 
@@ -190,7 +197,7 @@ export function useDocNotes(sessionId, artifact) {
     const existing = current.find((n) => !n.sentAt && latest.current.anchorOf(n) === target.anchor && n.kind !== 'area');
     if (existing && existing.comment === reply) persist(current.filter((n) => n.id !== existing.id));
     else if (existing) persist(current.map((n) => (n.id === existing.id ? { ...n, comment: reply } : n)));
-    else persist([...current, { ...target, id: newId(), comment: reply, created: Date.now() }]);
+    else persist([...current, { ...target, id: mint(), comment: reply, created: Date.now() }]);
     cancel();
   }, [flush, persist, cancel]);
 
