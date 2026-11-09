@@ -271,6 +271,20 @@ var knownModels = map[string]Model{
 		Name: "Muse Spark 1.3 (contributor, data shared)", MaxInput: 1_000_000, MaxOutput: 131072,
 		Pricing: &Pricing{Input: 0.10, Output: 0.20, CacheRead: 0.002},
 	},
+	// Ember is Standard mode only (no contributor SKU). Unlike Spark it bills
+	// a request whose input, cache included, exceeds 200K tokens entirely at
+	// the long rates. Limits and prices: dev.meta.ai/docs/muse-ember and
+	// /docs/pricing-rate-limits.
+	"muse-ember-1.0": {
+		ID: "muse-ember-1.0", Provider: "meta", API: "meta-responses",
+		Name: "Muse Ember 1.0", MaxInput: 1_048_576, MaxOutput: 524_288,
+		Pricing: &Pricing{
+			Input: 0.10, Output: 0.50, CacheRead: 0.004,
+			Tiers: []PricingTier{
+				{Threshold: 200_001, Input: 0.30, Output: 1.50, CacheRead: 0.012},
+			},
+		},
+	},
 }
 
 // ReasoningEffortsForModel returns the validated reasoning efforts a model
@@ -483,6 +497,7 @@ var modelDisplayOrder = []string{
 	// Meta
 	"muse-spark-1.3",
 	"muse-spark-1.3-contributor",
+	"muse-ember-1.0",
 	// OpenAI
 	"gpt-6-astra",
 	"gpt-6.1-sol",

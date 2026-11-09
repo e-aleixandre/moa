@@ -89,6 +89,34 @@ func TestResolveModel_Muse(t *testing.T) {
 	}
 }
 
+// Source: dev.meta.ai/docs/muse-ember and /docs/pricing-rate-limits (08/11).
+func TestMuseEmberPricing(t *testing.T) {
+	model, ok := ResolveModel("meta/muse-ember-1.0")
+	if !ok || model.Provider != "meta" || model.API != "meta-responses" || model.Pricing == nil {
+		t.Fatalf("muse-ember-1.0 must resolve under meta with pricing: %+v, %v", model, ok)
+	}
+	if model.MaxInput != 1_048_576 || model.MaxOutput != 524_288 {
+		t.Fatalf("limits = %d/%d", model.MaxInput, model.MaxOutput)
+	}
+	want := Pricing{Input: 0.10, Output: 0.50, CacheRead: 0.004, Tiers: []PricingTier{{Threshold: 200_001, Input: 0.30, Output: 1.50, CacheRead: 0.012}}}
+	if !reflect.DeepEqual(*model.Pricing, want) {
+		t.Fatalf("pricing = %+v, want %+v", *model.Pricing, want)
+	}
+	// Exactly 200K stays short; cached tokens count toward the tier.
+	if got, w := model.Pricing.Cost(Usage{Input: 200_000}), 0.02; math.Abs(got-w) > 1e-12 {
+		t.Fatalf("200K cost = %v, want %v", got, w)
+	}
+	if got, w := model.Pricing.Cost(Usage{Input: 100_000, CacheRead: 100_001, Output: 1_000}), 0.03+100_001*0.012/1e6+0.0015; math.Abs(got-w) > 1e-12 {
+		t.Fatalf("long cost = %v, want %v", got, w)
+	}
+	if _, ok := ResolveModel("muse-ember-1.0-contributor"); ok {
+		t.Fatal("Ember has no contributor variant")
+	}
+	if m, _ := ResolveModel("muse"); m.ID != "muse-spark-1.3" {
+		t.Fatalf("muse alias must stay on Spark, got %s", m.ID)
+	}
+}
+
 func TestGrokPricing(t *testing.T) {
 	model, ok := ResolveModel("grok-4.5")
 	if !ok || model.Pricing == nil {
