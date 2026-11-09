@@ -177,9 +177,9 @@ func TestGrok47Pricing(t *testing.T) {
 }
 
 func TestFable51Pricing(t *testing.T) {
-	model, ok := ResolveModel("fable")
-	if !ok || model.ID != "claude-fable-5-1" || model.Pricing == nil {
-		t.Fatalf("fable alias = %+v, %v; want claude-fable-5-1", model, ok)
+	model, ok := ResolveModel("claude-fable-5-1")
+	if !ok || model.Pricing == nil {
+		t.Fatalf("claude-fable-5-1 = %+v, %v; want a priced catalog entry", model, ok)
 	}
 	p := model.Pricing
 	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 ||
@@ -507,8 +507,17 @@ func TestFable52Definition(t *testing.T) {
 		p.Input != 8 || p.Output != 40 || p.CacheRead != 0.2 || p.CacheWrite != 10 || p.CacheWrite1h != 16 {
 		t.Fatalf("Fable 5.2 definition = %+v, pricing = %+v", model, p)
 	}
-	if alias, _ := ResolveModel("fable"); alias.ID != "claude-fable-5-1" {
-		t.Fatalf("fable alias moved to %s; that is the owner's decision", alias.ID)
+	if alias, _ := ResolveModel("fable"); alias.ID != "claude-fable-5-2" {
+		t.Fatalf("fable alias = %s, want claude-fable-5-2 (owner decision 08/11)", alias.ID)
+	}
+	// Fast mode: $16 / $80 per the pricing page, i.e. 2x on every rate, and
+	// the cache multipliers stack on top of it.
+	if p.FastMultiplier != 2 {
+		t.Fatalf("Fable 5.2 FastMultiplier = %v, want 2", p.FastMultiplier)
+	}
+	u := Usage{Input: 1_000_000, Output: 1_000_000, CacheRead: 1_000_000, Fast: true}
+	if got, want := p.Cost(u), 2*(8.0+40+0.2); got != want {
+		t.Fatalf("fast cost = %v, want %v", got, want)
 	}
 }
 
@@ -914,7 +923,7 @@ func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 		"Luna":            "gpt-6-luna",
 		"Astra":           "gpt-6-astra",
 		"Opus":            "claude-opus-5-5",
-		"Fable":           "claude-fable-5-1",
+		"Fable":           "claude-fable-5-2",
 		" sol ":           "gpt-6.1-sol",
 		"openai/Sol":      "gpt-6.1-sol",
 		"ANTHROPIC/Opus":  "claude-opus-5-5",

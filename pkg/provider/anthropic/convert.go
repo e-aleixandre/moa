@@ -66,7 +66,7 @@ type anthropicRequest struct {
 	Thinking     *thinkingConfig  `json:"thinking,omitempty"`
 	OutputConfig *outputConfig    `json:"output_config,omitempty"`
 	// Speed is "fast" to buy latency at a premium, and is only accepted
-	// alongside the fast-mode beta header and on an Opus model.
+	// alongside the fast-mode beta header and on an Opus or Fable 5.2 model.
 	Speed string `json:"speed,omitempty"`
 }
 

@@ -27,7 +27,8 @@ var openAIFastMultipliers = map[string]float64{
 // FastCostMultiplier returns the premium-tier token-price multiplier for a
 // model, or 1 when the model has no fast tier. Anthropic's fast-mode
 // documentation table lists Opus 5 / 4.8 at $10 input / $50 output versus
-// $5 / $25 standard.
+// $5 / $25 standard; Fable 5.2 is $16 / $80 versus $8 / $40, also 2x, and the
+// cache multipliers stack on top.
 func FastCostMultiplier(model Model) float64 {
 	switch model.Provider {
 	case "anthropic", "xai":
@@ -45,8 +46,8 @@ func FastCostMultiplier(model Model) float64 {
 // Fast mode is the same model at a premium speed and price, and each provider
 // gates it differently:
 //
-//   - Anthropic serves it on Opus only; every other model rejects the `speed`
-//     field outright ("does not support the `speed` parameter").
+//   - Anthropic serves it on Opus and Fable 5.2 (fast-mode page); every other
+//     model, Fable 5.1 included, rejects the `speed` field outright ("does not support the `speed` parameter").
 //   - OpenAI offers it per model; see openAIFastMultipliers.
 //   - xAI accepts the priority tier across its catalogue.
 //
@@ -63,7 +64,7 @@ func SupportsFast(modelID string) bool {
 func supportsFastModel(m Model) bool {
 	switch m.Provider {
 	case "anthropic":
-		return strings.Contains(m.ID, "opus")
+		return strings.Contains(m.ID, "opus") || m.ID == "claude-fable-5-2"
 	case "openai":
 		_, ok := openAIFastMultipliers[m.ID]
 		return ok

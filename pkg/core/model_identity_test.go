@@ -3,7 +3,7 @@ package core
 import "testing"
 
 func TestSameModelIdentityNormalizesAliases(t *testing.T) {
-	if !SameModelIdentity("fable", "claude-fable-5-1") {
+	if !SameModelIdentity("fable", "claude-fable-5-2") {
 		t.Fatal("alias and effective ID should match")
 	}
 	if SameModelIdentity("fable", "claude-opus-5") {

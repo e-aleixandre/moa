@@ -41,6 +41,15 @@ func TestFastModeSendsSpeedOnOpus(t *testing.T) {
 	}
 }
 
+func TestFastModeSendsSpeedOnFable52(t *testing.T) {
+	if body := fastBody(t, "claude-fable-5-2", true); body["speed"] != "fast" {
+		t.Errorf(`fable 5.2 with fast mode on sent speed=%v, want "fast"`, body["speed"])
+	}
+	if body := fastBody(t, "claude-fable-5-1", true); body["speed"] != nil {
+		t.Errorf("fable 5.1 got speed=%v; only 5.2 offers fast mode", body["speed"])
+	}
+}
+
 func TestFastModeOmittedWhenOff(t *testing.T) {
 	body := fastBody(t, "claude-opus-5", false)
 	if _, present := body["speed"]; present {

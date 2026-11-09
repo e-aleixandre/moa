@@ -15,6 +15,8 @@ func TestSupportsFast(t *testing.T) {
 	}{
 		{"claude-opus-5", true, "Anthropic serves fast mode on Opus"},
 		{"claude-opus-4-8", true, "Anthropic serves fast mode on Opus"},
+		{"claude-fable-5-2", true, "Fast mode is GA on Fable 5.2 (fast-mode page, 08/11)"},
+		{"fable", true, "alias of claude-fable-5-2"},
 		{"claude-fable-5-1", false, "Fable answers: does not support the `speed` parameter"},
 		{"claude-sonnet-5", false, "Sonnet answers: does not support the `speed` parameter"},
 		{"claude-haiku-4-5-20251001", false, "Haiku answers: does not support the `speed` parameter"},
