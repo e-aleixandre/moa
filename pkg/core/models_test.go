@@ -496,8 +496,25 @@ func TestEffectiveThinkingLevel_GPT6Astra(t *testing.T) {
 	}
 }
 
+func TestFable52Definition(t *testing.T) {
+	model, ok := ResolveModel("claude-fable-5-2")
+	if !ok || model.Pricing == nil {
+		t.Fatalf("claude-fable-5-2 not in catalog: %+v, %v", model, ok)
+	}
+	p := *model.Pricing
+	// platform.claude.com pricing: $8 / $40, cache read 2.5% of input.
+	if model.Name != "Claude Fable 5.2" || model.MaxInput != 1_000_000 ||
+		p.Input != 8 || p.Output != 40 || p.CacheRead != 0.2 || p.CacheWrite != 10 || p.CacheWrite1h != 16 {
+		t.Fatalf("Fable 5.2 definition = %+v, pricing = %+v", model, p)
+	}
+	if alias, _ := ResolveModel("fable"); alias.ID != "claude-fable-5-1" {
+		t.Fatalf("fable alias moved to %s; that is the owner's decision", alias.ID)
+	}
+}
+
 func TestThinkingAlwaysOn_PerModel(t *testing.T) {
 	cases := map[string]bool{
+		"claude-fable-5-2":          true,
 		"claude-fable-5-1":          true,
 		"fable":                     true,
 		"claude-fable-5":            true,
@@ -524,6 +541,7 @@ func TestThinkingAlwaysOn_PerModel(t *testing.T) {
 func TestEffectiveThinkingLevel_AnthropicPerModel(t *testing.T) {
 	levels := []string{"off", "low", "medium", "high", "xhigh", "max"}
 	want := map[string][]string{
+		"claude-fable-5-2":          {"high", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-fable-5-1":          {"high", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-fable-5":            {"high", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-opus-5-5":           {"medium", "low", "medium", "high", "xhigh", "xhigh"},
@@ -1007,6 +1025,7 @@ func TestAnthropicMaxOutputPinnedBySource(t *testing.T) {
 		"claude-opus-5-5":   128_000, // prompting-claude-opus-5-5
 		"claude-sonnet-5-5": 128_000, // prompting-claude-sonnet-5-5
 		"claude-haiku-5-5":  128_000, // prompting-claude-haiku-5-5
+		"claude-fable-5-2":  128_000, // fable-5-2 overview/migration guide: "128k max output tokens"
 		"claude-fable-5-1":  131072,  // unverified: overview says only "128K"
 		"claude-fable-5":    131072,
 		"claude-opus-5":     131072,

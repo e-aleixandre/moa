@@ -224,6 +224,7 @@ func TestBuildRequestBody_Fable51OffStillSendsAdaptiveHigh(t *testing.T) {
 func TestBuildRequestBody_ThinkingPerModelAndLevel(t *testing.T) {
 	levels := []string{"off", "low", "medium", "high", "xhigh"}
 	want := map[string][]string{
+		"claude-fable-5-2":          {"adaptive/high", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-fable-5-1":          {"adaptive/high", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-fable-5":            {"adaptive/high", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
 		"claude-opus-5-5":           {"adaptive/medium", "adaptive/low", "adaptive/medium", "adaptive/high", "adaptive/xhigh"},
@@ -846,6 +847,7 @@ func TestBuildRequestBody_BlockBindingOnBindingModels(t *testing.T) {
 		level string
 		want  bool
 	}{
+		{"claude-fable-5-2", "high", true},
 		{"claude-fable-5-1", "high", true},
 		{"claude-fable-5", "high", false},
 		{"claude-opus-5", "high", false},

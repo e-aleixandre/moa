@@ -11,6 +11,12 @@ var gpt6AstraReasoningEfforts = []string{"low", "medium", "high", "xhigh", "max"
 // Known models with context window sizes and API details.
 var knownModels = map[string]Model{
 	// --- Anthropic ---
+	"claude-fable-5-2": {
+		ID: "claude-fable-5-2", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Fable 5.2", MaxInput: 1_000_000, MaxOutput: 128_000,
+		// $8 / $40; cache reads are 2.5% of input ($0.20), writes 1.25x / 2x.
+		Pricing: &Pricing{Input: 8, Output: 40, CacheRead: 0.2, CacheWrite: 10, CacheWrite1h: 16},
+	},
 	"claude-fable-5-1": {
 		ID: "claude-fable-5-1", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Fable 5.1", MaxInput: 1_000_000, MaxOutput: 131072,
@@ -485,6 +491,7 @@ type ModelEntry struct {
 // provider-then-name order.
 var modelDisplayOrder = []string{
 	// Anthropic
+	"claude-fable-5-2",
 	"claude-fable-5-1",
 	"claude-fable-5",
 	"claude-opus-5-5",
