@@ -153,7 +153,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 
 `daybreak` (and the retired `gpt-daybreak-blue-latest`) means `gpt-6-sol` with the Daybreak mode on; it needs Daybreak provisioning and the ChatGPT plan login. In `subagent_allowed_models` it allows GPT-6 Sol with Daybreak.
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5-2`, `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-haiku-5-5`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-ember-1.0`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-haiku-5-5`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-ember-1.0`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
 ## Thinking levels
 
@@ -188,7 +188,7 @@ CLI flag, and only some models can serve it:
 
 | Provider | Models that support it | What it costs |
 |---|---|---|
-| Anthropic | Opus models only | 2.5× faster, billed as separate usage credits |
+| Anthropic | Opus models and Fable 5.2 | 2.5× faster, billed as separate usage credits |
 | OpenAI | `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna` | Fast mode, 2× the token rate |
 | OpenAI | `gpt-5.6-sol` | up to 2.5× faster, burns credits 2× |
 | OpenAI | `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4-mini`, `gpt-5.3-codex` | Fast mode, burns credits 2× |
