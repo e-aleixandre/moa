@@ -153,7 +153,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 
 `daybreak` (and the retired `gpt-daybreak-blue-latest`) means `gpt-6-sol` with the Daybreak mode on; it needs Daybreak provisioning and the ChatGPT plan login. In `subagent_allowed_models` it allows GPT-6 Sol with Daybreak.
 
-You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-haiku-5-5`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-ember-1.0`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
+You can also use canonical IDs (`claude-sonnet-5`) or provider-prefixed IDs (`anthropic/claude-sonnet-5`). Some known models have no alias and are reachable only by ID: `claude-fable-5-2`, `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-haiku-5-5`, `gpt-5.6-luna`, `grok-4.5`, `grok-4.6`, `muse-ember-1.0`, `muse-spark-1.3-contributor` (cheaper, but Meta trains on its prompts). Provider-prefixed custom IDs, including `xai/<model-id>`, are accepted, but context-window management and any unverified pricing metadata are disabled for them.
 
 ## Thinking levels
 
@@ -163,7 +163,7 @@ model does with them differs:
 - **xAI Grok** requires reasoning: `off`/`low` collapse to `low`, `xhigh` to
   `high`. Only `low`, `medium`, `high` are distinct there.
 - **Meta Muse Spark** always reasons: `off` becomes `low`.
-- **Claude Fable 5, Fable 5.1 and Opus 5.5** think on every turn. `off` is not a
+- **Claude Fable 5, Fable 5.1, Fable 5.2 and Opus 5.5** think on every turn. `off` is not a
   real setting for them: it runs at the model's default effort (`high` on
   Fable, `medium` on Opus 5.5), and the web selector hides the option.
 - **Claude Sonnet 5.5** cannot turn thinking fully off. `off` sends its lowest
