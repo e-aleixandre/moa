@@ -140,8 +140,10 @@ model registry.
 
 The Meta models are `muse-spark-1.3` (also available as `muse`) and
 `muse-spark-1.3-contributor`. The contributor variant is much cheaper because
-Meta uses its prompts to improve their products. Muse Spark always reasons, so
-`off` resolves to its lowest effort.
+Meta uses its prompts to improve their products. `muse-ember-1.0` is Meta's
+cheap execution model (Standard mode only, no alias); a request with more than
+200K input tokens, cache included, is billed entirely at its higher long-context
+rates. Muse models always reason, so `off` resolves to the lowest effort.
 
 The OpenAI models `gpt-6.1-sol`, `gpt-6.1-terra` and `gpt-6-luna` are also available as `sol`,
 `terra` and `luna` (`gpt-6-sol` and `gpt-5.6-terra` stay selectable by ID). `gpt-6-astra` is available as
