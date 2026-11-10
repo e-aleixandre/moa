@@ -37,6 +37,19 @@ have to reconstruct spending from session files:
   entries split by provider, model and role, each with its `messages` count,
   tokens and cost.
 
+Tool and compaction telemetry is also available:
+
+- `agent_start` advertises `subagent_tools` and `compaction_usage` in its
+  `telemetry` list, so consumers can distinguish an older CLI from a run with
+  no child tool calls.
+- `tool_execution_start` and `tool_execution_end` include `subagent_id` for
+  a child's tools; main-agent tool events have no child ID.
+- `compaction_end` includes `summarizer` metadata when available, with token
+  fields only when a call reported usage. Background summaries also carry
+  `background: true` and `job_id`.
+- `compaction_usage` reports a background summary call's token usage under
+  the same `job_id`, even if its summary is later discarded.
+
 ```jsonl
 {"type":"message_usage","role":"main","provider":"anthropic","model":"claude-sonnet-5","input":1204,"output":318,"cache_read":8192,"cache_write":0,"cost_usd":0.008}
 {"type":"summary","turns":2,"tools_completed":3,"files_touched":["main.go"],"elapsed_seconds":41,"cost_usd":0.0143,"usage":{"input":1600,"output":420,"cache_read":8192,"cache_write":0},"by_model":[{"provider":"anthropic","model":"claude-sonnet-5","role":"main","messages":2,"input":1600,"output":420,"cache_read":8192,"cache_write":0,"cost_usd":0.0143}]}

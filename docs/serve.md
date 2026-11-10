@@ -656,6 +656,11 @@ A paragraph that opens with a bold number and asks a question (`**P1.** Do you
 want…?`) shows **Yes**, **No** and **Your call** under it; one tap is a whole
 note, and **Your call** tells the agent to go with its recommendation.
 
+In a PDF or image, tap **Mark an area to comment** and drag a box over the
+part you want to comment on. The note includes a crop; a PDF note also quotes any text found
+inside the box. Add, review and send these notes from the same tray as text
+notes. **Cancel** leaves area-marking mode without adding a note.
+
 Keep files you want to revisit in a stable location. Artifacts retain a reference
 to the original file, **not a copy or a version**:
 
@@ -1087,6 +1092,11 @@ to the lock screen. Sessions under an owner report to that owner instead of
 publishing News themselves. Recent news and its read state are provided to
 the publishing session to help it avoid repeating an update as new; this is
 guidance, not a guarantee against repetition.
+
+The agent receives its open questions and recent News as saved context
+snapshots when that state changes, and again after compaction. Older snapshots
+remain history; the latest one governs. These internal snapshots are not
+shown as messages in the conversation.
 
 This is separate from **Events**, which holds incoming external webhooks.
 `GET /api/for-you` returns the current waiting items and news; resolving an
