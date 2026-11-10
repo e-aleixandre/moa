@@ -11,6 +11,12 @@ var gpt6AstraReasoningEfforts = []string{"low", "medium", "high", "xhigh", "max"
 // Known models with context window sizes and API details.
 var knownModels = map[string]Model{
 	// --- Anthropic ---
+	"claude-fable-5-2": {
+		ID: "claude-fable-5-2", Provider: "anthropic", API: "anthropic-messages",
+		Name: "Claude Fable 5.2", MaxInput: 1_000_000, MaxOutput: 128_000,
+		// $8 / $40; cache reads are 2.5% of input ($0.20), writes 1.25x / 2x.
+		Pricing: &Pricing{Input: 8, Output: 40, CacheRead: 0.2, CacheWrite: 10, CacheWrite1h: 16},
+	},
 	"claude-fable-5-1": {
 		ID: "claude-fable-5-1", Provider: "anthropic", API: "anthropic-messages",
 		Name: "Claude Fable 5.1", MaxInput: 1_000_000, MaxOutput: 131072,
@@ -271,6 +277,20 @@ var knownModels = map[string]Model{
 		Name: "Muse Spark 1.3 (contributor, data shared)", MaxInput: 1_000_000, MaxOutput: 131072,
 		Pricing: &Pricing{Input: 0.10, Output: 0.20, CacheRead: 0.002},
 	},
+	// Ember is Standard mode only (no contributor SKU). Unlike Spark it bills
+	// a request whose input, cache included, exceeds 200K tokens entirely at
+	// the long rates. Limits and prices: dev.meta.ai/docs/muse-ember and
+	// /docs/pricing-rate-limits.
+	"muse-ember-1.0": {
+		ID: "muse-ember-1.0", Provider: "meta", API: "meta-responses",
+		Name: "Muse Ember 1.0", MaxInput: 1_048_576, MaxOutput: 524_288,
+		Pricing: &Pricing{
+			Input: 0.10, Output: 0.50, CacheRead: 0.004,
+			Tiers: []PricingTier{
+				{Threshold: 200_001, Input: 0.30, Output: 1.50, CacheRead: 0.012},
+			},
+		},
+	},
 }
 
 // ReasoningEffortsForModel returns the validated reasoning efforts a model
@@ -297,7 +317,7 @@ var modelAliases = map[string]string{
 	"sonnet": "claude-sonnet-5-5",
 	"opus":   "claude-opus-5-5",
 	"haiku":  "claude-haiku-4-5-20251001",
-	"fable":  "claude-fable-5-1",
+	"fable":  "claude-fable-5-2",
 	// OpenAI
 	"codex":       "gpt-5.3-codex",
 	"codex-spark": "gpt-5.3-codex-spark",
@@ -471,6 +491,7 @@ type ModelEntry struct {
 // provider-then-name order.
 var modelDisplayOrder = []string{
 	// Anthropic
+	"claude-fable-5-2",
 	"claude-fable-5-1",
 	"claude-fable-5",
 	"claude-opus-5-5",
@@ -483,6 +504,7 @@ var modelDisplayOrder = []string{
 	// Meta
 	"muse-spark-1.3",
 	"muse-spark-1.3-contributor",
+	"muse-ember-1.0",
 	// OpenAI
 	"gpt-6-astra",
 	"gpt-6.1-sol",

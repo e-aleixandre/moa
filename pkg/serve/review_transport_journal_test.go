@@ -267,6 +267,8 @@ func TestReviewJournalMaxEscapedTranscriptLine(t *testing.T) {
 	if err := c.addTranscript(voice.Event{Kind: voice.EventTranscript, Role: "user", ItemID: "i", Text: text, Final: true}); err != nil {
 		t.Fatal(err)
 	}
+	// Recovery reads a closed journal, after its asynchronous writer has drained.
+	j.close(false)
 	st, _ := os.Stat(j.path)
 	end, _, ok := readJournalPath(t, j.path)
 	t.Logf("text_bytes=%d journal_bytes=%d recovered_text=%t scanner_limit=%d", len(text), st.Size(), strings.Contains(end.transcript, text), 8*voice.MaxTranscriptBytes)

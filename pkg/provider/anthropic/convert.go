@@ -10,7 +10,7 @@ import (
 
 // Claude Code identity — required for OAuth tokens (Claude Max).
 const (
-	claudeCodeVersion        = "2.1.284"
+	claudeCodeVersion        = "2.1.290"
 	claudeCodeSystemPreamble = "You are Claude Code, Anthropic's official CLI for Claude."
 )
 
@@ -66,7 +66,7 @@ type anthropicRequest struct {
 	Thinking     *thinkingConfig  `json:"thinking,omitempty"`
 	OutputConfig *outputConfig    `json:"output_config,omitempty"`
 	// Speed is "fast" to buy latency at a premium, and is only accepted
-	// alongside the fast-mode beta header and on an Opus model.
+	// alongside the fast-mode beta header and on an Opus or Fable 5.2 model.
 	Speed string `json:"speed,omitempty"`
 }
 
@@ -683,13 +683,14 @@ func resolveMaxTokens(req core.Request) int {
 
 // bindsThinkingPrefix reports whether the model validates a thinking block's
 // signature against everything sent before it. Claude Fable 5.1 was the first
-// to do so; Sonnet 5.5, Opus 5.5 and Haiku 5.5 do too. This applies to every request,
+// to do so, and Fable 5.2 too; Sonnet 5.5, Opus 5.5 and Haiku 5.5 do too. This applies to every request,
 // including the main agent: drop_block opts older accounts into dropping stale
 // reasoning instead of letting it survive prefix edits. Mythos 5.1 does not
 // bind its prefix, so the check stays narrow rather than "5.1 and up".
 func bindsThinkingPrefix(modelID string) bool {
 	id := strings.ToLower(modelID)
-	return strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1") ||
+	return strings.Contains(id, "fable-5-2") || strings.Contains(id, "fable-5.2") ||
+		strings.Contains(id, "fable-5-1") || strings.Contains(id, "fable-5.1") ||
 		strings.Contains(id, "sonnet-5-5") || strings.Contains(id, "sonnet-5.5") ||
 		strings.Contains(id, "haiku-5-5") || strings.Contains(id, "haiku-5.5") ||
 		strings.Contains(id, "opus-5-5") || strings.Contains(id, "opus-5.5")

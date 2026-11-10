@@ -375,6 +375,7 @@ func ThinkingLevelOptions() string {
 // (which thinking types each model accepts). Moa does not expose "max".
 //
 //	model       thinking            levels (moa)           API default effort
+//	Fable 5.2   adaptive, always on low medium high xhigh  high
 //	Fable 5.1   adaptive, always on low medium high xhigh  high
 //	Fable 5     adaptive, always on low medium high xhigh  high
 //	Opus 5.5    adaptive, always on low medium high xhigh  medium
@@ -403,12 +404,13 @@ type AnthropicThinking struct {
 }
 
 // anthropicThinking is ordered: a prefix that is a substring of a later ID
-// (opus-5 in opus-5-5, fable-5 in fable-5-1, sonnet-5 in sonnet-5-5) must
+// (opus-5 in opus-5-5, fable-5 in fable-5-1 and fable-5-2, sonnet-5 in sonnet-5-5) must
 // come after it.
 var anthropicThinking = []struct {
 	ids  []string
 	spec AnthropicThinking
 }{
+	{[]string{"fable-5-2", "fable-5.2"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "high", XHigh: true}},
 	{[]string{"fable-5-1", "fable-5.1"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "high", XHigh: true}},
 	{[]string{"fable-5"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "high", XHigh: true}},
 	{[]string{"opus-5-5", "opus-5.5"}, AnthropicThinking{Adaptive: true, AlwaysOn: true, DefaultEffort: "medium", XHigh: true}},

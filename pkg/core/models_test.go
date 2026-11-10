@@ -89,6 +89,34 @@ func TestResolveModel_Muse(t *testing.T) {
 	}
 }
 
+// Source: dev.meta.ai/docs/muse-ember and /docs/pricing-rate-limits (08/11).
+func TestMuseEmberPricing(t *testing.T) {
+	model, ok := ResolveModel("meta/muse-ember-1.0")
+	if !ok || model.Provider != "meta" || model.API != "meta-responses" || model.Pricing == nil {
+		t.Fatalf("muse-ember-1.0 must resolve under meta with pricing: %+v, %v", model, ok)
+	}
+	if model.MaxInput != 1_048_576 || model.MaxOutput != 524_288 {
+		t.Fatalf("limits = %d/%d", model.MaxInput, model.MaxOutput)
+	}
+	want := Pricing{Input: 0.10, Output: 0.50, CacheRead: 0.004, Tiers: []PricingTier{{Threshold: 200_001, Input: 0.30, Output: 1.50, CacheRead: 0.012}}}
+	if !reflect.DeepEqual(*model.Pricing, want) {
+		t.Fatalf("pricing = %+v, want %+v", *model.Pricing, want)
+	}
+	// Exactly 200K stays short; cached tokens count toward the tier.
+	if got, w := model.Pricing.Cost(Usage{Input: 200_000}), 0.02; math.Abs(got-w) > 1e-12 {
+		t.Fatalf("200K cost = %v, want %v", got, w)
+	}
+	if got, w := model.Pricing.Cost(Usage{Input: 100_000, CacheRead: 100_001, Output: 1_000}), 0.03+100_001*0.012/1e6+0.0015; math.Abs(got-w) > 1e-12 {
+		t.Fatalf("long cost = %v, want %v", got, w)
+	}
+	if _, ok := ResolveModel("muse-ember-1.0-contributor"); ok {
+		t.Fatal("Ember has no contributor variant")
+	}
+	if m, _ := ResolveModel("muse"); m.ID != "muse-spark-1.3" {
+		t.Fatalf("muse alias must stay on Spark, got %s", m.ID)
+	}
+}
+
 func TestGrokPricing(t *testing.T) {
 	model, ok := ResolveModel("grok-4.5")
 	if !ok || model.Pricing == nil {
@@ -149,9 +177,9 @@ func TestGrok47Pricing(t *testing.T) {
 }
 
 func TestFable51Pricing(t *testing.T) {
-	model, ok := ResolveModel("fable")
-	if !ok || model.ID != "claude-fable-5-1" || model.Pricing == nil {
-		t.Fatalf("fable alias = %+v, %v; want claude-fable-5-1", model, ok)
+	model, ok := ResolveModel("claude-fable-5-1")
+	if !ok || model.Pricing == nil {
+		t.Fatalf("claude-fable-5-1 = %+v, %v; want a priced catalog entry", model, ok)
 	}
 	p := model.Pricing
 	if model.MaxInput != 1_000_000 || model.MaxOutput != 131072 ||
@@ -468,8 +496,34 @@ func TestEffectiveThinkingLevel_GPT6Astra(t *testing.T) {
 	}
 }
 
+func TestFable52Definition(t *testing.T) {
+	model, ok := ResolveModel("claude-fable-5-2")
+	if !ok || model.Pricing == nil {
+		t.Fatalf("claude-fable-5-2 not in catalog: %+v, %v", model, ok)
+	}
+	p := *model.Pricing
+	// platform.claude.com pricing: $8 / $40, cache read 2.5% of input.
+	if model.Name != "Claude Fable 5.2" || model.MaxInput != 1_000_000 ||
+		p.Input != 8 || p.Output != 40 || p.CacheRead != 0.2 || p.CacheWrite != 10 || p.CacheWrite1h != 16 {
+		t.Fatalf("Fable 5.2 definition = %+v, pricing = %+v", model, p)
+	}
+	if alias, _ := ResolveModel("fable"); alias.ID != "claude-fable-5-2" {
+		t.Fatalf("fable alias = %s, want claude-fable-5-2 (owner decision 08/11)", alias.ID)
+	}
+	// Fast mode: $16 / $80 per the pricing page, i.e. 2x on every rate, and
+	// the cache multipliers stack on top of it.
+	if p.FastMultiplier != 2 {
+		t.Fatalf("Fable 5.2 FastMultiplier = %v, want 2", p.FastMultiplier)
+	}
+	u := Usage{Input: 1_000_000, Output: 1_000_000, CacheRead: 1_000_000, Fast: true}
+	if got, want := p.Cost(u), 2*(8.0+40+0.2); got != want {
+		t.Fatalf("fast cost = %v, want %v", got, want)
+	}
+}
+
 func TestThinkingAlwaysOn_PerModel(t *testing.T) {
 	cases := map[string]bool{
+		"claude-fable-5-2":          true,
 		"claude-fable-5-1":          true,
 		"fable":                     true,
 		"claude-fable-5":            true,
@@ -496,6 +550,7 @@ func TestThinkingAlwaysOn_PerModel(t *testing.T) {
 func TestEffectiveThinkingLevel_AnthropicPerModel(t *testing.T) {
 	levels := []string{"off", "low", "medium", "high", "xhigh", "max"}
 	want := map[string][]string{
+		"claude-fable-5-2":          {"high", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-fable-5-1":          {"high", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-fable-5":            {"high", "low", "medium", "high", "xhigh", "xhigh"},
 		"claude-opus-5-5":           {"medium", "low", "medium", "high", "xhigh", "xhigh"},
@@ -868,7 +923,7 @@ func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 		"Luna":            "gpt-6-luna",
 		"Astra":           "gpt-6-astra",
 		"Opus":            "claude-opus-5-5",
-		"Fable":           "claude-fable-5-1",
+		"Fable":           "claude-fable-5-2",
 		" sol ":           "gpt-6.1-sol",
 		"openai/Sol":      "gpt-6.1-sol",
 		"ANTHROPIC/Opus":  "claude-opus-5-5",
@@ -979,6 +1034,7 @@ func TestAnthropicMaxOutputPinnedBySource(t *testing.T) {
 		"claude-opus-5-5":   128_000, // prompting-claude-opus-5-5
 		"claude-sonnet-5-5": 128_000, // prompting-claude-sonnet-5-5
 		"claude-haiku-5-5":  128_000, // prompting-claude-haiku-5-5
+		"claude-fable-5-2":  128_000, // fable-5-2 overview/migration guide: "128k max output tokens"
 		"claude-fable-5-1":  131072,  // unverified: overview says only "128K"
 		"claude-fable-5":    131072,
 		"claude-opus-5":     131072,

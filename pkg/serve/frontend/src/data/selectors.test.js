@@ -84,6 +84,7 @@ test('nextThinkingLevel: Grok cycles only supported persisted levels', () => {
 test('thinkingLevelsFor: each Anthropic model offers only the levels it accepts', () => {
   const alwaysOn = ['low', 'medium', 'high', 'xhigh'];
   const cases = {
+    'claude-fable-5-2': alwaysOn,
     'claude-fable-5-1': alwaysOn,
     'claude-fable-5': alwaysOn,
     'claude-opus-5-5': alwaysOn,
