@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -115,7 +116,7 @@ func checkMark(snap Snapshot, units map[string]Unit, due map[string]bool, m Mark
 			return fmt.Errorf("%s: fecha, punto and que_cambia must be short single lines", m.Old)
 		}
 	}
-	if !contains(old.Files, m.OldQuote.Path) || !contains(nu.Files, m.NewQuote.Path) {
+	if !slices.Contains(old.Files, m.OldQuote.Path) || !slices.Contains(nu.Files, m.NewQuote.Path) {
 		return fmt.Errorf("%s: each quote must come from its own decision", m.Old)
 	}
 	if !quoteHolds(snap, m.OldQuote) || !quoteHolds(snap, m.NewQuote) {
