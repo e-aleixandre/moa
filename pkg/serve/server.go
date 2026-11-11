@@ -29,6 +29,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
@@ -779,10 +780,18 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 		// A durable question is answered through the store, loaded or not: the
 		// session it names, and only that one, is woken by the answer.
 		if mgr.questions.engaged() {
-			_, err := mgr.tasks.GetQuestion(r.Context(), body.ID)
+			stored, err := mgr.tasks.GetQuestion(r.Context(), body.ID)
 			switch {
 			case err == nil:
-				writeQuestionResult(w, mgr.questions.Answer(r.Context(), sessionID, body.ID, body.Answers, responder))
+				answerErr := mgr.questions.Answer(r.Context(), sessionID, body.ID, body.Answers, responder)
+				if answerErr == nil {
+					texts := make([]string, 0, len(stored.Questions))
+					for _, q := range stored.Questions {
+						texts = append(texts, q.Text)
+					}
+					mgr.tellOwnerUserSaid(sessionID, userSaid{kind: owner.UserSaidAnswer, text: strings.Join(body.Answers, " | "), ref: body.ID, question: askQuestionText(texts)})
+				}
+				writeQuestionResult(w, answerErr)
 				return
 			case !errors.Is(err, tasks.ErrQuestionNotFound):
 				http.Error(w, "questions unavailable", http.StatusInternalServerError)
@@ -793,6 +802,12 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		var asked []string
+		if ask := sess.runtime.Context().Approvals.PendingInfo().Ask; ask != nil && ask.ID == body.ID {
+			for _, q := range ask.Questions {
+				asked = append(asked, q.Text)
+			}
+		}
 		if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: body.ID, Answers: body.Answers, Responder: responder}); err != nil {
 			if errors.Is(err, errFenceBarred) {
 				writeFenceBarred(w)
@@ -801,6 +816,7 @@ func handleAskUserResponse(mgr *Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		mgr.tellOwnerUserSaid(sessionID, userSaid{kind: owner.UserSaidAnswer, text: strings.Join(body.Answers, " | "), ref: body.ID, question: askQuestionText(asked)})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

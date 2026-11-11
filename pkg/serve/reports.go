@@ -27,6 +27,10 @@ import (
 // did not type it.
 const reportSource = "report"
 
+// reportStatusUserSaid is the status of an entry that is not a turn outcome but
+// the user's own words in a session the owner launched (owner_hears_user.go).
+const reportStatusUserSaid = "user_said"
+
 // reportBatchWindow coalesces the reports of a codebase: a session finishing is
 // rarely urgent on its own, and an owner woken once per child would spend its
 // context on interruptions. Overridden in tests.
@@ -547,8 +551,10 @@ func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Rep
 	// Set this before delivery, which can block awaiting the owner transcript.
 	batch.deferNextHeartbeat = true
 	// A session that failed or is stuck waiting for an answer is not worth
-	// batching: it is exactly what the owner has to act on now.
-	if rep.Status == callbackStatusDone {
+	// batching: it is exactly what the owner has to act on now. What the user
+	// said is information, not an alarm: it rides the window so a burst of
+	// messages is one wake-up.
+	if rep.Status == callbackStatusDone || rep.Status == reportStatusUserSaid {
 		c.arm(key, batch)
 		return
 	}
@@ -968,29 +974,28 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 		// The observer stays installed while detached, so a reattach takes
 		// effect on the next turn without rewiring anything; the turns in
 		// between are simply never reported.
-		dropped := func() bool {
-			if !sess.ownerDetached.Load() {
-				return false
-			}
+		if sess.ownerDetached.Load() {
 			slog.Info("owner report dropped: session detached", "session", sess.ID)
-			return true
-		}
-		if dropped() {
 			return
 		}
-		report := reportFrom(sess, out)
-		sess.ownerDetachMu.Lock()
-		defer sess.ownerDetachMu.Unlock()
-		// Build git state without the lock, then serialize final admission with
-		// detach so it cannot return while this report is still admitted.
-		if dropped() {
-			return
-		}
-		reports.add(key, report)
+		admitOwnerReport(reports, sess, key, reportFrom(sess, out))
 	})
 	sess.mu.Lock()
 	sess.ownerObserver = observer
 	sess.mu.Unlock()
+}
+
+// admitOwnerReport hands a report of a live child to the coordinator unless the
+// child has been detached. The detach check is repeated under ownerDetachMu so
+// that a detach which has returned can never be followed by an admitted report.
+func admitOwnerReport(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report) {
+	sess.ownerDetachMu.Lock()
+	defer sess.ownerDetachMu.Unlock()
+	if sess.ownerDetached.Load() {
+		slog.Info("owner report dropped: session detached", "session", sess.ID)
+		return
+	}
+	reports.add(key, report)
 }
 
 // reportFrom turns a run outcome into the report the owner will read. The
@@ -1249,6 +1254,10 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		fmt.Fprintf(&b, "- %s — %s\n", rep.SessionID, strings.TrimSpace(rep.Title))
 		fmt.Fprintf(&b, "  origin: %s\n", reportOrigin(rep.Origin))
 		fmt.Fprintf(&b, "  status: %s\n", rep.Status)
+		if rep.UserKind != "" {
+			writeUserSaid(&b, rep)
+			continue
+		}
 		if line := backgroundWorkLine(rep.BackgroundCount); line != "" {
 			fmt.Fprintf(&b, "  %s\n", line)
 		}
@@ -1295,6 +1304,13 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 	}
 	b.WriteString("\nUse the sessions tool to read or answer any of them, and update the book " +
 		"with what this changes about the project.")
+	for _, rep := range pending {
+		if rep.UserKind != "" {
+			b.WriteString(" Entries that say \"the user wrote\" or \"the user answered\" are the user's own " +
+				"words in a session you launched: take them into account and write down what they decide.")
+			break
+		}
+	}
 	return b.String()
 }
 

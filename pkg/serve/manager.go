@@ -26,6 +26,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/events" // wake-on-event
 	"github.com/e-aleixandre/moa/pkg/files"
 	"github.com/e-aleixandre/moa/pkg/mcp"
+	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/push"
 	"github.com/e-aleixandre/moa/pkg/release"
 	"github.com/e-aleixandre/moa/pkg/secrets"
@@ -1383,7 +1384,15 @@ func (m *Manager) sendValidated(sessionID, text string, atts []Attachment, steer
 // enters the transcript (a queued steer carries it until delivery). It is the
 // only producer of that receipt.
 func (m *Manager) SendHuman(sessionID, text string, atts []Attachment, steerID, msgID string, mentions []string) (action, id string, descriptors []attachment.Descriptor, err error) {
-	return m.sendCore(sessionID, text, atts, steerID, msgID, nil, mentions, nil)
+	action, id, descriptors, err = m.sendCore(sessionID, text, atts, steerID, msgID, nil, mentions, nil)
+	if err == nil {
+		said := userSaid{kind: owner.UserSaidMessage, text: userSaidMessageText(text, len(atts))}
+		if action == "send" {
+			said.ref = id
+		}
+		m.tellOwnerUserSaid(sessionID, said)
+	}
+	return action, id, descriptors, err
 }
 
 func (m *Manager) sendCore(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, mentions []string, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
