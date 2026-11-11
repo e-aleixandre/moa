@@ -159,7 +159,7 @@ func bookSignature(dir string) string {
 	h := fnv.New64a()
 	_ = walkBook(dir, func(rel, full string) error {
 		if info, err := os.Stat(full); err == nil {
-			fmt.Fprintf(h, "%s|%d|%d\n", rel, info.Size(), info.ModTime().UnixNano())
+			_, _ = fmt.Fprintf(h, "%s|%d|%d\n", rel, info.Size(), info.ModTime().UnixNano())
 		}
 		return nil
 	})
