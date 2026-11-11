@@ -1,6 +1,6 @@
 module github.com/e-aleixandre/moa
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
