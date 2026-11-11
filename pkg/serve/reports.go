@@ -1361,8 +1361,8 @@ func nowLine(rep owner.Report) string {
 	var line string
 	switch {
 	case rep.InterruptedByRestart:
-		// Whatever it left running died with the process.
-		return "now: interrupted by a moa restart — it will not continue on its own"
+		// Whatever it left running died with the process; a schedule did not.
+		line = "now: interrupted by a moa restart — it will not continue on its own"
 	case rep.BackgroundCount == 1:
 		line = "now: 1 background job still running — it will report again when they finish"
 	case rep.BackgroundCount > 1:
