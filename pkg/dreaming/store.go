@@ -319,13 +319,17 @@ type Group struct {
 	Kind    string   `json:"kind"` // "unit" or "fact"
 	Changes []Change `json:"changes"`
 	Sources []Change `json:"sources,omitempty"` // Pre only
+	// Unit is every file of a unit as the models read it (path → blob). The
+	// whole unit must still be exactly that, parts included and no new part,
+	// even where only its first file is written; undo records it back.
+	Unit map[string]string `json:"unit,omitempty"`
 	// After is the state the group leaves its unit or fact in (see state.json).
 	After string `json:"after,omitempty"`
 }
 
 // UnitGroup turns a verified output into the group that applies it.
 func (r *Run) UnitGroup(snap Snapshot, u Unit, out Output, sources []string) (Group, map[string][]byte, error) {
-	g := Group{ID: bookPrefix + u.Sheet, Kind: "unit"}
+	g := Group{ID: bookPrefix + u.Sheet, Kind: "unit", Unit: unitBlobs(snap, u)}
 	content := map[string][]byte{}
 	after := map[string]string{}
 	paths := make([]string, 0, len(out.Files))
@@ -585,6 +589,9 @@ func (r *Run) commit(kind, base, title string, groups []Group, content map[strin
 			if err != nil || live != src.Pre {
 				rejected[g.ID] = true
 			}
+		}
+		if g.Unit != nil && !r.unitIntact(g) {
+			rejected[g.ID] = true
 		}
 	}
 	// A plan that relied on a source another rejected group would have
@@ -879,6 +886,9 @@ func (s Store) Undo(commit string, pub Publisher) (Report, error) {
 			}
 		}
 		units[g.ID] = unitHash(before)
+		if g.Unit != nil {
+			units[g.ID] = unitHash(g.Unit)
+		}
 		if g.Kind == "fact" {
 			// A fact is recorded by its own blob (see DueFacts).
 			units[g.ID] = before[g.ID]
@@ -1030,4 +1040,37 @@ func (snap Snapshot) HasSecret(u Unit) bool {
 		}
 	}
 	return false
+}
+
+// unitIntact reports whether a unit's files are live exactly as the models
+// read them and no part was added since.
+func (r *Run) unitIntact(g Group) bool {
+	for p, blob := range g.Unit {
+		if live, _, err := r.s.liveBlob(p); err != nil || live != blob {
+			return false
+		}
+	}
+	sheet := strings.TrimPrefix(g.ID, bookPrefix)
+	stem := strings.TrimSuffix(sheet, ".md")
+	entries, err := os.ReadDir(filepath.Join(r.s.bookDir(), filepath.FromSlash(stem)))
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+	for _, e := range entries {
+		rel := stem + "/" + e.Name()
+		if m := partPattern.FindStringSubmatch(rel); m != nil && m[1]+".md" == sheet {
+			if _, known := g.Unit[bookPrefix+rel]; !known {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func unitBlobs(snap Snapshot, u Unit) map[string]string {
+	m := map[string]string{}
+	for _, f := range u.Files {
+		m[bookPrefix+f] = snap.Blobs[bookPrefix+f]
+	}
+	return m
 }

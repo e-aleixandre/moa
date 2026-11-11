@@ -184,7 +184,7 @@ func (r *Run) markGroups(snap Snapshot, units map[string]Unit, due map[string]bo
 		for _, m := range ms {
 			total = total || m.Scope == "total"
 		}
-		g := Group{ID: bookPrefix + old, Kind: "unit"}
+		g := Group{ID: bookPrefix + old, Kind: "unit", Unit: unitBlobs(snap, u)}
 		after := map[string]string{}
 		bad := ""
 		for _, f := range u.Files {

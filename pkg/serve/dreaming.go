@@ -34,6 +34,9 @@ type dreamingService struct {
 	cancel  context.CancelFunc
 	stopped chan struct{}
 	once    sync.Once
+	// failed are the codebases whose crashed night could not be recovered:
+	// no night runs there until a restart recovers it.
+	failed map[string]bool
 }
 
 // newDreamingService also finishes or rolls back what a crashed night left,
@@ -44,7 +47,7 @@ func newDreamingService(m *Manager) *dreamingService {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	d := &dreamingService{mgr: m, store: store, ctx: ctx, cancel: cancel, stopped: make(chan struct{})}
+	d := &dreamingService{mgr: m, store: store, ctx: ctx, cancel: cancel, stopped: make(chan struct{}), failed: map[string]bool{}}
 	d.recoverAll()
 	return d
 }
@@ -72,7 +75,8 @@ func (d *dreamingService) recoverAll() {
 		}
 		r, rep, err := dreaming.Store{Codebase: dir}.Begin(true, d.publisher(own))
 		if err != nil {
-			slog.Error("dreaming: recovery failed; nothing was changed", "owner", own.Name, "error", err)
+			slog.Error("dreaming: recovery failed; no night runs for this owner until it is fixed", "owner", own.Name, "error", err)
+			d.failed[own.CodebaseKey] = true
 			continue
 		}
 		_ = r.Close()
@@ -118,7 +122,7 @@ func (d *dreamingService) tick(now time.Time) {
 	for _, own := range owners {
 		settings := own.DreamingSettings()
 		date := settings.DreamingDue(now)
-		if date == "" || own.SessionID == "" || d.ctx.Err() != nil {
+		if date == "" || own.SessionID == "" || d.failed[own.CodebaseKey] || d.ctx.Err() != nil {
 			continue
 		}
 		analyzer, ok1 := core.ResolveModel(dreamingModels[0])

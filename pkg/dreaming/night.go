@@ -205,7 +205,7 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (res NightResult, err
 			res.Rejected[u.Sheet] = err.Error()
 			continue
 		}
-		g, c, err := r.UnitGroup(snap, u, out, planSources(u, plan, decisions))
+		g, c, err := r.UnitGroup(snap, u, out, append(planSources(u, plan, decisions), crossSources(snap, crossFor(cross, u.Sheet))...))
 		if err != nil {
 			return res, err
 		}
@@ -499,6 +499,23 @@ func parsePlan(text string) (Plan, error) {
 		return Plan{}, fmt.Errorf("the plan is not valid JSON: %w", err)
 	}
 	return p, nil
+}
+
+var mdPath = regexp.MustCompile(`[A-Za-z0-9_][A-Za-z0-9_./-]*\.md`)
+
+// crossSources are the book files the cross-sheet view showed the organizer
+// of a sheet: its state may rest on them, so a change to any of them during
+// the night defers the plan (R6). Conservative: every path named counts.
+func crossSources(snap Snapshot, text string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range mdPath.FindAllString(text, -1) {
+		if _, ok := snap.Files[bookPrefix+p]; ok && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // planSources is what a plan relied on outside its own unit (R6): the sheets
