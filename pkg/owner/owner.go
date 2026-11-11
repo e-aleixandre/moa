@@ -88,7 +88,12 @@ type Owner struct {
 	// paid provider owner calls would use when no plan is signed in. It is
 	// bound to that provider: a different paid provider needs a new one.
 	CallCostAck *CallCostAck `json:"call_cost_ack,omitempty"`
-	Created     time.Time    `json:"created"`
+	// ActionGate turns on the pre-action book check of the owner's own session:
+	// its first sessions send/new or ask_user of a turn is refused once with
+	// what the book says about it, unless the turn already read the book.
+	// Additive: an owner.json without it leaves the gate off.
+	ActionGate bool      `json:"action_gate,omitempty"`
+	Created    time.Time `json:"created"`
 }
 
 // Call levels of an owner.
@@ -160,6 +165,12 @@ func (s *Store) CodebaseDir(key string) string {
 // BookDir is the owner's book directory for a codebase.
 func (s *Store) BookDir(key string) string {
 	return filepath.Join(s.CodebaseDir(key), "book")
+}
+
+// ActionGateLogPath is where the action gate records what it showed and what
+// the owner did next; it never leaves the host.
+func (s *Store) ActionGateLogPath(key string) string {
+	return filepath.Join(s.CodebaseDir(key), "action-gate.jsonl")
 }
 
 func (s *Store) ownerPath(key string) string {

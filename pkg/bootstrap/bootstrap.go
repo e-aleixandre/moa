@@ -599,6 +599,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// nothing to the prompt.
 	projectOwner, ownerStore := loadProjectOwner(cfg.CWD)
 	var bookGuard extension.Extension
+	var actionGate extension.Extension
 	if projectOwner.ID != "" && ownerStore != nil {
 		if cfg.OwnerSession {
 			// The role carries book/OWNER.md and the canonical ref, both of
@@ -646,6 +647,17 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 					}
 				}
 				return cfg.CWD
+			})
+			// Off unless the owner's own switch is on; read on every turn so
+			// flipping it needs no restart.
+			key := projectOwner.CodebaseKey
+			actionGate = book.GateExtension(book.GateConfig{
+				Dir:     ownerStore.BookDir(key),
+				LogPath: ownerStore.ActionGateLogPath(key),
+				Enabled: func() bool {
+					current, found, err := ownerStore.FindByCodebase(key)
+					return err == nil && found && current.ActionGate
+				},
 			})
 		}
 	}
@@ -860,6 +872,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 	if bookGuard != nil {
 		agentCfg.Extensions = append(agentCfg.Extensions, bookGuard)
+	}
+	if actionGate != nil {
+		agentCfg.Extensions = append(agentCfg.Extensions, actionGate)
 	}
 	ag, err := agent.New(agentCfg)
 	if err != nil {

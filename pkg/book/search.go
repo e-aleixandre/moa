@@ -139,8 +139,42 @@ func searchBook(dir, query string, limit int, hidden func(rel string) bool) ([]H
 	if err != nil {
 		return nil, 0, err
 	}
+	hits, found := rank(docs, terms, limit)
+	return hits, found, nil
+}
+
+// Index is a book scanned and tokenized once, for a caller that searches the
+// same book several times or needs the scan done before the query is known.
+type Index struct{ docs []document }
+
+// NewIndex scans the whole book, which costs as much as the tokenizing of every
+// file; Search on it is cheap.
+func NewIndex(dir string) (*Index, error) {
+	docs, err := scan(dir, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &Index{docs: docs}, nil
+}
+
+// Search ranks like SearchBook, over the files as they were when scanned.
+func (ix *Index) Search(query string, limit int) ([]Hit, int) {
+	terms := queryTerms(query)
+	if len(terms) == 0 {
+		return nil, 0
+	}
+	if limit <= 0 {
+		limit = defaultSearchLimit
+	}
+	if limit > maxSearchLimit {
+		limit = maxSearchLimit
+	}
+	return rank(ix.docs, terms, limit)
+}
+
+func rank(docs []document, terms []term, limit int) ([]Hit, int) {
 	if len(docs) == 0 {
-		return nil, 0, nil
+		return nil, 0
 	}
 
 	df := map[string]int{}
@@ -218,7 +252,7 @@ func searchBook(dir, query string, limit int, hidden func(rel string) bool) ([]H
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
-	return hits, found, nil
+	return hits, found
 }
 
 // kind ranks, smallest first.
