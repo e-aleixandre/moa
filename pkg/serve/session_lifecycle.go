@@ -1530,6 +1530,7 @@ func (m *Manager) Shutdown() {
 	// owner session that is about to be torn down. The actor stays alive and
 	// keeps ACCEPTING: a turn reported below must still reach the outbox.
 	m.heartbeat.Close()
+	m.dreaming.Close()
 	m.reports.BeginShutdown()
 	if m.pushPolicy != nil {
 		m.pushPolicy.Close() // pending summaries are not persisted; see push.Policy

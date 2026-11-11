@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/storelock"
 )
 
 const (
@@ -321,6 +322,11 @@ func WriteFile(dir, rel string, content []byte) error {
 	if len(content) > maxWriteBytes {
 		return ErrTooLarge
 	}
+	unlock, err := lockBook(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	full, err := resolve(dir, rel)
 	if err != nil {
 		return err
@@ -329,6 +335,18 @@ func WriteFile(dir, rel string, content []byte) error {
 		return err
 	}
 	return writeFileAtomic(full, content, 0o600)
+}
+
+// lockBook takes the book's store lock for one whole write, append's read
+// included: the nightly dreaming applies under the same lock and compares
+// what it read with what is on disk, so a cooperative writer is never lost
+// between that comparison and the dreaming's rename.
+func lockBook(dir string) (func(), error) {
+	f, err := storelock.Lock(dir)
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = f.Close() }, nil
 }
 
 // list shows the book's files, optionally under one directory, each with the
@@ -465,6 +483,11 @@ func write(dir, rel, content string, appendTo bool) (core.Result, error) {
 	if len(content) > maxWriteBytes {
 		return core.ErrorResult(fmt.Sprintf("content is larger than %dKB; split it across book files", maxWriteBytes/1024)), nil
 	}
+	unlock, err := lockBook(dir)
+	if err != nil {
+		return core.ErrorResult(fmt.Sprintf("cannot lock the book: %v", err)), nil
+	}
+	defer unlock()
 	full, err := resolve(dir, rel)
 	if err != nil {
 		return core.ErrorResult(err.Error()), nil

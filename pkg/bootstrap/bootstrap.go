@@ -21,6 +21,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/book"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/dreaming"
 	"github.com/e-aleixandre/moa/pkg/extension"
 	"github.com/e-aleixandre/moa/pkg/git"
 	"github.com/e-aleixandre/moa/pkg/goal"
@@ -659,6 +660,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 					return err == nil && found && current.ActionGate
 				},
 			})
+		}
+		if cfg.OwnerSession && projectOwner.Dreaming != nil {
+			core.RegisterOrLog(toolReg, dreaming.NewUndoTool(ownerStore.CodebaseDir(projectOwner.CodebaseKey)))
 		}
 	}
 

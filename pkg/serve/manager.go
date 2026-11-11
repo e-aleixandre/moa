@@ -956,6 +956,8 @@ type Manager struct {
 	// heartbeat wakes an owner when the project changed without anyone talking
 	// to it. nil when owners are unavailable.
 	heartbeat *heartbeatService
+	// dreaming consolidates the books of owners that turned it on, nightly.
+	dreaming *dreamingService
 	// ownerRefs memoizes which owner a working directory reports to, keyed by
 	// cwd. Dropped whole whenever an owner is created, renamed or deleted.
 	// ownerRefMu is held across the resolution, not only around the map: see
@@ -1245,6 +1247,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	} else if m.tasks != nil {
 		m.tasks.SetClock(m.clock.Now)
 	}
+	// A night that crashed is finished or rolled back before any session,
+	// task or dispatcher can resume and write the book.
+	m.dreaming = newDreamingService(m)
 	if m.tasks != nil {
 		m.questions = newQuestionService(m)
 		// Before anything can admit or continue an answer: a Stop the last
@@ -1266,6 +1271,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	// has recovered it.
 	m.heartbeat = newHeartbeatService(m)
 	m.heartbeat.Start()
+	m.dreaming.Start()
 	reapStaleAttachments()
 	secrets.Reap()
 	// The manager, rather than its caller's context, owns this process-wide

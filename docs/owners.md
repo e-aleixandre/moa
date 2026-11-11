@@ -413,6 +413,28 @@ window retries instead of losing the notice. A busy owner is never steered: the
 facts stay unannounced and the next tick tries again. Reports come first: a beat
 that finds reports waiting delivers them instead and wakes the owner no further.
 
+## Dreaming: nightly consolidation of the book
+
+Off by default. With `"dreaming": {"enabled": true, "hour": 3, "tz": "Europe/Madrid", "budget_usd": 3}` in
+`owner.json`, once per civil date after `hour` in `tz` (UTC when empty) moa consolidates the sheets that changed since
+the last night:
+
+- a cheap model reads each changed sheet (and its `book-tidy` parts) and another plans it, both in single calls
+  **without tools**: they only answer;
+- code rewrites the sheet as `## Estado actual` + the lines that still hold, verbatim, and moves the rest, verbatim,
+  to `archivo/<sheet>/<date>.md`. It proves that every original file rebuilds byte for byte from the two before
+  writing, keeps the front matter and title on top, and never touches `decisions/`, `OWNER.md`, `PROJECT.md`,
+  `historico/` or an existing archive file;
+- the book is versioned in a local git repository in the codebase directory (one snapshot and one
+  commit per night). A sheet anyone changed during the night is left alone; writes through the `book` tool wait for
+  the night's short write section;
+- the morning news in For you says what changed, what was skipped, the questions for the user, the cost and the
+  commit. The owner undoes a night with `dreaming_undo`; a sheet edited after that night is left as it is;
+- a night costs at most `budget_usd` at catalog prices (every call reserves its maximum cost before it is sent);
+  what does not fit waits for the next night. A failed night is not retried the same day.
+
+Memory is not consolidated in this version.
+
 ## OWNER.md
 
 `book/OWNER.md` is your half of the contract: how you want this owner to brief
