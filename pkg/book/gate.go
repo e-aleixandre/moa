@@ -34,7 +34,7 @@ import (
 const (
 	gateHits      = 3
 	gateSnippet   = 140
-	gateQueryMax  = 2000
+	gateQueryMax  = 1000
 	gateIndexWait = 150 * time.Millisecond // the tool-call hook is cut at 200ms
 
 	gateHeader = "Antes de enviar: esto de tu libro puede afectar"
@@ -73,9 +73,14 @@ type gate struct {
 	// Tokenizing a real book takes longer than a hook may run (about half a
 	// second for 4 MB), so the index is built when the turn starts, reused
 	// while the files are unchanged, and the call only has to search it.
+	//
+	// An index is searched only once this turn's build has confirmed it matches
+	// the files (ready); a stale one would surface notes already removed.
 	idx   *Index
 	sig   string
 	build chan struct{}
+	gen   int  // turn counter; a warmer of an older turn publishes nothing
+	ready bool // this turn's build finished
 }
 
 func (g *gate) enabled() bool { return g.cfg.Enabled != nil && g.cfg.Enabled() }
@@ -88,10 +93,13 @@ func (g *gate) Init(api extension.API) error {
 			g.pending = nil
 		}
 		g.readBook, g.fired, g.epoch, g.firedEpoch = false, false, 0, 0
-		g.build = nil
+		g.build, g.ready = nil, false
+		g.gen++
 		if g.enabled() {
 			g.build = make(chan struct{})
-			go g.warm(g.build)
+			go g.warm(g.gen, g.build)
+		} else {
+			g.idx, g.sig = nil, ""
 		}
 		g.mu.Unlock()
 		return nil, nil
@@ -102,26 +110,41 @@ func (g *gate) Init(api extension.API) error {
 		g.mu.Unlock()
 		return nil, nil
 	})
+	api.OnAgentEnd(func(context.Context, core.AgentEvent) {
+		g.mu.Lock()
+		if g.pending != nil {
+			g.logResolved(g.pending, "abandoned")
+			g.pending = nil
+		}
+		g.mu.Unlock()
+	})
 	api.OnToolCall(g.onToolCall)
 	return nil
 }
 
-func (g *gate) warm(done chan struct{}) {
+func (g *gate) warm(gen int, done chan struct{}) {
 	defer close(done)
 	sig := bookSignature(g.cfg.Dir)
 	g.mu.Lock()
-	fresh := g.idx != nil && g.sig == sig
-	g.mu.Unlock()
-	if fresh {
+	if g.gen != gen {
+		g.mu.Unlock()
 		return
 	}
+	if g.idx != nil && g.sig == sig {
+		g.ready = true
+		g.mu.Unlock()
+		return
+	}
+	g.mu.Unlock()
 	ix, err := NewIndex(g.cfg.Dir)
 	if err != nil {
 		slog.Warn("action gate: cannot index the book", "error", err)
 		return
 	}
 	g.mu.Lock()
-	g.idx, g.sig = ix, sig
+	if g.gen == gen {
+		g.idx, g.sig, g.ready = ix, sig, true
+	}
 	g.mu.Unlock()
 }
 
@@ -137,7 +160,7 @@ func bookSignature(dir string) string {
 	return fmt.Sprintf("%x", h.Sum64())
 }
 
-func (g *gate) onToolCall(_ context.Context, name string, args map[string]any) *core.ToolCallDecision {
+func (g *gate) onToolCall(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 	name = strings.ToLower(name)
 	if name == "book" {
 		if a, _ := args["action"].(string); a == "search" || a == "read" {
@@ -190,16 +213,28 @@ func (g *gate) onToolCall(_ context.Context, name string, args map[string]any) *
 	}
 
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if g.fired || g.readBook {
+		g.mu.Unlock()
 		return nil
 	}
-	if g.idx == nil {
+	if !g.ready {
 		g.appendLog(map[string]any{"event": "skipped", "reason": "index not ready", "tool": name, "action": action})
+		g.mu.Unlock()
 		return nil
 	}
-	hits, _ := g.idx.Search(text, gateHits)
-	if len(hits) == 0 {
+	idx, gen := g.idx, g.gen
+	g.mu.Unlock()
+
+	// Ranking runs outside the lock, and a call the host already gave up on
+	// (the hook deadline passed, so the action went ahead) must not afterwards
+	// count as refused.
+	hits, _ := idx.Search(text, gateHits)
+	if len(hits) == 0 || ctx.Err() != nil {
+		return nil
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.fired || g.readBook || g.gen != gen {
 		return nil
 	}
 	g.seq++
@@ -210,9 +245,10 @@ func (g *gate) onToolCall(_ context.Context, name string, args map[string]any) *
 		reason: gateReason(hits),
 	}
 	g.fired, g.firedEpoch, g.pending = true, g.epoch, p
-	shown := make([]map[string]string, 0, len(hits))
+	// Paths only: a snippet would copy book text, secrets included, into a log.
+	shown := make([]string, 0, len(hits))
 	for _, h := range hits {
-		shown = append(shown, map[string]string{"path": h.Path, "snippet": gateClip(h.Snippet)})
+		shown = append(shown, h.Path)
 	}
 	g.appendLog(map[string]any{"event": "fired", "id": p.id, "tool": name, "action": action, "text": text, "results": shown})
 	return &core.ToolCallDecision{Block: true, Reason: p.reason, Kind: core.ToolCallDecisionKindPolicy}
@@ -234,6 +270,7 @@ func (g *gate) appendLog(entry map[string]any) {
 	if err == nil {
 		var f *os.File
 		if f, err = os.OpenFile(g.cfg.LogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			_ = f.Chmod(0o600) // OpenFile's mode only applies to a new file
 			_, err = f.Write(append(line, '\n'))
 			if cerr := f.Close(); err == nil {
 				err = cerr

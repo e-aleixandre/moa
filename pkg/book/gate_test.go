@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/extension"
@@ -284,5 +285,68 @@ func TestGateTrimsLongSnippets(t *testing.T) {
 	d := r.call("sessions", send("Katxiña largo"))
 	if d == nil || len(d.Reason) > 1500 {
 		t.Fatalf("reason = %v", d)
+	}
+}
+
+func TestGateLogsAbandonedWhenTheRunEnds(t *testing.T) {
+	r := newGateRig(t)
+	r.call("sessions", send(katxina))
+	r.host.FireObserver(core.AgentEvent{Type: core.AgentEventEnd})
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(r.log()) < 2 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	log := r.log()
+	if len(log) != 2 || log[1]["outcome"] != "abandoned" {
+		t.Fatalf("log = %v", log)
+	}
+}
+
+// A call the host gave up on (its deadline passed and the action went ahead)
+// must not afterwards count as a refusal.
+func TestGateLateCallChangesNothing(t *testing.T) {
+	r := newGateRig(t)
+	g := &gate{cfg: GateConfig{Dir: r.dir, LogPath: r.logPath, Enabled: func() bool { return true }}}
+	g.gen++
+	ix, err := NewIndex(r.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.idx, g.ready = ix, true
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if d := g.onToolCall(ctx, "sessions", send(katxina)); d != nil {
+		t.Fatal("a call past its deadline was refused")
+	}
+	if g.fired || len(r.log()) != 0 {
+		t.Fatalf("state changed: fired=%v log=%v", g.fired, r.log())
+	}
+	if d := g.onToolCall(context.Background(), "sessions", send(katxina)); d == nil {
+		t.Fatal("the next call in time was not gated")
+	}
+}
+
+func TestGateNeverUsesAnIndexThisTurnDidNotConfirm(t *testing.T) {
+	r := newGateRig(t)
+	g := &gate{cfg: GateConfig{Dir: r.dir, LogPath: r.logPath, Enabled: func() bool { return true }}}
+	ix, _ := NewIndex(r.dir)
+	g.idx, g.ready = ix, false // a previous turn's index, rebuild unfinished
+	if d := g.onToolCall(context.Background(), "sessions", send(katxina)); d != nil {
+		t.Fatal("gated on an unconfirmed index")
+	}
+	log := r.log()
+	if len(log) != 1 || log[0]["event"] != "skipped" {
+		t.Fatalf("log = %v", log)
+	}
+}
+
+func TestGateLogKeepsPathsNotBookText(t *testing.T) {
+	r := newGateRig(t)
+	r.sheet("work/secreto.md", "# Secreto\n\nKatxiña token=EXAMPLE_SECRET_NOT_IN_ACTION\n")
+	r.turn()
+	r.call("sessions", send("Katxiña token"))
+	data, _ := os.ReadFile(r.logPath)
+	if strings.Contains(string(data), "EXAMPLE_SECRET") || !strings.Contains(string(data), "work/secreto.md") {
+		t.Fatalf("log = %s", data)
 	}
 }
