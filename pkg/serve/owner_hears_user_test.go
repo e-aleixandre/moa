@@ -321,3 +321,26 @@ func TestAChildsQuestionCannotForgeAnEntry(t *testing.T) {
 		t.Fatalf("a multi-line question forged report structure:\n%s", text)
 	}
 }
+
+func TestShutdownDrainsAdmittedUserSaidRelaysAndRefusesLaterOnes(t *testing.T) {
+	var r userSaidRelays
+	if !r.start() {
+		t.Fatal("an open gate refused a relay")
+	}
+	drained := make(chan struct{})
+	go func() { r.close(); close(drained) }()
+	select {
+	case <-drained:
+		t.Fatal("close returned while a relay was still admitted")
+	case <-time.After(100 * time.Millisecond):
+	}
+	r.wg.Done()
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("close did not return after the relay finished")
+	}
+	if r.start() {
+		t.Fatal("a relay was admitted after shutdown")
+	}
+}

@@ -18,6 +18,7 @@ package serve
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/owner"
@@ -47,7 +48,39 @@ type userSaid struct {
 func (m *Manager) tellOwnerUserSaid(sessionID string, said userSaid) {
 	// reports.add waits for the actor, which can be confirming an unrelated
 	// delivery for seconds; the user's own request must never wait behind it.
-	go m.relayUserSaid(sessionID, said)
+	if !m.userSaid.start() {
+		return
+	}
+	go func() {
+		defer m.userSaid.wg.Done()
+		m.relayUserSaid(sessionID, said)
+	}()
+}
+
+// userSaidRelays admits relays until Shutdown closes it, and lets Shutdown wait
+// for the admitted ones: a relay dropped there is lost for good, because
+// neither the saved message nor the durable answer would regenerate it.
+type userSaidRelays struct {
+	mu     sync.Mutex
+	closed bool
+	wg     sync.WaitGroup
+}
+
+func (r *userSaidRelays) start() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
+	r.wg.Add(1)
+	return true
+}
+
+func (r *userSaidRelays) close() {
+	r.mu.Lock()
+	r.closed = true
+	r.mu.Unlock()
+	r.wg.Wait()
 }
 
 func (m *Manager) relayUserSaid(sessionID string, said userSaid) {

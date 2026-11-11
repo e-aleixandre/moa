@@ -950,6 +950,9 @@ type Manager struct {
 	// reports batches the run outcomes of a project's sessions and delivers
 	// them to its owner. nil when owners are unavailable (no config dir).
 	reports *reportCoordinator
+	// userSaid tracks the relays of what the user said to an owner (see
+	// owner_hears_user.go) so Shutdown can drain them before closing reports.
+	userSaid userSaidRelays
 	// heartbeat wakes an owner when the project changed without anyone talking
 	// to it. nil when owners are unavailable.
 	heartbeat *heartbeatService
