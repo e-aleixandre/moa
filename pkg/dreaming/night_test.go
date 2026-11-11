@@ -48,6 +48,8 @@ func fakeNight(t *testing.T, budget float64) (*fakeProvider, NightConfig, *[]New
 	fp := &fakeProvider{usage: &core.Usage{Input: 1000, Output: 500}, answer: func(req core.Request) string {
 		prompt := req.Messages[0].Content[0].Text
 		switch req.System {
+		case memorySystem:
+			return keepAllFacts(prompt)
 		case organizerSystem:
 			if strings.Contains(prompt, "Hoja: work/c.md\n") {
 				return "```json\n" + `{"estado": "## Estado actual\n- C2 vigente (12-nov · detalle abajo)\n\n## Por resolver\n- PREGUNTA AL DUEÑO: ¿sigue C2?", "conservar": [[0,3,3]], "archivar": [{"f":0,"lineas":[2,2],"motivo":"superado","fuente":"work/c.md:3"}]}` + "\n```"

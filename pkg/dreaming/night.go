@@ -102,7 +102,11 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (NightResult, error) 
 		return res, err
 	}
 	due, err := s.Due(snap)
-	if err != nil || len(due) == 0 {
+	if err != nil {
+		return res, err
+	}
+	dueFacts, err := s.DueFacts(snap)
+	if err != nil || len(due)+len(dueFacts) == 0 {
 		return res, err
 	}
 	s.byRecency(due)
@@ -142,7 +146,7 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (NightResult, error) 
 	content := map[string][]byte{}
 	fin := Finish{Run: cfg.Date + "-" + randomHex(4), Units: map[string]string{}}
 	plans := map[string]Plan{}
-	clean := map[string]string{} // units the organizer judged clean: nothing to write
+	clean := map[string]string{} // units judged clean and facts kept: nothing to write
 	for i, u := range analyzed {
 		plan, decisions, err := s.organize(ctx, budget, cfg, snap, u, analyses[u.Sheet], cross)
 		if errors.Is(err, ErrBudget) {
@@ -182,14 +186,26 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (NightResult, error) 
 		fin.Units[g.ID] = g.After
 		plans[g.ID] = plan
 	}
+	facts := r.consolidateFacts(ctx, budget, cfg, snap, dueFacts, res.Rejected, &res.Deferred)
+	for _, g := range facts.groups {
+		groups = append(groups, g)
+		fin.Units[g.ID] = g.After
+	}
+	for k, v := range facts.content {
+		content[k] = v
+	}
+	for k, v := range facts.kept {
+		clean[k] = v
+	}
 	news := func(rep Report) *News {
-		n := morningNews(cfg, rep, res, plans, budget)
+		n := morningNews(cfg, rep, res, plans, facts, budget)
 		return &n
 	}
 	rep, err := r.Apply(snap, "Dreaming del "+cfg.Date, groups, content, fin, news, cfg.Publish)
 	res.Commit, res.Applied, res.Conflicts = rep.Commit, rep.Applied, rep.Conflicts
-	// Clean units are recorded with their snapshot hash: if someone changed
-	// one during the night, its live hash differs and it is due again.
+	// Clean units and kept facts are recorded with their snapshot hash: if
+	// someone changed one during the night, its live hash differs and it is
+	// due again.
 	if err == nil && len(clean) > 0 {
 		st, lerr := s.loadState()
 		if lerr != nil {
@@ -409,15 +425,21 @@ func crossFor(cross, sheet string) string {
 
 var jsonBlock = regexp.MustCompile("(?s)```(?:json)?\\s*(\\{.*\\})\\s*```")
 
-func parsePlan(text string) (Plan, error) {
+// extractJSON is the object of a model answer: a fenced block, or the text
+// between the first "{" and the last "}".
+func extractJSON(text string) string {
 	raw := strings.TrimSpace(text)
 	if m := jsonBlock.FindStringSubmatch(raw); m != nil {
-		raw = m[1]
+		return m[1]
 	} else if i, j := strings.Index(raw, "{"), strings.LastIndex(raw, "}"); i >= 0 && j > i {
-		raw = raw[i : j+1]
+		return raw[i : j+1]
 	}
+	return raw
+}
+
+func parsePlan(text string) (Plan, error) {
 	var p Plan
-	dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
+	dec := json.NewDecoder(bytes.NewReader([]byte(extractJSON(text))))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
 		return Plan{}, fmt.Errorf("the plan is not valid JSON: %w", err)
@@ -475,11 +497,21 @@ func slug(path string) string { return strings.NewReplacer("/", "__", ".md", "")
 
 // morningNews is the For you item: what changed, what was skipped and why,
 // the questions for the user, the cost and how to undo. It names secrets by
-// file only (memory is not consolidated in this version).
-func morningNews(cfg NightConfig, rep Report, res NightResult, plans map[string]Plan, b *Budget) News {
+// file only, never by their content (I9).
+func morningNews(cfg NightConfig, rep Report, res NightResult, plans map[string]Plan, facts factOutcome, b *Budget) News {
 	archived := 0
+	sheets, factsArchived, factsCorrected := 0, 0, 0
 	var questions []string
 	for _, id := range rep.Applied {
+		switch facts.verdict[id] {
+		case VerdictArchive:
+			factsArchived++
+			continue
+		case VerdictCorrect:
+			factsCorrected++
+			continue
+		}
+		sheets++
 		p := plans[id]
 		for _, a := range p.Archive {
 			archived += a.Lines[1] - a.Lines[0] + 1
@@ -490,10 +522,22 @@ func morningNews(cfg NightConfig, rep Report, res NightResult, plans map[string]
 			}
 		}
 	}
-	title := fmt.Sprintf("Dreaming del %s: %d hojas consolidadas", cfg.Date, len(rep.Applied))
+	title := fmt.Sprintf("Dreaming del %s: %d hojas consolidadas", cfg.Date, sheets)
+	if n := factsArchived + factsCorrected; n > 0 {
+		title += fmt.Sprintf(" y %d hechos de memoria", n)
+	}
 	var body strings.Builder
-	if len(rep.Applied) > 0 {
-		fmt.Fprintf(&body, "- %d hojas consolidadas; %d líneas, literales, a `archivo/`.\n", len(rep.Applied), archived)
+	if sheets > 0 {
+		fmt.Fprintf(&body, "- %d hojas consolidadas; %d líneas, literales, a `archivo/`.\n", sheets, archived)
+	}
+	if factsArchived+factsCorrected > 0 {
+		fmt.Fprintf(&body, "- Memoria: %d hechos archivados, literales, en `memory/archivo/`; %d corregidos con una nota al final.\n", factsArchived, factsCorrected)
+	}
+	if len(facts.review) > 0 {
+		fmt.Fprintf(&body, "- Memoria a revisar (la corrección dejaría mal su descripción): %s.\n", strings.Join(facts.review, ", "))
+	}
+	if len(facts.secrets) > 0 {
+		fmt.Fprintf(&body, "- Memoria con secretos, sin tocar: %s.\n", strings.Join(facts.secrets, ", "))
 	}
 	if len(rep.Conflicts) > 0 {
 		fmt.Fprintf(&body, "- Sin tocar porque cambiaron durante la noche: %s.\n", trimIDs(rep.Conflicts))
@@ -507,7 +551,7 @@ func morningNews(cfg NightConfig, rep Report, res NightResult, plans map[string]
 		fmt.Fprintf(&body, "- Plan rechazado por las comprobaciones: %s.\n", strings.Join(names, ", "))
 	}
 	if len(res.Deferred) > 0 {
-		fmt.Fprintf(&body, "- Para otra noche: %d hojas.\n", len(res.Deferred))
+		fmt.Fprintf(&body, "- Para otra noche: %d hojas o hechos.\n", len(res.Deferred))
 	}
 	for _, q := range questions {
 		fmt.Fprintf(&body, "- Pregunta: %s\n", q)

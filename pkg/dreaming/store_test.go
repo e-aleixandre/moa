@@ -202,9 +202,6 @@ func TestNightAppliesApprovedBytesAndKeepsProtectedIntact(t *testing.T) {
 	allLinesPresent(t, s, n.snap)
 	// The commit is exactly the approved bytes: its tree equals the disk.
 	for p, c := range after {
-		if !strings.HasPrefix(p, bookPrefix) {
-			continue // memory is not versioned yet
-		}
 		got := gitOut(t, s, "cat-file", "blob", rep.Commit+":"+p)
 		if got != strings.TrimSpace(c) {
 			t.Fatalf("%s in the commit differs from disk", p)

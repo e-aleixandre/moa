@@ -148,10 +148,9 @@ func (r *Run) Snapshot(title string) (Snapshot, error) {
 	}
 	defer unlock()
 	snap := Snapshot{Files: map[string][]byte{}, Blobs: map[string]string{}}
-	// Only the book for now: memory is not consolidated yet, and versioning it
-	// would keep a secret a fact holds in the history after the fact is gone,
-	// which the user has not decided.
-	for _, store := range []struct{ dir, prefix string }{{r.s.bookDir(), bookPrefix}} {
+	// The memory is versioned with the book: the user accepted (11/11) that a
+	// secret a fact holds stays in this local history after the fact is gone.
+	for _, store := range []struct{ dir, prefix string }{{r.s.bookDir(), bookPrefix}, {r.s.memoryDir(), memoryPrefix}} {
 		if err := walkStore(store.dir, func(rel string, data []byte, regular bool) error {
 			if !regular {
 				snap.Skipped = append(snap.Skipped, store.prefix+rel)
@@ -476,8 +475,15 @@ func (s Store) confined(path string) (string, error) {
 }
 
 // allowedChange enforces I2 on a change, whatever produced it: protected book
-// paths are never rewritten; the archive only gains or loses whole files.
+// paths are never rewritten; the archives (the book's and the memory's) only
+// gain or lose whole files.
 func allowedChange(c Change) error {
+	if strings.HasPrefix(c.Path, memoryPrefix+"archivo/") {
+		if (c.Pre == "") != (c.Post == "") {
+			return nil
+		}
+		return fmt.Errorf("%s is protected", c.Path)
+	}
 	rel, ok := strings.CutPrefix(c.Path, bookPrefix)
 	if !ok {
 		return nil
@@ -873,6 +879,10 @@ func (s Store) Undo(commit string, pub Publisher) (Report, error) {
 			}
 		}
 		units[g.ID] = unitHash(before)
+		if g.Kind == "fact" {
+			// A fact is recorded by its own blob (see DueFacts).
+			units[g.ID] = before[g.ID]
+		}
 		inverse = append(inverse, ig)
 	}
 	fin := Finish{Run: run + "-undo", Units: units, News: nil}
