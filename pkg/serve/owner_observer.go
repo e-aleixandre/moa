@@ -16,7 +16,9 @@ package serve
 //     told nothing happened.
 //   - Semantic turns. A background job that finishes hours later injects its
 //     own notification, which is a new run with a new generation. That is the
-//     same turn continuing, not a second thing to report.
+//     same turn continuing, not a second thing to report — except when the
+//     owner already read the turn with that work still running: then its
+//     conclusion is a follow-up, because the owner was told it would come.
 //   - Shutdown. A callback is cancelled (its caller will retry). A report is
 //     flushed: it is the owner's only record of the turn.
 
@@ -88,6 +90,14 @@ type ownerReportObserver struct {
 	// reported is the turns that have already left for the owner. It is what
 	// makes a late continuation silent instead of a duplicate.
 	reported map[uint64]bool
+	// followUps maps a turn reported with background work still running to
+	// the At of that report. Its continuation is not silent: the owner was
+	// promised another report, and it reads as a follow-up of that one.
+	followUps map[uint64]string
+	// restarting reports that moa itself is stopping, so a run cancelled now
+	// was cut by the restart rather than by a user's Stop. Nil in tests that
+	// build an observer on its own: never a restart.
+	restarting func() bool
 	// closed stops new work being admitted once the session is being torn
 	// down. discard additionally abandons what was pending (an explicit
 	// delete: the conversation is gone, and so is the reason to report it).
@@ -144,6 +154,7 @@ func newOwnerReportObserver(sess *ManagedSession, emit func(runOutcome)) *ownerR
 		openRuns:    map[uint64]int{},
 		latest:      map[uint64]runOutcome{},
 		reported:    map[uint64]bool{},
+		followUps:   map[uint64]string{},
 		syncPending: map[uint64]chan struct{}{},
 		ctx:         ctx,
 		cancel:      cancel,
@@ -342,6 +353,7 @@ func (o *ownerReportObserver) runEnded(e bus.RunEnded) {
 		o.mu.Unlock()
 		return
 	}
+	followUpOf, reopened := o.reopenLocked(turn)
 	if o.reported[turn] {
 		o.mu.Unlock()
 		slog.Info("owner outcome suppressed", "codebase", o.sess.CWD, "session", o.sess.ID,
@@ -351,8 +363,13 @@ func (o *ownerReportObserver) runEnded(e bus.RunEnded) {
 	}
 	// Record the turn's latest text before the waiter sleeps: whoever emits
 	// reads this, so a continuation landing before the deadline updates the
-	// single report instead of adding one.
-	o.latest[turn] = runOutcome{Status: callbackStatusDone, RunGen: e.RunGen, FinalText: e.FinalText}
+	// single report instead of adding one. A follow-up keeps the report it
+	// concludes even when a later continuation replaces the text.
+	if prev, ok := o.latest[turn]; ok && !reopened {
+		followUpOf = prev.FollowUpOf
+	}
+	o.latest[turn] = runOutcome{Status: callbackStatusDone, RunGen: e.RunGen, FinalText: e.FinalText,
+		FollowUpOf: followUpOf, InterruptedByRestart: o.restartCancelled(e)}
 	if !o.admitLocked() {
 		o.mu.Unlock()
 		return
@@ -365,6 +382,10 @@ func (o *ownerReportObserver) runEnded(e bus.RunEnded) {
 func (o *ownerReportObserver) failed(e bus.RunEnded) {
 	o.mu.Lock()
 	turn := o.turnOfLocked(e.RunGen)
+	followUpOf, _ := o.reopenLocked(turn)
+	if prev, ok := o.latest[turn]; ok && followUpOf == "" {
+		followUpOf = prev.FollowUpOf
+	}
 	if o.reported[turn] {
 		// A late continuation of a turn the owner has already read. Its
 		// failure belongs to that same turn, so it is not a second entry.
@@ -383,10 +404,11 @@ func (o *ownerReportObserver) failed(e bus.RunEnded) {
 	o.mu.Unlock()
 
 	out := runOutcome{
-		Status:    callbackStatusFailed,
-		RunGen:    e.RunGen,
-		FinalText: e.FinalText,
-		Err:       e.Err.Error(),
+		Status:     callbackStatusFailed,
+		RunGen:     e.RunGen,
+		FinalText:  e.FinalText,
+		Err:        e.Err.Error(),
+		FollowUpOf: followUpOf,
 	}
 	o.launch(func() {
 		// The quiescence counters are maintained by a different subscriber, so
@@ -399,11 +421,59 @@ func (o *ownerReportObserver) failed(e bus.RunEnded) {
 		if o.discarded() {
 			return
 		}
+		out.ReportedAt = o.stamp(turn, out.BackgroundCount)
 		slog.Info("owner outcome emitted", "codebase", o.sess.CWD, "session", o.sess.ID,
 			"status", callbackStatusFailed, "run_gen", e.RunGen, "turn", turn,
 			"background", out.BackgroundCount)
 		o.emit(out)
 	})
+}
+
+// reopenLocked lets a turn reported with background work running be reported
+// once more, as a follow-up of that report: the owner was told it would hear
+// again. Callers hold mu.
+func (o *ownerReportObserver) reopenLocked(turn uint64) (followUpOf string, reopened bool) {
+	at, ok := o.followUps[turn]
+	if !ok || !o.reported[turn] {
+		return "", false
+	}
+	delete(o.followUps, turn)
+	delete(o.reported, turn)
+	return at, true
+}
+
+// restartCancelled says a run was cut by moa stopping. A user's Stop cancels
+// the run too, but leaves the process running.
+func (o *ownerReportObserver) restartCancelled(e bus.RunEnded) bool {
+	return e.Cancelled && o.restarting != nil && o.restarting()
+}
+
+// stamp is stampLocked for a caller that does not hold mu.
+func (o *ownerReportObserver) stamp(turn uint64, background int) time.Time {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.stampLocked(turn, background)
+}
+
+// stampLocked fixes when a turn's report is made and, when it leaves work
+// running, remembers it so that work's conclusion is a follow-up of it.
+// Callers hold mu.
+func (o *ownerReportObserver) stampLocked(turn uint64, background int) time.Time {
+	at := time.Now().UTC()
+	if background > 0 {
+		o.followUps[turn] = at.Format(time.RFC3339)
+	} else {
+		delete(o.followUps, turn)
+	}
+	return at
+}
+
+// running says a run of the session is open: it is not quiet, whatever a
+// turn that ended earlier is about to report.
+func (o *ownerReportObserver) running() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.openRuns) > 0
 }
 
 // discarded reports whether delete has abandoned this observer's work. It
@@ -462,10 +532,13 @@ func (o *ownerReportObserver) awaitAndEmit(turn uint64) {
 	}
 	o.reported[turn] = true
 	delete(o.latest, turn)
+	if !quiescent {
+		out.BackgroundCount = background
+	}
+	out.ReportedAt = o.stampLocked(turn, out.BackgroundCount)
 	o.mu.Unlock()
 
 	if !quiescent {
-		out.BackgroundCount = background
 		slog.Info("owner outcome emitted after quiescence timeout", "codebase", o.sess.CWD,
 			"session", o.sess.ID, "status", out.Status, "run_gen", out.RunGen, "turn", turn,
 			"background", background, "waited", ownerReportQuiescenceTimeout)
@@ -515,6 +588,10 @@ func (o *ownerReportObserver) flush() {
 	background := o.sess.runtime.BackgroundWork()
 	for i, out := range pending {
 		out.BackgroundCount = background
+		// Whatever the turn left running dies with the process: it will not
+		// report again, and the owner has to hear why.
+		out.InterruptedByRestart = out.InterruptedByRestart || background > 0
+		out.ReportedAt = time.Now().UTC()
 		slog.Info("owner outcome flushed at shutdown", "codebase", o.sess.CWD,
 			"session", o.sess.ID, "status", out.Status, "run_gen", out.RunGen,
 			"turn", turns[i], "background", background)

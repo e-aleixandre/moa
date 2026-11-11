@@ -121,8 +121,10 @@ func TestTurnWithEndlessBackgroundJobIsStillReported(t *testing.T) {
 }
 
 // When the endless job finally ends it injects its own notification, which is
-// a new run. That is the same turn concluding, not a second thing to report.
-func TestLateBashCompletionDoesNotReportTheTurnTwice(t *testing.T) {
+// a new run. That is the same turn concluding: the owner read it with the job
+// running and was told it would hear again, so the conclusion is a follow-up
+// of that report, never a rewrite of it.
+func TestLateBashCompletionIsAFollowUpOfTheReportedTurn(t *testing.T) {
 	shortReportWindow(t, time.Hour)
 	shortOwnerQuiescence(t, 150*time.Millisecond)
 	ctx := context.Background()
@@ -143,16 +145,19 @@ func TestLateBashCompletionDoesNotReportTheTurnTwice(t *testing.T) {
 
 	time.Sleep(3 * ownerReportQuiescenceTimeout)
 	got := outbox(t, mgr, info.CodebaseKey)
-	if len(got) != 1 {
-		t.Fatalf("the continuation produced a second report: %d reports", len(got))
+	if len(got) != 2 {
+		t.Fatalf("the continuation must produce exactly one follow-up: %d reports", len(got))
 	}
 	if !strings.Contains(got[0].FinalText, "server started") {
 		t.Fatalf("the reported turn changed under the owner: %+v", got[0])
 	}
+	if got[1].FollowUpOf != got[0].At || !strings.Contains(got[1].FinalText, "exited with status 0") {
+		t.Fatalf("the follow-up does not conclude the reported turn: %+v", got[1])
+	}
 }
 
-// The same dedupe for an async subagent, whose completion takes the same rail.
-func TestLateSubagentCompletionDoesNotReportTheTurnTwice(t *testing.T) {
+// The same follow-up for an async subagent, whose completion takes the same rail.
+func TestLateSubagentCompletionIsAFollowUpOfTheReportedTurn(t *testing.T) {
 	shortReportWindow(t, time.Hour)
 	shortOwnerQuiescence(t, 150*time.Millisecond)
 	ctx := context.Background()
@@ -171,8 +176,8 @@ func TestLateSubagentCompletionDoesNotReportTheTurnTwice(t *testing.T) {
 	publishRunEnd(child, 2, "the audit came back clean")
 
 	time.Sleep(3 * ownerReportQuiescenceTimeout)
-	if got := outbox(t, mgr, info.CodebaseKey); len(got) != 1 {
-		t.Fatalf("the subagent continuation produced a second report: %d", len(got))
+	if got := outbox(t, mgr, info.CodebaseKey); len(got) != 2 || got[1].FollowUpOf != got[0].At {
+		t.Fatalf("the subagent continuation must be one follow-up: %+v", got)
 	}
 }
 
@@ -212,7 +217,7 @@ func TestBackgroundWorkFinishingInTimeGivesOneCompleteReport(t *testing.T) {
 }
 
 // A new instruction while the old job is still running is a turn of its own,
-// and the old job's eventual completion still adds nothing.
+// and the old job's eventual completion is a follow-up of the first turn.
 func TestAnExplicitTurnReportsWhileAnOldJobKeepsRunning(t *testing.T) {
 	shortReportWindow(t, time.Hour)
 	shortOwnerQuiescence(t, 200*time.Millisecond)
@@ -247,8 +252,9 @@ func TestAnExplicitTurnReportsWhileAnOldJobKeepsRunning(t *testing.T) {
 	child.runtime.Bus.Publish(bus.BashJobSettled{SessionID: child.ID, JobID: "bash-endless"})
 	publishRunEnd(child, 3, "the server exited")
 	time.Sleep(3 * ownerReportQuiescenceTimeout)
-	if got := outbox(t, mgr, info.CodebaseKey); len(got) != 2 {
-		t.Fatalf("the late completion produced a third report: %d", len(got))
+	got = outbox(t, mgr, info.CodebaseKey)
+	if len(got) != 3 || got[2].FollowUpOf != got[0].At || !strings.Contains(got[2].FinalText, "the server exited") {
+		t.Fatalf("the late completion must be one follow-up of the first turn: %+v", got)
 	}
 }
 
@@ -523,7 +529,8 @@ func TestShutdownDoesNotWaitOutTheQuiescenceBudget(t *testing.T) {
 // The sequence the turn-identity rework exists for. Three explicit turns, the
 // first holding a job that only finishes at the end, and a late continuation
 // in the middle. Every explicit turn is one thing that happened to the project
-// and owes the owner a line; the continuation owes nothing.
+// and owes the owner a line; the continuation owes one follow-up of T1, never
+// a turn of its own.
 func TestThreeExplicitTurnsReportOnceEachDespiteALateContinuation(t *testing.T) {
 	shortReportWindow(t, time.Hour)
 	shortOwnerQuiescence(t, 200*time.Millisecond)
@@ -556,17 +563,29 @@ func TestThreeExplicitTurnsReportOnceEachDespiteALateContinuation(t *testing.T) 
 
 	time.Sleep(3 * ownerReportQuiescenceTimeout)
 	got := outbox(t, mgr, info.CodebaseKey)
-	if len(got) != 3 {
+	var turns []owner.Report
+	var follow []owner.Report
+	for _, rep := range got {
+		if rep.FollowUpOf != "" {
+			follow = append(follow, rep)
+		} else {
+			turns = append(turns, rep)
+		}
+	}
+	if len(turns) != 3 || len(follow) != 1 {
 		texts := make([]string, 0, len(got))
 		for _, rep := range got {
 			texts = append(texts, rep.FinalText)
 		}
-		t.Fatalf("expected exactly three reports (T1, T2, T3), got %d: %v", len(got), texts)
+		t.Fatalf("expected three turns (T1, T2, T3) and one follow-up of T1, got %d: %v", len(got), texts)
 	}
 	for i, want := range []string{"turn one done", "turn two done", "turn three done"} {
-		if !strings.Contains(got[i].FinalText, want) {
-			t.Fatalf("report %d = %q, want %q", i, got[i].FinalText, want)
+		if !strings.Contains(turns[i].FinalText, want) {
+			t.Fatalf("report %d = %q, want %q", i, turns[i].FinalText, want)
 		}
+	}
+	if follow[0].FollowUpOf != turns[0].At || !strings.Contains(follow[0].FinalText, "the long job finished") {
+		t.Fatalf("the continuation is not a follow-up of T1: %+v", follow[0])
 	}
 }
 
@@ -632,8 +651,8 @@ func TestContinueCurrentDoesNotOpenANewTurn(t *testing.T) {
 }
 
 // A failure that arrives as a late continuation of a turn the owner already
-// read belongs to that turn, so it is not a second entry.
-func TestFailedLateContinuationDoesNotDuplicateAReportedTurn(t *testing.T) {
+// read belongs to that turn: it is its failed follow-up, not a turn of its own.
+func TestFailedLateContinuationIsAFollowUpOfTheReportedTurn(t *testing.T) {
 	shortReportWindow(t, time.Hour)
 	shortOwnerQuiescence(t, 150*time.Millisecond)
 	ctx := context.Background()
@@ -653,8 +672,9 @@ func TestFailedLateContinuationDoesNotDuplicateAReportedTurn(t *testing.T) {
 		Err: errTestRunFailed,
 	})
 	time.Sleep(3 * ownerReportQuiescenceTimeout)
-	if got := outbox(t, mgr, info.CodebaseKey); len(got) != 1 {
-		t.Fatalf("a failed continuation duplicated an already reported turn: %d", len(got))
+	got := outbox(t, mgr, info.CodebaseKey)
+	if len(got) != 2 || got[1].Status != callbackStatusFailed || got[1].FollowUpOf != got[0].At {
+		t.Fatalf("a failed continuation must be one failed follow-up of the reported turn: %+v", got)
 	}
 }
 

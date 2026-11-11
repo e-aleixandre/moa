@@ -92,7 +92,9 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 			"session, each abridged to its beginning and end with a notice of what was cut; " +
 			"message_id reads one message whole (offset pages a very long one), and tools=true " +
 			"adds the tool calls. send: a message or a correction to a session. new: start a session in a " +
-			"directory of this project with a prompt. answer: answer a question a session asked " +
+			"directory of this project with a prompt; it needs task: the id of the task of your checklist it " +
+			"works on (create it first), or \"none\" for a question or an exploration. send with task makes that " +
+			"session the task's executor. answer: answer a question a session asked " +
 			"the user, when the book already answers it. You cannot approve permissions: those " +
 			"are the user's.",
 		Parameters: json.RawMessage(`{
@@ -111,6 +113,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 				"tools": {"type": "boolean", "description": "For read: also list the tool calls, with abridged arguments and results (default false)."},
 				"cwd": {"type": "string", "description": "For new: the directory to work in. Must belong to this project."},
 				"title": {"type": "string", "description": "For new: an explicit title."},
+				"task": {"type": ["integer", "string"], "description": "Required for new, optional for send: the id of the task of your checklist this session works on, so the task follows it (create it with tasks create first). \"none\" for new when it is not a commitment: a question or an exploration."},
 				"model": {"type": "string", "description": "For new: model spec (default: the usual default)."},
 				"thinking": {"type": "string", "description": "For new: thinking level."},
 				"ask_id": {"type": "string", "description": "For answer: the id of the question, as reported."},
@@ -139,9 +142,9 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 					tools:     params["tools"] == true,
 				}), nil
 			case "send":
-				return mgr.ownerSendToSession(own, getStr(params, "session_id"), getStr(params, "text")), nil
+				return mgr.ownerSendWithTask(ctx, own, params), nil
 			case "new":
-				return mgr.ownerNewSession(own, params), nil
+				return mgr.ownerNewSession(ctx, own, params), nil
 			case "answer":
 				return mgr.ownerAnswerAsk(own, getStr(params, "session_id"), getStr(params, "ask_id"), getStrings(params, "answers")), nil
 			default:
@@ -260,6 +263,7 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 	if total > len(mine) {
 		fmt.Fprintf(&sb, "Showing %d of %d sessions, most recently updated first.\n", len(mine), total)
 	}
+	linked := m.linkedTasksBySession(own)
 	for _, info := range mine {
 		// That it exists is all a detached session tells its owner: no title,
 		// state, brief or pending question, which are its content.
@@ -275,6 +279,9 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 			fmt.Fprintf(&sb, " — updated %s", book.RelativeAge(now.Sub(info.Updated)))
 		}
 		sb.WriteString("\n")
+		for _, t := range linked[info.ID] {
+			fmt.Fprintf(&sb, "    task: #%d %s\n", t.ID, t.Title)
+		}
 		if info.BriefAttempting != "" {
 			fmt.Fprintf(&sb, "    attempting: %s\n", info.BriefAttempting)
 		}
@@ -491,7 +498,7 @@ func askQuestionsSuffix(sess *ManagedSession) string {
 	return fmt.Sprintf(": %q", strings.Join(questions, " / "))
 }
 
-func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.Result {
+func (m *Manager) ownerNewSession(ctx context.Context, own owner.Owner, params map[string]any) core.Result {
 	cwd := getStr(params, "cwd")
 	if cwd == "" {
 		cwd = own.Root
@@ -503,6 +510,21 @@ func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.R
 	if prompt == "" {
 		return core.ErrorResult("text is required: a new session needs its first instruction")
 	}
+	// Delegated work leaves the turn as a task that follows its session; the
+	// escape is explicit, so forgetting is not an option.
+	taskID, none, given, err := executionTaskParam(params)
+	if err != nil {
+		return core.ErrorResult(err.Error())
+	}
+	if !given {
+		return core.ErrorResult("task is required for new: the id of the task of your checklist this session works on " +
+			"(create it with tasks create first), or \"none\" if it is a question or an exploration, not a commitment")
+	}
+	if !none {
+		if err := m.checkExecutionLink(ctx, own, taskID); err != nil {
+			return core.ErrorResult(linkErrorText(taskID, err))
+		}
+	}
 	sess, err := m.CreateSession(CreateOpts{
 		CWD:      cwd,
 		Title:    getStr(params, "title"),
@@ -513,10 +535,60 @@ func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.R
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot create the session: %v", err))
 	}
+	linked := ""
+	if !none {
+		// Before the prompt: its run start is what marks the task started.
+		if err := m.linkExecution(ctx, own, taskID, sess.ID); err != nil {
+			return core.ErrorResult(fmt.Sprintf("session %s was created but not started: %s", sess.ID, linkErrorText(taskID, err)))
+		}
+		linked = fmt.Sprintf(" It works on task #%d.", taskID)
+	}
 	if _, _, _, err := m.send(sess.ID, prompt, nil, "", "", ownerPromptCustom(own)); err != nil {
 		return core.ErrorResult(fmt.Sprintf("session %s was created but the prompt was refused: %v", sess.ID, err))
 	}
-	return core.TextResult(fmt.Sprintf("Started session %s in %s.", sess.ID, cwd))
+	return core.TextResult(fmt.Sprintf("Started session %s in %s.%s", sess.ID, cwd, linked))
+}
+
+// ownerSendWithTask is send, plus — when task is given — making the target
+// the task's executor first, so the run the message starts marks it started.
+func (m *Manager) ownerSendWithTask(ctx context.Context, own owner.Owner, params map[string]any) core.Result {
+	id, text := getStr(params, "session_id"), getStr(params, "text")
+	taskID, none, given, err := executionTaskParam(params)
+	if err != nil {
+		return core.ErrorResult(err.Error())
+	}
+	if !given || none {
+		return m.ownerSendToSession(own, id, text)
+	}
+	if text == "" {
+		return core.ErrorResult("text is required")
+	}
+	if _, err := m.ownerSession(own, id); err != nil {
+		return core.ErrorResult(err.Error())
+	}
+	if err := m.checkExecutionLink(ctx, own, taskID); err != nil {
+		return core.ErrorResult(linkErrorText(taskID, err))
+	}
+	if err := m.linkExecution(ctx, own, taskID, id); err != nil {
+		return core.ErrorResult(linkErrorText(taskID, err))
+	}
+	res := m.ownerSendToSession(own, id, text)
+	note := fmt.Sprintf(" It works on task #%d.", taskID)
+	if res.IsError {
+		note = fmt.Sprintf(" Task #%d is linked to %s anyway: send again, or pass task=%d to another session.", taskID, id, taskID)
+	}
+	if n := len(res.Content); n > 0 {
+		res.Content[n-1].Text += note
+	}
+	return res
+}
+
+// linkErrorText says why a task cannot follow a session and how to fix it.
+func linkErrorText(id int64, err error) string {
+	if errors.Is(err, tasks.ErrNotFound) {
+		return fmt.Sprintf("task #%d is not on your checklist: pass the id of one of your open tasks (tasks list), create it with tasks create, or pass task=\"none\" if this is not a commitment", id)
+	}
+	return strings.TrimPrefix(err.Error(), tasks.ErrInvalid.Error()+": ")
 }
 
 func ownerResponder(own owner.Owner) askuser.Responder {

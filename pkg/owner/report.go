@@ -65,6 +65,36 @@ type Report struct {
 	UserText     string `json:"user_text,omitempty"`
 	UserRef      string `json:"user_ref,omitempty"`
 	UserQuestion string `json:"user_question,omitempty"`
+	// InterruptedByRestart marks a turn cut short by moa stopping: the
+	// session will not continue on its own, whatever it left running.
+	InterruptedByRestart bool `json:"interrupted_by_restart,omitempty"`
+	// FollowUpOf is the At of the report this one concludes: a turn the
+	// owner read while background work was still running.
+	FollowUpOf string `json:"follow_up_of,omitempty"`
+	// NextRun is the session's next scheduled run, if it has one: what
+	// will wake it without anybody sending it a message.
+	NextRun *ReportNextRun `json:"next_run,omitempty"`
+	// LinkedTasks are the owner's open tasks this session executes and was
+	// quiet on when the report was made: each one is a decision for the
+	// owner's turn.
+	LinkedTasks []ReportTask `json:"linked_tasks,omitempty"`
+	// RestartTasks makes the entry the one an owner gets after a restart that
+	// was not an orderly shutdown: its linked tasks whose session was working
+	// and is not any more. The other fields are empty.
+	RestartTasks []ReportTask `json:"restart_tasks,omitempty"`
+}
+
+// ReportTask names one of the owner's tasks in a report.
+type ReportTask struct {
+	ID        int64  `json:"id"`
+	Title     string `json:"title"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+// ReportNextRun is a session's next scheduled run.
+type ReportNextRun struct {
+	TaskID int64  `json:"task_id"`
+	At     string `json:"at"` // RFC3339
 }
 
 // What a user-said report carries.

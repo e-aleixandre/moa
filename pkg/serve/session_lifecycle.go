@@ -339,6 +339,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		ForYouSnapshot:      m.forYouSnapshot(askAsync, id, &notifyOn, func() *ManagedSession { return sess }),
 		EnableSecretActions: true,
 		OwnerSession:        opts != nil && opts.ownerSession,
+		SessionTitle:        m.sessionTitle,
 		CreatorTZ:           creatorTZ,
 		Fast:                initialFast,
 		Daybreak:            daybreak,
@@ -820,6 +821,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// Project owners: children report their outcomes here, and the owner's own
 	// outcomes are what release a batch that was waiting for it to be free.
 	m.subscribeOwnerReports(sess, opts != nil && opts.ownerSession)
+	// Any session can be the executor of an owner's task: its run starts
+	// mark them started (live_tasks.go).
+	m.subscribeExecutionStarts(sess)
 
 	return sess, nil
 }
@@ -1497,6 +1501,7 @@ const shutdownDrainBudget = 5 * time.Second
 // captures the complete final turn rather than a partial one. If the budget
 // expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
+	m.shuttingDown.Store(true)
 	// Voice calls first: their minutes are written into sessions that are
 	// still alive, and no call keeps a provider open past shutdown.
 	m.closeVoiceCalls()
@@ -1583,6 +1588,8 @@ func (m *Manager) Shutdown() {
 
 	// What the user said has been relayed by now; nothing more is admitted.
 	m.userSaid.close()
+	// The last run starts were recorded; no session runs any more.
+	m.executions.close()
 
 	// 5. Everything that was going to be reported has been handed over and
 	// acknowledged. Close shuts the admission gate, waits for the senders

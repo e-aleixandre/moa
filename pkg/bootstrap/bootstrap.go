@@ -133,6 +133,9 @@ type SessionConfig struct {
 	// other session of the same codebase is a child: it reads the book, and is
 	// told so in its prompt, but never writes it.
 	OwnerSession bool
+	// SessionTitle names a session by id, for the owner's tasks list to say
+	// which session executes each task. Nil where there is no roster.
+	SessionTitle func(id string) string
 
 	// AsyncQuestions marks a session whose ask_user does not wait for the
 	// answer (see agentcontext.SystemPromptOptions.AsyncQuestions).
@@ -427,7 +430,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// An owner's conversation may also send tasks to other owners; the tool
 	// still checks the session against owner.json on every send.
 	taskStore := tasks.NewScope(taskRepo, taskSessionID, cfg.CWD).WithTZ(cfg.CreatorTZ).
-		WithOwners(ownerDirectory{}, cfg.OwnerSession)
+		WithOwners(ownerDirectory{}, cfg.OwnerSession).WithSessionTitles(cfg.SessionTitle)
 	core.RegisterOrLog(toolReg, tasks.NewTool(taskStore))
 
 	// 3b. moa's own documentation, embedded in the binary. Always available:

@@ -216,9 +216,9 @@ func (c *reportCoordinator) post(cmd reportCommand) bool {
 // The wait is what makes a sink's completion meaningful: "this turn was
 // reported" has to mean it reached the outbox, not that it reached a channel.
 // Nudges stay asynchronous — they carry nothing that can be lost.
-func (c *reportCoordinator) add(key string, rep owner.Report) {
+func (c *reportCoordinator) add(key string, rep owner.Report) bool {
 	if c == nil {
-		return
+		return false
 	}
 	c.admission.RLock()
 	defer c.admission.RUnlock()
@@ -227,9 +227,10 @@ func (c *reportCoordinator) add(key string, rep owner.Report) {
 	}
 	ack := make(chan struct{})
 	if !c.post(reportCommand{key: key, report: &rep, ack: ack}) {
-		return
+		return false
 	}
 	<-ack
+	return true
 }
 
 // BeginShutdown puts the actor in accept-only mode and waits for it to be in
@@ -553,8 +554,10 @@ func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Rep
 	// A session that failed or is stuck waiting for an answer is not worth
 	// batching: it is exactly what the owner has to act on now. What the user
 	// said is information, not an alarm: it rides the window so a burst of
-	// messages is one wake-up.
-	if rep.Status == callbackStatusDone || rep.Status == reportStatusUserSaid {
+	// messages is one wake-up. So does a follow-up, even a failed one: the
+	// owner already read its turn and was told this conclusion would come.
+	if rep.Status == callbackStatusDone || rep.Status == reportStatusUserSaid || rep.Status == reportStatusRestart ||
+		rep.FollowUpOf != "" {
 		c.arm(key, batch)
 		return
 	}
@@ -848,6 +851,9 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 	batchID := reportBatchID(pending)
 	sessions := make([]map[string]string, 0, len(pending))
 	for _, rep := range pending {
+		if rep.SessionID == "" {
+			continue // the restart entry is about several sessions, named in its text
+		}
 		sessions = append(sessions, map[string]string{"id": rep.SessionID, "title": rep.Title, "status": rep.Status, "origin": rep.Origin})
 	}
 	custom := map[string]any{"source": reportSource, "batch": batchID, "count": len(pending), "sessions": sessions}
@@ -970,7 +976,8 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 		}))
 		return
 	}
-	observer := newOwnerReportObserver(sess, func(out runOutcome) {
+	var observer *ownerReportObserver
+	observer = newOwnerReportObserver(sess, func(out runOutcome) {
 		// The observer stays installed while detached, so a reattach takes
 		// effect on the next turn without rewiring anything; the turns in
 		// between are simply never reported.
@@ -978,8 +985,15 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 			slog.Info("owner report dropped: session detached", "session", sess.ID)
 			return
 		}
-		admitOwnerReport(reports, sess, key, reportFrom(sess, out))
+		rep := reportFrom(sess, out)
+		m.withRunState(&rep, observer.running())
+		// The stop is recorded only once the report naming it is in the
+		// outbox: a crash in between says it twice rather than never.
+		if admitOwnerReport(reports, sess, key, rep) && len(rep.LinkedTasks) > 0 {
+			m.markExecutionStopped(sess.ID)
+		}
 	})
+	observer.restarting = m.stopping
 	sess.mu.Lock()
 	sess.ownerObserver = observer
 	sess.mu.Unlock()
@@ -988,14 +1002,14 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 // admitOwnerReport hands a report of a live child to the coordinator unless the
 // child has been detached. The detach check is repeated under ownerDetachMu so
 // that a detach which has returned can never be followed by an admitted report.
-func admitOwnerReport(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report) {
+func admitOwnerReport(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report) bool {
 	sess.ownerDetachMu.Lock()
 	defer sess.ownerDetachMu.Unlock()
 	if sess.ownerDetached.Load() {
 		slog.Info("owner report dropped: session detached", "session", sess.ID)
-		return
+		return false
 	}
-	reports.add(key, report)
+	return reports.add(key, report)
 }
 
 // reportFrom turns a run outcome into the report the owner will read. The
@@ -1017,8 +1031,14 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 		// What the session left running when its turn ended. A report is about
 		// a completed turn, not a quiet session; this is what keeps the two
 		// from reading the same.
-		BackgroundCount: out.BackgroundCount,
-		At:              time.Now().UTC().Format(time.RFC3339),
+		BackgroundCount:      out.BackgroundCount,
+		InterruptedByRestart: out.InterruptedByRestart,
+		FollowUpOf:           out.FollowUpOf,
+		At:                   time.Now().UTC().Format(time.RFC3339),
+	}
+	if !out.ReportedAt.IsZero() {
+		// The observer's stamp: a later follow-up names exactly this one.
+		rep.At = out.ReportedAt.UTC().Format(time.RFC3339)
 	}
 	pos := gitPosition(sess.CWD)
 	rep.GitAvailable, rep.Branch, rep.Head, rep.Dirty = pos.Available, pos.Branch, pos.Head, pos.Dirty
@@ -1251,6 +1271,10 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		fmt.Fprintf(&b, "Reports from %d sessions of your project:\n\n", len(pending))
 	}
 	for _, rep := range pending {
+		if len(rep.RestartTasks) > 0 {
+			writeRestartTasks(&b, rep.RestartTasks)
+			continue
+		}
 		fmt.Fprintf(&b, "- %s — %s\n", rep.SessionID, strings.TrimSpace(rep.Title))
 		fmt.Fprintf(&b, "  origin: %s\n", reportOrigin(rep.Origin))
 		fmt.Fprintf(&b, "  status: %s\n", rep.Status)
@@ -1258,9 +1282,10 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 			writeUserSaid(&b, rep)
 			continue
 		}
-		if line := backgroundWorkLine(rep.BackgroundCount); line != "" {
-			fmt.Fprintf(&b, "  %s\n", line)
+		if rep.FollowUpOf != "" {
+			fmt.Fprintf(&b, "  follow-up of the turn reported at %s\n", rep.FollowUpOf)
 		}
+		fmt.Fprintf(&b, "  %s\n", nowLine(rep))
 		if rep.CWD != "" {
 			fmt.Fprintf(&b, "  directory: %s\n", rep.CWD)
 		}
@@ -1274,6 +1299,9 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		}
 		if rep.FinalText != "" {
 			fmt.Fprintf(&b, "  said: %s\n", indentReportText(rep.FinalText))
+		} else if rep.Status == callbackStatusDone && rep.InterruptedByRestart {
+			fmt.Fprintf(&b, "  said: nothing — moa restarted in the middle of the turn. See where it stopped with the sessions tool: "+
+				"action=read, session_id=%s, tools=true\n", rep.SessionID)
 		} else if rep.Status == callbackStatusDone {
 			// A run that stops on a tool call or an empty reply ends "done"
 			// with nothing to quote. Saying nothing would read as finished work.
@@ -1301,6 +1329,9 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		default:
 			fmt.Fprintf(&b, "  book delta: %s\n", indentReportText(rep.BookDelta))
 		}
+		for _, t := range rep.LinkedTasks {
+			fmt.Fprintf(&b, "  %s\n", linkedTaskNotice(t, rep.Status == callbackStatusNeedsInput && !rep.InterruptedByRestart))
+		}
 	}
 	b.WriteString("\nUse the sessions tool to read or answer any of them, and update the book " +
 		"with what this changes about the project.")
@@ -1321,18 +1352,53 @@ func reportOrigin(origin string) string {
 	return "user"
 }
 
-// backgroundWorkLine says what the session left running. It is stated in the
-// report rather than inferred from silence: a child that finished its turn and
-// a child that finished its turn while a dev server keeps running are two
-// different things for an owner deciding what to do next.
-func backgroundWorkLine(count int) string {
+// nowLine says what the session is doing as the owner reads the report, so
+// that "it will come back on its own" and "it stopped" never read the same: a
+// child that finished its turn, one that left a dev server running and one
+// that a restart cut are three different things for an owner deciding what to
+// do next.
+func nowLine(rep owner.Report) string {
+	var line string
 	switch {
-	case count <= 0:
-		return ""
-	case count == 1:
-		return "1 background job still running"
+	case rep.InterruptedByRestart:
+		// Whatever it left running died with the process.
+		return "now: interrupted by a moa restart — it will not continue on its own"
+	case rep.BackgroundCount == 1:
+		line = "now: 1 background job still running — it will report again when they finish"
+	case rep.BackgroundCount > 1:
+		line = fmt.Sprintf("now: %d background jobs still running — it will report again when they finish", rep.BackgroundCount)
+	case rep.Status == callbackStatusFailed:
+		line = "now: stopped by the error above — it will not continue on its own"
+	case rep.Status == callbackStatusNeedsInput:
+		line = "now: waiting for the answer above — nothing else is running"
 	default:
-		return fmt.Sprintf("%d background jobs still running", count)
+		line = "now: idle — nothing is running; it will not continue unless someone sends it a message"
+	}
+	if n := rep.NextRun; n != nil {
+		line += fmt.Sprintf("; next scheduled run %s (#%d)", n.At, n.TaskID)
+	}
+	return line
+}
+
+// linkedTaskNotice turns an open task the quiet session executes into the
+// decision it is for the owner's turn.
+func linkedTaskNotice(t owner.ReportTask, waiting bool) string {
+	if waiting {
+		return fmt.Sprintf("linked task #%d «%s» is still open. It waits for the answer above; comment it on the task if it is a real blocker.",
+			t.ID, strings.TrimSpace(t.Title))
+	}
+	return fmt.Sprintf("linked task #%d «%s» is still open. Before ending your turn: close it with evidence, "+
+		"send the next step (to this session or a new one with task=%d), or comment what it waits for and who unblocks it.",
+		t.ID, strings.TrimSpace(t.Title), t.ID)
+}
+
+// writeRestartTasks is the entry an owner gets when moa starts after dying
+// mid-turn: no session resumes on its own, so each task is the owner's call.
+func writeRestartTasks(b *strings.Builder, list []owner.ReportTask) {
+	b.WriteString("- After the restart, these linked tasks have a session that was working and is not anymore:\n")
+	for _, t := range list {
+		fmt.Fprintf(b, "  - #%d «%s» — session %s (stopped mid-turn). Continue it, close it, or comment what it waits for.\n",
+			t.ID, strings.TrimSpace(t.Title), t.SessionID)
 	}
 }
 

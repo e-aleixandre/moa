@@ -3,6 +3,7 @@ package serve
 import (
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
 )
@@ -22,6 +23,13 @@ type runOutcome struct {
 	// consumer that reports a finished turn without waiting for the session to
 	// go quiet. Zero everywhere else, which is what it has always meant.
 	BackgroundCount int
+	// Owner reports only. InterruptedByRestart: the run was cut by moa
+	// stopping. FollowUpOf: the At of the report this one concludes.
+	// ReportedAt: when the observer decided the report, which a follow-up
+	// names.
+	InterruptedByRestart bool
+	FollowUpOf           string
+	ReportedAt           time.Time
 }
 
 // subscribeRunOutcomes installs the observer that turns bus traffic into

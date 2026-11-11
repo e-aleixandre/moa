@@ -925,6 +925,12 @@ type Manager struct {
 	// never started): cancelling it only asks it to stop, and until it returns
 	// it may still open the task database.
 	tasksWatcherDone chan struct{}
+	// executions admits the workers that record an executor's run start on
+	// its linked tasks (live_tasks.go); Shutdown closes it and waits for them.
+	executions executionWorkers
+	// shuttingDown is set when Shutdown starts: a run cancelled from then on
+	// was cut by moa stopping, not by a user's Stop.
+	shuttingDown atomic.Bool
 	// newsGate admits the per-request News reads of the agent runs. A run
 	// can outlive Delete (the session leaves m.sessions without a join), so
 	// Shutdown closes the gate and waits for the reads in flight instead of
@@ -1262,6 +1268,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	// The coordinator reads its outbox at startup, so it must exist before any
 	// session is resumed and starts reporting.
 	m.reports = newReportCoordinator(ctx, m)
+	// Before any session is resumed: a linked task whose session was working
+	// when the last process died is the owner's to decide (live_tasks.go).
+	m.reportInterruptedExecutions()
 	// The heartbeat reads the same outbox, so it starts after the coordinator
 	// has recovered it.
 	m.heartbeat = newHeartbeatService(m)
