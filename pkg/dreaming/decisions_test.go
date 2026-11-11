@@ -132,7 +132,6 @@ func TestMarkRules(t *testing.T) {
 	}
 }
 
-
 // A total mark never overwrites what the archive already holds.
 func TestTotalMarkNeverOverwritesTheArchive(t *testing.T) {
 	s := fixture(t)
