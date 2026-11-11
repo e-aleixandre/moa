@@ -76,15 +76,19 @@ func quoteHolds(snap Snapshot, q Quote) bool {
 	}
 	window := normQuote(strings.Join(lines[max(0, q.Line-2):min(len(lines), q.Line+1)], " "))
 	text := normQuote(strings.NewReplacer("…", " ... ", "[...]", " ... ").Replace(q.Text))
-	parts := 0
+	// The fragments must appear in order and without overlapping: "..." may
+	// only cut text out, never reorder it.
+	parts, at := 0, 0
 	for _, part := range ellipsis.Split(text, -1) {
 		if part = strings.TrimSpace(part); part == "" {
 			continue
 		}
 		parts++
-		if !strings.Contains(window, part) {
+		i := strings.Index(window[at:], part)
+		if i < 0 {
 			return false
 		}
+		at += i + len(part)
 	}
 	return parts > 0
 }
@@ -240,6 +244,9 @@ func (s Store) DueDecisions(snap Snapshot) (map[string]Unit, map[string]bool, er
 	for _, u := range snap.Units() {
 		if !isDecision(u) {
 			continue
+		}
+		if snap.HasSecret(u) {
+			continue // never read; named by the night with the other sheets
 		}
 		all[u.Sheet] = u
 		if st.Units[bookPrefix+u.Sheet] != snap.UnitHash(u) {

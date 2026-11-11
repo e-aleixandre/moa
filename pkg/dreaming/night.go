@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ type NightResult struct {
 	Rejected  map[string]string // unit → why its plan was refused
 	Deferred  []string          // left for another night (budget)
 	Marks     []Mark            // decisions marked as superseded
+	Secrets   []string          // sheets and decisions left alone: they look like they hold a credential
 	Questions []string          // for the user, from the decisions pass
 	CostUSD   float64
 }
@@ -60,12 +62,27 @@ const (
 
 // Night runs one night for the store if the date has not run yet: it never
 // runs twice on a date, even after a failure.
-func (s Store) Night(ctx context.Context, cfg NightConfig) (NightResult, error) {
+//
+// It waits for another run (an undo) without blocking in the kernel, so a
+// cancelled context always ends it: the server's shutdown must not hang on a
+// lock.
+func (s Store) Night(ctx context.Context, cfg NightConfig) (res NightResult, err error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	res := NightResult{Rejected: map[string]string{}}
-	r, _, err := s.Begin(true, cfg.Publish)
+	res = NightResult{Rejected: map[string]string{}}
+	var r *Run
+	for {
+		r, _, err = s.Begin(false, cfg.Publish)
+		if !errors.Is(err, ErrBusy) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return res, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 	if err != nil {
 		return res, err
 	}
@@ -115,6 +132,17 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (NightResult, error) 
 	if err != nil || len(due)+len(dueFacts)+len(dueDecisions) == 0 {
 		return res, err
 	}
+	// A sheet that looks like it holds a credential is never sent to a model
+	// nor changed; it is recorded as read so it is named once per change.
+	secretClean := map[string]string{}
+	due = slices.DeleteFunc(due, func(u Unit) bool {
+		if snap.HasSecret(u) {
+			res.Secrets = append(res.Secrets, u.Sheet)
+			secretClean[bookPrefix+u.Sheet] = snap.UnitHash(u)
+			return true
+		}
+		return false
+	})
 	s.byRecency(due)
 	batch, deferred := selectBatch(snap, due, cfg)
 	res.Deferred = append(res.Deferred, deferred...)
@@ -152,7 +180,7 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (NightResult, error) 
 	content := map[string][]byte{}
 	fin := Finish{Run: cfg.Date + "-" + randomHex(4), Units: map[string]string{}}
 	plans := map[string]Plan{}
-	clean := map[string]string{} // units judged clean and facts kept: nothing to write
+	clean := secretClean // units judged clean, facts kept and secrets: nothing to write
 	for i, u := range analyzed {
 		plan, decisions, err := s.organize(ctx, budget, cfg, snap, u, analyses[u.Sheet], cross)
 		if errors.Is(err, ErrBudget) {
@@ -355,7 +383,7 @@ func (s Store) cross(ctx context.Context, b *Budget, cfg NightConfig, snap Snaps
 func decisionsIndex(snap Snapshot) string {
 	var paths []string
 	for p := range snap.Files {
-		if strings.HasPrefix(p, bookPrefix+"decisions/") && strings.HasSuffix(p, ".md") {
+		if strings.HasPrefix(p, bookPrefix+"decisions/") && strings.HasSuffix(p, ".md") && !isSecret(snap.Files[p]) {
 			paths = append(paths, p)
 		}
 	}
@@ -389,7 +417,7 @@ func citedDecisions(snap Snapshot, texts ...string) (paths []string, rendered st
 			}
 			seen[ref] = true
 			data, ok := snap.Files[bookPrefix+ref]
-			if !ok {
+			if !ok || isSecret(data) {
 				continue
 			}
 			var d strings.Builder
@@ -562,6 +590,9 @@ func morningNews(cfg NightConfig, rep Report, res NightResult, plans map[string]
 	if len(facts.review) > 0 {
 		fmt.Fprintf(&body, "- Memoria a revisar (la corrección dejaría mal su descripción): %s.\n", strings.Join(facts.review, ", "))
 	}
+	if len(res.Secrets) > 0 {
+		fmt.Fprintf(&body, "- Hojas con posibles secretos, sin tocar: %s.\n", strings.Join(res.Secrets, ", "))
+	}
 	if len(facts.secrets) > 0 {
 		fmt.Fprintf(&body, "- Memoria con secretos, sin tocar: %s.\n", strings.Join(facts.secrets, ", "))
 	}
@@ -602,7 +633,7 @@ func morningNews(cfg NightConfig, rep Report, res NightResult, plans map[string]
 	if rep.Commit != "" {
 		fmt.Fprintf(&body, "- Para deshacerlo, pídeselo al owner: «deshaz el dreaming %s».\n", shortSHA(rep.Commit)[:7])
 	}
-	return News{Key: "dreaming/" + cfg.Date, Origin: "dreaming/" + cfg.Date, Title: title, Body: strings.TrimSpace(body.String())}
+	return News{Key: "dreaming/" + cfg.Date, Origin: "dreaming/" + cfg.Date, Title: title, Body: withoutSecrets(strings.TrimSpace(body.String()))}
 }
 
 func trimIDs(ids []string) string {
@@ -641,4 +672,16 @@ func (s Store) pruneRuns(now time.Time) {
 		}
 		_ = os.Remove(dir)
 	}
+}
+
+// withoutSecrets drops every line of generated text that looks like it holds
+// a credential: a model may have copied one from a quote.
+func withoutSecrets(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		if isSecret([]byte(l)) {
+			lines[i] = "- (línea omitida: parecía contener un secreto)"
+		}
+	}
+	return strings.Join(lines, "\n")
 }

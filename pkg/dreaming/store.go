@@ -992,7 +992,7 @@ func (s Store) Due(snap Snapshot) ([]Unit, error) {
 	}
 	var out []Unit
 	for _, u := range snap.Units() {
-		if !isDecision(u) && st.Units[bookPrefix+u.Sheet] != snap.UnitHash(u) {
+		if (!isDecision(u) || snap.HasSecret(u)) && st.Units[bookPrefix+u.Sheet] != snap.UnitHash(u) {
 			out = append(out, u)
 		}
 	}
@@ -1019,4 +1019,15 @@ func (r *Run) addPromotions(snap Snapshot, u Unit, plan Plan, date string, g *Gr
 		g.Changes = append(g.Changes, Change{Path: bookPrefix + p.Path, Post: id})
 	}
 	return nil
+}
+
+// HasSecret reports whether any file of a unit looks like it holds a
+// credential.
+func (snap Snapshot) HasSecret(u Unit) bool {
+	for _, f := range u.Files {
+		if isSecret(snap.Files[bookPrefix+f]) {
+			return true
+		}
+	}
+	return false
 }
