@@ -427,6 +427,16 @@ func TestAnOversizedBookCanBeSplitWithTheTool(t *testing.T) {
 	}
 }
 
+// The newline an append adds counts as growth: an empty append must not push a
+// full file over its limit.
+func TestEmptyAppendCannotGrowAFullFile(t *testing.T) {
+	dir := newBook(t)
+	writeSized(t, dir, "PROJECT.md", 8*1024)
+	if res := run(t, NewTool(dir, true), map[string]any{"action": "append", "path": "PROJECT.md", "content": ""}); !res.IsError {
+		t.Fatal("an empty append grew a full index")
+	}
+}
+
 func TestReadOffsetOutsideTheFileIsAnError(t *testing.T) {
 	dir := newBook(t)
 	writeSized(t, dir, "people.md", 100)

@@ -473,13 +473,14 @@ func write(dir, rel, content string, appendTo bool) (core.Result, error) {
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return core.ErrorResult(fmt.Sprintf("cannot read %s: %v", rel, readErr)), nil
 	}
+	before := len(existing)
 	if appendTo {
 		if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
 			existing = append(existing, '\n')
 		}
 		content = string(existing) + content
 	}
-	if refusal := sizeRefusal(CleanPath(rel), len(content), len(existing)); refusal != "" {
+	if refusal := sizeRefusal(CleanPath(rel), len(content), before); refusal != "" {
 		return core.ErrorResult(refusal), nil
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {

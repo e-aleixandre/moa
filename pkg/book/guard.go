@@ -27,15 +27,25 @@ const GuardMessage = "The book is written only with the book tool (action write 
 
 // GuardExtension refuses, in an owner's session, the calls that would write the
 // book directory without going through the book tool.
-func GuardExtension(dir string) extension.Extension {
-	return guardExtension{dir: dir}
+//
+// cwd tells where the session's shell is when a command starts (its persisted
+// directory, or the one the call names); nil means unknown.
+func GuardExtension(dir string, cwd func(ctx context.Context, args map[string]any) string) extension.Extension {
+	return guardExtension{dir: dir, cwd: cwd}
 }
 
-type guardExtension struct{ dir string }
+type guardExtension struct {
+	dir string
+	cwd func(ctx context.Context, args map[string]any) string
+}
 
 func (g guardExtension) Init(api extension.API) error {
-	api.OnToolCall(func(_ context.Context, name string, args map[string]any) *core.ToolCallDecision {
-		if WritesBook(g.dir, name, args) {
+	api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
+		cwd := ""
+		if g.cwd != nil {
+			cwd = g.cwd(ctx, args)
+		}
+		if WritesBookFrom(g.dir, cwd, name, args) {
 			return &core.ToolCallDecision{Block: true, Reason: GuardMessage}
 		}
 		return nil
@@ -46,10 +56,18 @@ func (g guardExtension) Init(api extension.API) error {
 // WritesBook reports whether a tool call would write inside the book directory
 // by a route other than the book tool.
 func WritesBook(dir, tool string, args map[string]any) bool {
+	return WritesBookFrom(dir, "", tool, args)
+}
+
+// WritesBookFrom is WritesBook for a shell that starts in cwd.
+func WritesBookFrom(dir, cwd, tool string, args map[string]any) bool {
 	if dir == "" {
 		return false
 	}
 	g := newGuard(dir)
+	if cwd != "" && filepath.IsAbs(cwd) {
+		g.cwd = filepath.Clean(cwd)
+	}
 	switch strings.ToLower(tool) {
 	case "bash":
 		cmd, _ := args["command"].(string)
@@ -68,7 +86,7 @@ func WritesBook(dir, tool string, args map[string]any) bool {
 	return false
 }
 
-var patchFileRE = regexp.MustCompile(`(?m)^\*\*\* (?:Add|Update|Delete) File: (.+)$`)
+var patchFileRE = regexp.MustCompile(`(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$`)
 
 type guard struct {
 	dir  string // absolute, cleaned
@@ -162,15 +180,15 @@ func (g *guard) script(src string, depth int) bool {
 	if depth > maxGuardDepth {
 		return false
 	}
-	var saved []string
+	var saved []shellState
 	level := 0
 	for _, seg := range splitSegments(src) {
 		for level < seg.depth {
-			saved = append(saved, g.cwd)
+			saved = append(saved, g.state())
 			level++
 		}
 		for level > seg.depth && len(saved) > 0 {
-			g.cwd = saved[len(saved)-1]
+			g.restore(saved[len(saved)-1])
 			saved = saved[:len(saved)-1]
 			level--
 		}
@@ -181,14 +199,39 @@ func (g *guard) script(src string, depth int) bool {
 	return false
 }
 
+// shellState is what a subshell, $( ) or `bash -c` must not leak: the working
+// directory and the variables.
+type shellState struct {
+	cwd  string
+	vars map[string]string
+}
+
+func (g *guard) state() shellState {
+	vars := make(map[string]string, len(g.vars))
+	for k, v := range g.vars {
+		vars[k] = v
+	}
+	return shellState{cwd: g.cwd, vars: vars}
+}
+
+func (g *guard) restore(s shellState) { g.cwd, g.vars = s.cwd, s.vars }
+
+// nested runs a script of its own (a $( ) body, bash -c, a heredoc fed to a
+// shell) without letting its cd or assignments out.
+func (g *guard) nested(src string, depth int) bool {
+	saved := g.state()
+	defer g.restore(saved)
+	return g.script(src, depth+1)
+}
+
+// shellKeywords introduce a command rather than being one.
+var shellKeywords = map[string]bool{"then": true, "do": true, "else": true, "elif": true, "if": true, "while": true, "until": true, "!": true, "{": true, "}": true, "fi": true, "done": true}
+
 var assignRE = regexp.MustCompile(`^([A-Za-z_]\w*)=(.*)$`)
 
 func (g *guard) segment(seg segment, depth int) bool {
 	for _, sub := range seg.subs {
-		saved := g.cwd
-		hit := g.script(sub, depth+1)
-		g.cwd = saved
-		if hit {
+		if g.nested(sub, depth) {
 			return true
 		}
 	}
@@ -210,6 +253,9 @@ func (g *guard) segment(seg segment, depth int) bool {
 		} else if p := g.resolve(m[2]); p != "" {
 			g.vars[m[1]] = p
 		}
+		words = words[1:]
+	}
+	for len(words) > 0 && shellKeywords[words[0]] {
 		words = words[1:]
 	}
 	if len(words) == 0 {
@@ -237,10 +283,11 @@ func (g *guard) segment(seg segment, depth int) bool {
 	case "bash", "sh", "zsh", "dash":
 		for i, a := range args {
 			if (a == "-c" || (strings.HasPrefix(a, "-") && strings.HasSuffix(a, "c"))) && i+1 < len(args) {
-				return g.script(args[i+1], depth+1)
+				return g.nested(args[i+1], depth)
 			}
 		}
-		return false
+		// `bash <<'SH'`: the heredoc is the script.
+		return seg.heredoc != "" && g.nested(seg.heredoc, depth)
 	}
 
 	ops := operands(args)
@@ -248,15 +295,19 @@ func (g *guard) segment(seg segment, depth int) bool {
 	case "tee", "rm", "touch", "truncate", "unlink", "shred", "mkdir", "rmdir", "ln", "install", "ed", "sponge":
 		return g.anyInBook(ops)
 	case "mv":
-		// Replacing the whole directory is how a snapshot is restored; only what
-		// lives inside the book counts.
-		for _, o := range ops {
-			if p := g.resolve(o); p != g.dir && g.inBook(p) {
-				return true
-			}
+		// Swapping the whole directory (`mv -T new book`, how a snapshot is
+		// restored) is not a content write; moving the book away never is.
+		// Anything else into or out of the directory is.
+		whole := false
+		for _, a := range args {
+			whole = whole || a == "-T" || a == "--no-target-directory"
 		}
-		if len(ops) > 0 {
-			if p := g.resolve(ops[len(ops)-1]); p != g.dir && g.inBook(p) {
+		for i, o := range ops {
+			p := g.resolve(o)
+			if p == g.dir && (i < len(ops)-1 || whole) {
+				continue
+			}
+			if g.inBook(p) {
 				return true
 			}
 		}
@@ -283,6 +334,29 @@ func (g *guard) segment(seg segment, depth int) bool {
 		for _, a := range args {
 			if a == "-delete" {
 				return g.anyInBook(ops)
+			}
+		}
+		// find B -exec sed -i ... {} +: judge the command it runs, with {}
+		// standing for what find was pointed at.
+		var roots []string
+		for _, o := range ops {
+			if g.inBook(g.resolve(o)) {
+				roots = append(roots, o)
+			}
+		}
+		for i, a := range args {
+			if a != "-exec" && a != "-execdir" && a != "-ok" || len(roots) == 0 {
+				continue
+			}
+			var run []string
+			for _, w := range args[i+1:] {
+				if w == ";" || w == "+" {
+					break
+				}
+				run = append(run, strings.ReplaceAll(w, "{}", roots[0]))
+			}
+			if g.segment(segment{words: run}, depth) {
+				return true
 			}
 		}
 	}
@@ -385,7 +459,7 @@ func isInterpreter(cmd string) bool {
 
 // scriptWriteRE matches the calls a script uses to change a file. It is run
 // only on scripts that are about the book.
-var scriptWriteRE = regexp.MustCompile(`(?i)(\bopen\([^)]*['"][^'"]*[wax+][^'"]*['"]|mode\s*=\s*['"][wax]|write_text|write_bytes|writelines|\.write\(|os\.(rename|remove|unlink|replace|truncate)|shutil\.(copy|move|rmtree)|\.(unlink|rename|replace|touch)\(|fs\.(write|append|rename|unlink|rm|copy)|writeFile|appendFile|File\.(write|open)|file_put_contents|\bsed -i)`)
+var scriptWriteRE = regexp.MustCompile(`(?i)(\bopen\([^,()]*,\s*['"][rbt]*[wax+][^'"]*['"]|mode\s*=\s*['"][^'"]*[wax+]|write_text|write_bytes|writelines|\.write\(|os\.(rename|remove|unlink|replace|truncate)|shutil\.(copy|move|rmtree)|\.(unlink|rename|replace|touch)\(|fs\.(write|append|rename|unlink|rm|copy)|writeFile|appendFile|File\.(write|open)|file_put_contents|\bsed -i)`)
 
 // splitSegments tokenizes a shell script just enough for the guard: quotes,
 // operators, redirections and heredocs. A quoted ">" is text, and the body of a
@@ -445,6 +519,14 @@ func splitSegments(src string) []segment {
 			for i++; i < len(rs) && rs[i] != '"'; i++ {
 				if rs[i] == '\\' && i+1 < len(rs) {
 					i++
+				} else if rs[i] == '$' && i+1 < len(rs) && rs[i+1] == '(' {
+					start := i
+					i = matchParen(rs, i+1)
+					word.WriteString(string(rs[start : i+1]))
+					if i > start+2 {
+						cur.subs = append(cur.subs, string(rs[start+2:i]))
+					}
+					continue
 				}
 				word.WriteRune(rs[i])
 			}
@@ -477,23 +559,12 @@ func splitSegments(src string) []segment {
 			pending = nil
 		case c == '$' && i+1 < len(rs) && rs[i+1] == '(':
 			// Kept whole inside the word, so NAME=$(...) stays one assignment.
-			start, level := i, 0
-			for ; i < len(rs); i++ {
-				if rs[i] == '(' {
-					level++
-				} else if rs[i] == ')' {
-					if level--; level == 0 {
-						break
-					}
-				}
-			}
-			if i >= len(rs) {
-				i = len(rs) - 1
-			}
+			start := i
+			i = matchParen(rs, i+1)
 			word.WriteString(string(rs[start : i+1]))
 			inWord = true
-			if body := string(rs[start+2 : i]); i > start+2 {
-				cur.subs = append(cur.subs, body)
+			if i > start+2 {
+				cur.subs = append(cur.subs, string(rs[start+2:i]))
 			}
 		case c == ';' || c == '|' || c == '&' || c == '(' || c == ')' || c == '`':
 			if c == '&' && i+1 < len(rs) && rs[i+1] == '>' {
@@ -575,6 +646,23 @@ func splitSegments(src string) []segment {
 	}
 	endSeg()
 	return segs
+}
+
+// matchParen returns the index of the ")" closing the "(" at open, or the last
+// rune when it is never closed.
+func matchParen(rs []rune, open int) int {
+	level := 0
+	for i := open; i < len(rs); i++ {
+		switch rs[i] {
+		case '(':
+			level++
+		case ')':
+			if level--; level == 0 {
+				return i
+			}
+		}
+	}
+	return len(rs) - 1
 }
 
 func isDigits(s string) bool {
