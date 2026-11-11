@@ -33,6 +33,30 @@ type Archived struct {
 	Lines  [2]int `json:"lineas"`
 	Reason string `json:"motivo"`
 	Source string `json:"fuente"`
+	// Source2 is the second citation a decision of the user needs before any
+	// of its lines leaves the file (decisions/dreaming.md, 11/11).
+	Source2 string `json:"fuente2,omitempty"`
+}
+
+// isDecision reports whether a unit is one of the user's decisions. Its lines
+// are never rewritten (I1 already guarantees that); on top of it, only a later
+// decision of the user can retire them, and the only new text is the
+// "Superada por" note.
+func isDecision(u Unit) bool { return strings.HasPrefix(u.Sheet, "decisions/") }
+
+var decisionNote = regexp.MustCompile("^> Superada por `decisions/[^`\\s]+\\.md` \\([^()]+\\)(: [^:\\s]+:[0-9]+-[0-9]+)?\\.?$")
+
+// checkDecisionState allows only "Superada por" notes, one per line.
+func checkDecisionState(state string) error {
+	for _, l := range strings.Split(state, "\n") {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if !decisionNote.MatchString(l) {
+			return fmt.Errorf("a decision only takes \"> Superada por `decisions/x.md` (fecha)\" notes; found %q", l)
+		}
+	}
+	return nil
 }
 
 // Reasons an archived range may carry. ReasonUnconfirmed is the only one that
@@ -160,7 +184,12 @@ func Assemble(in AssembleInput) (Output, error) {
 	if strings.Contains(state, in.Nonce) {
 		return Output{}, fmt.Errorf("nonce occurs in the state")
 	}
-	if !strings.Contains(state, "## Estado actual") {
+	decision := isDecision(u)
+	if decision {
+		if err := checkDecisionState(state); err != nil {
+			return Output{}, err
+		}
+	} else if !strings.Contains(state, "## Estado actual") {
 		return Output{}, fmt.Errorf("the state needs a \"## Estado actual\" section")
 	}
 	if len(state) > maxStateBytes {
@@ -209,6 +238,11 @@ func Assemble(in AssembleInput) (Output, error) {
 		if err := checkReason(in, state, ar); err != nil {
 			return Output{}, err
 		}
+		if decision {
+			if err := checkDecisionArchive(in, ar); err != nil {
+				return Output{}, err
+			}
+		}
 	}
 	for f := range lines {
 		start := 0
@@ -235,11 +269,21 @@ func Assemble(in AssembleInput) (Output, error) {
 		sheet.WriteByte('\n')
 	}
 	stem := strings.TrimSuffix(u.Sheet, ".md")
-	fmt.Fprintf(&sheet, "\n> Consolidada por el dreaming el %s: arriba, el estado actual; debajo, literal, el detalle que sigue vigente. Lo retirado está, literal, en `archivo/%s/`.\n\n", in.Date, stem)
-	sheet.WriteString(state)
-	sheet.WriteString("\n")
-	if len(plan.Keep) > 0 {
+	if decision {
+		if state != "" {
+			fmt.Fprintf(&sheet, "\n%s\n> Lo superado está, literal, en `archivo/%s/`.\n\n", state, stem)
+		} else {
+			sheet.WriteString("\n")
+		}
+	} else {
+		fmt.Fprintf(&sheet, "\n> Consolidada por el dreaming el %s: arriba, el estado actual; debajo, literal, el detalle que sigue vigente. Lo retirado está, literal, en `archivo/%s/`.\n\n", in.Date, stem)
+		sheet.WriteString(state)
+		sheet.WriteString("\n")
+	}
+	if len(plan.Keep) > 0 && !decision {
 		sheet.WriteString("\n## Detalle vigente (literal)\n\n")
+	}
+	if len(plan.Keep) > 0 {
 		for _, k := range plan.Keep {
 			sheet.Write(block(in.Nonce, k[0], k[1], k[2], slice(k[0], k[1], k[2]), ""))
 		}
@@ -261,6 +305,9 @@ func Assemble(in AssembleInput) (Output, error) {
 		extra := " motivo=" + ar.Reason
 		if ar.Source != "" {
 			extra += " fuente=S0:" + shortSHA(in.S0) + ":" + ar.Source
+		}
+		if ar.Source2 != "" {
+			extra += " fuente2=S0:" + shortSHA(in.S0) + ":" + ar.Source2
 		}
 		// A range bigger than an archive file is cut at line boundaries.
 		a := ar.Lines[0]
@@ -311,6 +358,28 @@ func shortSHA(s string) string {
 
 // checkReason enforces I8: a reason with a source that exists in the snapshot,
 // or por_confirmar with a bullet in the state that names the range.
+// checkDecisionArchive: a decision's lines leave only as superseded, citing a
+// later decision of the user (another file of decisions/) and a second line
+// of the snapshot that shows the same point; both are kept in the marker.
+func checkDecisionArchive(in AssembleInput, ar Archived) error {
+	if ar.Reason != ReasonSuperseded {
+		return fmt.Errorf("a decision's lines leave only as %q, not %q", ReasonSuperseded, ar.Reason)
+	}
+	src := ar.Source[:strings.LastIndexByte(ar.Source, ':')]
+	if !strings.HasPrefix(src, "decisions/") || src == in.Unit.Sheet {
+		return fmt.Errorf("a decision is superseded only by another decision of the user, not %s", ar.Source)
+	}
+	if !safeSource.MatchString(ar.Source2) || ar.Source2 == ar.Source {
+		return fmt.Errorf("superseding a decision needs a second citation (fuente2)")
+	}
+	i := strings.LastIndexByte(ar.Source2, ':')
+	line, _ := strconv.Atoi(ar.Source2[i+1:])
+	if in.SourceExists == nil || !in.SourceExists(ar.Source2[:i], line) {
+		return fmt.Errorf("fuente2 %s does not exist in the snapshot", ar.Source2)
+	}
+	return nil
+}
+
 func checkReason(in AssembleInput, state string, ar Archived) error {
 	switch ar.Reason {
 	case ReasonSuperseded, ReasonClosed, ReasonRepeated:

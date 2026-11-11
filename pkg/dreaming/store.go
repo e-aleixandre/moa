@@ -41,14 +41,14 @@ const (
 var ErrBusy = errors.New("a dreaming is in progress; try again later")
 
 // Protected reports whether a book path is never consolidated (I2): the user's
-// decisions, the user's file, the index, history kept by hand, and the archive
+// file, the index, history kept by hand, and the archive
 // itself. The archive only ever gains whole new files.
 func Protected(rel string) bool {
 	switch rel {
 	case "PROJECT.md", "OWNER.md":
 		return true
 	}
-	for _, p := range []string{"decisions/", "archivo/", "historico/"} {
+	for _, p := range []string{"archivo/", "historico/"} {
 		if strings.HasPrefix(rel, p) {
 			return true
 		}

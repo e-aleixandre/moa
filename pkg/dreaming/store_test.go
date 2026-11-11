@@ -92,6 +92,9 @@ func prepare(t *testing.T, s Store, date string, only ...string) *night {
 		if len(only) > 0 && !contains(only, u.Sheet) {
 			continue
 		}
+		if len(only) == 0 && isDecision(u) {
+			continue // decisions have their own rules; see decision_test.go
+		}
 		out, err := Assemble(AssembleInput{Unit: u, Orig: snap.Orig(u), Plan: planAll(snap, u), Date: date, Nonce: "nonce" + strings.ReplaceAll(date, "-", ""), S0: snap.Commit, SourceExists: snap.SourceExists})
 		if err != nil {
 			t.Fatalf("%s: %v", u.Sheet, err)
@@ -544,9 +547,11 @@ func TestProtectedPathsCannotBeWritten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bad := Group{ID: "x", Changes: []Change{{Path: "book/decisions/precios.md", Pre: n.snap.Blobs["book/decisions/precios.md"], Post: x}}}
-	if _, err := n.r.Apply(n.snap, "d", []Group{bad}, map[string][]byte{x: []byte("x")}, Finish{Run: "r"}, nil, nil); err == nil {
-		t.Fatal("a change to decisions/ was accepted")
+	for _, p := range []string{"book/OWNER.md", "book/historico/2025.md", "book/archivo/work/z/old.md"} {
+		bad := Group{ID: "x", Changes: []Change{{Path: p, Pre: n.snap.Blobs[p], Post: x}}}
+		if _, err := n.r.Apply(n.snap, "d", []Group{bad}, map[string][]byte{x: []byte("x")}, Finish{Run: "r"}, nil, nil); err == nil {
+			t.Fatalf("a change to %s was accepted", p)
+		}
 	}
 	// archivo/work/c is a symlink into decisions/: the archive write must not
 	// follow it.
