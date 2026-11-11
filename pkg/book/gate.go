@@ -63,9 +63,10 @@ type gate struct {
 	cfg GateConfig
 
 	mu         sync.Mutex
-	readBook   bool // a book search or read happened in this turn
-	fired      bool // the gate has refused once in this turn
-	epoch      int  // model requests so far; calls of one step share it
+	logMu      sync.Mutex // the log is written outside mu
+	readBook   bool       // a book search or read happened in this turn
+	fired      bool       // the gate has refused once in this turn
+	epoch      int        // model requests so far; calls of one step share it
 	firedEpoch int
 	pending    *gatePending
 	seq        int
@@ -233,8 +234,9 @@ func (g *gate) onToolCall(ctx context.Context, name string, args map[string]any)
 		return nil
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.fired || g.readBook || g.gen != gen {
+	// Checked again under the lock: waiting for it can outlast the deadline.
+	if g.fired || g.readBook || g.gen != gen || ctx.Err() != nil {
+		g.mu.Unlock()
 		return nil
 	}
 	g.seq++
@@ -245,12 +247,26 @@ func (g *gate) onToolCall(ctx context.Context, name string, args map[string]any)
 		reason: gateReason(hits),
 	}
 	g.fired, g.firedEpoch, g.pending = true, g.epoch, p
+	g.mu.Unlock()
+
 	// Paths only: a snippet would copy book text, secrets included, into a log.
 	shown := make([]string, 0, len(hits))
 	for _, h := range hits {
 		shown = append(shown, h.Path)
 	}
 	g.appendLog(map[string]any{"event": "fired", "id": p.id, "tool": name, "action": action, "text": text, "results": shown})
+
+	// Slow log I/O can also run the deadline out; the action then went ahead,
+	// so the refusal is taken back rather than left in the state and the log.
+	if ctx.Err() != nil {
+		g.mu.Lock()
+		if g.pending == p {
+			g.fired, g.pending = false, nil
+		}
+		g.mu.Unlock()
+		g.logResolved(p, "timed_out")
+		return nil
+	}
 	return &core.ToolCallDecision{Block: true, Reason: p.reason, Kind: core.ToolCallDecisionKindPolicy}
 }
 
@@ -262,6 +278,8 @@ func (g *gate) appendLog(entry map[string]any) {
 	if g.cfg.LogPath == "" {
 		return
 	}
+	g.logMu.Lock()
+	defer g.logMu.Unlock()
 	entry["at"] = time.Now().UTC().Format(time.RFC3339)
 	line, err := json.Marshal(entry)
 	if err == nil {

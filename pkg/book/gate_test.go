@@ -3,9 +3,11 @@ package book
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -348,5 +350,41 @@ func TestGateLogKeepsPathsNotBookText(t *testing.T) {
 	data, _ := os.ReadFile(r.logPath)
 	if strings.Contains(string(data), "EXAMPLE_SECRET") || !strings.Contains(string(data), "work/secreto.md") {
 		t.Fatalf("log = %s", data)
+	}
+}
+
+// Slow log I/O (a FIFO whose reader shows up late) runs the hook's deadline
+// out: the host lets the action through, so the gate must not remember having
+// refused it.
+func TestGateSlowLogDoesNotLeaveAPhantomRefusal(t *testing.T) {
+	r := newGateRig(t)
+	fifo := filepath.Join(t.TempDir(), "log.fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skip("no fifo here:", err)
+	}
+	g := &gate{cfg: GateConfig{Dir: r.dir, LogPath: fifo, Enabled: func() bool { return true }}}
+	g.gen++
+	ix, _ := NewIndex(r.dir)
+	g.idx, g.ready = ix, true
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		for i := 0; i < 2; i++ { // the fired line, then the timed_out one
+			f, err := os.Open(fifo)
+			if err != nil {
+				return
+			}
+			_, _ = io.Copy(io.Discard, f)
+			_ = f.Close()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if d := g.onToolCall(ctx, "sessions", send(katxina)); d != nil {
+		t.Fatal("refused after the deadline")
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.fired || g.pending != nil {
+		t.Fatal("phantom refusal in the state")
 	}
 }
