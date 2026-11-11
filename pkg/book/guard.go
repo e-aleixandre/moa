@@ -45,13 +45,20 @@ func (g guardExtension) Init(api extension.API) error {
 	// so `cd BOOK` and the write after it arrive together while the shell is
 	// still where it was. Every directory an earlier shell command here could
 	// have left the shell in is therefore another place to start from. They are
-	// forgotten as soon as the shell's own directory changes: that is the
-	// signal that those commands have run and the real state is known again.
+	// forgotten when the batch's first result arrives (every call of a batch is
+	// checked before any runs, and the shell then holds its real directory), and
+	// also when the shell's own directory is seen to change.
 	var (
 		mu           sync.Mutex
 		lastProvided string
 		ends         = map[string]bool{}
 	)
+	api.OnToolResult(func(context.Context, string, core.Result, bool) (*core.Result, error) {
+		mu.Lock()
+		ends = map[string]bool{}
+		mu.Unlock()
+		return nil, nil
+	})
 	api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 		cwd := ""
 		if g.cwd != nil {

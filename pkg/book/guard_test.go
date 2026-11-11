@@ -248,6 +248,16 @@ func TestGuardBatchWithAReadBetweenAndExplicitCwd(t *testing.T) {
 		t.Fatalf("a write with an explicit repo cwd was blocked: %+v", d)
 	}
 
+	// The batch's results arrive: guesses about where its commands would leave
+	// the shell are over, even when the shell came back to where it started.
+	host = newHost()
+	host.FireToolCall(ctx, "bash", bash("cd "+dir+" && cat work/a.md"))
+	host.FireToolCall(ctx, "bash", bash("cd "+repo))
+	host.FireToolResult(ctx, "bash", core.TextResult("ok"), false)
+	if d := host.FireToolCall(ctx, "bash", bash("echo x >> notes.md")); d != nil {
+		t.Fatalf("a write after the batch completed was blocked: %+v", d)
+	}
+
 	// Once the shell's own directory is seen to change, earlier guesses go.
 	host = newHost()
 	host.FireToolCall(ctx, "bash", bash("cd "+dir))
