@@ -7,7 +7,7 @@ import { useStore } from "../../hooks/useStore.js";
 import { loadTask, patchTask, isNewRequest } from "../../data/tasks.js";
 import {
   canCheck, canMove, handoffOrphan, closeReady, completeNotifies, completePatch, deliverOptions, errorText, isCantDo, isHere, isOpen, isRequest,
-  needsDeliverChoice, noticeStateWords, noteSummary, projectLabelOf, recipientFor, relAge, rowFrom, sessionName, startNotifyGesture, taskProjectName,
+  executionLine, needsDeliverChoice, noticeStateWords, noteSummary, projectLabelOf, recipientFor, relAge, rowFrom, sessionName, startNotifyGesture, taskProjectName,
 } from "../../data/tasks-model.js";
 import { moveIndex, moveSearch } from "../../data/tasks-move.js";
 import { isTargetHere } from "../../data/schedule-model.js";
@@ -299,7 +299,9 @@ function rowMeta({ task, context, sessions, lookup, owners }) {
   const from = rowFrom(task, owners);
   if (from) meta.push(<FromChip from={from} />);
   if (isCantDo(task)) meta.push(<span class="tk-meta-cant">Can't do</span>);
-  if (task.status === "in_progress") meta.push(<span class="tk-word-working">Working</span>);
+  const exec = executionLine(task, sessions);
+  if (exec) meta.push(<span class={exec.startsWith("Working") ? "tk-word-working" : "tk-meta-exec"}>{exec}</span>);
+  else if (task.status === "in_progress") meta.push(<span class="tk-word-working">Working</span>);
   const waiting = (task.waits_for || []).map(lookup).find((b) => b && isOpen(b));
   if (waiting && isOpen(task)) meta.push(<span class="tk-meta-wait"><Link2 size={12} aria-hidden="true" />Waits for {waiting.title}</span>);
   const notice = noticeStateWords(task.notice_state);
@@ -362,6 +364,7 @@ function GroupHead({ g, open, onToggle, dragging, onDrop }) {
   const body = (
     <>
       {g.collapsed && <ChevronDown size={13} class={`tk-group-chev${open ? "" : " is-closed"}`} aria-hidden="true" />}
+      {g.owner && <OwnerAvatarFor owner={g.owner} state={ownerState(g.owner)} size={16} />}
       <span class="tk-group-t">{g.title}</span>
       {g.sub && <span class="tk-group-sub">{g.sub}</span>}
       {g.working && <span class="tk-word-working">Working</span>}
@@ -370,7 +373,7 @@ function GroupHead({ g, open, onToggle, dragging, onDrop }) {
       {live && over && <span class="tk-drop-hint">{hint}</span>}
     </>
   );
-  const cls = `tk-group${g.agent ? " is-agent" : ""}${live ? " is-drop" : ""}${live && over ? " is-over" : ""}`;
+  const cls = `tk-group${g.agent || g.owner ? " is-agent" : ""}${live ? " is-drop" : ""}${live && over ? " is-over" : ""}`;
   const drag = {
     onDragOver: (e) => { if (live) { e.preventDefault(); setOver(true); } },
     onDragLeave: () => setOver(false),

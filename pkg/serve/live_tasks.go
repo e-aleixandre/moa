@@ -95,6 +95,26 @@ func (m *Manager) sessionTitle(id string) string {
 	return ""
 }
 
+// ownerSessionIDs are the owners' conversations, whose checklists Tasks shows
+// without the agents' filter.
+func (m *Manager) ownerSessionIDs() []string {
+	store, err := m.ownerStore()
+	if err != nil {
+		return nil
+	}
+	owners, err := store.List()
+	if err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(owners))
+	for _, own := range owners {
+		if own.SessionID != "" {
+			ids = append(ids, own.SessionID)
+		}
+	}
+	return ids
+}
+
 // sessionWorking says a loaded session is running or has work in flight.
 func (m *Manager) sessionWorking(id string) bool {
 	sess, ok := m.Get(id)

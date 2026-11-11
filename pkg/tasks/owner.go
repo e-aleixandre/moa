@@ -459,6 +459,9 @@ type Filter struct {
 	ProjectKey      string
 	IncludeAgents   bool
 	IncludeArchived bool
+	// AgentSessions are checklists returned even without IncludeAgents: the
+	// owners' conversations, which Tasks shows by default.
+	AgentSessions []string
 }
 
 // Counts summarizes a listing. OpenRequests is the number the sidebar shows:
@@ -506,7 +509,14 @@ func (r *Repo) List(ctx context.Context, f Filter) (ListResult, error) {
 		where = append(where, "archived_at IS NULL")
 	}
 	if !f.IncludeAgents {
-		where = append(where, "place <> 'agent'")
+		if len(f.AgentSessions) == 0 {
+			where = append(where, "place <> 'agent'")
+		} else {
+			where = append(where, "(place <> 'agent' OR assignee_session_id IN ("+placeholders(len(f.AgentSessions))+"))")
+			for _, id := range f.AgentSessions {
+				args = append(args, id)
+			}
+		}
 	}
 	if f.ProjectKey != "" {
 		where = append(where, "(place = 'you' OR project_key = ?)")

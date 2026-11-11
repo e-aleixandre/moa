@@ -27,7 +27,7 @@ let listSeq = 0;
 export function loadTasks() {
   const seq = ++listSeq;
   const agents = tasksSlice(store.get()).agents;
-  return api('GET', `/api/tasks${agents ? '?include_agents=1' : ''}`)
+  return api('GET', `/api/tasks?${agents ? 'include_agents=1' : 'include_owners=1'}`)
     .then((res) => {
       if (seq !== listSeq) return;
       patch({

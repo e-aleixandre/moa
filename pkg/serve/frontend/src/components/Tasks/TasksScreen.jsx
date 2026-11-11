@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Plus } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
+import { ownersSlice } from "../../data/owners.js";
 import { hasBlockingOverlay } from "../../data/overlays.js";
 import { addToast } from "../../data/notifications.js";
 import {
@@ -23,6 +24,7 @@ import { bucketOf, byProject } from "../../data/scheduled-visible.js";
 export function TasksScreen() {
   const slice = useStore(tasksSlice);
   const sessions = useStore(selectSessionDirectory);
+  const owners = useStore((st) => ownersSlice(st).list);
   const [sel, setSel] = useState(null);
   const [creating, setCreating] = useState(false);
   const [project, setProject] = useState(null);
@@ -43,8 +45,8 @@ export function TasksScreen() {
   const onlyData = only ? slice.bySession[only] : null;
 
   const groups = useMemo(
-    () => (only ? sessionGroups(onlyData, only, since).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions, since })),
-    [only, onlyData, slice.list, slice.agents, project, sessions, since],
+    () => (only ? sessionGroups(onlyData, only, since).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions, since, owners })),
+    [only, onlyData, slice.list, slice.agents, project, sessions, since, owners],
   );
   // Scheduled sits on top of the other groups: the templates the view shows
   // (a session's own, an owner's project's, or those filed under the chosen

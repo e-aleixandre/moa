@@ -176,11 +176,15 @@ func boolQuery(r *http.Request, key string) bool {
 
 func handleListTasks(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		res, err := m.tasks.List(r.Context(), tasks.Filter{
+		f := tasks.Filter{
 			ProjectKey:      r.URL.Query().Get("project"),
 			IncludeAgents:   boolQuery(r, "include_agents"),
 			IncludeArchived: boolQuery(r, "include_archived"),
-		})
+		}
+		if boolQuery(r, "include_owners") && !f.IncludeAgents {
+			f.AgentSessions = m.ownerSessionIDs()
+		}
+		res, err := m.tasks.List(r.Context(), f)
 		if err != nil {
 			writeTaskError(w, err)
 			return

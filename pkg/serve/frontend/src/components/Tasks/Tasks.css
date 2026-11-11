@@ -115,6 +115,7 @@ button.tk-group:hover { color: var(--zl-t2); }
 .tk-meta-wait svg { flex: none; }
 .tk-meta-note { color: var(--zl-t3); font-style: italic; }
 .tk-meta-notice { color: var(--zl-yellow); }
+.tk-meta-exec { color: var(--zl-t2); }
 .tk-row-age { flex: none; min-width: 3ch; text-align: right; color: var(--zl-t4); }
 .tk-new { position: absolute; left: 4px; top: 17px; width: 6px; height: 6px; border-radius: 50%; background: var(--zl-accent); }
 

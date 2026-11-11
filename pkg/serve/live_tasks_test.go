@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -279,5 +281,44 @@ func TestReportsSayTheNextScheduledRun(t *testing.T) {
 	if text := reportsMessage(owner.Owner{}, []owner.Report{waiting}); !strings.Contains(text,
 		"linked task #3 «Ship» is still open. It waits for the answer above; comment it on the task if it is a real blocker.") {
 		t.Fatalf("waiting notice:\n%s", text)
+	}
+}
+
+// Tasks shows the owners' checklists by default: the list asks for them with
+// include_owners, and other sessions' checklists still need include_agents.
+func TestTasksListIncludesOwnersChecklistsOnRequest(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	mine := liveOwnerTask(t, mgr, ownerSess, "the owner's")
+	child := ownerChild(t, mgr, root, "child")
+	if _, err := mgr.tasks.Create(ctx, tasks.CreateInput{Title: "the child's", Place: tasks.PlaceAgent,
+		ProjectKey: core.CodebaseKey(root), AssigneeSessionID: child.ID}); err != nil {
+		t.Fatal(err)
+	}
+	list := func(query string) []string {
+		rec := httptest.NewRecorder()
+		handleListTasks(mgr)(rec, httptest.NewRequest("GET", "/api/tasks"+query, nil))
+		var res struct {
+			Tasks []tasks.Record `json:"tasks"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
+		var titles []string
+		for _, r := range res.Tasks {
+			titles = append(titles, r.Title)
+		}
+		return titles
+	}
+	if got := list(""); len(got) != 0 {
+		t.Fatalf("plain list returned checklists: %v", got)
+	}
+	if got := list("?include_owners=1"); len(got) != 1 || got[0] != mine.Title {
+		t.Fatalf("include_owners: %v", got)
+	}
+	if got := list("?include_agents=1"); len(got) != 2 {
+		t.Fatalf("include_agents: %v", got)
 	}
 }
