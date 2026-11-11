@@ -3,6 +3,7 @@ package dreaming
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -657,5 +658,32 @@ func TestPlansDependingOnAChangedSourceAreDeferred(t *testing.T) {
 	rep := n.apply(t)
 	if len(rep.Applied) != 0 || len(rep.Conflicts) != 3 {
 		t.Fatalf("report = %+v", rep)
+	}
+}
+
+// Two groups that would create the same path are both refused: neither may
+// silently replace the other.
+func TestTwoGroupsNeverWriteTheSamePath(t *testing.T) {
+	s := fixture(t)
+	n := prepare(t, s, "2026-11-12", "work/c.md")
+	var groups []Group
+	content := map[string][]byte{}
+	for i, text := range []string{"primera\n", "segunda\n"} {
+		id, err := n.r.repo.hashObject([]byte(text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		content[id] = []byte(text)
+		groups = append(groups, Group{ID: fmt.Sprintf("g%d", i), Changes: []Change{{Path: "book/archivo/work/x/2026-11-12.md", Post: id}}})
+	}
+	rep, err := n.r.Apply(n.snap, "d", groups, content, Finish{Run: "r"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Applied) != 0 || len(rep.Conflicts) != 2 {
+		t.Fatalf("report = %+v", rep)
+	}
+	if _, err := os.Stat(filepath.Join(s.bookDir(), "archivo/work/x/2026-11-12.md")); !os.IsNotExist(err) {
+		t.Fatal("a contested path was written")
 	}
 }

@@ -546,10 +546,22 @@ func (r *Run) commit(kind, base, title string, groups []Group, content map[strin
 	}
 	var rep Report
 	rejected := map[string]bool{}
+	// One writer per path in the whole set: two groups (or one group twice)
+	// claiming the same path would let the later write silently replace the
+	// earlier one. Every claimant is rejected.
 	touched := map[string]string{} // path → group id
+	claims := map[string]int{}
 	for _, g := range groups {
 		for _, c := range g.Changes {
 			touched[c.Path] = g.ID
+			claims[c.Path]++
+		}
+	}
+	for _, g := range groups {
+		for _, c := range g.Changes {
+			if claims[c.Path] > 1 {
+				rejected[g.ID] = true
+			}
 		}
 	}
 	for _, g := range groups {
