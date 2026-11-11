@@ -99,6 +99,9 @@ func (r *gateRig) readLog() []map[string]any {
 	}
 	var out []map[string]any
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" { // the writer created the file and has not written yet
+			continue
+		}
 		var m map[string]any
 		if err := json.Unmarshal([]byte(line), &m); err != nil {
 			r.t.Fatalf("log line %q: %v", line, err)
@@ -320,6 +323,7 @@ func TestGateLateCallChangesNothing(t *testing.T) {
 	g := &gate{cfg: GateConfig{Dir: r.dir, LogPath: r.logPath, Enabled: func() bool { return true }}}
 	t.Cleanup(g.logWG.Wait)
 	g.gen++
+	g.on = true
 	ix, err := NewIndex(r.dir)
 	if err != nil {
 		t.Fatal(err)
@@ -342,6 +346,7 @@ func TestGateNeverUsesAnIndexThisTurnDidNotConfirm(t *testing.T) {
 	r := newGateRig(t)
 	g := &gate{cfg: GateConfig{Dir: r.dir, LogPath: r.logPath, Enabled: func() bool { return true }}}
 	ix, _ := NewIndex(r.dir)
+	g.on = true
 	g.idx, g.ready = ix, false // a previous turn's index, rebuild unfinished
 	if d := g.onToolCall(context.Background(), "sessions", send(katxina)); d != nil {
 		t.Fatal("gated on an unconfirmed index")

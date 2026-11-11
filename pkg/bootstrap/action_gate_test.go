@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
@@ -98,7 +99,12 @@ func TestOwnerActionGateThroughTheSession(t *testing.T) {
 				t.Fatal(err)
 			}
 			logPath := store.ActionGateLogPath(own.CodebaseKey)
+			// The log is written off the hook path: wait for the resolution.
 			data, logErr := os.ReadFile(logPath)
+			for i := 0; tc.wantGate && i < 200 && !strings.Contains(string(data), `"event":"resolved"`); i++ {
+				time.Sleep(10 * time.Millisecond)
+				data, logErr = os.ReadFile(logPath)
+			}
 			if !tc.wantGate {
 				if ran != 2 || logErr == nil {
 					t.Fatalf("ran=%d, log err=%v", ran, logErr)

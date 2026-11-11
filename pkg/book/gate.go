@@ -67,6 +67,7 @@ type gate struct {
 	logQ       []map[string]any
 	draining   bool
 	logWG      sync.WaitGroup // lets tests wait for pending writes
+	on         bool           // the switch, read once per turn: no file read on the call path
 	readBook   bool           // a book search or read happened in this turn
 	fired      bool           // the gate has refused once in this turn
 	epoch      int            // model requests so far; calls of one step share it
@@ -99,7 +100,8 @@ func (g *gate) Init(api extension.API) error {
 		g.readBook, g.fired, g.epoch, g.firedEpoch = false, false, 0, 0
 		g.build, g.ready = nil, false
 		g.gen++
-		if g.enabled() {
+		g.on = g.enabled()
+		if g.on {
 			g.build = make(chan struct{})
 			go g.warm(g.gen, g.build)
 		} else {
@@ -178,11 +180,15 @@ func (g *gate) onToolCall(ctx context.Context, name string, args map[string]any)
 		return nil
 	}
 	action, text, ok := gatedAction(name, args)
-	if !ok || !g.enabled() {
+	if !ok {
 		return nil
 	}
 
 	g.mu.Lock()
+	if !g.on {
+		g.mu.Unlock()
+		return nil
+	}
 	if g.fired {
 		defer g.mu.Unlock()
 		p := g.pending
