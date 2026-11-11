@@ -98,7 +98,9 @@ func TestOwnerDependencyOnAPrivateNoteIsProjectedAsBlocked(t *testing.T) {
 
 func TestSeeingIsNotEditing(t *testing.T) {
 	r := newRepo(t)
+	// The backlog holds ideas only the owner's conversation reads.
 	a := actor("A", "p")
+	a.Owner = true
 	bl := backlog(t, r, "shared backlog task", "p")
 	req, _ := r.AgentAsk(bg, a, AgentInput{Title: "please decide"})
 
@@ -147,6 +149,7 @@ func TestBacklogOfOtherProjectsIsInvisible(t *testing.T) {
 	mine := backlog(t, r, "mine", "p1")
 	other := backlog(t, r, "other", "p2")
 	a := actor("A", "p1")
+	a.Owner = true
 
 	view, _ := r.AgentList(bg, a)
 	if len(view.Backlog) != 1 || view.Backlog[0].ID != mine.ID {
@@ -159,7 +162,7 @@ func TestBacklogOfOtherProjectsIsInvisible(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	// An agent whose project is unknown reaches no backlog at all.
-	nowhere := Actor{SessionID: "X"}
+	nowhere := Actor{SessionID: "X", Owner: true}
 	if v, _ := r.AgentList(bg, nowhere); len(v.Backlog) != 0 {
 		t.Fatalf("no project, yet backlog: %+v", v.Backlog)
 	}
@@ -183,7 +186,11 @@ func TestOnlyOneSessionWinsAClaim(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := repo.AgentClaim(bg, actor(sid, "p"), bl.ID)
+			// Only an owner's conversation promotes ideas; two processes'
+			// owners racing is the case left to settle.
+			claimer := actor(sid, "p")
+			claimer.Owner = true
+			_, err := repo.AgentClaim(bg, claimer, bl.ID)
 			mu.Lock()
 			defer mu.Unlock()
 			switch {
@@ -382,7 +389,9 @@ func TestChecklistDoesNotProjectPrivateDependencyIDs(t *testing.T) {
 					got = tk.DependsOn
 				}
 			}
-			if len(got) != 2 {
+			// The backlog is ideas no session but the owner reads: a
+			// dependency on one is as private as the note.
+			if len(got) != 1 || int64(got[0]) != mine.ID {
 				t.Fatalf("visible deps lost: %v", got)
 			}
 		}

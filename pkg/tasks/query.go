@@ -86,6 +86,9 @@ func loadRecords(ctx context.Context, q querier, where string, args ...any) ([]R
 	if err := attachHandoffs(ctx, q, recs); err != nil {
 		return nil, err
 	}
+	if err := attachExecutions(ctx, q, recs); err != nil {
+		return nil, err
+	}
 	return recs, attachSchedules(ctx, q, recs)
 }
 

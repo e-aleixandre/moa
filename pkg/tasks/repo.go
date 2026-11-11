@@ -522,6 +522,22 @@ INSERT OR IGNORE INTO news_origins(session_id, origin, news_id)
   task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
   kept_at INTEGER NOT NULL
 );`,
+	// 7: which session executes an owner's checklist task (execution.go).
+	// Its own table, cascading with the task. The trigger lives in the
+	// database so that an older binary that moves, reassigns or reopens a
+	// task also drops its link: no writer can leave a stale executor.
+	`CREATE TABLE task_execution_links (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL CHECK(length(trim(session_id)) > 0),
+  linked_at INTEGER NOT NULL,
+  started_at INTEGER,
+  stopped_at INTEGER
+);
+CREATE INDEX task_execution_links_session ON task_execution_links(session_id);
+CREATE TRIGGER task_execution_links_revoke AFTER UPDATE OF place, assignee_session_id, project_key, status ON tasks
+WHEN NEW.place IS NOT OLD.place OR NEW.assignee_session_id IS NOT OLD.assignee_session_id
+  OR NEW.project_key IS NOT OLD.project_key OR (NEW.status = 'pending' AND OLD.status <> 'pending')
+BEGIN DELETE FROM task_execution_links WHERE task_id = NEW.id; END;`,
 }
 
 // newsCompatLevel is the compat migration that created the news table.
@@ -723,6 +739,8 @@ CREATE TEMP TABLE task_handoffs (task_id INTEGER PRIMARY KEY, from_owner_id TEXT
 CREATE TEMP TABLE task_comments (id INTEGER PRIMARY KEY, task_id INTEGER, author_kind TEXT, author_session_id TEXT,
   author_name TEXT, body TEXT, created_at INTEGER);
 CREATE TEMP TABLE task_schedule_reviews (task_id INTEGER PRIMARY KEY, kept_at INTEGER);
+CREATE TEMP TABLE task_execution_links (task_id INTEGER PRIMARY KEY, session_id TEXT, linked_at INTEGER,
+  started_at INTEGER, stopped_at INTEGER);
 PRAGMA query_only = 1;`
 
 // openReader opens the read pool. With noCompat each connection first gets

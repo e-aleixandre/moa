@@ -1498,7 +1498,7 @@ func boundToSession(id string) string {
 // session's discard intent.
 // Undelivered work fails (session_deleted) and can be sent elsewhere; work
 // reserved or admitted is skipped with an unknown outcome. Finished history
-// is unchanged.
+// is unchanged. The session's execution links are removed too.
 func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string) (int, error) {
 	var n int
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
@@ -1543,7 +1543,14 @@ func (r *Repo) SettleSessionDeleted(ctx context.Context, sessionID string) (int,
 		if err != nil {
 			return false, err
 		}
-		return n > 0 || questions, nil
+		// The deleted session executes nothing any more: its tasks stay on
+		// the owner's checklist, without an executor.
+		res, err := tx.ExecContext(ctx, "DELETE FROM task_execution_links WHERE session_id = ?", sessionID)
+		if err != nil {
+			return false, err
+		}
+		links, _ := res.RowsAffected()
+		return n > 0 || questions || links > 0, nil
 	})
 	return n, err
 }

@@ -102,7 +102,7 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 				"archived": {
 					"type": "boolean",
 					"description": "For list: also include archived tasks (done more than 7 days ago); default false"
-				},` + toParam(ownerSession) + `
+				},` + toParam(ownerSession) + placeParam(ownerSession) + `
 				"status": {
 					"type": "string",
 					"enum": ["pending", "in_progress", "open", "done", "all"],
@@ -157,6 +157,8 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 			switch action {
 			case "create", "ask":
 				res, err = toolCreate(ctx, repo, actor, action == "ask", params)
+			case "list":
+				res, err = toolList(ctx, repo, actor, params, scope.titler())
 			case "update":
 				res, err = toolUpdate(ctx, repo, actor, params)
 			case "done":
@@ -167,8 +169,6 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 				res, err = toolSend(ctx, scope, params)
 			case "claim":
 				res, err = toolClaim(ctx, repo, actor, params)
-			case "list":
-				res, err = toolList(ctx, repo, actor, params)
 			case "get":
 				res, err = toolGet(ctx, repo, actor, params)
 			case "pause", "resume", "delete":
@@ -186,9 +186,9 @@ func newTool(scope *Scope, ownerSession bool) core.Tool {
 	}
 }
 
-const toolDescription = "Your task checklist, your requests to the owner, and your project's shared backlog. " +
+const toolDescription = "Your task checklist and your requests to the owner. " +
 	"create adds to your checklist; ask files a request to the owner without blocking you (ask_user is for a decision only the user can make; its description says whether it waits); " +
-	"claim takes a pending backlog task of your project; list before creating to avoid duplicates. " +
+	"list before creating to avoid duplicates. " +
 	"create with when schedules the task to run later or repeat, in this session only; only when the user asks to schedule, otherwise omit when. when is plain text such as " +
 	"\"in 20m\", \"tomorrow at 09:00\", \"monday at 09:00\", \"2026-10-05 15:30\" or \"every weekday at 08:30\" " +
 	"(use 09:00-style hours: a bare \"at 9\" is ambiguous and nothing is scheduled). Each run arrives in this session as a new task. " +
@@ -198,10 +198,27 @@ const toolDescription = "Your task checklist, your requests to the owner, and yo
 	"A task another owner sent you is closed with done, an outcome and a note. " +
 	"pause, resume and delete act only on a task you scheduled (the schedule itself, not one of its runs): pause stops a recurring task until resume, delete removes the schedule; runs already on your checklist stay there and are closed with done. " +
 	"withdraw closes a request to the user that is no longer needed (one this session asked), with a note saying why; it stays in Done with that note. " +
-	"You only ever see your own checklist and requests plus the project's backlog and the tasks you scheduled."
+	"You only ever see your own checklist and requests plus the tasks you scheduled."
 
 const toolOwnerDescription = " send gives a task to another project's owner (to, title, description, subtasks); " +
-	"without the user's permission it waits for them first. list shows what you sent under Sent, and the requests to the user that your project's sessions made, which you can withdraw too."
+	"without the user's permission it waits for them first. list shows what you sent under Sent, and the requests to the user that your project's sessions made, which you can withdraw too. " +
+	"create with place=backlog writes down an idea the user floated without deciding it: it is not work, nobody else sees it, and list only counts the ideas (list place=backlog shows them). " +
+	"claim promotes an idea to your checklist once the user decided it. " +
+	"Each open task of your checklist shows its session: → id «title» · working, stopped <age>, delegated, not started, or no executor (link one with the sessions tool's task)."
+
+// placeParam is create's and list's place, offered only to an owner's
+// conversation: the backlog holds the ideas only it reads.
+func placeParam(owner bool) string {
+	if !owner {
+		return ""
+	}
+	return `
+				"place": {
+					"type": ["string", "null"],
+					"enum": ["backlog", "", null],
+					"description": "Optional. For create: backlog writes down an idea the user floated without deciding it, instead of a task on your checklist. For list: backlog lists the ideas"
+				},`
+}
 
 // actsForOwner refuses what a subagent (a context tagged with an agent id)
 // would do in its owner's name: sending a task to another owner, and
@@ -312,6 +329,25 @@ func toolCreate(ctx context.Context, repo *Repo, actor Actor, ask bool, params m
 		return core.Result{}, err
 	} else if subs != nil {
 		in.Subtasks = *subs
+	}
+	place, _ := params["place"].(string)
+	switch strings.TrimSpace(place) {
+	case "":
+	case string(PlaceBacklog):
+		if ask {
+			return core.Result{}, invalid("place applies to create, not ask")
+		}
+		if _, ok := params["when"].(string); ok {
+			return core.Result{}, invalid("an idea in the backlog cannot be scheduled: promote it with claim once the user decides it")
+		}
+		in.Place = PlaceBacklog
+		t, err := repo.AgentCreate(ctx, actor, in)
+		if err != nil {
+			return core.Result{}, err
+		}
+		return core.TextResult(fmt.Sprintf("Wrote idea #%d to the backlog: %s. It is not work: claim it once the user decides it.", t.ID, t.Title)), nil
+	default:
+		return core.Result{}, invalid("place must be %q or omitted", PlaceBacklog)
 	}
 	if text, ok := params["when"].(string); ok {
 		return toolSchedule(ctx, repo, actor, in, text)
@@ -508,7 +544,7 @@ func toolClaim(ctx context.Context, repo *Repo, actor Actor, params map[string]a
 	if err != nil {
 		return core.Result{}, err
 	}
-	return core.TextResult(fmt.Sprintf("Claimed task #%d: %s. It is now in your checklist.", t.ID, t.Title)), nil
+	return core.TextResult(fmt.Sprintf("Promoted idea #%d to your checklist: %s.", t.ID, t.Title)), nil
 }
 
 func progress(list []AgentTask) (done, total int) {
@@ -577,6 +613,7 @@ type listQuery struct {
 	search   string // folded; also reaches archived tasks
 	limit    int
 	archived bool
+	backlog  bool // only the project's ideas, in detail
 }
 
 func parseListQuery(params map[string]any) (listQuery, error) {
@@ -600,6 +637,13 @@ func parseListQuery(params map[string]any) (listQuery, error) {
 		q.limit = min(n, listMaxLimit)
 	}
 	q.archived, _ = params["archived"].(bool)
+	switch place, _ := params["place"].(string); strings.TrimSpace(place) {
+	case "":
+	case string(PlaceBacklog):
+		q.backlog = true
+	default:
+		return q, invalid("place must be %q or omitted", PlaceBacklog)
+	}
 	return q, nil
 }
 
@@ -700,7 +744,7 @@ func writeListed(sb *strings.Builder, t AgentTask) {
 	}
 }
 
-func toolList(ctx context.Context, repo *Repo, actor Actor, params map[string]any) (core.Result, error) {
+func toolList(ctx context.Context, repo *Repo, actor Actor, params map[string]any, title func(string) string) (core.Result, error) {
 	q, err := parseListQuery(params)
 	if err != nil {
 		return core.Result{}, err
@@ -708,6 +752,9 @@ func toolList(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 	view, err := repo.agentList(ctx, actor, q.archived || q.search != "")
 	if err != nil {
 		return core.Result{}, err
+	}
+	if q.backlog {
+		return listBacklog(view.Backlog, q), nil
 	}
 	if len(view.Checklist)+len(view.Requests)+len(view.Backlog)+len(view.Scheduled)+len(view.Sent)+len(view.ProjectRequests) == 0 {
 		return core.TextResult("No tasks yet."), nil
@@ -766,17 +813,24 @@ func toolList(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 	}
 	if len(checklist) > 0 {
 		done, total := progress(view.Checklist)
-		section(fmt.Sprintf("Tasks (%d/%d done):", done, total), checklist, func(t AgentTask) { writeListed(&sb, t) })
+		section(fmt.Sprintf("Tasks (%d/%d done):", done, total), checklist, func(t AgentTask) {
+			writeListed(&sb, t)
+			if actor.Owner && t.Status != StatusDone {
+				fmt.Fprintf(&sb, "\n    %s", executionLine(t.Execution, title, now))
+			}
+		})
 	}
 	section("\n\nYour requests to the owner:", requests, func(t AgentTask) { writeListed(&sb, t) })
 	section("\n\nRequests to the user from your project's sessions (withdraw the ones no longer needed):", projectRequests, func(t AgentTask) { writeListed(&sb, t) })
-	section("\n\nBacklog you can claim (your project):", backlog, func(t AgentTask) { writeTask(&sb, t) })
 	section("\n\nSent to other owners:", sent, func(t AgentTask) {
 		fmt.Fprintf(&sb, "\n- #%d → %s: %s — %s", t.ID, t.To, t.Title, handoffStatus(t))
 	})
 	section("\n\nYour scheduled tasks (each run arrives here as a new task):", scheduled, func(t AgentTask) {
 		fmt.Fprintf(&sb, "\n- #%d: %s — %s", t.ID, t.Title, describeSchedule(t))
 	})
+	if len(backlog) > 0 {
+		fmt.Fprintf(&sb, "\n\nBacklog: %s (list place=backlog)", plural(len(backlog), "idea"))
+	}
 	if over > 0 {
 		fmt.Fprintf(&sb, "\n\n%d more — narrow with search or status (limit is %d, at most %d).", over, q.limit, listMaxLimit)
 	}
@@ -789,6 +843,73 @@ func toolList(ctx context.Context, repo *Repo, actor Actor, params map[string]an
 		out = "No tasks match."
 	}
 	return core.TextResult(out), nil
+}
+
+// listBacklog is list place=backlog: the project's ideas, in full, for the
+// owner to decide on with the user. A search narrows them.
+func listBacklog(ideas []AgentTask, q listQuery) core.Result {
+	var sb strings.Builder
+	n := 0
+	for _, t := range ideas {
+		if !q.matches(t) {
+			continue
+		}
+		if n == q.limit {
+			fmt.Fprintf(&sb, "\n\nMore ideas — narrow with search (limit is %d, at most %d).", q.limit, listMaxLimit)
+			break
+		}
+		if n == 0 {
+			sb.WriteString("Backlog — ideas nobody decided yet (claim one once the user decides it):")
+		}
+		n++
+		writeTask(&sb, t)
+	}
+	if n == 0 {
+		return core.TextResult("No ideas in the backlog.")
+	}
+	return core.TextResult(sb.String())
+}
+
+// executionLine says who does an owner's open task, from the link's facts:
+// the owner decides what they mean.
+func executionLine(ex *ExecutionLink, title func(string) string, now time.Time) string {
+	if ex == nil {
+		return "→ no executor"
+	}
+	// The whole id: it is what the sessions tool takes to read or continue it.
+	who := ex.SessionID
+	if title != nil {
+		if t := strings.TrimSpace(title(ex.SessionID)); t != "" {
+			who += " «" + t + "»"
+		}
+	}
+	switch {
+	case ex.StoppedAt != 0:
+		return fmt.Sprintf("→ %s · stopped %s", who, shortAge(now.Sub(time.UnixMilli(ex.StoppedAt))))
+	case ex.StartedAt != 0:
+		return fmt.Sprintf("→ %s · working", who)
+	}
+	return fmt.Sprintf("→ %s · delegated, not started", who)
+}
+
+// shortAge is "now", "5m", "3h" or "2d".
+func shortAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	}
+	return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
 }
 
 func handoffStatus(t AgentTask) string {

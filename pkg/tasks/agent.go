@@ -44,6 +44,10 @@ type AgentTask struct {
 	HandoffState string        `json:"handoff_state,omitempty"`
 	Outcome      string        `json:"outcome,omitempty"`
 	Thread       []ThreadEntry `json:"thread,omitempty"`
+
+	// Execution is set, for the owner, on a task of its checklist it
+	// delegated to a session.
+	Execution *ExecutionLink `json:"execution,omitempty"`
 }
 
 // ThreadEntry is one comment as an agent reads it: the author is "you",
@@ -75,6 +79,9 @@ type AgentInput struct {
 	Description string
 	DependsOn   []int64
 	Subtasks    []SubtaskInput
+	// Place is where create puts the task: zero is the agent's checklist;
+	// PlaceBacklog, an idea of the project, is only the owner's.
+	Place Place
 }
 
 // AgentPatch is a partial agent edit of a task it may edit.
@@ -111,7 +118,9 @@ func (a Actor) readsArchived(t *Record) bool {
 		// A private note has no requester and matches nobody.
 		return t.RequesterSessionID != "" && t.RequesterSessionID == a.SessionID
 	case PlaceBacklog:
-		return a.ProjectKey != "" && t.ProjectKey == a.ProjectKey
+		// Ideas nobody decided: a session that executes must not pick them
+		// up, so only the owner's conversation reads them.
+		return a.Owner && a.ProjectKey != "" && t.ProjectKey == a.ProjectKey
 	}
 	return false
 }
@@ -177,6 +186,9 @@ func (a Actor) project(ctx context.Context, q querier, recs []Record) ([]AgentTa
 			CommentCount: t.CommentCount, Subtasks: t.Subtasks,
 			When: t.When, TZ: t.TZ, Next: t.Next, ScheduleState: t.ScheduleState,
 		}
+		if a.Owner && t.Place == PlaceAgent && t.AssigneeSessionID == a.SessionID {
+			at.Execution = t.Execution
+		}
 		if h := t.Handoff; h != nil {
 			at.HandoffState, at.Outcome = h.State, h.Outcome
 			if t.RequesterSessionID == a.SessionID {
@@ -205,8 +217,9 @@ func (a Actor) project(ctx context.Context, q querier, recs []Record) ([]AgentTa
 }
 
 // AgentList returns the agent's checklist (done ones included until they are
-// archived), its own requests to the owner, the tasks it sent to other owners,
-// and the pending backlog of its project. Nothing else.
+// archived), its own requests to the owner and the tasks it sent to other
+// owners; for the owner's conversation also its project's ideas (backlog).
+// Nothing else.
 func (r *Repo) AgentList(ctx context.Context, a Actor) (AgentView, error) {
 	return r.agentList(ctx, a, false)
 }
@@ -250,7 +263,7 @@ func (r *Repo) agentList(ctx context.Context, a Actor, withArchived bool) (Agent
 		AND id IN (SELECT task_id FROM task_handoffs WHERE from_session_id = ?)`, a.SessionID); err != nil {
 		return view, err
 	}
-	if a.ProjectKey != "" {
+	if a.Owner && a.ProjectKey != "" {
 		if view.Backlog, err = load("place = 'backlog' AND project_key = ? AND status = 'pending' AND archived_at IS NULL", a.ProjectKey); err != nil {
 			return view, err
 		}
@@ -378,10 +391,19 @@ func (r *Repo) agentInsert(ctx context.Context, a Actor, place Place, in AgentIn
 	}
 	rec := Record{Title: title, Description: in.Description, Status: StatusPending, Place: place,
 		ProjectKey: a.ProjectKey, ProjectCWD: a.ProjectCWD}
-	if place == PlaceAgent {
+	switch place {
+	case PlaceAgent:
 		rec.AssigneeSessionID = a.SessionID
-	} else {
+	case PlaceYou:
 		rec.RequesterSessionID = a.SessionID
+	case PlaceBacklog:
+		// An idea belongs to the project, not to whoever wrote it down.
+		if !a.Owner {
+			return AgentTask{}, invalid("only the project owner's conversation writes ideas to the backlog: add it to your checklist or ask the owner")
+		}
+		if a.ProjectKey == "" {
+			return AgentTask{}, invalid("the backlog needs a project: this session has none")
+		}
 	}
 	var out AgentTask
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
@@ -410,9 +432,16 @@ func (r *Repo) agentSnapshot(ctx context.Context, q querier, a Actor, id int64) 
 	return pr[0], nil
 }
 
-// AgentCreate adds a task to the agent's own checklist.
+// AgentCreate adds a task to the agent's own checklist, or, for the owner
+// with Place backlog, an idea to its project's backlog.
 func (r *Repo) AgentCreate(ctx context.Context, a Actor, in AgentInput) (AgentTask, error) {
-	return r.agentInsert(ctx, a, PlaceAgent, in)
+	switch in.Place {
+	case "", PlaceAgent:
+		return r.agentInsert(ctx, a, PlaceAgent, in)
+	case PlaceBacklog:
+		return r.agentInsert(ctx, a, PlaceBacklog, in)
+	}
+	return AgentTask{}, invalid("place must be %q or omitted", PlaceBacklog)
 }
 
 // AgentAsk files a request to the owner. It does not block the agent.
@@ -506,10 +535,12 @@ func hiddenWaits(ctx context.Context, q querier, a Actor, id int64) ([]int64, er
 	return hidden, nil
 }
 
-// AgentClaim takes a pending backlog task of the agent's own project. It is
-// the only write an agent has on the backlog. Of two sessions claiming at
-// once, one wins and the others get "not available", the same answer as for
-// a task assigned directly to someone else.
+// AgentClaim promotes a pending idea of the owner's project to its own
+// checklist, once the user decided it. It is the only write on the backlog
+// besides creating an idea, and only the owner's conversation has it: any
+// other session gets "not available", as if the idea did not exist. Of two
+// claims at once, one wins and the other gets "not available", the same
+// answer as for a task assigned directly to someone else.
 func (r *Repo) AgentClaim(ctx context.Context, a Actor, id int64) (AgentTask, error) {
 	var out AgentTask
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
@@ -519,7 +550,8 @@ func (r *Repo) AgentClaim(ctx context.Context, a Actor, id int64) (AgentTask, er
 		}
 		// A private note, a request or another project's task: not available.
 		sameProject := a.ProjectKey != "" && cur.ProjectKey == a.ProjectKey
-		if cur.ArchivedAt != 0 || !sameProject || (cur.Place != PlaceBacklog && cur.Place != PlaceAgent) {
+		if cur.ArchivedAt != 0 || !sameProject || (cur.Place != PlaceBacklog && cur.Place != PlaceAgent) ||
+			cur.Place == PlaceBacklog && !a.Owner {
 			return false, notAvailable(id)
 		}
 		if cur.Place == PlaceAgent {
