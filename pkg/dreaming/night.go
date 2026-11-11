@@ -71,6 +71,7 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (res NightResult, err
 		cfg.Now = time.Now
 	}
 	res = NightResult{Rejected: map[string]string{}}
+	s.Ctx = ctx
 	var r *Run
 	for {
 		r, _, err = s.Begin(false, cfg.Publish)
@@ -501,20 +502,21 @@ func parsePlan(text string) (Plan, error) {
 	return p, nil
 }
 
-var mdPath = regexp.MustCompile(`[A-Za-z0-9_][A-Za-z0-9_./-]*\.md`)
-
 // crossSources are the book files the cross-sheet view showed the organizer
 // of a sheet: its state may rest on them, so a change to any of them during
-// the night defers the plan (R6). Conservative: every path named counts.
+// the night defers the plan (R6). Conservative: every file of the snapshot
+// whose path the text names counts, whatever characters the name has.
 func crossSources(snap Snapshot, text string) []string {
+	if text == "" {
+		return nil
+	}
 	var out []string
-	seen := map[string]bool{}
-	for _, p := range mdPath.FindAllString(text, -1) {
-		if _, ok := snap.Files[bookPrefix+p]; ok && !seen[p] {
-			seen[p] = true
-			out = append(out, p)
+	for p := range snap.Files {
+		if rel, ok := strings.CutPrefix(p, bookPrefix); ok && strings.Contains(text, rel) {
+			out = append(out, rel)
 		}
 	}
+	sort.Strings(out)
 	return out
 }
 

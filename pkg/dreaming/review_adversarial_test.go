@@ -87,21 +87,32 @@ func TestDreamingAdversarialNightCancellationWhileRunLockBusy(t *testing.T) {
 }
 
 func TestDreamingAdversarialChangedCrossSourceDefersWholePlan(t *testing.T) {
+	for _, name := range []string{"areas/b.md", "areas/facturación.md", "areas/datos fiscales.md"} {
+		t.Run(name, func(t *testing.T) { crossSourceCase(t, name) })
+	}
+}
+
+func crossSourceCase(t *testing.T, name string) {
 	s := fixture(t)
+	if name != "areas/b.md" {
+		if err := os.WriteFile(filepath.Join(s.bookDir(), name), []byte("# B\nB1 viejo\nB2 vigente\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fp, cfg, _ := fakeNight(t, 5)
 	answer := fp.answer
 	mutated := false
 	fp.answer = func(req core.Request) string {
 		switch req.System {
 		case crossSystem:
-			return "## Por hoja\n### work/c.md\n- CASA de B: vigente B2 (areas/b.md:3).\n"
+			return "## Por hoja\n### work/c.md\n- CASA de B: vigente B2 ("+name+":3).\n"
 		case organizerSystem:
 			prompt := req.Messages[0].Content[0].Text
 			if strings.Contains(prompt, "Hoja: work/c.md\n") {
-				if !strings.Contains(prompt, "areas/b.md:3") {
+				if !strings.Contains(prompt, name+":3") {
 					t.Fatal("cross-sheet source did not reach the organizer")
 				}
-				if err := book.WriteFile(s.bookDir(), "areas/b.md", []byte("# B\nB2 descartado por el dueño\n")); err != nil {
+				if err := book.WriteFile(s.bookDir(), name, []byte("# B\nB2 descartado por el dueño\n")); err != nil {
 					t.Fatal(err)
 				}
 				mutated = true
@@ -234,5 +245,31 @@ func TestDreamingAdversarialPartialMarkUndoDoesNotReprocessUnchangedDecision(t *
 	}
 	if again[m.Old] {
 		t.Fatal("undo did not record the hash of the unchanged parts; same decision is due again immediately")
+	}
+}
+
+// A night waiting for the book's lock (a tool writing) stops when cancelled.
+func TestDreamingAdversarialNightCancellationWhileBookLockBusy(t *testing.T) {
+	s := fixture(t)
+	lock, err := storelock.Lock(s.bookDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Close() }()
+	_, cfg, _ := fakeNight(t, 5)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { _, err := s.Night(ctx, cfg); done <- err }()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancellation: %v", err)
+		}
+	case <-time.After(time.Second):
+		_ = lock.Close()
+		<-done
+		t.Fatal("the night ignored cancellation while waiting for the book lock")
 	}
 }

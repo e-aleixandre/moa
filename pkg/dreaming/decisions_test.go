@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/e-aleixandre/moa/pkg/book"
 	"strings"
 	"testing"
 )
@@ -154,5 +156,44 @@ func TestTotalMarkNeverOverwritesTheArchive(t *testing.T) {
 	groups, _, _ := n.r.markGroups(n.snap, units, due, []Mark{m}, "2026-11-12", rejected)
 	if len(groups) != 0 || rejected["marca decisions/precios.md"] == "" {
 		t.Fatalf("groups = %+v, rejected = %v", groups, rejected)
+	}
+}
+
+// Undoing a mark checks the whole decision: a part edited since that night
+// makes it a conflict, and the marked file stays as it is.
+func TestUndoOfAMarkRespectsAnEditedPart(t *testing.T) {
+	s := fixture(t)
+	for p, c := range map[string]string{"decisions/precios/parte-01.md": "parte uno\n", "decisions/2026-11-12-tarifa.md": newDecision} {
+		full := filepath.Join(s.bookDir(), p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pairAnswer = `{"marcas": [{"vieja": "decisions/precios.md", "nueva": "decisions/2026-11-12-tarifa.md", "fecha_nueva": "12-nov-2026",
+	  "alcance": "parcial", "punto": "precio vigente", "que_cambia": "Manda la tarifa.",
+	  "cita_vieja": {"ruta": "decisions/precios.md", "linea": 2, "texto": "el precio vigente es la última fuente"},
+	  "cita_nueva": {"ruta": "decisions/2026-11-12-tarifa.md", "linea": 2, "texto": "el precio vigente es el de la tarifa"}}], "preguntas": []}`
+	t.Cleanup(func() { pairAnswer = "" })
+	_, cfg, _ := fakeNight(t, 5)
+	res, err := s.Night(t.Context(), cfg)
+	if err != nil || !contains(res.Applied, "book/decisions/precios.md") {
+		t.Fatalf("night: %+v %v", res, err)
+	}
+	marked, _ := os.ReadFile(filepath.Join(s.bookDir(), "decisions/precios.md"))
+	if err := book.WriteFile(s.bookDir(), "decisions/precios/parte-01.md", []byte("parte uno, editada\n")); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := s.Undo(res.Commit, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(rep.Conflicts, "book/decisions/precios.md") {
+		t.Fatalf("undo = %+v", rep)
+	}
+	if now, _ := os.ReadFile(filepath.Join(s.bookDir(), "decisions/precios.md")); string(now) != string(marked) {
+		t.Fatal("undo rewrote a decision whose part was edited after the night")
 	}
 }

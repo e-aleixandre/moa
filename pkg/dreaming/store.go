@@ -1,6 +1,7 @@
 package dreaming
 
 import (
+	"context"
 	"crypto/sha1" //nolint:gosec // git's object id, not a security boundary
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/storelock"
 )
@@ -21,6 +23,9 @@ import (
 // dreaming's own working files.
 type Store struct {
 	Codebase string
+	// Ctx, when set, makes every lock wait of a run cancellable (the night's
+	// clock must be able to stop on shutdown). Nil waits like the tools do.
+	Ctx context.Context
 }
 
 func (s Store) bookDir() string   { return filepath.Join(s.Codebase, "book") }
@@ -118,16 +123,34 @@ func (r *Run) Close() error { return r.run.Close() }
 
 // lockStores takes book then memory, the fixed order after run.
 func (r *Run) lockStores() (func(), error) {
-	b, err := storelock.Lock(r.s.bookDir())
+	b, err := r.s.lock(r.s.bookDir())
 	if err != nil {
 		return nil, err
 	}
-	m, err := storelock.Lock(r.s.memoryDir())
+	m, err := r.s.lock(r.s.memoryDir())
 	if err != nil {
 		_ = b.Close()
 		return nil, err
 	}
 	return func() { _ = m.Close(); _ = b.Close() }, nil
+}
+
+// lock takes a store's lock, polling when the run is cancellable.
+func (s Store) lock(dir string) (*os.File, error) {
+	if s.Ctx == nil {
+		return storelock.Lock(dir)
+	}
+	for {
+		f, ok, err := storelock.TryLock(dir)
+		if err != nil || ok {
+			return f, err
+		}
+		select {
+		case <-s.Ctx.Done():
+			return nil, s.Ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 // Snapshot is S0: every regular file of the book and the memory as it was,
@@ -888,6 +911,22 @@ func (s Store) Undo(commit string, pub Publisher) (Report, error) {
 		units[g.ID] = unitHash(before)
 		if g.Unit != nil {
 			units[g.ID] = unitHash(g.Unit)
+			// The undo checks the whole unit as that night left it: an edit
+			// to an untouched part since then makes it a conflict too.
+			ig.Unit = map[string]string{}
+			for p, blob := range g.Unit {
+				ig.Unit[p] = blob
+			}
+			for _, c := range g.Changes {
+				if _, ok := ig.Unit[c.Path]; !ok {
+					continue
+				}
+				if c.Post == "" {
+					delete(ig.Unit, c.Path)
+				} else {
+					ig.Unit[c.Path] = c.Post
+				}
+			}
 		}
 		if g.Kind == "fact" {
 			// A fact is recorded by its own blob (see DueFacts).
