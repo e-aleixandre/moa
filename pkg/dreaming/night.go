@@ -37,6 +37,8 @@ type NightResult struct {
 	Conflicts []string
 	Rejected  map[string]string // unit → why its plan was refused
 	Deferred  []string          // left for another night (budget)
+	Marks     []Mark            // decisions marked as superseded
+	Questions []string          // for the user, from the decisions pass
 	CostUSD   float64
 }
 
@@ -106,7 +108,11 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (NightResult, error) 
 		return res, err
 	}
 	dueFacts, err := s.DueFacts(snap)
-	if err != nil || len(due)+len(dueFacts) == 0 {
+	if err != nil {
+		return res, err
+	}
+	decisionUnits, dueDecisions, err := s.DueDecisions(snap)
+	if err != nil || len(due)+len(dueFacts)+len(dueDecisions) == 0 {
 		return res, err
 	}
 	s.byRecency(due)
@@ -197,6 +203,21 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (NightResult, error) 
 	for k, v := range facts.kept {
 		clean[k] = v
 	}
+	decided, err := r.markDecisions(ctx, budget, cfg, snap, decisionUnits, dueDecisions, res.Rejected, &res.Deferred)
+	if err != nil {
+		return res, err
+	}
+	for _, g := range decided.groups {
+		groups = append(groups, g)
+		fin.Units[g.ID] = g.After
+	}
+	for k, v := range decided.content {
+		content[k] = v
+	}
+	for k, v := range decided.clean {
+		clean[k] = v
+	}
+	res.Marks, res.Questions = decided.marks, decided.questions
 	news := func(rep Report) *News {
 		n := morningNews(cfg, rep, res, plans, facts, budget)
 		return &n
@@ -287,6 +308,11 @@ func numbered(u Unit, orig [][]byte) []string {
 }
 
 func (s Store) analyze(ctx context.Context, b *Budget, cfg NightConfig, snap Snapshot, u Unit) (string, error) {
+	return s.read(ctx, b, cfg, snap, u, analyzerSystem, "Extrae E/D/C/X de este tramo.")
+}
+
+// read has the cheap model read a unit in chunks of at most chunkBytes.
+func (s Store) read(ctx context.Context, b *Budget, cfg NightConfig, snap Snapshot, u Unit, system, task string) (string, error) {
 	var chunks []string
 	var cur strings.Builder
 	for _, part := range numbered(u, snap.Orig(u)) {
@@ -303,8 +329,8 @@ func (s Store) analyze(ctx context.Context, b *Budget, cfg NightConfig, snap Sna
 	}
 	var out []string
 	for i, c := range chunks {
-		prompt := fmt.Sprintf("Hoja: %s (tramo %d de %d). Extrae E/D/C/X de este tramo.\n\n%s", u.Sheet, i+1, len(chunks), c)
-		res, err := b.call(ctx, cfg.Factory, cfg.Analyzer, analyzerSystem, prompt, analyzerMaxOut)
+		prompt := fmt.Sprintf("Hoja: %s (tramo %d de %d). %s\n\n%s", u.Sheet, i+1, len(chunks), task, c)
+		res, err := b.call(ctx, cfg.Factory, cfg.Analyzer, system, prompt, analyzerMaxOut)
 		if err != nil {
 			return "", err
 		}
@@ -553,6 +579,22 @@ func morningNews(cfg NightConfig, rep Report, res NightResult, plans map[string]
 	if len(res.Deferred) > 0 {
 		fmt.Fprintf(&body, "- Para otra noche: %d hojas o hechos.\n", len(res.Deferred))
 	}
+	applied := map[string]bool{}
+	for _, id := range rep.Applied {
+		applied[id] = true
+	}
+	for _, m := range res.Marks {
+		if !applied[bookPrefix+m.Old] {
+			continue
+		}
+		scope := "en parte"
+		if m.Scope == "total" {
+			scope = "del todo (archivada)"
+		}
+		fmt.Fprintf(&body, "- `%s` superada %s por `%s`: %s Decía (`%s:%d`) «%s»; ahora (`%s:%d`) «%s».\n",
+			m.Old, scope, m.New, m.Change, m.OldQuote.Path, m.OldQuote.Line, m.OldQuote.Text, m.NewQuote.Path, m.NewQuote.Line, m.NewQuote.Text)
+	}
+	questions = append(questions, res.Questions...)
 	for _, q := range questions {
 		fmt.Fprintf(&body, "- Pregunta: %s\n", q)
 	}
