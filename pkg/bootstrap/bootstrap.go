@@ -627,7 +627,11 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		if cfg.OwnerSession {
 			// The tool carries the size limits; a shell redirect into the
 			// directory would skip them, so the owner's calls are guarded.
-			bookGuard = book.GuardExtension(ownerStore.BookDir(projectOwner.CodebaseKey), func(ctx context.Context, args map[string]any) string {
+			bookGuard = book.GuardExtension(ownerStore.BookDir(projectOwner.CodebaseKey), func(ctx context.Context, tool string, args map[string]any) string {
+				// File tools resolve against the workspace root, not the shell.
+				if !strings.EqualFold(tool, "bash") {
+					return cfg.CWD
+				}
 				// Where the shell will start: the call's own cwd, else the
 				// directory a previous call left it in, else the project root.
 				if c, _ := args["cwd"].(string); c != "" {

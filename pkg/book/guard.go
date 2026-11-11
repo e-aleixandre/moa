@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/extension"
@@ -30,23 +31,46 @@ const GuardMessage = "The book is written only with the book tool (action write 
 //
 // cwd tells where the session's shell is when a command starts (its persisted
 // directory, or the one the call names); nil means unknown.
-func GuardExtension(dir string, cwd func(ctx context.Context, args map[string]any) string) extension.Extension {
+func GuardExtension(dir string, cwd func(ctx context.Context, tool string, args map[string]any) string) extension.Extension {
 	return guardExtension{dir: dir, cwd: cwd}
 }
 
 type guardExtension struct {
 	dir string
-	cwd func(ctx context.Context, args map[string]any) string
+	cwd func(ctx context.Context, tool string, args map[string]any) string
 }
 
 func (g guardExtension) Init(api extension.API) error {
+	// The calls of one assistant turn are all checked before any of them runs,
+	// so `cd BOOK` and the write after it arrive together while the shell is
+	// still where it was. The directory the previous shell command would leave
+	// the shell in is therefore a second place to start from.
+	var (
+		mu      sync.Mutex
+		lastEnd string
+	)
 	api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 		cwd := ""
 		if g.cwd != nil {
-			cwd = g.cwd(ctx, args)
+			cwd = g.cwd(ctx, name, args)
 		}
-		if WritesBookFrom(g.dir, cwd, name, args) {
-			return &core.ToolCallDecision{Block: true, Reason: GuardMessage}
+		starts := []string{cwd}
+		isBash := strings.EqualFold(name, "bash")
+		mu.Lock()
+		if isBash && lastEnd != "" && lastEnd != cwd {
+			starts = append(starts, lastEnd)
+		}
+		mu.Unlock()
+		for _, start := range starts {
+			hit, end := checkCall(g.dir, start, name, args)
+			if hit {
+				return &core.ToolCallDecision{Block: true, Reason: GuardMessage}
+			}
+			if isBash && start == cwd {
+				mu.Lock()
+				lastEnd = end
+				mu.Unlock()
+			}
 		}
 		return nil
 	})
@@ -61,8 +85,15 @@ func WritesBook(dir, tool string, args map[string]any) bool {
 
 // WritesBookFrom is WritesBook for a shell that starts in cwd.
 func WritesBookFrom(dir, cwd, tool string, args map[string]any) bool {
+	hit, _ := checkCall(dir, cwd, tool, args)
+	return hit
+}
+
+// checkCall is WritesBookFrom that also reports where a shell command would
+// leave the shell ("" when unknown or not a shell command).
+func checkCall(dir, cwd, tool string, args map[string]any) (hit bool, end string) {
 	if dir == "" {
-		return false
+		return false, ""
 	}
 	g := newGuard(dir)
 	if cwd != "" && filepath.IsAbs(cwd) {
@@ -71,19 +102,20 @@ func WritesBookFrom(dir, cwd, tool string, args map[string]any) bool {
 	switch strings.ToLower(tool) {
 	case "bash":
 		cmd, _ := args["command"].(string)
-		return g.script(cmd, 0)
+		hit = g.script(cmd, 0)
+		return hit, g.cwd
 	case "write", "edit", "multiedit":
 		path, _ := args["path"].(string)
-		return path != "" && g.inBook(g.resolve(path))
+		return path != "" && g.inBook(g.resolve(path)), ""
 	case "apply_patch":
 		patch, _ := args["patch"].(string)
 		for _, m := range patchFileRE.FindAllStringSubmatch(patch, -1) {
 			if g.inBook(g.resolve(strings.TrimSpace(m[1]))) {
-				return true
+				return true, ""
 			}
 		}
 	}
-	return false
+	return false, ""
 }
 
 var patchFileRE = regexp.MustCompile(`(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$`)
@@ -459,7 +491,7 @@ func isInterpreter(cmd string) bool {
 
 // scriptWriteRE matches the calls a script uses to change a file. It is run
 // only on scripts that are about the book.
-var scriptWriteRE = regexp.MustCompile(`(?i)(\bopen\([^,()]*,\s*['"][rbt]*[wax+][^'"]*['"]|mode\s*=\s*['"][^'"]*[wax+]|write_text|write_bytes|writelines|\.write\(|os\.(rename|remove|unlink|replace|truncate)|shutil\.(copy|move|rmtree)|\.(unlink|rename|replace|touch)\(|fs\.(write|append|rename|unlink|rm|copy)|writeFile|appendFile|File\.(write|open)|file_put_contents|\bsed -i)`)
+var scriptWriteRE = regexp.MustCompile(`(?i)(\bopen\([^,()]*,\s*['"][rbt]*[wax+][^'"]*['"]|mode\s*=\s*['"][^'"]*[wax+]|write_text|write_bytes|writelines|os\.(rename|remove|unlink|replace|truncate)|shutil\.(copy|move|rmtree)|\.(unlink|rename|touch)\(|fs\.(write|append|rename|unlink|rm|copy)|writeFile|appendFile|File\.write|File\.open\([^)]*,\s*['"][^'"]*[wa+]|file_put_contents|\bsed -i)`)
 
 // splitSegments tokenizes a shell script just enough for the guard: quotes,
 // operators, redirections and heredocs. A quoted ">" is text, and the body of a

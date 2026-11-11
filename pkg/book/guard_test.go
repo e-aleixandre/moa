@@ -109,6 +109,9 @@ func TestGuardLeavesReadingAndOtherWorkAlone(t *testing.T) {
 		"python reads a book file":        `cd ` + tilde + ` && python3 -c "print(open('work/a.md').read())"`,
 		"child shell cd does not leak":    `bash -c 'cd ` + dir + ` && ls'; echo x >> notes.md`,
 		"subshell variable does not leak": `D=/tmp; (D=` + dir + `; ls "$D"); echo x >> "$D/out.md"`,
+		"node reads":                      `cd ` + tilde + ` && node -e "console.log(require('fs').readFileSync('work/a.md','utf8').replace('old','new'))"`,
+		"ruby reads":                      `cd ` + tilde + ` && ruby -e "puts File.open('work/a.md', 'r').read"`,
+		"python reads and replaces":       `cd ` + tilde + ` && python3 -c "print(open('work/a.md').read().replace('old','new'))"`,
 		"find exec read":                  `find ` + dir + ` -name '*.md' -exec grep -l foo {} +`,
 		"empty":                           ``,
 	}
@@ -162,7 +165,7 @@ func TestGuardCoversTheFileToolsToo(t *testing.T) {
 func TestGuardExtensionBlocksThroughTheHost(t *testing.T) {
 	_, dir := guardFixture(t)
 	host := extension.NewHost(core.NewRegistry(), nil)
-	if err := host.Load(GuardExtension(dir, nil)); err != nil {
+	if err := host.Load(GuardExtension(dir, func(context.Context, string, map[string]any) string { return "/tmp" })); err != nil {
 		t.Fatal(err)
 	}
 	d := host.FireToolCall(context.Background(), "bash", bash("echo x >> "+dir+"/a.md"))
@@ -171,5 +174,42 @@ func TestGuardExtensionBlocksThroughTheHost(t *testing.T) {
 	}
 	if d := host.FireToolCall(context.Background(), "bash", bash("grep x "+dir+"/a.md")); d != nil {
 		t.Fatalf("a read was blocked: %+v", d)
+	}
+}
+
+// One assistant turn can carry `cd BOOK` and the write after it: both are
+// checked before either runs, while the shell is still elsewhere.
+func TestGuardSeesACdAndAWriteInTheSameBatch(t *testing.T) {
+	_, dir := guardFixture(t)
+	host := extension.NewHost(core.NewRegistry(), nil)
+	if err := host.Load(GuardExtension(dir, func(context.Context, string, map[string]any) string { return "/tmp" })); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if d := host.FireToolCall(ctx, "bash", bash("cd "+dir)); d != nil {
+		t.Fatalf("a bare cd was blocked: %+v", d)
+	}
+	if d := host.FireToolCall(ctx, "bash", bash("echo note >> work/a.md")); d == nil || !d.Block {
+		t.Fatal("the write after a cd in the same batch was allowed")
+	}
+	if d := host.FireToolCall(ctx, "bash", bash("cd /tmp")); d != nil {
+		t.Fatalf("leaving the book was blocked: %+v", d)
+	}
+	if d := host.FireToolCall(ctx, "bash", bash("echo note >> notes.md")); d != nil {
+		t.Fatalf("a write after leaving the book was blocked: %+v", d)
+	}
+}
+
+// File tools resolve against the workspace root, whatever directory the shell
+// has wandered into.
+func TestGuardResolvesFileToolsFromTheWorkspace(t *testing.T) {
+	home, dir := guardFixture(t)
+	project := filepath.Join(home, "project")
+	rel, _ := filepath.Rel(project, filepath.Join(dir, "new.md"))
+	if !WritesBookFrom(dir, project, "write", map[string]any{"path": rel}) {
+		t.Errorf("relative path %s into the book not refused", rel)
+	}
+	if WritesBookFrom(dir, project, "write", map[string]any{"path": "notes.md"}) {
+		t.Error("a workspace write was refused")
 	}
 }
