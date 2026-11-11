@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -733,15 +734,60 @@ func (b *backupFailure) Unwrap() error { return b.error }
 // compatTempTables stand in, on a connection to a database without the compat
 // tables, for the ones the queries mention: they are empty, so a read sees a
 // task as one nobody sent and with no thread, exactly as the older binary does.
-const compatTempTables = `PRAGMA query_only = 0;
-CREATE TEMP TABLE task_handoffs (task_id INTEGER PRIMARY KEY, from_owner_id TEXT, from_owner_name TEXT, from_session_id TEXT,
-  to_owner_id TEXT, to_owner_name TEXT, to_session_id TEXT, state TEXT, outcome TEXT, created_at INTEGER, updated_at INTEGER);
-CREATE TEMP TABLE task_comments (id INTEGER PRIMARY KEY, task_id INTEGER, author_kind TEXT, author_session_id TEXT,
-  author_name TEXT, body TEXT, created_at INTEGER);
-CREATE TEMP TABLE task_schedule_reviews (task_id INTEGER PRIMARY KEY, kept_at INTEGER);
-CREATE TEMP TABLE task_execution_links (task_id INTEGER PRIMARY KEY, session_id TEXT, linked_at INTEGER,
-  started_at INTEGER, stopped_at INTEGER);
-PRAGMA query_only = 1;`
+// Only the missing ones are created: SQLite resolves an unqualified name to
+// TEMP first, so a stand-in for a table the database already has would hide
+// its rows (a compat6 database whose compat7 backup failed still has its
+// handoffs and threads).
+var compatTempTables = []struct{ name, ddl string }{
+	{"task_handoffs", `CREATE TEMP TABLE task_handoffs (task_id INTEGER PRIMARY KEY, from_owner_id TEXT, from_owner_name TEXT, from_session_id TEXT,
+  to_owner_id TEXT, to_owner_name TEXT, to_session_id TEXT, state TEXT, outcome TEXT, created_at INTEGER, updated_at INTEGER);`},
+	{"task_comments", `CREATE TEMP TABLE task_comments (id INTEGER PRIMARY KEY, task_id INTEGER, author_kind TEXT, author_session_id TEXT,
+  author_name TEXT, body TEXT, created_at INTEGER);`},
+	{"task_schedule_reviews", `CREATE TEMP TABLE task_schedule_reviews (task_id INTEGER PRIMARY KEY, kept_at INTEGER);`},
+	{"task_execution_links", `CREATE TEMP TABLE task_execution_links (task_id INTEGER PRIMARY KEY, session_id TEXT, linked_at INTEGER,
+  started_at INTEGER, stopped_at INTEGER);`},
+}
+
+// missingCompatTables is the script creating the stand-ins for the compat
+// tables conn's database lacks, "" when it has them all.
+func missingCompatTables(ctx context.Context, conn driver.Conn) (string, error) {
+	q, ok := conn.(driver.QueryerContext)
+	if !ok {
+		return "", errors.New("sqlite connection cannot query")
+	}
+	rows, err := q.QueryContext(ctx, `SELECT name FROM main.sqlite_master WHERE type = 'table'`, nil)
+	if err != nil {
+		return "", err
+	}
+	have := map[string]bool{}
+	dest := make([]driver.Value, 1)
+	for {
+		if err := rows.Next(dest); err != nil {
+			_ = rows.Close()
+			if !errors.Is(err, io.EOF) {
+				return "", err
+			}
+			break
+		}
+		switch v := dest[0].(type) {
+		case string:
+			have[v] = true
+		case []byte:
+			have[string(v)] = true
+		}
+	}
+	var b strings.Builder
+	for _, t := range compatTempTables {
+		if !have[t.name] {
+			b.WriteString(t.ddl)
+			b.WriteString("\n")
+		}
+	}
+	if b.Len() == 0 {
+		return "", nil
+	}
+	return "PRAGMA query_only = 0;\n" + b.String() + "PRAGMA query_only = 1;", nil
+}
 
 // openReader opens the read pool. With noCompat each connection first gets
 // the empty stand-in tables, so every read query works unchanged.
@@ -775,7 +821,15 @@ func (c tempTablesConnector) Connect(ctx context.Context) (driver.Conn, error) {
 		_ = conn.Close()
 		return nil, errors.New("sqlite connection cannot exec")
 	}
-	if _, err := ex.ExecContext(ctx, compatTempTables, nil); err != nil {
+	script, err := missingCompatTables(ctx, conn)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if script == "" {
+		return conn, nil
+	}
+	if _, err := ex.ExecContext(ctx, script, nil); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
