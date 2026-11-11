@@ -117,8 +117,23 @@ type document struct {
 // SearchBook ranks the book's files against a free-text query. It is exported
 // for callers outside the tool (tests, future HTTP search) and is the single
 // implementation: the tool formats what this returns.
+//
+// The dreaming's archive (archivo/) is left out: it holds what was superseded,
+// and a reader looking for the current state must not find it first (the
+// user's decision of 11/11). The tool can ask for it explicitly.
 func SearchBook(dir, query string, limit int) ([]Hit, int, error) {
-	return searchBook(dir, query, limit, nil)
+	return searchBook(dir, query, limit, withoutArchive(nil))
+}
+
+// ArchiveDir is where the nightly dreaming moves superseded text, verbatim.
+const ArchiveDir = "archivo/"
+
+// withoutArchive adds the archive to a visibility filter, before ranking, so
+// totals and limits count only what can be returned.
+func withoutArchive(hidden func(rel string) bool) func(rel string) bool {
+	return func(rel string) bool {
+		return strings.HasPrefix(rel, ArchiveDir) || (hidden != nil && hidden(rel))
+	}
 }
 
 // searchBook is SearchBook plus the visibility filter the children's variant

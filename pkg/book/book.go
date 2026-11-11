@@ -98,6 +98,10 @@ func newTool(dir string, writable, hideReserved bool) core.Tool {
 				"type": "integer",
 				"description": "For read: byte to start from, to read past the first 64KB of a larger file (the truncation notice gives the next offset)."
 			},
+			"include_archive": {
+				"type": "boolean",
+				"description": "For search: also search archivo/, where superseded text was moved (default false)."
+			},
 			"content": {
 				"type": "string",
 				"description": "Markdown to write (for write and append)."
@@ -137,7 +141,11 @@ func newTool(dir string, writable, hideReserved bool) core.Tool {
 				return read(dir, path, toInt(params["offset"]))
 			case "search":
 				query, _ := params["query"].(string)
-				return search(dir, query, toInt(params["limit"]), hidden)
+				filter := withoutArchive(hidden)
+				if include, _ := params["include_archive"].(bool); include {
+					filter = hidden
+				}
+				return search(dir, query, toInt(params["limit"]), filter)
 			case "write", "append":
 				if !writable {
 					return core.ErrorResult("the book is written by the project owner only"), nil
