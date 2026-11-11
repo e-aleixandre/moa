@@ -11,6 +11,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/handoff"
+	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/tasks"
 	"github.com/e-aleixandre/moa/pkg/verify"
@@ -77,7 +78,13 @@ func (m *Manager) ExecCommand(sessionID, rawCommand, id string) (*CommandResult,
 		// after the registry so one can never shadow a command the user relies
 		// on; a colliding skill is reached as "/skill:<name>".
 		if s, found := findInvocableSkill(sess.CWD, sess.Kind == session.KindOwner, cmd); found {
-			return runSkillCommand(sess, s, args)
+			res, err := runSkillCommand(sess, s, args)
+			if err == nil && res != nil && res.OK && !s.IsFork() {
+				// The human's instruction is the invocation, not the SKILL.md
+				// body the session is sent.
+				m.tellOwnerUserSaid(sess.ID, userSaid{kind: owner.UserSaidMessage, text: strings.TrimSpace("/" + cmd + " " + strings.Join(args, " "))})
+			}
+			return res, err
 		}
 		return &CommandResult{OK: false, Message: "unknown command: /" + cmd}, nil
 	}

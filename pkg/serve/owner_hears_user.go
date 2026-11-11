@@ -45,6 +45,12 @@ type userSaid struct {
 // project, when that session is one the owner launched and still follows. It
 // never fails the user's action: a relay that cannot happen is logged.
 func (m *Manager) tellOwnerUserSaid(sessionID string, said userSaid) {
+	// reports.add waits for the actor, which can be confirming an unrelated
+	// delivery for seconds; the user's own request must never wait behind it.
+	go m.relayUserSaid(sessionID, said)
+}
+
+func (m *Manager) relayUserSaid(sessionID string, said userSaid) {
 	reports := m.reports
 	if reports == nil {
 		return
@@ -96,10 +102,6 @@ func (m *Manager) tellOwnerUserSaid(sessionID string, said userSaid) {
 		UserQuestion: said.question,
 		At:           time.Now().UTC().Format(time.RFC3339),
 	}
-	if said.kind == owner.UserSaidAnswer && said.ref != "" {
-		// The same answer posted twice is one fact for the owner.
-		rep.ID = "user-answer:" + said.ref
-	}
 	if live != nil {
 		admitOwnerReport(reports, live, own.CodebaseKey, rep)
 		return
@@ -141,7 +143,9 @@ func writeUserSaid(b *strings.Builder, rep owner.Report) {
 	case owner.UserSaidAnswer:
 		question := ""
 		if q := strings.TrimSpace(rep.UserQuestion); q != "" {
-			question = " (" + q + ")"
+			// Written by the child, not the user: kept on one line so it cannot
+			// pass for an entry of its own.
+			question = " (" + strings.Join(strings.Fields(q), " ") + ")"
 		}
 		fmt.Fprintf(b, "  the user answered ask_id %s%s: %s\n", rep.UserRef, question, indentReportText(rep.UserText))
 	default:
