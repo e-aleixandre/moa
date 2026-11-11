@@ -286,7 +286,7 @@ func TestSecretDetector(t *testing.T) {
 
 func TestMemoryNeedsAValidSourceAndYieldsToConcurrentWrites(t *testing.T) {
 	s, ms := memFixture(t)
-	for _, n := range []string{"a", "b", "c", "d", "e", "f"} {
+	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
 		writeFact(t, ms, n, "hecho "+n, "cuerpo de "+n)
 	}
 	orig := tree(t, s)
@@ -297,6 +297,9 @@ func TestMemoryNeedsAValidSourceAndYieldsToConcurrentWrites(t *testing.T) {
 		factVerdict{Fact: "d.md", Verdict: VerdictArchive, Reason: ReasonRepeated, Source: "memory/e.md:9"},
 		factVerdict{Fact: "e.md", Verdict: VerdictKeep},
 		factVerdict{Fact: "f.md", Verdict: VerdictArchive, Reason: ReasonSuperseded, Source: "decisions/precios.md:2"},
+		// g cites h, which leaves the index the same night: g stays.
+		factVerdict{Fact: "g.md", Verdict: VerdictArchive, Reason: ReasonRepeated, Source: "memory/h.md:9"},
+		factVerdict{Fact: "h.md", Verdict: VerdictArchive, Reason: ReasonClosed, Source: "decisions/precios.md:2"},
 	), func() {
 		// While the model thinks, sessions write c (the corrected fact) and
 		// e (the source d relies on) through the memory store.
@@ -307,19 +310,19 @@ func TestMemoryNeedsAValidSourceAndYieldsToConcurrentWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"memory/a.md", "memory/b.md"} {
+	for _, f := range []string{"memory/a.md", "memory/b.md", "memory/g.md"} {
 		if _, ok := res.Rejected[f]; !ok {
-			t.Fatalf("%s with a missing source was not rejected: %+v", f, res)
+			t.Fatalf("%s without a valid source was not rejected: %+v", f, res)
 		}
 	}
 	if !contains(res.Conflicts, "memory/c.md") || !contains(res.Conflicts, "memory/d.md") {
 		t.Fatalf("conflicts = %v", res.Conflicts)
 	}
-	if len(res.Applied) != 1 || res.Applied[0] != "memory/f.md" {
+	if len(res.Applied) != 2 || !contains(res.Applied, "memory/f.md") || !contains(res.Applied, "memory/h.md") {
 		t.Fatalf("applied = %v", res.Applied)
 	}
 	got := tree(t, s)
-	for _, p := range []string{"memory/a.md", "memory/b.md", "memory/d.md"} {
+	for _, p := range []string{"memory/a.md", "memory/b.md", "memory/d.md", "memory/g.md"} {
 		if got[p] != orig[p] {
 			t.Fatalf("%s changed", p)
 		}
