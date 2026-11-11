@@ -103,7 +103,7 @@ Where the source contradicts itself on what is current, do not invent the curren
 
 ## 5. Propose, then apply
 
-1. **Before writing anything to the live book, even if nothing is deleted:** show the user the plan (diff, movement map, evaluation results), name the version of the book it applies to (the snapshot digest) and the hashes of the plan, and **wait for the user's tap**. Agreeing the scope at the start is not that approval; each concrete application gets its own plan and its own tap. Only then re-check that the book still matches the snapshot's hashes (if it changed, start again from section 1) and apply it through the `book` tool or a plain copy of the checked tree.
+1. **Before writing anything to the live book, even if nothing is deleted:** show the user the plan (diff, movement map, evaluation results), name the version of the book it applies to (the snapshot digest) and the hashes of the plan, and **wait for the user's tap**. Agreeing the scope at the start is not that approval; each concrete application gets its own plan and its own tap. Only then re-check that the book still matches the snapshot's hashes (if it changed, start again from section 1) and apply it through the `book` tool: bash cannot write the book. Reading a file past 64 KiB takes `read` with `offset`.
 2. If you want to remove or summarize anything, give a list: file, range, bytes, why, and where any fact mixed into it will live. Nothing is selected by pattern; no id, refusal, exception or risk counts as disposable on its own. The user confirms with one tap that exact plan.
 3. After the change, run the questions again against the live book and compare with the snapshot. Record in `work/limpieza-del-libro.md` what was done, the snapshot path, and what was not verified.
 

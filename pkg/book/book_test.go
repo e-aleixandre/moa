@@ -2,6 +2,7 @@ package book
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -295,77 +296,142 @@ func writeSized(t *testing.T, dir, rel string, size int) {
 	}
 }
 
-func TestSizeWarningOnIndexAndDocuments(t *testing.T) {
+func TestWriteRefusesWhatLeavesTheLimits(t *testing.T) {
 	const kib = 1024
 	tests := []struct {
-		name      string
-		path      string
-		size      int
-		wantIndex bool
-		wantDoc   bool
+		name    string
+		path    string
+		size    int
+		refused bool
 	}{
-		{"index at 7KiB", "PROJECT.md", 7 * kib, false, false},
-		{"index at 7KiB+1", "PROJECT.md", 7*kib + 1, true, false},
-		{"doc at 48KiB", "work/x.md", 48 * kib, false, false},
-		{"doc at 48KiB+1", "work/x.md", 48*kib + 1, false, true},
-		{"index past both", "PROJECT.md", 48*kib + 1, true, true},
-		{"normal file", "people.md", 3 * kib, false, false},
-		{"big non-index is not an index warning", "work/y.md", 10 * kib, false, false},
+		{"index at 8KiB", "PROJECT.md", 8 * kib, false},
+		{"index at 8KiB+1", "PROJECT.md", 8*kib + 1, true},
+		{"doc at 64KiB", "work/x.md", 64 * kib, false},
+		{"doc at 64KiB+1", "work/x.md", 64*kib + 1, true},
+		{"big non-index is not an index case", "work/y.md", 10 * kib, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := newBook(t)
-			tool := NewTool(dir, true)
-			res := run(t, tool, map[string]any{"action": "write", "path": tc.path, "content": strings.Repeat("a", tc.size)})
-			if res.IsError {
-				t.Fatalf("write failed: %s", resultText(res))
+			res := run(t, NewTool(dir, true), map[string]any{"action": "write", "path": tc.path, "content": strings.Repeat("a", tc.size)})
+			if res.IsError != tc.refused {
+				t.Fatalf("refused = %v, want %v: %s", res.IsError, tc.refused, resultText(res))
 			}
-			text := resultText(res)
-			if got := strings.Contains(text, "PROJECT.md is now"); got != tc.wantIndex {
-				t.Errorf("index warning = %v, want %v: %q", got, tc.wantIndex, text)
+			_, err := os.Stat(filepath.Join(dir, tc.path))
+			if tc.refused && err == nil && tc.path == "work/x.md" {
+				t.Fatal("a refused write left a file behind")
 			}
-			if got := strings.Contains(text, "search skips"); got != tc.wantDoc {
-				t.Errorf("doc warning = %v, want %v: %q", got, tc.wantDoc, text)
-			}
-			if (tc.wantIndex || tc.wantDoc) && !strings.Contains(text, "book-tidy") {
-				t.Errorf("warning does not say how to continue: %q", text)
-			}
-			if !strings.HasPrefix(text, "Wrote "+tc.path+" in the book.") {
-				t.Errorf("success message lost: %q", text)
+			if tc.refused && !strings.Contains(resultText(res), "book-tidy") {
+				t.Fatalf("refusal does not say how to continue: %q", resultText(res))
 			}
 		})
 	}
 }
 
-// The warning measures the final file, not the appended chunk, and also fires
-// when the file was already over the line.
-func TestSizeWarningUsesFinalSizeOnAppend(t *testing.T) {
+func TestIndexRefusalSaysItIsAMap(t *testing.T) {
 	dir := newBook(t)
-	tool := NewTool(dir, true)
-	writeSized(t, dir, "PROJECT.md", 7*1024-10)
-
-	res := run(t, tool, map[string]any{"action": "append", "path": "PROJECT.md", "content": "0123456789ab"})
-	text := resultText(res)
-	if !strings.Contains(text, "PROJECT.md is now 7171 bytes") { // 7158 + newline separator + 12
-		t.Fatalf("append crossing the line: %q", text)
-	}
-	res = run(t, tool, map[string]any{"action": "append", "path": "PROJECT.md", "content": "x"})
-	if !strings.Contains(resultText(res), "PROJECT.md is now") {
-		t.Fatalf("append to a file already over: %q", resultText(res))
+	res := run(t, NewTool(dir, true), map[string]any{"action": "write", "path": "PROJECT.md", "content": strings.Repeat("a", 9000)})
+	if !res.IsError || !strings.Contains(resultText(res), "map") || !strings.Contains(resultText(res), "another file") {
+		t.Fatalf("index refusal: %q", resultText(res))
 	}
 }
 
-func TestSizeWarningCountsBytesNotRunes(t *testing.T) {
+// The size is the final file, not the appended chunk, and counts bytes.
+func TestAppendIsRefusedOnTheFinalSize(t *testing.T) {
 	dir := newBook(t)
 	tool := NewTool(dir, true)
-	// 3500 runes of 2 bytes: 7000 bytes is fine, 3600 runes is 7200 bytes.
-	res := run(t, tool, map[string]any{"action": "write", "path": "PROJECT.md", "content": strings.Repeat("á", 3500)})
-	if strings.Contains(resultText(res), "Warning") {
-		t.Fatalf("7000 bytes warned: %q", resultText(res))
+	writeSized(t, dir, "PROJECT.md", 8*1024-10)
+	if res := run(t, tool, map[string]any{"action": "append", "path": "PROJECT.md", "content": "0123"}); res.IsError {
+		t.Fatalf("append under the limit refused: %s", resultText(res))
 	}
-	res = run(t, tool, map[string]any{"action": "write", "path": "PROJECT.md", "content": strings.Repeat("á", 3600)})
-	if !strings.Contains(resultText(res), "7200 bytes") {
-		t.Fatalf("7200 bytes did not warn in bytes: %q", resultText(res))
+	before, _ := os.ReadFile(filepath.Join(dir, "PROJECT.md"))
+	if res := run(t, tool, map[string]any{"action": "append", "path": "PROJECT.md", "content": strings.Repeat("x", 20)}); !res.IsError {
+		t.Fatal("append past the limit accepted")
+	}
+	after, _ := os.ReadFile(filepath.Join(dir, "PROJECT.md"))
+	if string(before) != string(after) {
+		t.Fatal("a refused append changed the file")
+	}
+	// 4500 two-byte runes is 9000 bytes.
+	if res := run(t, tool, map[string]any{"action": "write", "path": "PROJECT.md", "content": strings.Repeat("á", 4500)}); !res.IsError {
+		t.Fatal("limit measured in runes, not bytes")
+	}
+}
+
+// A book that is already over the limit must not trap its owner: the file can
+// be read in pages and rewritten smaller, step by step, but not made bigger.
+func TestAnOversizedBookCanBeSplitWithTheTool(t *testing.T) {
+	dir := newBook(t)
+	tool := NewTool(dir, true)
+	var sb strings.Builder
+	for i := 0; sb.Len() < 150*1024; i++ {
+		fmt.Fprintf(&sb, "line %05d á\n", i)
+	}
+	original := sb.String()
+	if err := os.MkdirAll(filepath.Join(dir, "work"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "work", "big.md"), []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "PROJECT.md"), []byte(strings.Repeat("i", 30*1024)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reading in pages reproduces the file, tail included.
+	var got strings.Builder
+	offset := 0
+	for pages := 0; pages < 10; pages++ {
+		text := resultText(run(t, tool, map[string]any{"action": "read", "path": "work/big.md", "offset": float64(offset)}))
+		i := strings.LastIndex(text, "\n\n[truncated at 64KB; work/big.md continues at offset ")
+		if i < 0 {
+			got.WriteString(text)
+			break
+		}
+		got.WriteString(text[:i])
+		if _, err := fmt.Sscanf(text[i:], "\n\n[truncated at 64KB; work/big.md continues at offset %d]", &offset); err != nil {
+			t.Fatalf("no next offset in %q", text[i:])
+		}
+	}
+	if got.String() != original {
+		t.Fatalf("paged read differs from the file (%d vs %d bytes)", got.Len(), len(original))
+	}
+
+	// Parts go to their own files; the original shrinks in place.
+	third := len(original) / 3
+	for third > 0 && original[third]&0xC0 == 0x80 {
+		third--
+	}
+	parts := []string{original[:third], original[third:]}
+	if res := run(t, tool, map[string]any{"action": "write", "path": "work/big-2.md", "content": parts[1][:60*1024]}); res.IsError {
+		t.Fatalf("part refused: %s", resultText(res))
+	}
+	if res := run(t, tool, map[string]any{"action": "append", "path": "work/big.md", "content": "more"}); !res.IsError {
+		t.Fatal("an oversized file was allowed to grow")
+	}
+	if res := run(t, tool, map[string]any{"action": "write", "path": "work/big.md", "content": original[:100*1024]}); res.IsError {
+		t.Fatalf("shrinking an oversized file refused: %s", resultText(res))
+	}
+	if res := run(t, tool, map[string]any{"action": "write", "path": "work/big.md", "content": "map to parts\n"}); res.IsError {
+		t.Fatalf("final shrink refused: %s", resultText(res))
+	}
+	// The same for an oversized index: shorter is fine, growing is not.
+	if res := run(t, tool, map[string]any{"action": "write", "path": "PROJECT.md", "content": strings.Repeat("i", 31*1024)}); !res.IsError {
+		t.Fatal("an oversized index was allowed to grow")
+	}
+	if res := run(t, tool, map[string]any{"action": "write", "path": "PROJECT.md", "content": strings.Repeat("i", 20*1024)}); res.IsError {
+		t.Fatalf("shrinking an oversized index refused: %s", resultText(res))
+	}
+	if res := run(t, tool, map[string]any{"action": "write", "path": "PROJECT.md", "content": "# map\n"}); res.IsError {
+		t.Fatalf("writing the short index refused: %s", resultText(res))
+	}
+}
+
+func TestReadOffsetOutsideTheFileIsAnError(t *testing.T) {
+	dir := newBook(t)
+	writeSized(t, dir, "people.md", 100)
+	if res := run(t, NewTool(dir, false), map[string]any{"action": "read", "path": "people.md", "offset": float64(101)}); !res.IsError {
+		t.Fatal("offset past the end accepted")
 	}
 }
 
@@ -373,7 +439,7 @@ func TestFailedWriteDoesNotClaimSuccessOrWarn(t *testing.T) {
 	dir := newBook(t)
 	tool := NewTool(dir, true)
 	res := run(t, tool, map[string]any{"action": "write", "path": "../escape.md", "content": strings.Repeat("a", 60*1024)})
-	if !res.IsError || strings.Contains(resultText(res), "Wrote") || strings.Contains(resultText(res), "Warning") {
+	if !res.IsError || strings.Contains(resultText(res), "Wrote") {
 		t.Fatalf("failed write: %v %q", res.IsError, resultText(res))
 	}
 }

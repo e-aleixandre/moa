@@ -29,6 +29,9 @@ const (
 	// maxFileBytes caps a single read. A book file past this is being used as
 	// an archive, and the tail is dropped rather than the context blown.
 	maxFileBytes = 64 * 1024
+	// MaxIndexBytes is how much of PROJECT.md a session is given (the owner
+	// package injects exactly this), so it is also how big the index may be.
+	MaxIndexBytes = 8 * 1024
 	// maxSearchBytes caps a whole search response, like the memory tool's.
 	maxSearchBytes = 6 * 1024
 	// maxListEntries caps a listing so a book with thousands of files still
@@ -90,6 +93,10 @@ func newTool(dir string, writable, hideReserved bool) core.Tool {
 				"type": "integer",
 				"description": "For search: how many files to return (default 10, max 25)."
 			},
+			"offset": {
+				"type": "integer",
+				"description": "For read: byte to start from, to read past the first 64KB of a larger file (the truncation notice gives the next offset)."
+			},
 			"content": {
 				"type": "string",
 				"description": "Markdown to write (for write and append)."
@@ -126,7 +133,7 @@ func newTool(dir string, writable, hideReserved bool) core.Tool {
 				if hidden(path) {
 					return core.ErrorResult(fmt.Sprintf("%s is not in the book", rawPath)), nil
 				}
-				return read(dir, path)
+				return read(dir, path, toInt(params["offset"]))
 			case "search":
 				query, _ := params["query"].(string)
 				return search(dir, query, toInt(params["limit"]), hidden)
@@ -392,7 +399,7 @@ func list(dir, under string, hidden func(rel string) bool) (core.Result, error) 
 	return core.TextResult(sb.String()), nil
 }
 
-func read(dir, rel string) (core.Result, error) {
+func read(dir, rel string, offset int) (core.Result, error) {
 	full, err := resolve(dir, rel)
 	if err != nil {
 		return core.ErrorResult(err.Error()), nil
@@ -404,11 +411,21 @@ func read(dir, rel string) (core.Result, error) {
 		}
 		return core.ErrorResult(fmt.Sprintf("cannot read %s: %v", rel, err)), nil
 	}
-	if len(data) > maxFileBytes {
-		return core.TextResult(truncateUTF8(string(data), maxFileBytes) +
-			fmt.Sprintf("\n\n[truncated at %dKB]", maxFileBytes/1024)), nil
+	if offset < 0 || offset > len(data) {
+		return core.ErrorResult(fmt.Sprintf("offset %d is outside %s (%d bytes)", offset, rel, len(data))), nil
 	}
-	return core.TextResult(string(data)), nil
+	// An offset inside a multi-byte rune moves on to the next boundary rather
+	// than starting a page with a broken character.
+	for offset < len(data) && data[offset]&0xC0 == 0x80 {
+		offset++
+	}
+	rest := string(data[offset:])
+	if len(rest) > maxFileBytes {
+		page := truncateUTF8(rest, maxFileBytes)
+		return core.TextResult(page + fmt.Sprintf("\n\n[truncated at %dKB; %s continues at offset %d]",
+			maxFileBytes/1024, rel, offset+len(page))), nil
+	}
+	return core.TextResult(rest), nil
 }
 
 // search ranks the book (see search.go) rather than listing every line that
@@ -452,18 +469,21 @@ func write(dir, rel, content string, appendTo bool) (core.Result, error) {
 	if err != nil {
 		return core.ErrorResult(err.Error()), nil
 	}
-	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-		return core.ErrorResult(fmt.Sprintf("cannot create %s: %v", rel, err)), nil
+	existing, readErr := os.ReadFile(full)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return core.ErrorResult(fmt.Sprintf("cannot read %s: %v", rel, readErr)), nil
 	}
 	if appendTo {
-		existing, readErr := os.ReadFile(full)
-		if readErr != nil && !os.IsNotExist(readErr) {
-			return core.ErrorResult(fmt.Sprintf("cannot read %s: %v", rel, readErr)), nil
-		}
 		if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
 			existing = append(existing, '\n')
 		}
 		content = string(existing) + content
+	}
+	if refusal := sizeRefusal(CleanPath(rel), len(content), len(existing)); refusal != "" {
+		return core.ErrorResult(refusal), nil
+	}
+	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+		return core.ErrorResult(fmt.Sprintf("cannot create %s: %v", rel, err)), nil
 	}
 	if err := writeFileAtomic(full, []byte(content), 0o600); err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot write %s: %v", rel, err)), nil
@@ -472,33 +492,31 @@ func write(dir, rel, content string, appendTo bool) (core.Result, error) {
 	if appendTo {
 		verb = "Appended to"
 	}
-	msg := fmt.Sprintf("%s %s in the book.", verb, rel)
-	if w := sizeWarning(CleanPath(rel), len(content)); w != "" {
-		msg += "\n\n" + w
-	}
-	return core.TextResult(msg), nil
+	return core.TextResult(fmt.Sprintf("%s %s in the book.", verb, rel)), nil
 }
 
-const (
-	// indexWarnBytes leaves PROJECT.md a margin under the 8KB the owner's
-	// injection keeps (owner.MaxProjectBytes); docWarnBytes does the same under
-	// the read and search limit. Both are measured on the final file, in bytes.
-	indexWarnBytes = 7 * 1024
-	docWarnBytes   = 48 * 1024
-)
+// sizeRefusal says no to a write that leaves a file where the book stops
+// serving it: PROJECT.md past what a session is given, or any file past what
+// read and search handle. Only growth is refused: a file that is already over
+// (a book from before the limit) can still be rewritten smaller, in as many
+// steps as it takes, which is the only way to split it with this tool.
+func sizeRefusal(rel string, size, before int) string {
+	if size <= before {
+		return ""
+	}
+	if rel == "PROJECT.md" && size > MaxIndexBytes {
+		return fmt.Sprintf("Refused: PROJECT.md would be %d bytes and sessions are given only the first %d, so the rest would be cut off. The index is a short map: stable paths, one line per area, decision or active work, the state. Put the detail in another file (decisions/, areas/, work/) and leave one line here. If PROJECT.md is already over, write it back shorter first, moving what you remove into its own files without rewording; load_skill book-tidy for the method.", size, MaxIndexBytes)
+	}
+	if size > maxFileBytes {
+		return fmt.Sprintf("Refused: %s would be %d bytes. read cuts a file at %d bytes and search skips files larger than that, so its tail could not be found. Put this in the next part (for example %s) or in a file of its own. To split a file that is already over: read it in pages (offset), write each part to its own file without summarizing or rewording, then write the original back as a short map to the parts; load_skill book-tidy for the method.", rel, size, maxFileBytes, partName(rel))
+	}
+	return ""
+}
 
-// sizeWarning says when a file is past the point where the book stops serving
-// it whole. It only informs: nothing is blocked or removed, and it also fires
-// for a file that was already over before this write.
-func sizeWarning(rel string, size int) string {
-	var parts []string
-	if rel == "PROJECT.md" && size > indexWarnBytes {
-		parts = append(parts, fmt.Sprintf("Warning: PROJECT.md is now %d bytes. Sessions receive at most 8192 bytes of it and the rest is cut off. Keep it an index and move detail into other files; load_skill book-tidy for the method.", size))
-	}
-	if size > docWarnBytes {
-		parts = append(parts, fmt.Sprintf("Warning: %s is now %d bytes. read cuts a file at %d bytes and search skips files larger than that, so its tail cannot be found. Split it without summarizing; load_skill book-tidy for the method.", rel, size, maxFileBytes))
-	}
-	return strings.Join(parts, "\n")
+// partName suggests where the next piece of a full file goes.
+func partName(rel string) string {
+	ext := filepath.Ext(rel)
+	return strings.TrimSuffix(rel, ext) + "-2" + ext
 }
 
 // truncateUTF8 caps s at limit bytes without splitting a rune.
