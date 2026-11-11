@@ -63,10 +63,13 @@ type gate struct {
 	cfg GateConfig
 
 	mu         sync.Mutex
-	logMu      sync.Mutex // the log is written outside mu
-	readBook   bool       // a book search or read happened in this turn
-	fired      bool       // the gate has refused once in this turn
-	epoch      int        // model requests so far; calls of one step share it
+	logMu      sync.Mutex // guards the log queue; writing happens outside mu and logMu
+	logQ       []map[string]any
+	draining   bool
+	logWG      sync.WaitGroup // lets tests wait for pending writes
+	readBook   bool           // a book search or read happened in this turn
+	fired      bool           // the gate has refused once in this turn
+	epoch      int            // model requests so far; calls of one step share it
 	firedEpoch int
 	pending    *gatePending
 	seq        int
@@ -256,17 +259,6 @@ func (g *gate) onToolCall(ctx context.Context, name string, args map[string]any)
 	}
 	g.appendLog(map[string]any{"event": "fired", "id": p.id, "tool": name, "action": action, "text": text, "results": shown})
 
-	// Slow log I/O can also run the deadline out; the action then went ahead,
-	// so the refusal is taken back rather than left in the state and the log.
-	if ctx.Err() != nil {
-		g.mu.Lock()
-		if g.pending == p {
-			g.fired, g.pending = false, nil
-		}
-		g.mu.Unlock()
-		g.logResolved(p, "timed_out")
-		return nil
-	}
 	return &core.ToolCallDecision{Block: true, Reason: p.reason, Kind: core.ToolCallDecisionKindPolicy}
 }
 
@@ -274,13 +266,41 @@ func (g *gate) logResolved(p *gatePending, outcome string) {
 	g.appendLog(map[string]any{"event": "resolved", "id": p.id, "outcome": outcome, "read_book": p.readBook})
 }
 
+// appendLog never makes a hook wait for the disk: the hook has 200ms, and a
+// refusal recorded after the host already let the call through would be a lie.
+// One writer drains the queue, so lines keep their order.
 func (g *gate) appendLog(entry map[string]any) {
 	if g.cfg.LogPath == "" {
 		return
 	}
+	entry["at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	g.logMu.Lock()
 	defer g.logMu.Unlock()
-	entry["at"] = time.Now().UTC().Format(time.RFC3339)
+	g.logQ = append(g.logQ, entry)
+	if !g.draining {
+		g.draining = true
+		g.logWG.Add(1)
+		go g.drainLog()
+	}
+}
+
+func (g *gate) drainLog() {
+	defer g.logWG.Done()
+	for {
+		g.logMu.Lock()
+		if len(g.logQ) == 0 {
+			g.draining = false
+			g.logMu.Unlock()
+			return
+		}
+		entry := g.logQ[0]
+		g.logQ = g.logQ[1:]
+		g.logMu.Unlock()
+		g.writeLog(entry)
+	}
+}
+
+func (g *gate) writeLog(entry map[string]any) {
 	line, err := json.Marshal(entry)
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(g.cfg.LogPath), 0o700)

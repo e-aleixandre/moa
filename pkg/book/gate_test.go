@@ -3,11 +3,9 @@ package book
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -42,6 +40,7 @@ type gateRig struct {
 	logPath string
 	on      bool
 	host    *extension.Host
+	gate    *gate
 }
 
 func newGateRig(t *testing.T) *gateRig {
@@ -53,9 +52,11 @@ func newGateRig(t *testing.T) *gateRig {
 		r.sheet("areas/otros/ficha-"+string(rune('a'+i))+".md", "# Ficha\n\nNada que ver con vinos.\n")
 	}
 	r.host = extension.NewHost(core.NewRegistry(), nil)
-	if err := r.host.Load(GateExtension(GateConfig{Dir: dir, LogPath: r.logPath, Enabled: func() bool { return r.on }})); err != nil {
+	r.gate = GateExtension(GateConfig{Dir: dir, LogPath: r.logPath, Enabled: func() bool { return r.on }}).(*gate)
+	if err := r.host.Load(r.gate); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(r.gate.logWG.Wait) // before the temp dir goes
 	r.turn()
 	return r
 }
@@ -80,6 +81,14 @@ func (r *gateRig) call(name string, args map[string]any) *core.ToolCallDecision 
 }
 
 func (r *gateRig) log() []map[string]any {
+	r.t.Helper()
+	r.gate.logWG.Wait()
+	return r.readLog()
+}
+
+// readLog does not wait for the writer, for callers whose own trigger is
+// asynchronous (a WaitGroup may not be waited on while it is being added to).
+func (r *gateRig) readLog() []map[string]any {
 	r.t.Helper()
 	data, err := os.ReadFile(r.logPath)
 	if os.IsNotExist(err) {
@@ -295,7 +304,7 @@ func TestGateLogsAbandonedWhenTheRunEnds(t *testing.T) {
 	r.call("sessions", send(katxina))
 	r.host.FireObserver(core.AgentEvent{Type: core.AgentEventEnd})
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(r.log()) < 2 {
+	for time.Now().Before(deadline) && len(r.readLog()) < 2 {
 		time.Sleep(10 * time.Millisecond)
 	}
 	log := r.log()
@@ -309,6 +318,7 @@ func TestGateLogsAbandonedWhenTheRunEnds(t *testing.T) {
 func TestGateLateCallChangesNothing(t *testing.T) {
 	r := newGateRig(t)
 	g := &gate{cfg: GateConfig{Dir: r.dir, LogPath: r.logPath, Enabled: func() bool { return true }}}
+	t.Cleanup(g.logWG.Wait)
 	g.gen++
 	ix, err := NewIndex(r.dir)
 	if err != nil {
@@ -336,6 +346,7 @@ func TestGateNeverUsesAnIndexThisTurnDidNotConfirm(t *testing.T) {
 	if d := g.onToolCall(context.Background(), "sessions", send(katxina)); d != nil {
 		t.Fatal("gated on an unconfirmed index")
 	}
+	g.logWG.Wait()
 	log := r.log()
 	if len(log) != 1 || log[0]["event"] != "skipped" {
 		t.Fatalf("log = %v", log)
@@ -347,44 +358,9 @@ func TestGateLogKeepsPathsNotBookText(t *testing.T) {
 	r.sheet("work/secreto.md", "# Secreto\n\nKatxiña token=EXAMPLE_SECRET_NOT_IN_ACTION\n")
 	r.turn()
 	r.call("sessions", send("Katxiña token"))
+	r.gate.logWG.Wait()
 	data, _ := os.ReadFile(r.logPath)
 	if strings.Contains(string(data), "EXAMPLE_SECRET") || !strings.Contains(string(data), "work/secreto.md") {
 		t.Fatalf("log = %s", data)
-	}
-}
-
-// Slow log I/O (a FIFO whose reader shows up late) runs the hook's deadline
-// out: the host lets the action through, so the gate must not remember having
-// refused it.
-func TestGateSlowLogDoesNotLeaveAPhantomRefusal(t *testing.T) {
-	r := newGateRig(t)
-	fifo := filepath.Join(t.TempDir(), "log.fifo")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Skip("no fifo here:", err)
-	}
-	g := &gate{cfg: GateConfig{Dir: r.dir, LogPath: fifo, Enabled: func() bool { return true }}}
-	g.gen++
-	ix, _ := NewIndex(r.dir)
-	g.idx, g.ready = ix, true
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		for i := 0; i < 2; i++ { // the fired line, then the timed_out one
-			f, err := os.Open(fifo)
-			if err != nil {
-				return
-			}
-			_, _ = io.Copy(io.Discard, f)
-			_ = f.Close()
-		}
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if d := g.onToolCall(ctx, "sessions", send(katxina)); d != nil {
-		t.Fatal("refused after the deadline")
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.fired || g.pending != nil {
-		t.Fatal("phantom refusal in the state")
 	}
 }
