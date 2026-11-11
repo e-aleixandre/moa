@@ -992,7 +992,7 @@ func (s Store) Due(snap Snapshot) ([]Unit, error) {
 	}
 	var out []Unit
 	for _, u := range snap.Units() {
-		if st.Units[bookPrefix+u.Sheet] != snap.UnitHash(u) {
+		if !isDecision(u) && st.Units[bookPrefix+u.Sheet] != snap.UnitHash(u) {
 			out = append(out, u)
 		}
 	}

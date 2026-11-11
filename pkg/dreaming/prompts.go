@@ -65,7 +65,7 @@ Contesta SOLO con un bloque JSON:
 {"sin_cambios": false,
  "estado": "<markdown>",
  "conservar": [[f, a, b], ...],
- "archivar": [{"f": f, "lineas": [a, b], "motivo": "superado|cerrado|repetido|por_confirmar", "fuente": "<ruta>:<línea>", "fuente2": "<ruta>:<línea> (solo en decisions/)"}, ...]}
+ "archivar": [{"f": f, "lineas": [a, b], "motivo": "superado|cerrado|repetido|por_confirmar", "fuente": "<ruta>:<línea>"}, ...]}
 
 - "conservar": rangos (1-based, inclusivos) que siguen vigentes y quedan literales en la hoja, en el orden que des, bajo "Detalle vigente (literal)".
 - "archivar": cada rango que se retira, literal, al archivo. "fuente" es la línea que demuestra que está superado, cerrado o repetido: una ruta:línea de esta hoja, de otra hoja citada por los cruces, o de una decisión que tienes delante. Si no tienes esa línea, el motivo es "por_confirmar" (con su viñeta en el estado).
@@ -74,11 +74,6 @@ Contesta SOLO con un bloque JSON:
   "## Decisiones del usuario que aplican": solo enlaces a decisions/… con una frase de qué deciden.
   "## Por resolver": "CONFLICTO:" (qué no cuadra y cuál tomas por vigente y por qué) y "PREGUNTA AL DUEÑO:". Omítela si no hay nada.
 - Qué archivar: entradas de diario cerradas o superadas, incidentes resueltos, pendientes hechos, releases viejas, recaps repetidos, copias de lo que ya está en su casa, y un "Estado actual" de una noche anterior que ya no vale. Qué conservar: diseño y referencia válidos, pendientes abiertos, decisiones del dueño sin fichero propio, avisos vigentes y todo lo que dudes.
-- Si la hoja es un fichero de decisions/ (una decisión del dueño), las reglas cambian y el programa las comprueba:
-  - Nada de "## Estado actual" ni texto propio: "estado" solo puede contener líneas "> Superada por ` + "`decisions/<fichero>.md`" + ` (fecha): <ruta>:<a>-<b>", una por punto superado, o quedar vacío.
-  - Solo se archiva un rango si una decisión POSTERIOR del dueño (otro fichero de decisions/ que tengas delante; posterior por la fecha en que decidió el dueño) lo sustituye o contradice en ese mismo punto: motivo "superado", "fuente" = la línea de esa otra decisión y "fuente2" = una segunda ruta:línea distinta que muestre lo mismo.
-  - Un fichero de decisiones suele tener varios acuerdos: superar uno no supera los demás; archiva solo su rango. El diario o el contexto que lo rodea se conserva.
-  - Si no sabes cuál es posterior o si es el mismo punto, no archives: contesta {"sin_cambios": true} y, si hay contradicción, la escribirá el resumen como pregunta.
 - Si una decisión, orden o respuesta del dueño solo vive en esta hoja (no en decisions/), pide su fichero con "nuevas_decisiones": [{"ruta": "decisions/<slug-nuevo>.md", "titulo": "<una línea>", "fuente": "<ruta>:<a>-<b>"}]; el programa copia esas líneas literales. Conserva también esas líneas en la hoja.
 - La hoja final idealmente ≤ 24 KiB (el programa rechaza > 48 KiB).
 - Si la hoja ya es estado limpio y no hay nada que archivar, contesta {"sin_cambios": true}.`
