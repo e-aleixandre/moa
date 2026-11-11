@@ -21,10 +21,11 @@ type Unit struct {
 // that ends up as a kept or archived line: only line numbers, plus the new
 // state block, which is the single piece of new prose.
 type Plan struct {
-	NoChanges bool       `json:"sin_cambios"`
-	State     string     `json:"estado"`
-	Keep      [][3]int   `json:"conservar"` // [file, first, last], 1-based inclusive
-	Archive   []Archived `json:"archivar"`
+	NoChanges bool        `json:"sin_cambios"`
+	State     string      `json:"estado"`
+	Keep      [][3]int    `json:"conservar"` // [file, first, last], 1-based inclusive
+	Archive   []Archived  `json:"archivar"`
+	Promote   []Promotion `json:"nuevas_decisiones,omitempty"`
 }
 
 // Archived is one range the organizer retires, with why and on what evidence.

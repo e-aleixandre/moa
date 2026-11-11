@@ -171,6 +171,10 @@ func (s Store) Night(ctx context.Context, cfg NightConfig) (NightResult, error) 
 		if err != nil {
 			return res, err
 		}
+		if err := r.addPromotions(snap, u, plan, cfg.Date, &g, c); err != nil {
+			res.Rejected[u.Sheet] = err.Error()
+			continue
+		}
 		groups = append(groups, g)
 		for k, v := range c {
 			content[k] = v

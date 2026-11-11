@@ -79,5 +79,6 @@ Contesta SOLO con un bloque JSON:
   - Solo se archiva un rango si una decisión POSTERIOR del dueño (otro fichero de decisions/ que tengas delante; posterior por la fecha en que decidió el dueño) lo sustituye o contradice en ese mismo punto: motivo "superado", "fuente" = la línea de esa otra decisión y "fuente2" = una segunda ruta:línea distinta que muestre lo mismo.
   - Un fichero de decisiones suele tener varios acuerdos: superar uno no supera los demás; archiva solo su rango. El diario o el contexto que lo rodea se conserva.
   - Si no sabes cuál es posterior o si es el mismo punto, no archives: contesta {"sin_cambios": true} y, si hay contradicción, la escribirá el resumen como pregunta.
+- Si una decisión, orden o respuesta del dueño solo vive en esta hoja (no en decisions/), pide su fichero con "nuevas_decisiones": [{"ruta": "decisions/<slug-nuevo>.md", "titulo": "<una línea>", "fuente": "<ruta>:<a>-<b>"}]; el programa copia esas líneas literales. Conserva también esas líneas en la hoja.
 - La hoja final idealmente ≤ 24 KiB (el programa rechaza > 48 KiB).
 - Si la hoja ya es estado limpio y no hay nada que archivar, contesta {"sin_cambios": true}.`

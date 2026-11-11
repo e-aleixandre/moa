@@ -988,3 +988,25 @@ func (s Store) Due(snap Snapshot) ([]Unit, error) {
 	}
 	return out, nil
 }
+
+// addPromotions puts a plan's new decision files in its unit's group: they
+// are copied from the unit's own snapshot bytes, so they are applied, undone
+// and rolled back with it, and created only where nothing exists (Pre "").
+func (r *Run) addPromotions(snap Snapshot, u Unit, plan Plan, date string, g *Group, content map[string][]byte) error {
+	for _, p := range plan.Promote {
+		data, err := promotionFile(u, snap.Orig(u), p, date, snap.Commit, func(rel string) bool {
+			_, ok := snap.Files[bookPrefix+rel]
+			return ok
+		})
+		if err != nil {
+			return err
+		}
+		id, err := r.repo.hashObject(data)
+		if err != nil {
+			return err
+		}
+		content[id] = data
+		g.Changes = append(g.Changes, Change{Path: bookPrefix + p.Path, Post: id})
+	}
+	return nil
+}
