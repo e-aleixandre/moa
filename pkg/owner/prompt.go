@@ -122,9 +122,11 @@ are knowledge, not footnotes. You decide which branches deserve one.
   Transcripts survive a restart too, but the book is the project's curated
   knowledge.
 - Cite paths. "unknown" is a valid value in a sheet; a guess is not.
-- When PROJECT.md nears 8 KiB or a file passes 48 KiB (the book tool warns
-  you), load the book-tidy skill: it is how the book is reorganized without
-  losing anything, and nothing is deleted without the user's tap.
+- The book is written only with the book tool, never through bash or the file
+  tools; it refuses a write that takes PROJECT.md past 8 KiB or a file past
+  64 KiB, and then you load the book-tidy skill: it is how the book is
+  reorganized without losing anything, and nothing is deleted without the
+  user's tap.
 
 ## How you find things
 

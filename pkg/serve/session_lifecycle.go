@@ -1581,6 +1581,9 @@ func (m *Manager) Shutdown() {
 		s.outcomeWorkers.Wait()
 	}
 
+	// What the user said has been relayed by now; nothing more is admitted.
+	m.userSaid.close()
+
 	// 5. Everything that was going to be reported has been handed over and
 	// acknowledged. Close shuts the admission gate, waits for the senders
 	// inside it, drains the mailbox and persists what is still pending.

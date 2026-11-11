@@ -48,8 +48,8 @@ const ProjectFile = "PROJECT.md"
 
 // MaxProjectBytes caps what PROJECT.md contributes to a session prompt. It is
 // paid on every turn of every child, so the index is bounded even if the owner
-// lets the file grow.
-const MaxProjectBytes = 8 * 1024
+// lets the file grow. The book tool refuses a write past the same size.
+const MaxProjectBytes = book.MaxIndexBytes
 
 // Owner is the persisted entity. Model and Thinking are the conversation's
 // defaults at creation time; the session owns them afterwards, like any other.

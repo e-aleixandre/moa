@@ -408,17 +408,30 @@ Every result is capped at 16 KiB. Main sessions, owners and the headless CLI
 have it; subagents do not. In the web UI its card shows what was found in
 readable form.
 
+## MCP tool search
+
+On supported Anthropic models and the ChatGPT plan, MCP tool definitions load into the model's
+context on demand. The agent first calls `tool_search` with keywords, a server
+name or an exact tool name; `select:<name>,<name>` loads exactly the named
+tools. A search loads up to eight tools. They remain loaded for the rest of
+the conversation's current context; after compaction the agent searches again
+as needed. Calling an unloaded tool returns instructions to load it first.
+Other providers receive all tool definitions as before. This does not change
+tool permissions or when the MCP server itself starts.
+
+Older Anthropic models that do not support deferred tools, and endpoints that
+reject the feature, also receive the full definitions.
+
 ## Repeated tool calls
 
-A run that issues the same tool calls three times in a row is stopped, so a
-stuck model cannot burn tokens indefinitely. Before that happens, when the
-second identical batch ends in an error, the error result carries a warning:
-*Repeated tool error. Change the arguments or use a different approach; the
-next identical tool-call batch will stop this run.* The status tools
+A run that repeats an identical batch of tool calls **and results** gets a
+warning after the third repetition and stops after the sixth, so a stuck model
+cannot burn tokens indefinitely. Both successful and failing results count;
+a changed call or result starts a new streak. The status tools
 (`bash_status`, `bash_wait`, `subagent_status`, `subagent_wait`) are exempt,
-since polling them is normal. A batch that **you** refused (a denied permission
-request, a declined password card) does not count as the model repeating itself
-and gets no warning.
+since waiting on background work is normal; turns made only of these tools
+neither count nor reset the streak. A batch that **you** fully refused (denied
+permissions or declined password cards) does not count and gets no warning.
 
 ## Custom script tools
 
@@ -561,4 +574,3 @@ the same fields in the same order (label, type and kind), and the same submit. S
 the saved values and forgets them. Unpairing forgets them all; if the Keychain cannot delete them, the app says
 so and asks to unpair again. Each use sends
 the value to the server, just like typing it.
-

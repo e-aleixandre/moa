@@ -80,6 +80,14 @@ written to `codebases/<key>/reports.json` before it is queued, and removed
 only once it is in the owner's transcript on disk, so a restart re-delivers
 rather than loses it.
 
+What the **user** says inside a session the owner launched (origin `owner`) is
+reported too, as a `user_said` entry: a message typed in its chat, or an answer
+to its `ask_user`. It carries the session id and title and the user's words
+(abridged at 1500 characters, with how to read the rest). It rides the same 60 s
+batching window, so a burst is one delivery. Only the human is relayed: what an
+agent sends and what the owner itself answers never produce one, nor do sessions
+with origin `user`, the owner's own conversation, or detached sessions.
+
 The owner is **never steered**: a batch is delivered only when the owner is
 idle with an empty queue and no background work of its own, otherwise it waits
 for the owner's run or that work to end. An owner unloaded from memory is

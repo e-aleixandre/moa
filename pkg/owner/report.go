@@ -55,7 +55,23 @@ type Report struct {
 	// outbox) means the session had fully quiesced.
 	BackgroundCount int    `json:"background_count,omitempty"`
 	At              string `json:"at,omitempty"` // RFC3339
+	// UserKind marks an entry that is not a finished turn but something the
+	// user said inside the session: UserSaidMessage for a message they typed,
+	// UserSaidAnswer for an answer to the session's ask_user. UserText is
+	// their words (abridged), UserRef the message or question id, and
+	// UserQuestion the question an answer belongs to. Additive: an outbox
+	// written before these fields reads as turn reports.
+	UserKind     string `json:"user_kind,omitempty"`
+	UserText     string `json:"user_text,omitempty"`
+	UserRef      string `json:"user_ref,omitempty"`
+	UserQuestion string `json:"user_question,omitempty"`
 }
+
+// What a user-said report carries.
+const (
+	UserSaidMessage = "message"
+	UserSaidAnswer  = "answer"
+)
 
 // BookDeltaNone is the value a session uses to say its work changes nothing in
 // the book. It is deliberately distinguishable from an absent delta.

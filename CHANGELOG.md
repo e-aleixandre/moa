@@ -5,6 +5,73 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.0] - 2026-11-10
+
+### Added
+
+- **Comment on documents as you read.** In a Markdown or HTML artifact, tap a
+  paragraph or select words to write or dictate a note. In a PDF or image,
+  **Mark an area to comment** lets you drag a box; the note sends a crop and,
+  for PDFs, any text found inside it. Keep drafts on your device, review them in the note
+  tray, then send them together to the conversation that delivered the file,
+  or use **Send now** for one note without leaving the reader. Numbered
+  questions in Markdown and HTML offer **Yes**, **No** and **Your call** quick
+  replies. See [Commenting while you read](docs/serve.md#commenting-while-you-read).
+- **GPT-6.1 Terra**, available as `terra` or `gpt-6.1-terra`, with Fast mode.
+  GPT-5.6 Terra remains selectable by its ID.
+- **Claude Fable 5.2**, available as `fable` or `claude-fable-5-2`, with Fast
+  mode. Fable 5.1 remains selectable by its ID.
+- **Meta Muse Ember 1.0**, available by ID as `muse-ember-1.0`;
+  `muse` still selects Muse Spark.
+- **MCP tools load on demand** on supported Anthropic models and the ChatGPT plan. The agent
+  uses `tool_search` to find tools by keywords, server or exact name, instead
+  of putting every tool definition into its context up front. Other providers
+  keep the full tool list. See [MCP tool search](docs/tools.md#mcp-tool-search).
+- **More detail in CLI JSON-lines output:** subagents' tool calls carry their
+  child ID, and compaction reports the summarizer and its token usage, with
+  job IDs to link background summaries to their usage events.
+
+### Changed
+
+- **Repeated tool calls are checked with their results.** The agent gets a
+  warning after the third identical call-and-result batch and stops after the
+  sixth, whether the result is a success or an error. Changing results do not
+  count as a stuck loop; status/wait tools and batches you fully refused are
+  exempt. See [Repeated tool calls](docs/tools.md#repeated-tool-calls).
+- **For you context is saved as snapshots.** Changes to a session's open
+  questions and recent News are appended to its history rather than rewriting
+  an earlier request. These internal snapshots stay out of the visible chat
+  and are refreshed after compaction.
+- Agent instructions are aligned across owners, sessions and subagents:
+  human-only approvals still require your own answer, an open question does
+  not authorize consequential work, and memory is not a substitute for
+  canonical project sources. Redundant tool and style guidance is removed.
+- **Mirada returns** in place of Serena as an owner's animated face.
+
+### Security
+
+- Updated DOMPurify to 3.4.17 and `golang.org/x/net` to v0.62.0.
+
+### Fixed
+
+- **More stable prompt-cache prefixes.** Unchanged context inventories stay
+  anchored across requests and runs. Restored sessions reuse their own saved
+  MCP tool definitions while servers reconnect, withdraw them if a server
+  fails, and bound the wait for a connection rather than waiting indefinitely.
+- **Anthropic API-backup keep-alive** can keep the paid cache warm when
+  keep-alive is enabled and the backup is admitted; it stops pinging a key
+  observed to be out of credit. Results from an older sign-in/key pair no
+  longer overwrite the current pair's status.
+- Anthropic response messages retain the plan-quota utilization and reset
+  times reported with that response. Detailed cache diagnostics are off by
+  default and can be enabled with `MOA_DEBUG_CACHE=1`.
+- **Subagent model choices survive switching** between **All models** and
+  **Selected only** on the same device.
+- An owner's session tally includes idle conversations with background jobs
+  still running, without counting those jobs twice as live updates arrive.
+- Restored provider continuations resume without inserting fresh For you
+  context into a request that must be resubmitted unchanged.
+
 ## [0.47.0] - 2026-10-21
 
 ### Added

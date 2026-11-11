@@ -21,6 +21,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/book"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/extension"
 	"github.com/e-aleixandre/moa/pkg/git"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/history"
@@ -597,6 +598,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// book without anything being linked by hand. A codebase with no owner adds
 	// nothing to the prompt.
 	projectOwner, ownerStore := loadProjectOwner(cfg.CWD)
+	var bookGuard extension.Extension
 	if projectOwner.ID != "" && ownerStore != nil {
 		if cfg.OwnerSession {
 			// The role carries book/OWNER.md and the canonical ref, both of
@@ -622,6 +624,30 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		// only in the owner's own conversation: one author is what keeps the book
 		// a record rather than a scratchpad.
 		core.RegisterOrLog(toolReg, book.NewTool(ownerStore.BookDir(projectOwner.CodebaseKey), cfg.OwnerSession))
+		if cfg.OwnerSession {
+			// The tool carries the size limits; a shell redirect into the
+			// directory would skip them, so the owner's calls are guarded.
+			bookGuard = book.GuardExtension(ownerStore.BookDir(projectOwner.CodebaseKey), func(ctx context.Context, tool string, args map[string]any) string {
+				// File tools resolve against the workspace root, not the shell.
+				if !strings.EqualFold(tool, "bash") {
+					return cfg.CWD
+				}
+				// Where the shell will start: the call's own cwd, else the
+				// directory a previous call left it in, else the project root.
+				if c, _ := args["cwd"].(string); c != "" {
+					if !filepath.IsAbs(c) {
+						c = filepath.Join(cfg.CWD, c)
+					}
+					return c
+				}
+				if bashState != nil {
+					if c, _ := bashState.Snapshot(core.AgentIDFromContext(ctx)); c != "" {
+						return c
+					}
+				}
+				return cfg.CWD
+			})
+		}
 	}
 
 	// 9. Ask user bridge.
@@ -831,6 +857,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 	if gate != nil {
 		agentCfg.PermissionCheck = gate.Check
+	}
+	if bookGuard != nil {
+		agentCfg.Extensions = append(agentCfg.Extensions, bookGuard)
 	}
 	ag, err := agent.New(agentCfg)
 	if err != nil {
