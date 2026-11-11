@@ -381,8 +381,10 @@ func TestShutdownPersistsTheTurnAnEndlessJobWasHolding(t *testing.T) {
 	if !strings.Contains(delivered, "here is what it changed") {
 		t.Fatalf("the recovered report did not reach the owner:\n%s", delivered)
 	}
-	if !strings.Contains(delivered, "1 background job still running") {
-		t.Fatalf("the recovered report does not say what was left running:\n%s", delivered)
+	// The job it left running died with the process: the report must not
+	// promise that it will report again.
+	if !strings.Contains(delivered, "now: interrupted by a moa restart") || strings.Contains(delivered, "will report again") {
+		t.Fatalf("the recovered report does not say the restart cut what was left running:\n%s", delivered)
 	}
 }
 
