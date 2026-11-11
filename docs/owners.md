@@ -423,8 +423,13 @@ the last night:
   **without tools**: they only answer;
 - code rewrites the sheet as `## Estado actual` + the lines that still hold, verbatim, and moves the rest, verbatim,
   to `archivo/<sheet>/<date>.md`. It proves that every original file rebuilds byte for byte from the two before
-  writing, keeps the front matter and title on top, and never touches `decisions/`, `OWNER.md`, `PROJECT.md`,
-  `historico/` or an existing archive file;
+  writing, keeps the front matter and title on top, and never touches `OWNER.md`, `PROJECT.md`, `historico/` or an
+  existing archive file. A decision that only lives in a sheet gets its own file in `decisions/`, its lines copied
+  verbatim;
+- decisions are never rewritten. When one changed, the cheap model extracts each decision's points and the planner
+  pairs a decision with a later one that replaces it on the same point. Code checks both quotes against the files and
+  writes a `Superada por` header, with both quotes, above the decision's untouched text; a decision replaced on every
+  point moves, as it is, to `archivo/decisions/`. When it cannot tell which one holds, it asks in the morning news;
 - the project memory changed since the last night goes through one more call: each fact is kept, moved verbatim to
   `memory/archivo/<date>/`, or corrected by appending a dated one-line note after its original bytes (only when its
   `description` still holds; otherwise it is listed for you to review). Archiving or correcting needs a source that
@@ -438,7 +443,8 @@ the last night:
 - a night costs at most `budget_usd` at catalog prices (every call reserves its maximum cost before it is sent);
   what does not fit waits for the next night. A failed night is not retried the same day.
 
-A night with no changed sheet or fact makes no call and no commit.
+A night with no changed sheet, decision or fact makes no call and no commit. Search in the `book` tool leaves
+`archivo/` out unless asked with `include_archive`.
 
 Archived facts leave the memory index and the `memory` tool does not read them: read
 `memory/archivo/` (or the git history) directly, or undo the night.
