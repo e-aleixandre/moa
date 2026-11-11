@@ -258,6 +258,14 @@ func TestGuardBatchWithAReadBetweenAndExplicitCwd(t *testing.T) {
 		t.Fatalf("a write after the batch completed was blocked: %+v", d)
 	}
 
+	// A new run starts from what the shell really is.
+	host = newHost()
+	host.FireToolCall(ctx, "bash", bash("cd "+dir))
+	host.FireBeforeAgentStart(ctx)
+	if d := host.FireToolCall(ctx, "bash", bash("echo x >> notes.md")); d != nil {
+		t.Fatalf("a write in a new run was blocked: %+v", d)
+	}
+
 	// Once the shell's own directory is seen to change, earlier guesses go.
 	host = newHost()
 	host.FireToolCall(ctx, "bash", bash("cd "+dir))

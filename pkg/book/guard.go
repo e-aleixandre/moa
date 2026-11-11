@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/extension"
@@ -25,6 +26,10 @@ import (
 
 // GuardMessage is what the model is told when a call is refused.
 const GuardMessage = "The book is written only with the book tool (action write or append; read the file first with action read, and put detail in its own file rather than in PROJECT.md). Writing the book directory from a shell or with the file tools skips its size limits. Reading it with grep, cat or sed -n is fine."
+
+// endsLifetime bounds how long a guessed shell directory is kept without a
+// result to confirm or clear it.
+const endsLifetime = 2 * time.Minute
 
 // GuardExtension refuses, in an owner's session, the calls that would write the
 // book directory without going through the book tool.
@@ -51,11 +56,17 @@ func (g guardExtension) Init(api extension.API) error {
 	var (
 		mu           sync.Mutex
 		lastProvided string
-		ends         = map[string]bool{}
+		ends         = map[string]time.Time{}
 	)
+	api.OnBeforeAgentStart(func(context.Context) ([]core.AgentMessage, error) {
+		mu.Lock()
+		ends = map[string]time.Time{}
+		mu.Unlock()
+		return nil, nil
+	})
 	api.OnToolResult(func(context.Context, string, core.Result, bool) (*core.Result, error) {
 		mu.Lock()
-		ends = map[string]bool{}
+		ends = map[string]time.Time{}
 		mu.Unlock()
 		return nil, nil
 	})
@@ -78,11 +89,17 @@ func (g guardExtension) Init(api extension.API) error {
 		defer mu.Unlock()
 		if cwd != lastProvided && !explicit {
 			lastProvided = cwd
-			ends = map[string]bool{}
+			ends = map[string]time.Time{}
 		}
 		starts := []string{cwd}
 		if !explicit {
-			for e := range ends {
+			for e, at := range ends {
+				// A call rejected after this hook (bad arguments) never reports a
+				// result, so a guess also lapses with time.
+				if time.Since(at) > endsLifetime {
+					delete(ends, e)
+					continue
+				}
 				starts = append(starts, e)
 			}
 		}
@@ -92,7 +109,7 @@ func (g guardExtension) Init(api extension.API) error {
 				return &core.ToolCallDecision{Block: true, Reason: GuardMessage}
 			}
 			if !explicit && end != "" && end != cwd {
-				ends[end] = true
+				ends[end] = time.Now()
 			}
 		}
 		return nil
