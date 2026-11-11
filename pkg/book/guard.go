@@ -43,33 +43,49 @@ type guardExtension struct {
 func (g guardExtension) Init(api extension.API) error {
 	// The calls of one assistant turn are all checked before any of them runs,
 	// so `cd BOOK` and the write after it arrive together while the shell is
-	// still where it was. The directory the previous shell command would leave
-	// the shell in is therefore a second place to start from.
+	// still where it was. Every directory an earlier shell command here could
+	// have left the shell in is therefore another place to start from. They are
+	// forgotten as soon as the shell's own directory changes: that is the
+	// signal that those commands have run and the real state is known again.
 	var (
-		mu      sync.Mutex
-		lastEnd string
+		mu           sync.Mutex
+		lastProvided string
+		ends         = map[string]bool{}
 	)
 	api.OnToolCall(func(ctx context.Context, name string, args map[string]any) *core.ToolCallDecision {
 		cwd := ""
 		if g.cwd != nil {
 			cwd = g.cwd(ctx, name, args)
 		}
-		starts := []string{cwd}
-		isBash := strings.EqualFold(name, "bash")
-		mu.Lock()
-		if isBash && lastEnd != "" && lastEnd != cwd {
-			starts = append(starts, lastEnd)
+		if !strings.EqualFold(name, "bash") {
+			if WritesBookFrom(g.dir, cwd, name, args) {
+				return &core.ToolCallDecision{Block: true, Reason: GuardMessage}
+			}
+			return nil
 		}
-		mu.Unlock()
+		explicit := false
+		if c, _ := args["cwd"].(string); c != "" {
+			explicit = true
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if cwd != lastProvided && !explicit {
+			lastProvided = cwd
+			ends = map[string]bool{}
+		}
+		starts := []string{cwd}
+		if !explicit {
+			for e := range ends {
+				starts = append(starts, e)
+			}
+		}
 		for _, start := range starts {
 			hit, end := checkCall(g.dir, start, name, args)
 			if hit {
 				return &core.ToolCallDecision{Block: true, Reason: GuardMessage}
 			}
-			if isBash && start == cwd {
-				mu.Lock()
-				lastEnd = end
-				mu.Unlock()
+			if !explicit && end != "" && end != cwd {
+				ends[end] = true
 			}
 		}
 		return nil
@@ -491,7 +507,7 @@ func isInterpreter(cmd string) bool {
 
 // scriptWriteRE matches the calls a script uses to change a file. It is run
 // only on scripts that are about the book.
-var scriptWriteRE = regexp.MustCompile(`(?i)(\bopen\([^,()]*,\s*['"][rbt]*[wax+][^'"]*['"]|mode\s*=\s*['"][^'"]*[wax+]|write_text|write_bytes|writelines|os\.(rename|remove|unlink|replace|truncate)|shutil\.(copy|move|rmtree)|\.(unlink|rename|touch)\(|fs\.(write|append|rename|unlink|rm|copy)|writeFile|appendFile|File\.write|File\.open\([^)]*,\s*['"][^'"]*[wa+]|file_put_contents|\bsed -i)`)
+var scriptWriteRE = regexp.MustCompile(`(?i)(\bopen\([^,()]*,\s*['"][rbt]*[wax+][^'"]*['"]|\.open\(\s*['"][rbt]*[wax+][bt+]*['"]|mode\s*=\s*['"][^'"]*[wax+]|write_text|write_bytes|writelines|os\.(rename|remove|unlink|replace|truncate)|shutil\.(copy|move|rmtree)|\.(unlink|rename|touch)\(|fs\.(write|append|rename|unlink|rm|copy)|writeFile|appendFile|File\.write|File\.open\([^)]*,\s*['"][^'"]*[wa+]|file_put_contents|\bsed -i)`)
 
 // splitSegments tokenizes a shell script just enough for the guard: quotes,
 // operators, redirections and heredocs. A quoted ">" is text, and the body of a

@@ -66,6 +66,7 @@ func TestGuardRefusesTheWritesOwnersReallyMake(t *testing.T) {
 		"shell heredoc":                 "bash <<'SH'\necho note >> " + dir + "/work/a.md\nSH",
 		"inside if":                     `if test -f ` + dir + `/a.md; then sed -i 's/old/new/' ` + dir + `/a.md; fi`,
 		"find exec":                     `find ` + dir + ` -name a.md -exec sed -i 's/old/new/' {} +`,
+		"pathlib open w":                `cd ` + tilde + ` && python3 -c "from pathlib import Path; Path('work/a.md').open('w').write('x')"`,
 		"python explicit mode":          `cd ` + tilde + ` && python3 -c "open('work/a.md', mode='w').write('x')"`,
 		"newline separated":             "cd " + tilde + "\necho x >> work/a.md",
 	}
@@ -165,7 +166,7 @@ func TestGuardCoversTheFileToolsToo(t *testing.T) {
 func TestGuardExtensionBlocksThroughTheHost(t *testing.T) {
 	_, dir := guardFixture(t)
 	host := extension.NewHost(core.NewRegistry(), nil)
-	if err := host.Load(GuardExtension(dir, func(context.Context, string, map[string]any) string { return "/tmp" })); err != nil {
+	if err := host.Load(GuardExtension(dir, nil)); err != nil {
 		t.Fatal(err)
 	}
 	d := host.FireToolCall(context.Background(), "bash", bash("echo x >> "+dir+"/a.md"))
@@ -181,8 +182,9 @@ func TestGuardExtensionBlocksThroughTheHost(t *testing.T) {
 // checked before either runs, while the shell is still elsewhere.
 func TestGuardSeesACdAndAWriteInTheSameBatch(t *testing.T) {
 	_, dir := guardFixture(t)
+	cwd := "/tmp"
 	host := extension.NewHost(core.NewRegistry(), nil)
-	if err := host.Load(GuardExtension(dir, func(context.Context, string, map[string]any) string { return "/tmp" })); err != nil {
+	if err := host.Load(GuardExtension(dir, func(context.Context, string, map[string]any) string { return cwd })); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -192,9 +194,12 @@ func TestGuardSeesACdAndAWriteInTheSameBatch(t *testing.T) {
 	if d := host.FireToolCall(ctx, "bash", bash("echo note >> work/a.md")); d == nil || !d.Block {
 		t.Fatal("the write after a cd in the same batch was allowed")
 	}
+	// The batch ran: the shell is in the book, then leaves it.
+	cwd = dir
 	if d := host.FireToolCall(ctx, "bash", bash("cd /tmp")); d != nil {
 		t.Fatalf("leaving the book was blocked: %+v", d)
 	}
+	cwd = "/tmp"
 	if d := host.FireToolCall(ctx, "bash", bash("echo note >> notes.md")); d != nil {
 		t.Fatalf("a write after leaving the book was blocked: %+v", d)
 	}
@@ -211,5 +216,49 @@ func TestGuardResolvesFileToolsFromTheWorkspace(t *testing.T) {
 	}
 	if WritesBookFrom(dir, project, "write", map[string]any{"path": "notes.md"}) {
 		t.Error("a workspace write was refused")
+	}
+}
+
+func TestGuardBatchWithAReadBetweenAndExplicitCwd(t *testing.T) {
+	home, dir := guardFixture(t)
+	repo := filepath.Join(home, "repo")
+	newHost := func() *extension.Host {
+		host := extension.NewHost(core.NewRegistry(), nil)
+		if err := host.Load(GuardExtension(dir, func(context.Context, string, map[string]any) string { return repo })); err != nil {
+			t.Fatal(err)
+		}
+		return host
+	}
+	ctx := context.Background()
+
+	host := newHost()
+	host.FireToolCall(ctx, "bash", bash("cd "+dir))
+	if d := host.FireToolCall(ctx, "bash", bash("cat work/a.md")); d != nil {
+		t.Fatalf("a read was blocked: %+v", d)
+	}
+	if d := host.FireToolCall(ctx, "bash", bash("echo x >> work/a.md")); d == nil {
+		t.Fatal("a read between the cd and the write hid the cd")
+	}
+
+	// A call that names its own directory is judged from it alone, whatever
+	// earlier calls did.
+	host = newHost()
+	host.FireToolCall(ctx, "bash", bash("cd "+dir+" && ls"))
+	if d := host.FireToolCall(ctx, "bash", map[string]any{"command": "echo x >> notes.md", "cwd": repo}); d != nil {
+		t.Fatalf("a write with an explicit repo cwd was blocked: %+v", d)
+	}
+
+	// Once the shell's own directory is seen to change, earlier guesses go.
+	host = newHost()
+	host.FireToolCall(ctx, "bash", bash("cd "+dir))
+	host2 := extension.NewHost(core.NewRegistry(), nil)
+	cwd := dir
+	if err := host2.Load(GuardExtension(dir, func(context.Context, string, map[string]any) string { return cwd })); err != nil {
+		t.Fatal(err)
+	}
+	host2.FireToolCall(ctx, "bash", bash("cd /tmp"))
+	cwd = repo
+	if d := host2.FireToolCall(ctx, "bash", bash("echo x >> notes.md")); d != nil {
+		t.Fatalf("a repo write after the shell left the book was blocked: %+v", d)
 	}
 }
