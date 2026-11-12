@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
-import { RememberedStrip } from "../../../components/RememberedSecrets/RememberedSecrets.jsx";
-import { rememberedAliases, rememberedSlice } from "../../../data/remembered-secrets.js";
+import { RememberedSheet } from "../../../components/RememberedSecrets/RememberedSecrets.jsx";
 import { Plus } from "lucide-preact";
 import { updateSession, store } from "../../../data/store.js";
 import { ownersSlice } from "../../../data/owners.js";
@@ -570,10 +569,10 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
   // taken from `chrome`: the chrome snapshot is deliberately the ROSTER, and
   // adding a whole session to it would rebuild the header on every token.
   const chromeSession = useStore((s) => (chrome.activeId ? s.sessions[chrome.activeId] : null));
-  const rememberedCount = useStore((s) => rememberedAliases(rememberedSlice(s)).length);
 
   return (
     <>
+      <RememberedSheet />
       {chrome.showChip && !chrome.inboxOpen && !tasksOpen && !forYouOpen && (
         <MobileChrome
           title={chrome.title}
@@ -589,7 +588,6 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
           forYouNews={sessionForYou.unread}
           forYouOpen={forYouSheetId === chrome.activeId}
           onForYou={() => setForYouSheetId(chrome.activeId)}
-          below={rememberedCount > 0 ? <RememberedStrip /> : null}
         />
       )}
       {chrome.inboxOpen && (

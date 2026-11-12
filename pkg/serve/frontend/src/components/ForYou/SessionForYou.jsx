@@ -6,6 +6,7 @@ import { openForYouView } from "../../data/for-you.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { MobileSheet } from "../../layout/mobile/MobileSheet/MobileSheet.jsx";
 import { SessionForYouList } from "./ForYou.jsx";
+import { RememberedKey } from "../RememberedSecrets/RememberedSecrets.jsx";
 import "./ForYou.css";
 
 // useSessionForYou — the header button's two numbers for one conversation:
@@ -38,6 +39,7 @@ export function SessionForYouButton({ waiting = 0, unread = 0, phone = false, op
       <Inbox size={phone ? 18 : 16} aria-hidden="true" />
       {waiting > 0 && <span class="zl-cap-foryou-n zl-data">{waiting > 99 ? "99+" : waiting}</span>}
       {unread > 0 && <span class="zl-cap-foryou-dot" aria-hidden="true" />}
+      <RememberedKey size={phone ? 13 : 11} />
     </button>
   );
 }

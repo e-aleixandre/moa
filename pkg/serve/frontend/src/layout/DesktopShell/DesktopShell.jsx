@@ -1,6 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { RememberedStrip } from "../../components/RememberedSecrets/RememberedSecrets.jsx";
-import { rememberedAliases, rememberedSlice } from "../../data/remembered-secrets.js";
+import { RememberedSheet } from "../../components/RememberedSecrets/RememberedSecrets.jsx";
 import { Sidebar } from "../Sidebar/Sidebar.jsx";
 import { DesktopDossier } from "./DesktopDossier.jsx";
 import { GlobalSettings } from "../../components/index.js";
@@ -36,7 +35,6 @@ export function DesktopShell({ version, children }) {
   const chrome = useStore(selectDesktopChrome);
   const tasksOpen = useStore((s) => s.view === "tasks");
   const tasksCount = useStore((s) => attentionCount(tasksSlice(s)));
-  const rememberedCount = useStore((s) => rememberedAliases(rememberedSlice(s)).length);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   // A session's provider error asks for Settings → Providers on one provider
   // (data/providers.js). The request carries IDs only.
@@ -52,8 +50,8 @@ export function DesktopShell({ version, children }) {
   const [newOwnerOpen, setNewOwnerOpen] = useState(false);
 
   return (
-    <div class={rememberedCount > 0 ? "desktop-shell has-remembered" : "desktop-shell"}>
-      {rememberedCount > 0 && <div class="zl-rem-desktop"><RememberedStrip /></div>}
+    <div class="desktop-shell">
+      <RememberedSheet />
       <Sidebar
         version={version}
         active={chrome.active}

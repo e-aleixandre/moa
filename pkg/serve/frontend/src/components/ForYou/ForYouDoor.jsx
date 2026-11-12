@@ -1,4 +1,5 @@
 import { Inbox } from "lucide-preact";
+import { RememberedKey } from "../RememberedSecrets/RememberedSecrets.jsx";
 import "./ForYou.css";
 
 // ForYouDoor — the first row of the sidebar (and of the phone's drawer): the
@@ -15,6 +16,7 @@ export function ForYouDoor({ n = 0, news = 0, on = false, phone = false, onOpen 
     >
       <span class="fy-door-ico"><Inbox size={16} aria-hidden="true" /></span>
       <span class="fy-door-label">For you</span>
+      <RememberedKey size={13} />
       {news > 0 && <span class="fy-door-dot" aria-hidden="true" />}
       {n > 0 && <span class="fy-door-n zl-data">{n > 99 ? "99+" : n}</span>}
     </button>

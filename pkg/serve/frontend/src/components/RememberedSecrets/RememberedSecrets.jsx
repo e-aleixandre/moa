@@ -1,15 +1,15 @@
-import { useState } from "preact/hooks";
-import { KeyRound } from "lucide-preact";
+import { ChevronRight, KeyRound } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import {
   forgetRemembered, isForgetting, lastDeadline, rememberedAliases, rememberedRuns, rememberedSlice,
 } from "../../data/remembered-secrets.js";
 import { addToast } from "../../data/notifications.js";
+import { setState } from "../../data/store.js";
 import "./RememberedSecrets.css";
 
-// RememberedSecrets — the strip that says secrets are remembered, with
-// "Forget" (everything, one tap), and the sheet behind it: one row per alias
+// RememberedSecrets — the key on the For you button, the line at the top of
+// For you, and the sheet behind it: one row per alias
 // with its own Forget, the runs that used them and "Forget all". It reads
 // metadata only (data/remembered-secrets.js); no value ever reaches here.
 
@@ -68,33 +68,61 @@ export function RememberedSheetBody({ rows, runs, slice, dropped = 0, onForgetAl
   );
 }
 
-export function RememberedStrip() {
+// The sheet is one for the whole app, opened from For you: a For you sheet
+// closes itself first (onLeave) so two sheets never stack.
+export function openRememberedSheet() {
+  setState({ rememberedSheetOpen: true });
+}
+
+// useRemembered — whether anything is remembered now, for the For you
+// button's key. A boolean, so the headers do not rebuild on every poll.
+export function useRemembered() {
+  return useStore((s) => rememberedAliases(rememberedSlice(s)).length > 0);
+}
+
+// RememberedKey — the For you button's mark that secrets are remembered: a
+// small key, never a number or a dot, so it does not read as something
+// waiting or unread.
+export function RememberedKey({ size = 11 }) {
+  if (!useRemembered()) return null;
+  return <KeyRound size={size} class="zl-rem-key" aria-hidden="true" />;
+}
+
+// RememberedBlock — the first line of For you while secrets are remembered.
+export function RememberedBlock({ onLeave }) {
   const slice = useStore(rememberedSlice);
-  const [open, setOpen] = useState(false);
   const rows = rememberedAliases(slice);
-  if (rows.length === 0 && !open) return null;
-  const close = () => setOpen(false);
+  if (rows.length === 0) return null;
   return (
-    <>
-      {rows.length > 0 && (
-        <div class="zl-rem-strip" role="status">
-          <button type="button" class="zl-rem-open" onClick={() => setOpen(true)} aria-haspopup="dialog">
-            <KeyRound size={14} aria-hidden="true" />
-            <span class="zl-rem-txt">{stripText(rows)}</span>
-          </button>
-          <ForgetButton busy={isForgetting(slice, "")} onClick={() => forget("")} />
-        </div>
-      )}
-      <Sheet open={open && rows.length > 0} onClose={close} title="Remembered passwords">
-        <RememberedSheetBody
-          rows={rows}
-          runs={rememberedRuns(slice)}
-          slice={slice}
-          dropped={slice.usesDropped}
-          onForgetAll={() => { close(); forget(""); }}
-        />
-      </Sheet>
-    </>
+    <button
+      type="button"
+      class="zl-rem-block"
+      aria-haspopup="dialog"
+      onClick={() => { onLeave?.(); openRememberedSheet(); }}
+    >
+      <KeyRound size={15} aria-hidden="true" />
+      <span class="zl-rem-txt">{stripText(rows)}</span>
+      <ChevronRight size={15} class="zl-rem-chev" aria-hidden="true" />
+    </button>
+  );
+}
+
+// RememberedSheet — mounted once per shell.
+export function RememberedSheet() {
+  const slice = useStore(rememberedSlice);
+  const open = useStore((s) => !!s.rememberedSheetOpen);
+  const rows = rememberedAliases(slice);
+  const close = () => setState({ rememberedSheetOpen: false });
+  return (
+    <Sheet open={open && rows.length > 0} onClose={close} title="Remembered passwords">
+      <RememberedSheetBody
+        rows={rows}
+        runs={rememberedRuns(slice)}
+        slice={slice}
+        dropped={slice.usesDropped}
+        onForgetAll={() => { close(); forget(""); }}
+      />
+    </Sheet>
   );
 }
 
