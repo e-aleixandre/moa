@@ -95,6 +95,9 @@ type Record struct {
 	// the length of its thread (tasks between owners and agents' requests).
 	Handoff      *Handoff `json:"handoff,omitempty"`
 	CommentCount int      `json:"comment_count,omitempty"`
+	// LastComment is the body of the thread's latest comment: what a task
+	// waits for, shown on its row.
+	LastComment string `json:"last_comment,omitempty"`
 
 	// Execution is the session doing an owner's checklist task, when the
 	// owner delegated it with the sessions tool.

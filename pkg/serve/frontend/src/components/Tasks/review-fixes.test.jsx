@@ -195,3 +195,16 @@ test("R10: Alt+Enter on an orphaned handoff does not start a Done", () => {
     globalThis.document = doc;
   }
 });
+
+// §2.4: an owner's open task row shows what its thread last said; other rows
+// keep only the count.
+test("an owner's task row shows its latest comment in one line", () => {
+  const owners = [{ id: "own_moa", name: "moa", session_id: "owner-s" }];
+  const task = { id: 9, title: "Export CSV", status: "pending", place: "agent", assignee_session_id: "owner-s", comment_count: 2, last_comment: "waits for\nthe API key" };
+  const row = (t) => flat(expand(TaskRow({ task: t, owners, lookup: () => null, onSelect() {}, onCheck() {} })));
+  const comment = row(task).find((n) => n.props?.class === "tk-row-comment");
+  expect(comment && text(comment)).toBe("waits for the API key");
+  const other = { ...task, assignee_session_id: "child-s" };
+  expect(row(other).some((n) => n.props?.class === "tk-row-comment")).toBe(false);
+  expect(row({ ...task, status: "done" }).some((n) => n.props?.class === "tk-row-comment")).toBe(false);
+});

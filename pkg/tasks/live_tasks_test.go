@@ -94,3 +94,21 @@ func TestOwnerBacklogListingAndCreateErrors(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// A task's row shows what its thread last said: the blocker the owner wrote.
+func TestRecordCarriesItsLatestComment(t *testing.T) {
+	r := newRepo(t)
+	rec := mustCreate(t, r, CreateInput{Title: "blocked", Place: PlaceAgent, ProjectKey: "p", AssigneeSessionID: "owner"})
+	if got, err := r.Get(bg, rec.ID); err != nil || got.LastComment != "" {
+		t.Fatalf("no thread yet: %q %v", got.LastComment, err)
+	}
+	for _, body := range []string{"waits for the API key", "waits for Ana's review"} {
+		if _, err := r.HumanComment(bg, rec.ID, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := r.Get(bg, rec.ID)
+	if err != nil || got.LastComment != "waits for Ana's review" || got.CommentCount != 2 {
+		t.Fatalf("latest comment = %q (count %d) %v", got.LastComment, got.CommentCount, err)
+	}
+}
