@@ -1547,9 +1547,6 @@ func (m *Manager) Shutdown() {
 	if m.pushPolicy != nil {
 		m.pushPolicy.Close() // pending summaries are not persisted; see push.Policy
 	}
-	// Every run still going is cut by moa stopping, and says so: a signal has
-	// usually cancelled it already, with the same cause.
-	m.endRuns(bus.ErrStopRestart)
 
 	m.mu.RLock()
 	sessions := make([]*ManagedSession, 0, len(m.sessions))
@@ -1571,6 +1568,10 @@ func (m *Manager) Shutdown() {
 			slog.Warn("shutdown drain budget expired; flushing active session", "session", s.ID)
 		}
 	}
+	// A run still going past the budget is cut by moa stopping, and says so
+	// (a signal has usually cancelled it already, with the same cause) rather
+	// than by its runtime closing below.
+	m.endRuns(bus.ErrStopRestart)
 
 	for _, s := range sessions {
 		// 2. Persist the conversation itself while the runtime still holds it.
