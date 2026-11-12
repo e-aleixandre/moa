@@ -601,6 +601,12 @@ func (o *ownerReportObserver) flush() {
 			"session", o.sess.ID, "status", out.Status, "run_gen", out.RunGen,
 			"turn", turns[i], "background", background)
 		o.emit(out)
+		if out.UserStopped && background > 0 {
+			// The user's Stop keeps its label; the work it left running is
+			// promised a report it cannot send: conclude it as a follow-up.
+			o.emit(runOutcome{Status: callbackStatusDone, BackgroundCount: background,
+				FollowUpOf: out.ReportedAt.Format(time.RFC3339), InterruptedByRestart: true, ReportedAt: time.Now().UTC()})
+		}
 	}
 }
 
