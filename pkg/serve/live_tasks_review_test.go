@@ -99,6 +99,21 @@ func TestReviewRestartedExecutorCannotBeMarkedStoppedByPriorReport(t *testing.T)
 
 func TestReviewRelinkBeforeDeliveryRevokesOldReportNotice(t *testing.T) {
 	m, own, child, task := reviewLinkedChild(t)
+	// The owner hears of its new task in a run of its own, whose end nudges
+	// delivery: let it end first, or it delivers the report before the relink.
+	ownSess, ok := m.Get(own.SessionID)
+	if !ok {
+		t.Fatal("owner missing")
+	}
+	pollUntil(t, 5*time.Second, "owner's task notice run ended", func() bool {
+		for _, msg := range ownSess.History() {
+			if msg.Role == "assistant" {
+				return sessState(ownSess) == StateIdle
+			}
+		}
+		return false
+	})
+	ownSess.runtime.Bus.Drain(time.Second)
 	publishRunStart(child, 1, bus.RunOrigin{Explicit: true})
 	enterWork(t, child)
 	publishRunEnd(child, 1, "old executor finished")
@@ -110,10 +125,6 @@ func TestReviewRelinkBeforeDeliveryRevokesOldReportNotice(t *testing.T) {
 	}
 	if err := m.linkExecution(context.Background(), own, task.ID, "replacement-worker"); err != nil {
 		t.Fatal(err)
-	}
-	ownSess, ok := m.Get(own.SessionID)
-	if !ok {
-		t.Fatal("owner missing")
 	}
 	m.reports.nudge(own.CodebaseKey)
 	text := waitForOwnerReports(t, ownSess, 1)[0]
