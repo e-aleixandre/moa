@@ -105,7 +105,7 @@ func crossSourceCase(t *testing.T, name string) {
 	fp.answer = func(req core.Request) string {
 		switch req.System {
 		case crossSystem:
-			return "## Por hoja\n### work/c.md\n- CASA de B: vigente B2 ("+name+":3).\n"
+			return "## Por hoja\n### work/c.md\n- CASA de B: vigente B2 (" + name + ":3).\n"
 		case organizerSystem:
 			prompt := req.Messages[0].Content[0].Text
 			if strings.Contains(prompt, "Hoja: work/c.md\n") {
@@ -226,7 +226,7 @@ func TestDreamingAdversarialPartialMarkUndoDoesNotReprocessUnchangedDecision(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	n.r.Close()
+	_ = n.r.Close()
 	if _, err := s.Undo(rep.Commit, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestDreamingAdversarialPartialMarkUndoDoesNotReprocessUnchangedDecision(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	snap, err := r.Snapshot("after undo")
 	if err != nil {
 		t.Fatal(err)

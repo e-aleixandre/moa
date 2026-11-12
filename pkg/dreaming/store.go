@@ -66,7 +66,7 @@ func Protected(rel string) bool {
 // read and a hash.
 func gitBlobID(data []byte) string {
 	h := sha1.New() //nolint:gosec
-	fmt.Fprintf(h, "blob %d\x00", len(data))
+	_, _ = fmt.Fprintf(h, "blob %d\x00", len(data))
 	h.Write(data)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -304,7 +304,7 @@ func unitHash(files map[string]string) string {
 	sort.Strings(paths)
 	h := sha256.New()
 	for _, p := range paths {
-		fmt.Fprintf(h, "%s\x00%s\n", p, files[p])
+		_, _ = fmt.Fprintf(h, "%s\x00%s\n", p, files[p])
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

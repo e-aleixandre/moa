@@ -306,7 +306,7 @@ func TestUncooperativeWriteIsNeitherCommittedNorUndone(t *testing.T) {
 	if got := gitOut(t, s, "cat-file", "blob", rep.Commit+":book/areas/b.md"); strings.Contains(got, "bash del owner") {
 		t.Fatal("the commit adopted bytes the night never approved")
 	}
-	n.r.Close()
+	_ = n.r.Close()
 	urep, err := s.Undo(rep.Commit, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -350,12 +350,12 @@ func TestCrashMidApplyRollsBackToTheSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 		allLinesPresent(t, s, n.snap)
-		n.r.Close()
+		_ = n.r.Close()
 		r, rep, err := s.Begin(true, nil)
 		if err != nil {
 			t.Fatalf("k=%d: %v", k, err)
 		}
-		r.Close()
+		_ = r.Close()
 		if rep.Recovered != "rolled back" {
 			t.Fatalf("k=%d (of %d): recovery = %+v", k, total, rep)
 		}
@@ -373,7 +373,7 @@ func TestCrashMidApplyRollsBackToTheSnapshot(t *testing.T) {
 		if err != nil || rep.Recovered != "" {
 			t.Fatalf("second recovery: %+v %v", rep, err)
 		}
-		r.Close()
+		_ = r.Close()
 	}
 }
 
@@ -399,14 +399,14 @@ func TestCrashAfterPublishFinishes(t *testing.T) {
 	if _, err := n.r.Apply(n.snap, "dreaming", n.groups, n.content, n.fin, nil, failing); err == nil {
 		t.Fatal("expected the publish failure")
 	}
-	n.r.Close()
+	_ = n.r.Close()
 	consolidated := tree(t, s)
 	var got []News
 	r, rep, err := s.Begin(true, func(nw News) error { got = append(got, nw); return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Close()
+	_ = r.Close()
 	if rep.Recovered != "finished" || len(got) != 1 || got[0].Origin != "dreaming/run" {
 		t.Fatalf("recovery = %+v, news = %v", rep, got)
 	}
@@ -435,7 +435,7 @@ func TestRecoveryLeavesForeignWritesAlone(t *testing.T) {
 	if !errors.Is(err, errCrash) {
 		t.Fatal(err)
 	}
-	n.r.Close()
+	_ = n.r.Close()
 	if err := book.WriteFile(s.bookDir(), "work/a.md", []byte("escrito tras la caída\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +443,7 @@ func TestRecoveryLeavesForeignWritesAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Close()
+	_ = r.Close()
 	if len(rep.Conflicts) != 1 {
 		t.Fatalf("recovery = %+v", rep)
 	}
@@ -462,7 +462,7 @@ func TestUndoRestoresTheSnapshotAndRespectsLaterEdits(t *testing.T) {
 	s0 := tree(t, s)
 	n := prepare(t, s, "2026-11-12")
 	rep := n.apply(t)
-	n.r.Close()
+	_ = n.r.Close()
 	if err := book.WriteFile(s.bookDir(), "areas/b.md", []byte("editado después\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestUndoRestoresTheSnapshotAndRespectsLaterEdits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	snap, err := r.Snapshot("noche 2")
 	if err != nil {
 		t.Fatal(err)
@@ -511,10 +511,10 @@ func TestUndoAnOlderNightAfterAnother(t *testing.T) {
 	s0 := tree(t, s)
 	n1 := prepare(t, s, "2026-11-12", "work/a.md")
 	rep1 := n1.apply(t)
-	n1.r.Close()
+	_ = n1.r.Close()
 	n2 := prepare(t, s, "2026-11-13", "areas/b.md")
 	n2.apply(t)
-	n2.r.Close()
+	_ = n2.r.Close()
 	b := tree(t, s)["book/areas/b.md"]
 	if _, err := s.Undo(rep1.Commit, nil); err != nil {
 		t.Fatal(err)
@@ -590,7 +590,7 @@ func TestHistoryIgnoresTheUserGitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	snap, err := r.Snapshot("s0")
 	if err != nil {
 		t.Fatal(err)
@@ -633,7 +633,7 @@ func TestGitChildrenHoldTheRunLock(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("lock not released after the child: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 }
 
 // R6: a plan whose source changed during the night, or whose source belongs
