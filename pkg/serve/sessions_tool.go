@@ -438,11 +438,6 @@ func (m *Manager) ownerSendCustom(own owner.Owner, id, text string, custom map[s
 	if afterSendSnapshot != nil {
 		afterSendSnapshot(id, loaded)
 	}
-	if _, linking := liveTaskOf(custom); loaded && linking {
-		// The task follows this session's reports to the owner, whoever
-		// started it before the project had one.
-		m.ensureOwnerObserver(sess)
-	}
 	if loaded {
 		pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
 		if pending.Ask != nil && !pending.Ask.Async {
@@ -466,7 +461,15 @@ func (m *Manager) ownerSendCustom(own owner.Owner, id, text string, custom map[s
 		return core.ErrorResult(tapQuestionMessage(id, ask))
 	}
 	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", custom, func(sess *ManagedSession) error {
-		return ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load())
+		if err := ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load()); err != nil {
+			return err
+		}
+		if _, linking := liveTaskOf(custom); linking {
+			// The task follows the reports of the runtime that accepts it to
+			// the owner, whoever started it before the project had one.
+			m.ensureOwnerObserver(sess)
+		}
+		return nil
 	})
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot send to %s: %v", id, err))
@@ -602,10 +605,10 @@ var afterSendSnapshot func(id string, loaded bool)
 
 // ensureOwnerObserver gives a loaded child that predates its project's owner
 // the observer that reports its turns, so the owner hears of a task it hands
-// to it (a saved child gets one when it is resumed). Idempotent.
+// to it (a saved child gets one when it is resumed). Idempotent. The caller
+// holds sess.lifecycle for reading: taking it again here could deadlock
+// behind a waiting writer.
 func (m *Manager) ensureOwnerObserver(sess *ManagedSession) {
-	sess.lifecycle.RLock()
-	defer sess.lifecycle.RUnlock()
 	if sess.closing.Load() || sess.Kind == session.KindOwner {
 		return
 	}
