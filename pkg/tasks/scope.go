@@ -20,6 +20,9 @@ type Scope struct {
 
 	owners       OwnerDirectory
 	ownerSession bool
+	// sessionTitle names an executor session in the owner's list; nil
+	// outside serve, where sessions have no roster.
+	sessionTitle func(id string) string
 
 	keyOnce sync.Once
 	key     string
@@ -46,6 +49,20 @@ func (s *Scope) WithTZ(tz string) *Scope {
 func (s *Scope) WithOwners(dir OwnerDirectory, ownerSession bool) *Scope {
 	s.owners, s.ownerSession = dir, ownerSession
 	return s
+}
+
+// WithSessionTitles gives the scope a way to name the session executing a
+// task, for the owner's list. Set once at construction.
+func (s *Scope) WithSessionTitles(title func(id string) string) *Scope {
+	s.sessionTitle = title
+	return s
+}
+
+func (s *Scope) titler() func(string) string {
+	if s == nil {
+		return nil
+	}
+	return s.sessionTitle
 }
 
 // Repo is the shared repository.

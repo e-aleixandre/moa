@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/verify"
@@ -14,21 +13,21 @@ import (
 
 func registerManualVerifyHandler(sctx *SessionContext) {
 	b := sctx.Bus
-	// Serializes manual /verify runs (bus command and queued barrier share it).
-	var manualVerifyRunning atomic.Bool
 	b.OnCommand(func(cmd RunManualVerify) error {
 		if err := RequireManualVerifyAllowed(sctx.Bus); err != nil {
 			return err
 		}
+		sctx.abortMu.Lock()
 		// Occupy the session state for the whole verify (idle → running → idle),
 		// like a run: this is what keeps a queued /verify barrier in its position
 		// (a concurrent SendPrompt can't slip in while it runs). A second caller
-		// fails the transition and gets ErrSessionBusy. The atomic below is a
+		// fails the transition and gets ErrSessionBusy. The flag below is a
 		// belt against two verifies that both somehow saw idle. The serve
 		// direct /verify command does not go through here; only the queued
 		// barrier uses this state-occupying path.
 		if sctx.State != nil {
 			if err := sctx.State.Transition(StateRunning); err != nil {
+				sctx.abortMu.Unlock()
 				return ErrSessionBusy
 			}
 		}
@@ -40,12 +39,17 @@ func registerManualVerifyHandler(sctx *SessionContext) {
 			// ourselves so a following queued item drains.
 			requestPump(sctx)
 		}
-		if !manualVerifyRunning.CompareAndSwap(false, true) {
+		if sctx.manualVerifyRunning {
 			settle()
+			sctx.abortMu.Unlock()
 			return ErrVerifyRunning
 		}
+		sctx.manualVerifyRunning = true
+		sctx.abortMu.Unlock()
 		defer func() {
-			manualVerifyRunning.Store(false)
+			sctx.abortMu.Lock()
+			defer sctx.abortMu.Unlock()
+			sctx.manualVerifyRunning = false
 			settle()
 		}()
 

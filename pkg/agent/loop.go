@@ -1056,6 +1056,14 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 				}
 			}
 
+			// A run that was blocked (a permission, a question) goes on with
+			// no new run and no delivered message: this request is its work.
+			if cfg.agent != nil {
+				if err := cfg.agent.enterWork(WorkEntry{Work: true, Resumed: true}); err != nil {
+					loopErr = err
+					return loopErr
+				}
+			}
 			if ka := cfg.keepAlive(); ka != nil {
 				st := cfg.stateSnapshot()
 				ka.sending(req, cfg.provider, &st, cfg.requestRevision)
@@ -1437,15 +1445,26 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 		}
 
 		// Inject steering messages between steps.
+		delivered := len(claimed) > 0
 		if cfg.drainSteers != nil {
 			drained := cfg.drainSteers()
 			deliverSteers(cfg, drained)
 			if len(drained) > 0 {
 				apiWorkOrigin = nil
+				delivered = true
 			}
+		}
+		// Delivered input is work entering, told under the same lock.
+		var workErr error
+		if delivered && cfg.agent != nil && cfg.steerMu != nil {
+			workErr = cfg.agent.enterWorkLocked(WorkEntry{Work: true})
 		}
 		if cfg.steerMu != nil {
 			cfg.steerMu.Unlock()
+		}
+		if workErr != nil {
+			loopErr = workErr
+			return loopErr
 		}
 
 		// Budget check — after tool execution so conversation state has matching
@@ -2144,6 +2163,14 @@ func admitToolStart(runCtx context.Context, cfg *loopConfig, batch *toolBatch) s
 		if claimed := cfg.claimSteers(); len(claimed) > 0 {
 			batch.steers = claimed
 			return toolWithdrawnForSteer
+		}
+	}
+	// The call's work starts now. A run blocked on a permission resumes here,
+	// before its next provider request: that request is too late to tell the
+	// session's work it proceeds.
+	if cfg.agent != nil {
+		if err := cfg.agent.enterWorkLocked(WorkEntry{Work: true, Resumed: true}); err != nil {
+			return err.Error()
 		}
 	}
 	return ""

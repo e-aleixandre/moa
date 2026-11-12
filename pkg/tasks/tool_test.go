@@ -91,9 +91,10 @@ func TestToolIdentityIsInjectedNotSuppliedByTheModel(t *testing.T) {
 	}
 }
 
-func TestToolAskDoesNotBlockAndClaimTakesBacklog(t *testing.T) {
+func TestToolAskDoesNotBlockAndOnlyTheOwnerClaimsBacklog(t *testing.T) {
 	r := newRepo(t)
 	a := scopeFor(r, "A", "p")
+	own := scopeFor(r, "O", "p").WithOwners(nil, true)
 	bl := backlog(t, r, "shared chore", "p")
 	private := note(t, r, "PRIVATE-NOTE-TITLE")
 	other := backlog(t, r, "elsewhere", "q")
@@ -103,22 +104,27 @@ func TestToolAskDoesNotBlockAndClaimTakesBacklog(t *testing.T) {
 		t.Fatalf("ask: %q", out)
 	}
 	out, _ = run(t, a, map[string]any{"action": "list"})
-	for _, want := range []string{"Your requests to the owner", "put the secret in GitHub", "Backlog you can claim", "shared chore"} {
+	for _, want := range []string{"Your requests to the owner", "put the secret in GitHub"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("list lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "PRIVATE-NOTE-TITLE") || strings.Contains(out, "elsewhere") {
+	// The backlog is the owner's ideas: a session that executes neither
+	// sees nor claims them.
+	if strings.Contains(out, "PRIVATE-NOTE-TITLE") || strings.Contains(out, "elsewhere") || strings.Contains(out, "shared chore") {
 		t.Fatalf("list leaks:\n%s", out)
 	}
-	out, isErr = run(t, a, map[string]any{"action": "claim", "id": float64(bl.ID)})
-	if isErr || !strings.Contains(out, "Claimed task") {
+	if out, isErr = run(t, a, map[string]any{"action": "claim", "id": float64(bl.ID)}); !isErr || !strings.Contains(out, "not available") {
+		t.Fatalf("a session claimed an idea: %q", out)
+	}
+	out, isErr = run(t, own, map[string]any{"action": "claim", "id": float64(bl.ID)})
+	if isErr || !strings.Contains(out, "Promoted idea") {
 		t.Fatalf("claim: %q", out)
 	}
-	if out, isErr = run(t, a, map[string]any{"action": "claim", "id": float64(private.ID)}); !isErr || strings.Contains(out, "PRIVATE") {
+	if out, isErr = run(t, own, map[string]any{"action": "claim", "id": float64(private.ID)}); !isErr || strings.Contains(out, "PRIVATE") {
 		t.Fatalf("claiming a note: %q", out)
 	}
-	if _, isErr = run(t, a, map[string]any{"action": "claim", "id": float64(other.ID)}); !isErr {
+	if _, isErr = run(t, own, map[string]any{"action": "claim", "id": float64(other.ID)}); !isErr {
 		t.Fatal("claimed another project's backlog")
 	}
 	if out, isErr = run(t, a, map[string]any{"action": "done", "id": float64(4)}); !isErr || !strings.Contains(out, "not yours") {

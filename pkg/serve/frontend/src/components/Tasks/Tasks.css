@@ -104,7 +104,10 @@ button.tk-group:hover { color: var(--zl-t2); }
 .tk-row.is-dragging { opacity: 0.4; }
 .tk-row:focus-visible { box-shadow: inset 0 0 0 2px var(--zl-accent); }
 .tk-row-line { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px 0 14px; }
-.tk-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+/* The title yields: it takes only the room the meta leaves, so the execution
+   label stays whole however long the title is. */
+.tk-row-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.tk-row-comment { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 16px; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
 .tk-row-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 20px; color: var(--zl-t1); }
 .tk-row.is-done .tk-row-title { color: var(--zl-t3); text-decoration: line-through; text-decoration-color: var(--zl-t4); }
 .tk-row-meta { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; font-size: var(--zl-fs-meta); color: var(--zl-t4); }
@@ -115,6 +118,9 @@ button.tk-group:hover { color: var(--zl-t2); }
 .tk-meta-wait svg { flex: none; }
 .tk-meta-note { color: var(--zl-t3); font-style: italic; }
 .tk-meta-notice { color: var(--zl-yellow); }
+.tk-meta-exec { color: var(--zl-t2); }
+.tk-row-meta > .tk-meta-exec, .tk-row-meta > .tk-word-working { flex: none; }
+.tk-row-line > .tk-row-meta { max-width: 60%; }
 .tk-row-age { flex: none; min-width: 3ch; text-align: right; color: var(--zl-t4); }
 .tk-new { position: absolute; left: 4px; top: 17px; width: 6px; height: 6px; border-radius: 50%; background: var(--zl-accent); }
 

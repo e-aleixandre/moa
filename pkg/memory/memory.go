@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/storelock"
 )
 
 const (
@@ -382,6 +383,11 @@ func (s *Store) Write(m Memory) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("creating memory dir: %w", err)
 	}
+	lock, err := storelock.Lock(dir)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = lock.Close() }()
 	if err := writeFileAtomic(filepath.Join(dir, m.Name+".md"), data); err != nil {
 		return "", err
 	}
@@ -402,6 +408,11 @@ func (s *Store) Delete(id string) error {
 	if err != nil {
 		return err
 	}
+	lock, err := storelock.Lock(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
 	err = os.Remove(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("memory %q not found", id)

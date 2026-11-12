@@ -110,7 +110,7 @@ type PendingAsk struct {
 	CallAt    time.Time
 	CallState string
 	response  chan<- askuser.Reply
-	resolved bool
+	resolved  bool
 }
 
 // NewApprovalManager creates an ApprovalManager.
@@ -647,6 +647,23 @@ type PendingAskInfo struct {
 	// Additive; both as of the projection.
 	CallAt    time.Time `json:"call_at,omitzero"`
 	CallState string    `json:"call_state,omitempty"`
+}
+
+// hasBlockingPending excludes durable async questions, which survive Stop.
+func (am *ApprovalManager) hasBlockingPending() bool {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	for _, p := range am.perms {
+		if !p.resolved {
+			return true
+		}
+	}
+	for _, a := range am.asks {
+		if !a.resolved && !a.Async {
+			return true
+		}
+	}
+	return false
 }
 
 // PendingInfo returns the current pending approval state.

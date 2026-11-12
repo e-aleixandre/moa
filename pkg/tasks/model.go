@@ -17,7 +17,9 @@ const (
 	// PlaceYou is the owner's. With a requester it is a request an agent asked
 	// for; without one it is a private note no agent ever sees.
 	PlaceYou Place = "you"
-	// PlaceBacklog is a project's shared pool; agents of that project can claim.
+	// PlaceBacklog is a project's ideas nobody decided yet. Only the user and
+	// the project's owner conversation see them; the owner promotes one to its
+	// checklist (claim) once the user decides it.
 	PlaceBacklog Place = "backlog"
 	// PlaceAgent is one session's checklist (or a task assigned to it).
 	PlaceAgent Place = "agent"
@@ -93,6 +95,13 @@ type Record struct {
 	// the length of its thread (tasks between owners and agents' requests).
 	Handoff      *Handoff `json:"handoff,omitempty"`
 	CommentCount int      `json:"comment_count,omitempty"`
+	// LastComment is the body of the thread's latest comment: what a task
+	// waits for, shown on its row.
+	LastComment string `json:"last_comment,omitempty"`
+
+	// Execution is the session doing an owner's checklist task, when the
+	// owner delegated it with the sessions tool.
+	Execution *ExecutionLink `json:"execution,omitempty"`
 
 	template bool
 	handoff  bool

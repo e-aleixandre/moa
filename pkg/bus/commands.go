@@ -19,6 +19,15 @@ var ErrSteerQueueFull = errors.New("steer queue full")
 // pending.
 var ErrSessionBusy = errors.New("session is busy")
 
+// The causes a run is cancelled with (RunEnded.CancelCause). ErrStopByUser is an
+// abort someone asked for; ErrStopClosed, the session being unloaded or deleted;
+// ErrStopRestart, the process stopping.
+var (
+	ErrStopByUser  = errors.New("stopped by the user")
+	ErrStopClosed  = errors.New("session closed")
+	ErrStopRestart = errors.New("moa is restarting")
+)
+
 // ErrNothingToCut is returned by StartFreshSession when the conversation is
 // already no longer than what a fresh start keeps.
 var ErrNothingToCut = errors.New("nothing to cut")

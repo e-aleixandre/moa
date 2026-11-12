@@ -183,7 +183,7 @@ func TestSessionsToolNewStartsAndPrompts(t *testing.T) {
 	root := t.TempDir()
 	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
 
-	res := runSessionsTool(t, ownerSess, map[string]any{"action": "new", "cwd": root, "text": "fix the import", "title": "import fix"})
+	res := runSessionsTool(t, ownerSess, map[string]any{"action": "new", "cwd": root, "text": "fix the import", "title": "import fix", "task": "none"})
 	if res.IsError {
 		t.Fatalf("new failed: %s", toolText(res))
 	}

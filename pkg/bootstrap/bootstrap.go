@@ -21,6 +21,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/book"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/dreaming"
 	"github.com/e-aleixandre/moa/pkg/extension"
 	"github.com/e-aleixandre/moa/pkg/git"
 	"github.com/e-aleixandre/moa/pkg/goal"
@@ -127,12 +128,18 @@ type SessionConfig struct {
 	// when a browser MCP is present). Only for frontends that can answer a
 	// secret request (serve); the CLI cannot, so it stays off.
 	EnableSecretActions bool
+	// SecretMemory holds the secrets the owner chose to remember, shared by every
+	// session; nil turns it off.
+	SecretMemory *secretaction.Memory
 
 	// OwnerSession marks this build as a project owner's own conversation, so
 	// it gets the owner role prompt and the writable half of the book. Every
 	// other session of the same codebase is a child: it reads the book, and is
 	// told so in its prompt, but never writes it.
 	OwnerSession bool
+	// SessionTitle names a session by id, for the owner's tasks list to say
+	// which session executes each task. Nil where there is no roster.
+	SessionTitle func(id string) string
 
 	// AsyncQuestions marks a session whose ask_user does not wait for the
 	// answer (see agentcontext.SystemPromptOptions.AsyncQuestions).
@@ -140,6 +147,9 @@ type SessionConfig struct {
 
 	// ForYouSnapshot is AgentConfig.ForYouSnapshot for this session.
 	ForYouSnapshot func() (text string, empty bool)
+
+	// OnWork is AgentConfig.OnWork for this session.
+	OnWork func(agent.WorkEntry) error
 
 	// BeforeWrite is called before write/edit tools modify a file.
 	// Used by the checkpoint system to capture pre-edit state.
@@ -427,7 +437,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// An owner's conversation may also send tasks to other owners; the tool
 	// still checks the session against owner.json on every send.
 	taskStore := tasks.NewScope(taskRepo, taskSessionID, cfg.CWD).WithTZ(cfg.CreatorTZ).
-		WithOwners(ownerDirectory{}, cfg.OwnerSession)
+		WithOwners(ownerDirectory{}, cfg.OwnerSession).WithSessionTitles(cfg.SessionTitle)
 	core.RegisterOrLog(toolReg, tasks.NewTool(taskStore))
 
 	// 3b. moa's own documentation, embedded in the binary. Always available:
@@ -570,12 +580,12 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		})
 	}
 	if secretBroker != nil {
-		core.RegisterOrLog(toolReg, tool.NewRunWithSecret(tool.ToolConfig{
+		core.RegisterOrLog(toolReg, tool.NewRunWithSecretMemory(tool.ToolConfig{
 			WorkspaceRoot: cfg.CWD,
 			PathPolicy:    pathPolicy,
 			BashTimeout:   5 * time.Minute,
 			BashState:     bashState,
-		}, secretBroker))
+		}, secretBroker, cfg.SecretMemory))
 		secretaction.SyncBrowserFillTool(toolReg, secretBroker)
 	}
 
@@ -599,6 +609,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// nothing to the prompt.
 	projectOwner, ownerStore := loadProjectOwner(cfg.CWD)
 	var bookGuard extension.Extension
+	var actionGate extension.Extension
 	if projectOwner.ID != "" && ownerStore != nil {
 		if cfg.OwnerSession {
 			// The role carries book/OWNER.md and the canonical ref, both of
@@ -647,6 +658,20 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 				}
 				return cfg.CWD
 			})
+			// Off unless the owner's own switch is on; read on every turn so
+			// flipping it needs no restart.
+			key := projectOwner.CodebaseKey
+			actionGate = book.GateExtension(book.GateConfig{
+				Dir:     ownerStore.BookDir(key),
+				LogPath: ownerStore.ActionGateLogPath(key),
+				Enabled: func() bool {
+					current, found, err := ownerStore.FindByCodebase(key)
+					return err == nil && found && current.ActionGate
+				},
+			})
+		}
+		if cfg.OwnerSession && projectOwner.Dreaming != nil {
+			core.RegisterOrLog(toolReg, dreaming.NewUndoTool(ownerStore.CodebaseDir(projectOwner.CodebaseKey)))
 		}
 	}
 
@@ -845,6 +870,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		AttachmentScope:      cfg.AttachmentScope,
 		SessionCheckpoint:    sessionCheckpoint,
 		ForYouSnapshot:       cfg.ForYouSnapshot,
+		OnWork:               cfg.OnWork,
 		// The GLOBAL default only. A resumed session's own compact_at is applied
 		// afterwards via SetCompactAt, and the agent keeps the two apart, which is
 		// what lets a session's own choice win here without erasing the global
@@ -860,6 +886,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	}
 	if bookGuard != nil {
 		agentCfg.Extensions = append(agentCfg.Extensions, bookGuard)
+	}
+	if actionGate != nil {
+		agentCfg.Extensions = append(agentCfg.Extensions, actionGate)
 	}
 	ag, err := agent.New(agentCfg)
 	if err != nil {

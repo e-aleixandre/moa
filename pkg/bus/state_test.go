@@ -19,6 +19,7 @@ func TestStateMachine_ValidTransitions(t *testing.T) {
 		{StateRunning, StatePermission},
 		{StatePermission, StateRunning},
 		{StatePermission, StateIdle},
+		{StatePermission, StateError},
 		{StateError, StateRunning},
 		{StateError, StateIdle},
 	}
@@ -48,7 +49,6 @@ func TestStateMachine_InvalidTransitions(t *testing.T) {
 		{StateIdle, StatePermission},
 		{StateIdle, StateError},
 		{StateIdle, StateIdle},
-		{StatePermission, StateError},
 		{StatePermission, StatePermission},
 		{StateRunning, StateRunning},
 		{StateError, StateError},

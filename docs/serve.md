@@ -1154,7 +1154,7 @@ assistant. A session that an event created is marked as such in the session list
 Tasks live in one SQLite database, `tasks.sqlite` in the config directory, shared by every session, the CLI and `moa serve`. A change made in one process shows up in the others within about half a second. Each task sits in one of three places:
 
 - **You**: your own notes, and the requests agents file for you with `tasks ask`. An agent never sees your notes; a request is visible to the session that asked and its project's owner, which can withdraw it when it is no longer needed.
-- **Backlog**: a project's shared pool (a project is a repository: all its worktrees share it). Agents of that project can read it and `claim` a pending task.
+- **Backlog**: a project's ideas nobody has decided yet (a project is a repository: all its worktrees share it). Only the project's owner reads it, adds to it (`tasks create` with `place: "backlog"`) and takes an idea onto its checklist once you decide it (`claim`); the sessions it runs do not see it.
 - **Agents**: a session's own checklist, which is what `tasks create` adds to.
 
 A task can have one level of subtasks and can wait for other tasks (`Waits for` / `Unblocks`, across places; cycles are refused). Done tasks stay listed as done and are archived seven days after completion; archived tasks are left out of listings and counts.
@@ -1168,8 +1168,12 @@ If `tasks.sqlite` was written by a newer moa, this one reads it but refuses to c
 **Tasks**, at the foot of the session list, opens every task in one view. Its
 number counts only the requests agents made that are still open; your own
 notes never add to it. The view groups tasks under **You** (requests first,
-then your notes), one **Backlog** per project and **Done**, folded. Agents'
-checklists stay out of sight until you turn on **Agents' tasks**; **All
+then your notes), each owner's checklist under its face and name, one
+**Backlog** per project and **Done**, folded. The title's count leaves out
+backlog ideas. An owner's task it gave to a session says who is on it:
+**Working · ‹session›**, **Stopped 3d · ‹session›**, or **Not started ·
+‹session›**. Other sessions' checklists stay out of sight until you turn on
+**Agents' tasks**; **All
 projects** narrows the view to a project when you pick one. Opening tasks from
 a session's status line shows just that session's list: clear its name chip
 to show every task again. A request that arrived since your last visit carries

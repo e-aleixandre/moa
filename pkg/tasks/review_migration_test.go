@@ -103,8 +103,10 @@ func TestReviewCompat6BackupAdditiveIdempotent(t *testing.T) {
 	if got := pragmaInt(t, p, "PRAGMA user_version"); got != 4 {
 		t.Fatalf("user_version=%d, want 4", got)
 	}
-	if got := compatVersion(t, p); got != 6 {
-		t.Fatalf("compat=%d, want 6", got)
+	// Later compat levels apply in the same open: compat 7 adds the
+	// execution links (live_tasks_compat_red_test.go covers it).
+	if got := compatVersion(t, p); got != 7 {
+		t.Fatalf("compat=%d, want 7", got)
 	}
 	after := reviewFullDump(t, p)
 	for table, want := range before {
@@ -112,8 +114,8 @@ func TestReviewCompat6BackupAdditiveIdempotent(t *testing.T) {
 			t.Errorf("compat6 changed existing table %s", table)
 		}
 	}
-	if len(after) != len(before)+1 {
-		t.Fatalf("tables %d -> %d; want exactly one addition", len(before), len(after))
+	if len(after) != len(before)+2 || after["task_execution_links"] == "" {
+		t.Fatalf("tables %d -> %d; want exactly the compat 6 and 7 additions", len(before), len(after))
 	}
 	if _, ok := after["task_schedule_reviews"]; !ok {
 		t.Fatal("Keep table absent")

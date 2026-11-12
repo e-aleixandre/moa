@@ -29,7 +29,7 @@ const (
 var validTransitions = map[SessionState]map[SessionState]bool{
 	StateIdle:       {StateRunning: true},
 	StateRunning:    {StateIdle: true, StateError: true, StatePermission: true},
-	StatePermission: {StateRunning: true, StateIdle: true},
+	StatePermission: {StateRunning: true, StateIdle: true, StateError: true},
 	StateError:      {StateRunning: true, StateIdle: true},
 }
 

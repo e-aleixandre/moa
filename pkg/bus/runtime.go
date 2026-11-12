@@ -260,7 +260,7 @@ func (r *SessionRuntime) Close() {
 	r.closeOnce.Do(func() {
 		// Cancel run context FIRST so runCtx.Err() != nil before Agent.Abort()
 		// causes runFn to return. Prevents misclassifying abort as real error.
-		r.sctx.cancelRun()
+		r.sctx.cancelRun(ErrStopClosed)
 		// Abort running agent to prevent dangling goroutines.
 		r.sctx.Agent.Abort()
 		// A background summary not yet accepted is discarded; an accepted cut

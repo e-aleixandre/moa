@@ -414,9 +414,13 @@ type RunEnded struct {
 	FinalText string
 	Err       error // non-nil for real errors (not cancellation)
 	Cancelled bool
-	HadEdits  bool      // true if edit/write/multiedit/apply_patch completed successfully
-	Cost      float64   // USD cost of this run (0 if the model has no pricing)
-	At        time.Time // when the run ended, for the same reason as RunStarted.At
+	// CancelCause, for a cancelled run, is who cancelled it: ErrStopByUser,
+	// ErrStopClosed, ErrStopRestart, or another cause of the run's context. The
+	// first cancellation wins, so a later one cannot relabel it.
+	CancelCause error
+	HadEdits    bool      // true if edit/write/multiedit/apply_patch completed successfully
+	Cost        float64   // USD cost of this run (0 if the model has no pricing)
+	At          time.Time // when the run ended, for the same reason as RunStarted.At
 }
 
 // HandoffSettled is the terminal outcome of an internal handoff run. Unlike

@@ -1,6 +1,7 @@
 package book
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -203,4 +204,41 @@ aliases: ficha%d, sheet%d
 		t.Fatalf("p50 scan of 500 sheets = %s (budget 200ms)", p50)
 	}
 	t.Logf("p50 = %s over %d sheets", p50, 501)
+}
+
+// The archive is out of search unless asked for, and OWNER.md stays hidden
+// from a child either way.
+func TestSearchLeavesTheArchiveOutUnlessAsked(t *testing.T) {
+	dir := t.TempDir()
+	for p, c := range map[string]string{
+		"work/katxina.md":                    "# Katxina\nsin stock hasta 2027\n",
+		"archivo/work/katxina/2026-11-12.md": "katxina katxina katxina en stock\n",
+		"OWNER.md":                           "katxina preferencias\n",
+	} {
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hits, total, err := SearchBook(dir, "katxina", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range hits {
+		if strings.HasPrefix(h.Path, "archivo/") {
+			t.Fatalf("archive in default search: %v (total %d)", hits, total)
+		}
+	}
+	child, _ := ReadOnlyVariant(NewTool(dir, true))
+	res, err := child.Execute(context.Background(), map[string]any{"action": "search", "query": "katxina", "include_archive": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := res.Content[0].Text
+	if !strings.Contains(text, "archivo/work/katxina") || strings.Contains(text, "OWNER.md") {
+		t.Fatalf("include_archive result:\n%s", text)
+	}
 }

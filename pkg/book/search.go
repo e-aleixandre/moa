@@ -117,8 +117,23 @@ type document struct {
 // SearchBook ranks the book's files against a free-text query. It is exported
 // for callers outside the tool (tests, future HTTP search) and is the single
 // implementation: the tool formats what this returns.
+//
+// The dreaming's archive (archivo/) is left out: it holds what was superseded,
+// and a reader looking for the current state must not find it first (the
+// user's decision of 11/11). The tool can ask for it explicitly.
 func SearchBook(dir, query string, limit int) ([]Hit, int, error) {
-	return searchBook(dir, query, limit, nil)
+	return searchBook(dir, query, limit, withoutArchive(nil))
+}
+
+// ArchiveDir is where the nightly dreaming moves superseded text, verbatim.
+const ArchiveDir = "archivo/"
+
+// withoutArchive adds the archive to a visibility filter, before ranking, so
+// totals and limits count only what can be returned.
+func withoutArchive(hidden func(rel string) bool) func(rel string) bool {
+	return func(rel string) bool {
+		return strings.HasPrefix(rel, ArchiveDir) || (hidden != nil && hidden(rel))
+	}
 }
 
 // searchBook is SearchBook plus the visibility filter the children's variant
@@ -139,8 +154,42 @@ func searchBook(dir, query string, limit int, hidden func(rel string) bool) ([]H
 	if err != nil {
 		return nil, 0, err
 	}
+	hits, found := rank(docs, terms, limit)
+	return hits, found, nil
+}
+
+// Index is a book scanned and tokenized once, for a caller that searches the
+// same book several times or needs the scan done before the query is known.
+type Index struct{ docs []document }
+
+// NewIndex scans the whole book, which costs as much as the tokenizing of every
+// file; Search on it is cheap.
+func NewIndex(dir string) (*Index, error) {
+	docs, err := scan(dir, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &Index{docs: docs}, nil
+}
+
+// Search ranks like SearchBook, over the files as they were when scanned.
+func (ix *Index) Search(query string, limit int) ([]Hit, int) {
+	terms := queryTerms(query)
+	if len(terms) == 0 {
+		return nil, 0
+	}
+	if limit <= 0 {
+		limit = defaultSearchLimit
+	}
+	if limit > maxSearchLimit {
+		limit = maxSearchLimit
+	}
+	return rank(ix.docs, terms, limit)
+}
+
+func rank(docs []document, terms []term, limit int) ([]Hit, int) {
 	if len(docs) == 0 {
-		return nil, 0, nil
+		return nil, 0
 	}
 
 	df := map[string]int{}
@@ -218,7 +267,7 @@ func searchBook(dir, query string, limit int, hidden func(rel string) bool) ([]H
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
-	return hits, found, nil
+	return hits, found
 }
 
 // kind ranks, smallest first.

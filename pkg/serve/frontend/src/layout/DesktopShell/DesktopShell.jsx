@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { RememberedSheet } from "../../components/RememberedSecrets/RememberedSecrets.jsx";
 import { Sidebar } from "../Sidebar/Sidebar.jsx";
 import { DesktopDossier } from "./DesktopDossier.jsx";
 import { GlobalSettings } from "../../components/index.js";
@@ -50,6 +51,7 @@ export function DesktopShell({ version, children }) {
 
   return (
     <div class="desktop-shell">
+      <RememberedSheet />
       <Sidebar
         version={version}
         active={chrome.active}

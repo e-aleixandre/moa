@@ -3,7 +3,7 @@
 // A task lives in one PLACE, and the place says who sees it:
 //   you      — the owner's. With requester_session_id it is a REQUEST an agent
 //              made; without one it is a private note no agent ever reads.
-//   backlog  — a project's pool, which that project's agents can claim.
+//   backlog  — a project's ideas nobody decided yet; only its owner reads them.
 //   agent    — one session's checklist, or a task assigned to it.
 //
 // Four gestures tell a session about a task (docs/serve.md, Tasks): assigning
@@ -144,10 +144,25 @@ export function noteSummary(note, max = 110) {
 const newestFirst = (a, b) => (b.created_at || 0) - (a.created_at || 0);
 const byId = (a, b) => (a.id || 0) - (b.id || 0);
 
-// groupTasks lays out the global view: You (requests above notes), one
-// Backlog per project, the agents' checklists only behind their filter, and
-// what is done folded at the end. Empty groups are left out.
-export function groupTasks(list, { agents = false, project = null, sessions = {}, since = Infinity } = {}) {
+// executionLine — who is doing an owner's task, from the facts the server
+// keeps (record.execution) and the live roster: "Working · <session>",
+// "Stopped 3d · <session>", "Not started · <session>"; '' when the owner
+// delegated it to nobody, or it is done.
+export function executionLine(task, sessions = {}, now = Date.now()) {
+  const ex = task?.execution;
+  if (!ex?.session_id || !isOpen(task)) return '';
+  const name = sessionName(sessions, ex.session_id);
+  if (sessions[ex.session_id]?.state === 'running') return `Working · ${name}`;
+  if (ex.stopped_at) return `Stopped ${relAge(ex.stopped_at, now)} · ${name}`;
+  if (ex.started_at) return `Working · ${name}`;
+  return `Not started · ${name}`;
+}
+
+// groupTasks lays out the global view: You (requests above notes), each
+// owner's checklist with its face, one Backlog per project, the other
+// sessions' checklists only behind their filter, and what is done folded at
+// the end. Empty groups are left out.
+export function groupTasks(list, { agents = false, project = null, sessions = {}, since = Infinity, owners = [] } = {}) {
   const all = Array.isArray(list) ? list : [];
   // A scheduled task is not the owner's to do: it has its own group
   // (Scheduled) until it is done.
@@ -158,6 +173,24 @@ export function groupTasks(list, { agents = false, project = null, sessions = {}
   const requests = you.filter(isRequest).sort(newestFirst);
   const notes = you.filter((t) => !isRequest(t)).sort(newestFirst);
   if (you.length) groups.push({ id: 'you', title: 'You', rows: [...requests, ...notes], n: you.length, drop: { place: 'you' } });
+
+  // What the owners took on is what is being done: always in view.
+  const ownerBySession = new Map((owners || []).filter((o) => o?.session_id).map((o) => [o.session_id, o]));
+  const ownerOrder = [...ownerBySession.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  for (const o of ownerOrder) {
+    const mine = scoped.filter((t) => t.place === 'agent' && t.assignee_session_id === o.session_id);
+    if (!mine.length) continue;
+    const rows = mine.filter(isOpen).sort(byId);
+    groups.push({
+      id: `owner:${o.session_id}`,
+      title: o.name || 'Owner',
+      owner: o,
+      rows,
+      progress: rows.length ? `${rows.length} open` : '',
+      drop: { place: 'agent', sessionId: o.session_id },
+    });
+    groups.push(...doneGroups(mine.filter((t) => !isOpen(t)), since, { key: `:owner:${o.session_id}`, sub: o.name || '' }));
+  }
 
   const backlogs = new Map();
   for (const t of scoped) {
@@ -178,7 +211,7 @@ export function groupTasks(list, { agents = false, project = null, sessions = {}
   if (agents) {
     const bySession = new Map();
     for (const t of scoped) {
-      if (t.place !== 'agent') continue;
+      if (t.place !== 'agent' || ownerBySession.has(t.assignee_session_id)) continue;
       const sid = t.assignee_session_id || '';
       if (!bySession.has(sid)) bySession.set(sid, []);
       bySession.get(sid).push(t);
@@ -519,9 +552,10 @@ export function projectOptions(projects, list) {
   return out.sort((a, b) => projectLabelOf(a).localeCompare(projectLabelOf(b)));
 }
 
-// The count beside the view's title: what is open in You and the backlogs.
+// The count beside the view's title: what is open in You. Backlog ideas are
+// not pending work, and checklists are their sessions'.
 export function openOwnCount(list) {
-  return (list || []).filter((t) => isOpen(t) && t.place !== 'agent' && !isScheduled(t)).length;
+  return (list || []).filter((t) => isOpen(t) && t.place === 'you' && !isScheduled(t)).length;
 }
 
 // ── Dependencies ──────────────────────────────────────────────────────────

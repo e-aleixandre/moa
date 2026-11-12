@@ -92,7 +92,9 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 			"session, each abridged to its beginning and end with a notice of what was cut; " +
 			"message_id reads one message whole (offset pages a very long one), and tools=true " +
 			"adds the tool calls. send: a message or a correction to a session. new: start a session in a " +
-			"directory of this project with a prompt. answer: answer a question a session asked " +
+			"directory of this project with a prompt; it needs task: the id of the task of your checklist it " +
+			"works on (create it first), or \"none\" for a question or an exploration. send with task makes that " +
+			"session the task's executor. answer: answer a question a session asked " +
 			"the user, when the book already answers it. You cannot approve permissions: those " +
 			"are the user's.",
 		Parameters: json.RawMessage(`{
@@ -111,6 +113,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 				"tools": {"type": "boolean", "description": "For read: also list the tool calls, with abridged arguments and results (default false)."},
 				"cwd": {"type": "string", "description": "For new: the directory to work in. Must belong to this project."},
 				"title": {"type": "string", "description": "For new: an explicit title."},
+				"task": {"type": ["integer", "string"], "description": "Required for new, optional for send: the id of the task of your checklist this session works on, so the task follows it (create it with tasks create first). \"none\" for new when it is not a commitment: a question or an exploration."},
 				"model": {"type": "string", "description": "For new: model spec (default: the usual default)."},
 				"thinking": {"type": "string", "description": "For new: thinking level."},
 				"ask_id": {"type": "string", "description": "For answer: the id of the question, as reported."},
@@ -139,9 +142,9 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 					tools:     params["tools"] == true,
 				}), nil
 			case "send":
-				return mgr.ownerSendToSession(own, getStr(params, "session_id"), getStr(params, "text")), nil
+				return mgr.ownerSendWithTask(ctx, own, params), nil
 			case "new":
-				return mgr.ownerNewSession(own, params), nil
+				return mgr.ownerNewSession(ctx, own, params), nil
 			case "answer":
 				return mgr.ownerAnswerAsk(own, getStr(params, "session_id"), getStr(params, "ask_id"), getStrings(params, "answers")), nil
 			default:
@@ -260,6 +263,7 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 	if total > len(mine) {
 		fmt.Fprintf(&sb, "Showing %d of %d sessions, most recently updated first.\n", len(mine), total)
 	}
+	linked := m.linkedTasksBySession(own)
 	for _, info := range mine {
 		// That it exists is all a detached session tells its owner: no title,
 		// state, brief or pending question, which are its content.
@@ -275,6 +279,9 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 			fmt.Fprintf(&sb, " — updated %s", book.RelativeAge(now.Sub(info.Updated)))
 		}
 		sb.WriteString("\n")
+		for _, t := range linked[info.ID] {
+			fmt.Fprintf(&sb, "    task: #%d %s\n", t.ID, t.Title)
+		}
 		if info.BriefAttempting != "" {
 			fmt.Fprintf(&sb, "    attempting: %s\n", info.BriefAttempting)
 		}
@@ -384,6 +391,12 @@ func (m *Manager) savedQuestionLine(id string) string {
 }
 
 func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Result {
+	return m.ownerSendCustom(own, id, text, ownerPromptCustom(own))
+}
+
+// ownerSendCustom is ownerSendToSession for a message with the given
+// provenance (ownerPromptCustom, perhaps with a task).
+func (m *Manager) ownerSendCustom(own owner.Owner, id, text string, custom map[string]any) core.Result {
 	if text == "" {
 		return core.ErrorResult("text is required")
 	}
@@ -422,6 +435,9 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 	// skips nor refuses for it.
 	var ask *bus.PendingAskInfo
 	sess, loaded := m.Get(id)
+	if afterSendSnapshot != nil {
+		afterSendSnapshot(id, loaded)
+	}
 	if loaded {
 		pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
 		if pending.Ask != nil && !pending.Ask.Async {
@@ -444,8 +460,16 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 	if ask != nil && ask.RequiresTap {
 		return core.ErrorResult(tapQuestionMessage(id, ask))
 	}
-	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", ownerPromptCustom(own), func(sess *ManagedSession) error {
-		return ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load())
+	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", custom, func(sess *ManagedSession) error {
+		if err := ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load()); err != nil {
+			return err
+		}
+		if _, linking := liveTaskOf(custom); linking {
+			// The task follows the reports of the runtime that accepts it to
+			// the owner, whoever started it before the project had one.
+			m.ensureOwnerObserver(sess)
+		}
+		return nil
 	})
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot send to %s: %v", id, err))
@@ -491,7 +515,7 @@ func askQuestionsSuffix(sess *ManagedSession) string {
 	return fmt.Sprintf(": %q", strings.Join(questions, " / "))
 }
 
-func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.Result {
+func (m *Manager) ownerNewSession(ctx context.Context, own owner.Owner, params map[string]any) core.Result {
 	cwd := getStr(params, "cwd")
 	if cwd == "" {
 		cwd = own.Root
@@ -503,6 +527,21 @@ func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.R
 	if prompt == "" {
 		return core.ErrorResult("text is required: a new session needs its first instruction")
 	}
+	// Delegated work leaves the turn as a task that follows its session; the
+	// escape is explicit, so forgetting is not an option.
+	taskID, none, given, err := executionTaskParam(params)
+	if err != nil {
+		return core.ErrorResult(err.Error())
+	}
+	if !given {
+		return core.ErrorResult("task is required for new: the id of the task of your checklist this session works on " +
+			"(create it with tasks create first), or \"none\" if it is a question or an exploration, not a commitment")
+	}
+	if !none {
+		if err := m.checkExecutionLink(ctx, own, taskID); err != nil {
+			return core.ErrorResult(linkErrorText(taskID, err))
+		}
+	}
 	sess, err := m.CreateSession(CreateOpts{
 		CWD:      cwd,
 		Title:    getStr(params, "title"),
@@ -513,10 +552,82 @@ func (m *Manager) ownerNewSession(own owner.Owner, params map[string]any) core.R
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot create the session: %v", err))
 	}
-	if _, _, _, err := m.send(sess.ID, prompt, nil, "", "", ownerPromptCustom(own)); err != nil {
+	linked, custom := "", ownerPromptCustom(own)
+	if !none {
+		// The prompt carries the task: accepting it links the task.
+		custom = withLiveTask(custom, own, taskID)
+		linked = fmt.Sprintf(" It works on task #%d.", taskID)
+	}
+	if _, _, _, err := m.send(sess.ID, prompt, nil, "", "", custom); err != nil {
+		if !none {
+			return core.ErrorResult(fmt.Sprintf("session %s was created but the prompt was refused: %s", sess.ID, linkErrorText(taskID, err)))
+		}
 		return core.ErrorResult(fmt.Sprintf("session %s was created but the prompt was refused: %v", sess.ID, err))
 	}
-	return core.TextResult(fmt.Sprintf("Started session %s in %s.", sess.ID, cwd))
+	return core.TextResult(fmt.Sprintf("Started session %s in %s.%s", sess.ID, cwd, linked))
+}
+
+// ownerSendWithTask is send, plus — when task is given — making the target
+// the task's executor as it accepts the message: the link and the message are
+// accepted together, or neither is.
+func (m *Manager) ownerSendWithTask(ctx context.Context, own owner.Owner, params map[string]any) core.Result {
+	id, text := getStr(params, "session_id"), getStr(params, "text")
+	taskID, none, given, err := executionTaskParam(params)
+	if err != nil {
+		return core.ErrorResult(err.Error())
+	}
+	if !given || none {
+		return m.ownerSendToSession(own, id, text)
+	}
+	if text == "" {
+		return core.ErrorResult("text is required")
+	}
+	if _, err := m.ownerSession(own, id); err != nil {
+		return core.ErrorResult(err.Error())
+	}
+	if err := m.checkExecutionLink(ctx, own, taskID); err != nil {
+		return core.ErrorResult(linkErrorText(taskID, err))
+	}
+	res := m.ownerSendCustom(own, id, text, withLiveTask(ownerPromptCustom(own), own, taskID))
+	note := fmt.Sprintf(" It works on task #%d.", taskID)
+	if res.IsError {
+		note = fmt.Sprintf(" Task #%d was not linked to %s.", taskID, id)
+	}
+	if n := len(res.Content); n > 0 {
+		res.Content[n-1].Text += note
+	}
+	return res
+}
+
+// afterSendSnapshot is a test seam right after the sessions tool's send reads
+// whether its target is loaded. Nil in production.
+var afterSendSnapshot func(id string, loaded bool)
+
+// ensureOwnerObserver gives a loaded child that predates its project's owner
+// the observer that reports its turns, so the owner hears of a task it hands
+// to it (a saved child gets one when it is resumed). Idempotent. The caller
+// holds sess.lifecycle for reading: taking it again here could deadlock
+// behind a waiting writer.
+func (m *Manager) ensureOwnerObserver(sess *ManagedSession) {
+	if sess.closing.Load() || sess.Kind == session.KindOwner {
+		return
+	}
+	m.ownerObserverInstall.Lock()
+	defer m.ownerObserverInstall.Unlock()
+	sess.mu.Lock()
+	installed := sess.ownerObserver != nil
+	sess.mu.Unlock()
+	if !installed {
+		m.subscribeOwnerReports(sess, false)
+	}
+}
+
+// linkErrorText says why a task cannot follow a session and how to fix it.
+func linkErrorText(id int64, err error) string {
+	if errors.Is(err, tasks.ErrNotFound) {
+		return fmt.Sprintf("task #%d is not on your checklist: pass the id of one of your open tasks (tasks list), create it with tasks create, or pass task=\"none\" if this is not a commitment", id)
+	}
+	return strings.TrimPrefix(err.Error(), tasks.ErrInvalid.Error()+": ")
 }
 
 func ownerResponder(own owner.Owner) askuser.Responder {

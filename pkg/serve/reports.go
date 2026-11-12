@@ -126,6 +126,14 @@ type reportCommand struct {
 	// the outbox boundary only when this closes — before that the report exists
 	// solely in a channel, which a process exit does not preserve.
 	ack chan struct{}
+	// durable, for a report, is set before ack closes: the report is in the
+	// outbox on disk or confirmed in the owner's transcript, so a crash can no
+	// longer lose it. A failed write keeps it only in memory.
+	durable *bool
+	// from is the live child the report is about: the actor names in it the
+	// linked tasks the owner must decide on, as the session is when the report
+	// is persisted (admitTaskNotices). Nil for any other report.
+	from *ManagedSession
 }
 
 type heartbeatCommand struct {
@@ -211,25 +219,34 @@ func (c *reportCoordinator) post(cmd reportCommand) bool {
 }
 
 // add records one report for the codebase's owner and waits for the actor to
-// have processed it (queued, and its persistence attempted).
+// have processed it (queued, and its persistence attempted). It returns
+// whether the report is durable: what a sink records as told on the strength
+// of it must not outlive a report that only exists in memory.
 //
 // The wait is what makes a sink's completion meaningful: "this turn was
 // reported" has to mean it reached the outbox, not that it reached a channel.
 // Nudges stay asynchronous — they carry nothing that can be lost.
-func (c *reportCoordinator) add(key string, rep owner.Report) {
+func (c *reportCoordinator) add(key string, rep owner.Report) bool {
+	return c.addFrom(key, rep, nil)
+}
+
+// addFrom is add for a report about the live child from, whose linked tasks
+// the actor decides as it persists the report.
+func (c *reportCoordinator) addFrom(key string, rep owner.Report, from *ManagedSession) bool {
 	if c == nil {
-		return
+		return false
 	}
 	c.admission.RLock()
 	defer c.admission.RUnlock()
 	if c.testReportAdmitted != nil {
 		c.testReportAdmitted()
 	}
-	ack := make(chan struct{})
-	if !c.post(reportCommand{key: key, report: &rep, ack: ack}) {
-		return
+	ack, durable := make(chan struct{}), false
+	if !c.post(reportCommand{key: key, report: &rep, ack: ack, durable: &durable, from: from}) {
+		return false
 	}
 	<-ack
+	return durable
 }
 
 // BeginShutdown puts the actor in accept-only mode and waits for it to be in
@@ -352,10 +369,12 @@ func (c *reportCoordinator) loop() {
 				continue
 			}
 			if cmd.report != nil {
-				if acceptOnly {
-					c.queue(cmd.key, batch, *cmd.report)
-				} else {
-					c.accept(cmd.key, batch, *cmd.report)
+				added, durable := c.queueReport(batch, cmd)
+				if added && !acceptOnly {
+					durable = c.release(cmd.key, batch, *cmd.report) || durable
+				}
+				if cmd.durable != nil {
+					*cmd.durable = durable
 				}
 				ackCommand(cmd)
 				continue
@@ -477,7 +496,10 @@ func (c *reportCoordinator) drain(batches map[string]*reportBatch) {
 				continue // a nudge has nowhere to deliver to any more
 			}
 			batch := c.batch(cmd.key, batches)
-			c.queue(cmd.key, batch, *cmd.report)
+			_, durable := c.queueReport(batch, cmd)
+			if cmd.durable != nil {
+				*cmd.durable = durable
+			}
 			ackCommand(cmd)
 		default:
 			for key, batch := range batches {
@@ -539,35 +561,48 @@ func (c *reportCoordinator) recover(batches map[string]*reportBatch) {
 	}
 }
 
-// accept persists a new report and decides when it leaves. The outbox is
-// written BEFORE the report is queued in memory, so a crash between the two
-// leaves a report that will be redelivered rather than one that was promised
-// and then forgotten.
-func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Report) {
-	if !c.queue(key, batch, rep) {
-		return
+// queueReport queues a report command's report (queue), deciding first the
+// linked tasks of a report about a live child (admitTaskNotices).
+func (c *reportCoordinator) queueReport(batch *reportBatch, cmd reportCommand) (added, durable bool) {
+	if cmd.from == nil || c.mgr == nil {
+		return c.queue(cmd.key, batch, *cmd.report)
 	}
+	return c.mgr.admitTaskNotices(cmd.from, *cmd.report, func(rep owner.Report) (bool, bool) {
+		*cmd.report = rep
+		return c.queue(cmd.key, batch, rep)
+	})
+}
+
+// release decides when a report just queued leaves. The outbox was written
+// BEFORE the report was queued in memory, so a crash between the two leaves a
+// report that will be redelivered rather than one that was promised and then
+// forgotten. It returns whether the report reached the owner's flushed
+// transcript.
+func (c *reportCoordinator) release(key string, batch *reportBatch, rep owner.Report) bool {
 	// The report owns the next heartbeat even if this status flushes it now.
 	// Set this before delivery, which can block awaiting the owner transcript.
 	batch.deferNextHeartbeat = true
 	// A session that failed or is stuck waiting for an answer is not worth
 	// batching: it is exactly what the owner has to act on now. What the user
 	// said is information, not an alarm: it rides the window so a burst of
-	// messages is one wake-up.
-	if rep.Status == callbackStatusDone || rep.Status == reportStatusUserSaid {
+	// messages is one wake-up. So does a follow-up, even a failed one: the
+	// owner already read its turn and was told this conclusion would come.
+	if rep.Status == callbackStatusDone || rep.Status == reportStatusUserSaid || rep.Status == reportStatusRestart ||
+		rep.FollowUpOf != "" {
 		c.arm(key, batch)
-		return
+		return false
 	}
-	c.flush(key, batch)
+	return c.flush(key, batch)
 }
 
 // queue adds a report to the batch and tries to persist the outbox, returning
-// whether the report is new. A failed write does NOT drop the report: it stays
+// whether the report is new and whether the batch holding it is on disk. A
+// failed write does NOT drop the report: it stays
 // in memory (and is retried on the next accept, flush or shutdown), because the
 // disk being full is exactly when losing the owner's picture of the project is
 // least acceptable. The warning is logged once per batch so a broken disk does
 // not flood the log with one line per outcome.
-func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Report) bool {
+func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Report) (added, durable bool) {
 	if len(batch.pending) == 0 {
 		c.reloadEmptyBatch(key, batch)
 	}
@@ -576,7 +611,7 @@ func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Repo
 	}
 	for _, existing := range batch.pending {
 		if existing.ID == rep.ID {
-			return false // the same outcome, re-delivered: already queued
+			return false, !batch.outboxFailed // the same outcome, re-delivered: already queued
 		}
 	}
 	batch.pending = append(batch.pending, rep)
@@ -588,7 +623,7 @@ func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Repo
 			slog.Warn("owner reports: could not persist the outbox; keeping the reports in memory",
 				"codebase", key, "session", rep.SessionID, "error", err)
 		}
-		return true
+		return true, false
 	}
 	batch.outbox = outbox
 	batch.preservedPaths = c.warnPreserved(key, outbox, batch.preservedPaths)
@@ -597,7 +632,7 @@ func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Repo
 	}
 	batch.outboxFailed = false
 	slog.Info("owner report accepted in outbox", "codebase", key, "session", rep.SessionID, "owner", "", "status", rep.Status, "run_gen", 0, "batch", "", "n", len(batch.pending))
-	return true
+	return true, true
 }
 
 func (c *reportCoordinator) arm(key string, batch *reportBatch) {
@@ -617,11 +652,12 @@ func (c *reportCoordinator) disarm(batch *reportBatch) {
 // flush attempts one delivery of everything pending for a codebase. A busy
 // owner keeps its batch until its run ends, except when it is blocked in an
 // interruptible wait. Its own run outcomes nudge the coordinator; the timer
-// is re-armed as a backstop in case no further run ever happens.
-func (c *reportCoordinator) flush(key string, batch *reportBatch) {
+// is re-armed as a backstop in case no further run ever happens. It returns
+// whether the batch reached the owner's flushed transcript.
+func (c *reportCoordinator) flush(key string, batch *reportBatch) bool {
 	c.disarm(batch)
 	if len(batch.pending) == 0 {
-		return
+		return false
 	}
 	reportDeliveryAttempts.Add(1)
 	slog.Info("owner reports delivery attempt", "codebase", key, "session", "", "owner", "", "status", "attempt", "run_gen", 0, "batch", "", "n", len(batch.pending))
@@ -634,7 +670,7 @@ func (c *reportCoordinator) flush(key string, batch *reportBatch) {
 		slog.Info("owner reports delivery result", "codebase", key, "session", "", "owner", "", "status", status, "run_gen", 0, "batch", "", "n", len(batch.pending), "error", err)
 		slog.Debug("owner reports: batch waiting", "codebase", key, "error", err)
 		c.arm(key, batch)
-		return
+		return false
 	}
 	slog.Info("owner reports delivery result", "codebase", key, "session", "", "owner", "", "status", "delivered", "run_gen", 0, "batch", "", "n", len(batch.pending))
 	batch.pending = nil
@@ -646,6 +682,7 @@ func (c *reportCoordinator) flush(key string, batch *reportBatch) {
 	} else {
 		batch.outbox = outbox
 	}
+	return true
 }
 
 // batch loads the lanes before the first report for a codebase. That matters
@@ -844,10 +881,13 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 	if len(pending) == 0 {
 		return sess.runtime.Flush()
 	}
-	text := reportsMessage(own, pending)
 	batchID := reportBatchID(pending)
+	text := reportsMessage(own, m.currentTaskNotices(own, pending))
 	sessions := make([]map[string]string, 0, len(pending))
 	for _, rep := range pending {
+		if rep.SessionID == "" {
+			continue // the restart entry is about several sessions, named in its text
+		}
 		sessions = append(sessions, map[string]string{"id": rep.SessionID, "title": rep.Title, "status": rep.Status, "origin": rep.Origin})
 	}
 	custom := map[string]any{"source": reportSource, "batch": batchID, "count": len(pending), "sessions": sessions}
@@ -978,7 +1018,9 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 			slog.Info("owner report dropped: session detached", "session", sess.ID)
 			return
 		}
-		admitOwnerReport(reports, sess, key, reportFrom(sess, out))
+		rep := reportFrom(sess, out)
+		m.withRunState(&rep)
+		admitOwnerReportFrom(reports, sess, key, rep)
 	})
 	sess.mu.Lock()
 	sess.ownerObserver = observer
@@ -988,14 +1030,24 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 // admitOwnerReport hands a report of a live child to the coordinator unless the
 // child has been detached. The detach check is repeated under ownerDetachMu so
 // that a detach which has returned can never be followed by an admitted report.
-func admitOwnerReport(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report) {
+func admitOwnerReport(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report) bool {
+	return admitOwnerReportOf(reports, sess, key, report, nil)
+}
+
+// admitOwnerReportFrom is admitOwnerReport for a report about the child's own
+// turn, which names its linked tasks when the child is stopped (addFrom).
+func admitOwnerReportFrom(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report) bool {
+	return admitOwnerReportOf(reports, sess, key, report, sess)
+}
+
+func admitOwnerReportOf(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report, from *ManagedSession) bool {
 	sess.ownerDetachMu.Lock()
 	defer sess.ownerDetachMu.Unlock()
 	if sess.ownerDetached.Load() {
 		slog.Info("owner report dropped: session detached", "session", sess.ID)
-		return
+		return false
 	}
-	reports.add(key, report)
+	return reports.addFrom(key, report, from)
 }
 
 // reportFrom turns a run outcome into the report the owner will read. The
@@ -1017,8 +1069,14 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 		// What the session left running when its turn ended. A report is about
 		// a completed turn, not a quiet session; this is what keeps the two
 		// from reading the same.
-		BackgroundCount: out.BackgroundCount,
-		At:              time.Now().UTC().Format(time.RFC3339),
+		BackgroundCount:      out.BackgroundCount,
+		InterruptedByRestart: out.InterruptedByRestart,
+		FollowUpOf:           out.FollowUpOf,
+		At:                   time.Now().UTC().Format(time.RFC3339),
+	}
+	if !out.ReportedAt.IsZero() {
+		// The observer's stamp: a later follow-up names exactly this one.
+		rep.At = out.ReportedAt.UTC().Format(time.RFC3339)
 	}
 	pos := gitPosition(sess.CWD)
 	rep.GitAvailable, rep.Branch, rep.Head, rep.Dirty = pos.Available, pos.Branch, pos.Head, pos.Dirty
@@ -1251,6 +1309,10 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		fmt.Fprintf(&b, "Reports from %d sessions of your project:\n\n", len(pending))
 	}
 	for _, rep := range pending {
+		if len(rep.RestartTasks) > 0 {
+			writeRestartTasks(&b, rep.RestartTasks)
+			continue
+		}
 		fmt.Fprintf(&b, "- %s — %s\n", rep.SessionID, strings.TrimSpace(rep.Title))
 		fmt.Fprintf(&b, "  origin: %s\n", reportOrigin(rep.Origin))
 		fmt.Fprintf(&b, "  status: %s\n", rep.Status)
@@ -1258,9 +1320,10 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 			writeUserSaid(&b, rep)
 			continue
 		}
-		if line := backgroundWorkLine(rep.BackgroundCount); line != "" {
-			fmt.Fprintf(&b, "  %s\n", line)
+		if rep.FollowUpOf != "" {
+			fmt.Fprintf(&b, "  follow-up of the turn reported at %s\n", rep.FollowUpOf)
 		}
+		fmt.Fprintf(&b, "  %s\n", nowLine(rep))
 		if rep.CWD != "" {
 			fmt.Fprintf(&b, "  directory: %s\n", rep.CWD)
 		}
@@ -1274,6 +1337,9 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		}
 		if rep.FinalText != "" {
 			fmt.Fprintf(&b, "  said: %s\n", indentReportText(rep.FinalText))
+		} else if rep.Status == callbackStatusDone && rep.InterruptedByRestart {
+			fmt.Fprintf(&b, "  said: nothing — moa restarted in the middle of the turn. See where it stopped with the sessions tool: "+
+				"action=read, session_id=%s, tools=true\n", rep.SessionID)
 		} else if rep.Status == callbackStatusDone {
 			// A run that stops on a tool call or an empty reply ends "done"
 			// with nothing to quote. Saying nothing would read as finished work.
@@ -1301,6 +1367,9 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		default:
 			fmt.Fprintf(&b, "  book delta: %s\n", indentReportText(rep.BookDelta))
 		}
+		for _, t := range rep.LinkedTasks {
+			fmt.Fprintf(&b, "  %s\n", linkedTaskNotice(t, rep.Status == callbackStatusNeedsInput && !rep.InterruptedByRestart))
+		}
 	}
 	b.WriteString("\nUse the sessions tool to read or answer any of them, and update the book " +
 		"with what this changes about the project.")
@@ -1321,18 +1390,53 @@ func reportOrigin(origin string) string {
 	return "user"
 }
 
-// backgroundWorkLine says what the session left running. It is stated in the
-// report rather than inferred from silence: a child that finished its turn and
-// a child that finished its turn while a dev server keeps running are two
-// different things for an owner deciding what to do next.
-func backgroundWorkLine(count int) string {
+// nowLine says what the session is doing as the owner reads the report, so
+// that "it will come back on its own" and "it stopped" never read the same: a
+// child that finished its turn, one that left a dev server running and one
+// that a restart cut are three different things for an owner deciding what to
+// do next.
+func nowLine(rep owner.Report) string {
+	var line string
 	switch {
-	case count <= 0:
-		return ""
-	case count == 1:
-		return "1 background job still running"
+	case rep.InterruptedByRestart:
+		// Whatever it left running died with the process; a schedule did not.
+		line = "now: interrupted by a moa restart — it will not continue on its own"
+	case rep.BackgroundCount == 1:
+		line = "now: 1 background job still running — it will report again when they finish"
+	case rep.BackgroundCount > 1:
+		line = fmt.Sprintf("now: %d background jobs still running — it will report again when they finish", rep.BackgroundCount)
+	case rep.Status == callbackStatusFailed:
+		line = "now: stopped by the error above — it will not continue on its own"
+	case rep.Status == callbackStatusNeedsInput:
+		line = "now: waiting for the answer above — nothing else is running"
 	default:
-		return fmt.Sprintf("%d background jobs still running", count)
+		line = "now: idle — nothing is running; it will not continue unless someone sends it a message"
+	}
+	if n := rep.NextRun; n != nil {
+		line += fmt.Sprintf("; next scheduled run %s (#%d)", n.At, n.TaskID)
+	}
+	return line
+}
+
+// linkedTaskNotice turns an open task the quiet session executes into the
+// decision it is for the owner's turn.
+func linkedTaskNotice(t owner.ReportTask, waiting bool) string {
+	if waiting {
+		return fmt.Sprintf("linked task #%d «%s» is still open. It waits for the answer above; comment it on the task if it is a real blocker.",
+			t.ID, strings.TrimSpace(t.Title))
+	}
+	return fmt.Sprintf("linked task #%d «%s» is still open. Before ending your turn: close it with evidence, "+
+		"send the next step (to this session or a new one with task=%d), or comment what it waits for and who unblocks it.",
+		t.ID, strings.TrimSpace(t.Title), t.ID)
+}
+
+// writeRestartTasks is the entry an owner gets when moa starts after dying
+// mid-turn: no session resumes on its own, so each task is the owner's call.
+func writeRestartTasks(b *strings.Builder, list []owner.ReportTask) {
+	b.WriteString("- After the restart, these linked tasks have a session that was working and is not anymore:\n")
+	for _, t := range list {
+		fmt.Fprintf(b, "  - #%d «%s» — session %s (stopped mid-turn). Continue it, close it, or comment what it waits for.\n",
+			t.ID, strings.TrimSpace(t.Title), t.SessionID)
 	}
 }
 

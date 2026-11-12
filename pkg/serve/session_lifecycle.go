@@ -202,6 +202,10 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
+	if beforeSessionPublish != nil {
+		beforeSessionPublish(sess)
+	}
+
 	m.mu.Lock()
 	m.initializeAttentionRuntimeLocked(sess)
 	m.sessions[sess.ID] = sess
@@ -276,7 +280,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		return nil, fmt.Errorf("provider: %w", err)
 	}
 
-	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
+	// The session's runs are cancelled with why: unloading or deleting it is
+	// not a user's Stop, nor a restart (which ends m.runsCtx first).
+	sessionCtx, cancelSession := context.WithCancelCause(m.runsCtx)
+	sessionCancel := func() { cancelSession(bus.ErrStopClosed) }
 	moaCfg := m.loadConfig(cwd)
 	// Decided once, when the session is built: a session does not change
 	// contract under a config edit, and the switch needs the question store.
@@ -308,6 +315,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	// Forward-declare for closures.
 	var sess *ManagedSession
+	// Every runtime records its own work for the tasks it executes, owner or
+	// not: an executor's start never depends on who observes its reports.
+	work := &sessionWork{m: m, sessionID: id}
+	var onWork func(agent.WorkEntry) error
+	if m.tasks != nil {
+		onWork = work.enter
+	}
 	// notifyOn is decided once the build knows whether the codebase has an
 	// owner, before the session's first request.
 	var notifyOn bool
@@ -337,8 +351,11 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		EnableAskUser:       true,
 		AsyncQuestions:      askAsync,
 		ForYouSnapshot:      m.forYouSnapshot(askAsync, id, &notifyOn, func() *ManagedSession { return sess }),
+		OnWork:              onWork,
 		EnableSecretActions: true,
+		SecretMemory:        m.secretMemory,
 		OwnerSession:        opts != nil && opts.ownerSession,
+		SessionTitle:        m.sessionTitle,
 		CreatorTZ:           creatorTZ,
 		Fast:                initialFast,
 		Daybreak:            daybreak,
@@ -741,6 +758,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		sessionBriefModel:   briefModel,
 		sessionBriefEnabled: briefEnabled,
 		runtime:             rt,
+		work:                work,
 		subagents:           bs.Subagents,
 		bashJobs:            bs.BashJobs,
 		pathPolicy:          bs.PathPolicy,
@@ -1497,6 +1515,7 @@ const shutdownDrainBudget = 5 * time.Second
 // captures the complete final turn rather than a partial one. If the budget
 // expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
+	m.secretMemory.Shutdown()
 	// Voice calls first: their minutes are written into sessions that are
 	// still alive, and no call keeps a provider open past shutdown.
 	m.closeVoiceCalls()
@@ -1530,6 +1549,7 @@ func (m *Manager) Shutdown() {
 	// owner session that is about to be torn down. The actor stays alive and
 	// keeps ACCEPTING: a turn reported below must still reach the outbox.
 	m.heartbeat.Close()
+	m.dreaming.Close()
 	m.reports.BeginShutdown()
 	if m.pushPolicy != nil {
 		m.pushPolicy.Close() // pending summaries are not persisted; see push.Policy
@@ -1555,6 +1575,10 @@ func (m *Manager) Shutdown() {
 			slog.Warn("shutdown drain budget expired; flushing active session", "session", s.ID)
 		}
 	}
+	// A run still going past the budget is cut by moa stopping, and says so
+	// (a signal has usually cancelled it already, with the same cause) rather
+	// than by its runtime closing below.
+	m.endRuns(bus.ErrStopRestart)
 
 	for _, s := range sessions {
 		// 2. Persist the conversation itself while the runtime still holds it.
@@ -2105,6 +2129,10 @@ func creatorTZOf(meta map[string]any) string {
 // session's file is gone and its settlement is not yet committed. Nil in
 // production.
 var afterSessionUnlink func(sessionID string)
+
+// beforeSessionPublish is a test seam between a built session's persistence
+// and its publication in the manager. Nil in production.
+var beforeSessionPublish func(*ManagedSession)
 
 // settleScheduledWork settles, before a session is deleted, the scheduled
 // runs bound to it, including a run that reserved it and is not yet bound

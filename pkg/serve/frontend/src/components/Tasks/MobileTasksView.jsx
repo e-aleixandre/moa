@@ -48,8 +48,8 @@ export function MobileTasksView({ onBack }) {
   useEffect(() => { markListSeen(only || ""); return () => endListVisit(only || ""); }, [only]);
   const since = slice.visits[only || ""] ?? listMark(slice.marks, only || "");
   const groups = useMemo(
-    () => (only ? sessionGroups(onlyData, only, since).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions, since })),
-    [only, onlyData, slice.list, slice.agents, project, sessions, since],
+    () => (only ? sessionGroups(onlyData, only, since).map((g) => ({ ...g, add: false })) : groupTasks(slice.list, { agents: slice.agents, project, sessions, since, owners })),
+    [only, onlyData, slice.list, slice.agents, project, sessions, since, owners],
   );
   const projects = projectOptions(slice.projects, slice.list);
   const scheduled = useMemo(

@@ -7,6 +7,17 @@
 
 const FIELD_KINDS = new Set(["password", "username", "text"]);
 
+// Remembering: a card whose request carries holdMaxHours lets
+// the owner remember its values for a few hours (0 = just this once).
+export const MAX_HOLD_HOURS = 10;
+const HOLD_STEPS = [0, 2, 4, 8, 10];
+
+export function holdChoices(request) {
+  const max = request?.holdMaxHours || 0;
+  if (max <= 0) return [];
+  return HOLD_STEPS.filter((h) => h <= max);
+}
+
 // normalizeSecretRequest copies the metadata the card reads and nothing else,
 // so a stray property on the wire cannot end up rendered. Empty strings stand
 // for the contract's omitted fields.
@@ -24,6 +35,7 @@ export function normalizeSecretRequest(data) {
     submit: !!data.submit,
     actionFingerprint: data.actionFingerprint || "",
     requestedAt: data.requestedAt || "",
+    holdMaxHours: Number.isInteger(data.holdMaxHours) && data.holdMaxHours > 0 ? Math.min(data.holdMaxHours, MAX_HOLD_HOURS) : 0,
     fields: fields.map((f, i) => ({
       index: Number.isInteger(f?.index) ? f.index : i,
       label: f?.label || "",
@@ -107,13 +119,15 @@ export function valuesComplete(fields, values, skip = new Set()) {
 
 // buildAllowBody — the exact POST body for allow. Throws when something is
 // missing so the card can never send a request the server would refuse.
-export function buildAllowBody(fields, values) {
+export function buildAllowBody(fields, values, holdHours = 0) {
   const out = fields.map((f) => {
     const value = values[f.index];
     if (!value) throw new Error("missing value");
     return { index: f.index, value };
   });
-  return { action: "allow", values: out };
+  const body = { action: "allow", values: out };
+  if (Number.isInteger(holdHours) && holdHours > 0) body.holdHours = holdHours;
+  return body;
 }
 
 export const DENY_BODY = Object.freeze({ action: "deny" });

@@ -301,3 +301,34 @@ func TestBookSectionCarriesTheCutMarkWithinBudget(t *testing.T) {
 		t.Fatal("the mark does not reach the session prompt")
 	}
 }
+
+// The switch is additive: an owner.json written before it existed reads as off,
+// and a false value is not written back.
+func TestActionGateSwitchIsAdditiveAndOffByDefault(t *testing.T) {
+	store := NewStore(t.TempDir())
+	own, err := store.Create(t.TempDir(), "gate", "", "", false, Avatar{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if own.ActionGate {
+		t.Fatal("a new owner has the gate on")
+	}
+	raw, err := os.ReadFile(store.ownerPath(own.CodebaseKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "action_gate") {
+		t.Fatalf("the off switch was written: %s", raw)
+	}
+	own.ActionGate = true
+	if err := store.Save(own); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := store.FindByCodebase(own.CodebaseKey)
+	if err != nil || !found || !got.ActionGate {
+		t.Fatalf("round trip: %+v %v %v", got, found, err)
+	}
+	if want := filepath.Join(store.CodebaseDir(own.CodebaseKey), "action-gate.jsonl"); store.ActionGateLogPath(own.CodebaseKey) != want {
+		t.Fatal("log path is not inside the codebase's config directory")
+	}
+}

@@ -29,6 +29,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/push"
 	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
@@ -75,6 +76,9 @@ type ManagedSession struct {
 	// must not read disk: every report emission and every owner listing
 	// consults it. Written only by SetOwnerDetached.
 	ownerDetached atomic.Bool
+	// work records this session's work on the tasks it executes
+	// (live_tasks.go). Set once, when the session is built.
+	work *sessionWork
 
 	// missedCallFrom is the owner whose call request went unanswered, set
 	// while its written question is open: that question's push then reads
@@ -885,6 +889,7 @@ type Manager struct {
 	defaultDaybreak        bool
 	daybreakCatalog        func() core.DaybreakAvailability
 	workspaceRoot          string
+	secretMemory           *secretaction.Memory // remembered secrets; process memory only, a restart empties it
 	moaCfg                 core.MoaConfig
 	configLoader           func(cwd string) core.MoaConfig
 	keepAlive              *keepAliveService
@@ -925,6 +930,22 @@ type Manager struct {
 	// never started): cancelling it only asks it to stop, and until it returns
 	// it may still open the task database.
 	tasksWatcherDone chan struct{}
+	// testOwnerPrechecked runs in CreateOwner between its check for loaded
+	// sessions and the owner's creation: a scheduling point tests hold open.
+	// Set before the manager is used; nil in production.
+	testOwnerPrechecked func()
+	// testTaskNoticeDecided runs under a child's work gate between deciding a
+	// report's linked tasks and persisting it (admitTaskNotices). Set before
+	// the report it holds is made; nil in production.
+	testTaskNoticeDecided func()
+	// ownerObserverInstall serializes installing an owner observer on a child
+	// that was loaded before its project had an owner (ensureOwnerObserver).
+	ownerObserverInstall sync.Mutex
+	// runsCtx is the lifetime of every session's runs: the caller's context,
+	// ended with why. endRuns ends it saying moa is stopping
+	// (bus.ErrStopRestart), when that context ends or at Shutdown.
+	runsCtx context.Context
+	endRuns context.CancelCauseFunc
 	// newsGate admits the per-request News reads of the agent runs. A run
 	// can outlive Delete (the session leaves m.sessions without a join), so
 	// Shutdown closes the gate and waits for the reads in flight instead of
@@ -956,6 +977,8 @@ type Manager struct {
 	// heartbeat wakes an owner when the project changed without anyone talking
 	// to it. nil when owners are unavailable.
 	heartbeat *heartbeatService
+	// dreaming consolidates the books of owners that turned it on, nightly.
+	dreaming *dreamingService
 	// ownerRefs memoizes which owner a working directory reports to, keyed by
 	// cwd. Dropped whole whenever an owner is created, renamed or deleted.
 	// ownerRefMu is held across the resolution, not only around the map: see
@@ -1160,14 +1183,21 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		}
 	}
 	tasksCtx, tasksCancel := context.WithCancel(ctx)
+	// The runs' lifetime is the caller's, tagged with its cause: a child of
+	// ctx would be cancelled by ctx itself, without one, before any tag.
+	runsCtx, endRuns := context.WithCancelCause(context.WithoutCancel(ctx))
+	context.AfterFunc(ctx, func() { endRuns(bus.ErrStopRestart) })
 	m := &Manager{
 		tasks:                       taskRepo,
 		taskHub:                     newTasksHub(),
+		secretMemory:                secretaction.NewMemory(),
 		tasksCancel:                 tasksCancel,
 		sessions:                    make(map[string]*ManagedSession),
 		resuming:                    make(map[string]struct{}),
 		serverInstance:              newServerInstanceID(),
 		baseCtx:                     ctx,
+		runsCtx:                     runsCtx,
+		endRuns:                     endRuns,
 		providerFactory:             cfg.ProviderFactory,
 		transcriber:                 cfg.Transcriber,
 		usagePoller:                 cfg.UsagePoller,
@@ -1245,6 +1275,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	} else if m.tasks != nil {
 		m.tasks.SetClock(m.clock.Now)
 	}
+	// A night that crashed is finished or rolled back before any session,
+	// task or dispatcher can resume and write the book.
+	m.dreaming = newDreamingService(m)
 	if m.tasks != nil {
 		m.questions = newQuestionService(m)
 		// Before anything can admit or continue an answer: a Stop the last
@@ -1254,18 +1287,23 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 		m.planner = newTaskScheduler(m, m.clock, cfg.schedulerHooks)
 		m.recoverScheduledTasks(tasksCtx)
 	}
+	// The coordinator reads its outbox at startup, so it must exist before any
+	// session is resumed and starts reporting.
+	m.reports = newReportCoordinator(ctx, m)
+	// Before any session is resumed or a task worker starts one: a linked task
+	// whose session was working when the last process died is the owner's to
+	// decide (live_tasks.go), and no executor works again before it is said.
+	m.reportInterruptedExecutions()
 	m.startTasksWatcher(tasksCtx)
 	if m.tasks != nil {
 		go m.notices.run(tasksCtx)
 		go m.planner.run(tasksCtx)
 	}
-	// The coordinator reads its outbox at startup, so it must exist before any
-	// session is resumed and starts reporting.
-	m.reports = newReportCoordinator(ctx, m)
 	// The heartbeat reads the same outbox, so it starts after the coordinator
 	// has recovered it.
 	m.heartbeat = newHeartbeatService(m)
 	m.heartbeat.Start()
+	m.dreaming.Start()
 	reapStaleAttachments()
 	secrets.Reap()
 	// The manager, rather than its caller's context, owns this process-wide

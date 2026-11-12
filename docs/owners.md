@@ -40,7 +40,12 @@ index.
 `list` (which also names live sessions in other directories that no owner
 watches), `read`, `send` (message or steer), `new` (create a child in a
 directory of the codebase and send its first prompt), and `answer` (resolve a
-pending `ask_user` of a child). [Asynchronous questions](./serve.md#questions-from-the-agent)
+pending `ask_user` of a child). `new` needs `task`: the id of an open task on
+the owner's checklist, or `"none"` for work nobody tracks. `send` accepts
+`task` too, which gives that task to the session it sends to. A task given to
+a session is marked in progress when that session starts a run; `list` shows
+each session's task, and the owner's `tasks list` shows each task's session
+and whether it is working, stopped, or not started yet. [Asynchronous questions](./serve.md#questions-from-the-agent)
 are the default: `send` neither answers nor skips them, and they do not block
 messages. To reply, the owner uses `answer` when its book already contains the
 answer; it does not repeat the question with another `ask_user`, because it
@@ -71,8 +76,17 @@ same notice.
 the owner's conversation (`custom.source = "report"`). Unlike a callback, a
 finished turn does not wait indefinitely for the session to go quiet: it waits
 up to 15 s for background work (subagents, background shell jobs), then
-reports anyway and says how many jobs are still running. A background job that
-finishes later belongs to the same turn and is not reported twice. Reports are
+reports anyway and says how many jobs are still running. When that work ends
+and the session continues on its own, its result arrives as a follow-up of the
+turn already reported. Every report ends with a `now:` line saying whether
+anything still runs and whether the session will continue on its own (idle,
+background jobs, waiting for an answer, stopped by an error, or cut by a moa
+restart, which is not your **Stop**). When a session stops with a task the
+owner gave it still open, the report names the task and asks the owner to
+close it with evidence, send the next step, or comment what it waits for; it
+says so once per stop, not again until the session runs and stops again. If
+moa stopped while such a session was working, the next start tells the owner
+once which tasks lost their session. Reports are
 batched per owner over 60 s; `failed` and `needs_input` flush at once. A long
 run reports `needs_input` every time it becomes blocked again, not only the
 first time; questions raised together are one report. A report is
@@ -412,6 +426,42 @@ owner's transcript **and** the transcript is flushed to disk, so a crash in that
 window retries instead of losing the notice. A busy owner is never steered: the
 facts stay unannounced and the next tick tries again. Reports come first: a beat
 that finds reports waiting delivers them instead and wakes the owner no further.
+
+## Dreaming: nightly consolidation of the book and the memory
+
+Off by default. With `"dreaming": {"enabled": true, "hour": 3, "tz": "Europe/Madrid", "budget_usd": 3}` in
+`owner.json`, once per civil date after `hour` in `tz` (UTC when empty) moa consolidates the sheets that changed since
+the last night:
+
+- a cheap model reads each changed sheet (and its `book-tidy` parts) and another plans it, both in single calls
+  **without tools**: they only answer;
+- code rewrites the sheet as `## Estado actual` + the lines that still hold, verbatim, and moves the rest, verbatim,
+  to `archivo/<sheet>/<date>.md`. It proves that every original file rebuilds byte for byte from the two before
+  writing, keeps the front matter and title on top, and never touches `OWNER.md`, `PROJECT.md`, `historico/` or an
+  existing archive file. A decision that only lives in a sheet gets its own file in `decisions/`, its lines copied
+  verbatim;
+- decisions are never rewritten. When one changed, the cheap model extracts each decision's points and the planner
+  pairs a decision with a later one that replaces it on the same point. Code checks both quotes against the files and
+  writes a `Superada por` header, with both quotes, above the decision's untouched text; a decision replaced on every
+  point moves, as it is, to `archivo/decisions/`. When it cannot tell which one holds, it asks in the morning news;
+- the project memory changed since the last night goes through one more call: each fact is kept, moved verbatim to
+  `memory/archivo/<date>/`, or corrected by appending a dated one-line note after its original bytes (only when its
+  `description` still holds; otherwise it is listed for you to review). Archiving or correcting needs a source that
+  exists: another fact, a sheet or a decision. A fact marked `secret: true`, or that looks like it holds a
+  credential, is never sent to a model nor changed: the news names it by file;
+- the book and the project memory are versioned in a local git repository in the codebase directory (one snapshot
+  and one commit per night), secrets a fact holds included. A sheet or fact anyone changed during the night is left
+  alone; writes through the `book` and `memory` tools wait for the night's short write section;
+- the morning news in For you says what changed, what was skipped, the questions for the user, the cost and the
+  commit. The owner undoes a night with `dreaming_undo`; a sheet edited after that night is left as it is;
+- a night costs at most `budget_usd` at catalog prices (every call reserves its maximum cost before it is sent);
+  what does not fit waits for the next night. A failed night is not retried the same day.
+
+A night with no changed sheet, decision or fact makes no call and no commit. Search in the `book` tool leaves
+`archivo/` out unless asked with `include_archive`.
+
+Archived facts leave the memory index and the `memory` tool does not read them: read
+`memory/archivo/` (or the git history) directly, or undo the night.
 
 ## OWNER.md
 

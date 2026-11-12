@@ -65,8 +65,20 @@ func registerRunControlHandlers(sctx *SessionContext) {
 		// Cancel the bus context before the agent's own. The run settles as
 		// cancelled only if its bus context is already done when it decides;
 		// cancelling the agent first lets it unwind and settle as an error.
-		sctx.cancelRun()
+		sctx.cancelRun(ErrStopByUser)
 		sctx.Agent.Abort()
+		// Normally the admitted run settles its own state. An orphan has no
+		// terminal callback left to do so. abortMu excludes new admissions;
+		// runInFlight also covers a run not yet inside Agent.Send or still
+		// publishing its terminal result, where IsRunning alone is not enough.
+		if sctx.State != nil && !sctx.runInFlight() && !sctx.Agent.IsRunning() &&
+			!sctx.Compacting() && !sctx.manualVerifyRunning && !sctx.quiescenceBlocked() &&
+			(sctx.Approvals == nil || !sctx.Approvals.hasBlockingPending()) &&
+			(sctx.SecretBroker == nil || len(sctx.SecretBroker.Pending()) == 0) {
+			if state := sctx.State.Current(); state == StateRunning || state == StatePermission {
+				_ = sctx.State.Transition(StateIdle)
+			}
+		}
 		if discardedOut != nil {
 			*discardedOut = discarded
 		}
@@ -287,7 +299,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 				*cmd.AcceptedMsgID = msgID
 			}
 		}
-		if err := startRunWithOrigin(sctx, cmd.Text, originFromCustom(cmd.Custom), func(ctx context.Context) ([]core.AgentMessage, error) {
+		if err := startPromptRun(sctx, cmd.Text, originFromCustom(cmd.Custom), cmd.Custom, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if cmd.Custom != nil {
 				switch cmd.Custom["source"] {
 				case "secret_batch", "event", "report", "owner", "heartbeat", "voice_call", "schedule", "skill", "question_answer":
@@ -387,7 +399,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 		if cmd.AcceptedMsgID != nil {
 			*cmd.AcceptedMsgID = msgID
 		}
-		if err := startRunWithOrigin(sctx, label, originFromCustom(cmd.Custom), func(ctx context.Context) ([]core.AgentMessage, error) {
+		if err := startPromptRun(sctx, label, originFromCustom(cmd.Custom), cmd.Custom, func(ctx context.Context) ([]core.AgentMessage, error) {
 			if custom := promptCustom(cmd.Custom, cmd.HumanMentions); custom != nil {
 				return sctx.Agent.SendWithContentCustomAnnounced(ctx, cmd.Content, msgID, custom)
 			}
@@ -569,6 +581,27 @@ func steerAttachmentIDs(items []core.SteerItem) []string {
 func startRunWithOrigin(sctx *SessionContext, label string, origin RunOrigin, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {
 	if err := reserveRunSlot(sctx); err != nil {
 		return err
+	}
+	sctx.setPendingRunOrigin(origin)
+	launchRun(sctx, label, runFn)
+	return nil
+}
+
+// startPromptRun is startRunWithOrigin for a prompt accepted to start a run:
+// the agent is told the prompt was admitted (agent.WorkEntry) with the slot
+// already claimed, so nothing of this session works in between, and before
+// the run is launched, so a refusal leaves nothing behind.
+func startPromptRun(sctx *SessionContext, label string, origin RunOrigin, custom map[string]any, runFn func(ctx context.Context) ([]core.AgentMessage, error)) error {
+	if err := reserveRunSlot(sctx); err != nil {
+		return err
+	}
+	if admit, ok := sctx.Agent.(interface{ AdmitInput(map[string]any) error }); ok && custom != nil {
+		if err := admit.AdmitInput(custom); err != nil {
+			if sctx.State != nil {
+				_ = sctx.State.Transition(StateIdle)
+			}
+			return err
+		}
 	}
 	sctx.setPendingRunOrigin(origin)
 	launchRun(sctx, label, runFn)
@@ -778,7 +811,11 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 		// Atomically close the AbortRun window before deciding the terminal
 		// result. A Stop that won before this point cancels the handoff; one
 		// after it cannot retroactively change a settled run.
-		cancelled = cancelled || sctx.settleRunCancel(gen, runCtx)
+		settledCancel, cause := sctx.settleRunCancel(gen, runCtx)
+		cancelled = cancelled || settledCancel
+		if cancelled && cause == nil {
+			cause = context.Cause(runCtx)
+		}
 
 		// State transition.
 		if sctx.State != nil {
@@ -817,8 +854,11 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 			Err:       runErr,
 			Cancelled: cancelled,
 			HadEdits:  stats.hadEdits,
-			Cost:      stats.costUSD,
-			At:        time.Now(),
+			// Who cancelled it, read from the run's own context: a later
+			// cancellation of anything around it cannot relabel it.
+			CancelCause: cause,
+			Cost:        stats.costUSD,
+			At:          time.Now(),
 		})
 		// The run's start anchor is released only now, after its terminal event
 		// is on the bus. Between the state going idle and this point the run is

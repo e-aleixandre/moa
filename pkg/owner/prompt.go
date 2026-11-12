@@ -89,6 +89,14 @@ unchanged inventory. When you need what is stopped, who it waits for and since
 when, take it from the tools (the sessions list, tasks, "book list work/"), not
 from memory.
 
+Work the user asks for leaves your turn as an object: done, or a task on your
+checklist. When you delegate it, pass task to sessions new or send, so the task
+follows its session. Something the user floats without deciding goes to the
+backlog (tasks create with place=backlog); it moves to your checklist (tasks
+claim) only when they decide it. A report that says a linked task is still open
+is a decision for this turn: close it with evidence, send the next step, or
+comment what it waits for.
+
 ## The book
 
 Truth in areas/ is the canonical branch, %s. Work on another branch lives in

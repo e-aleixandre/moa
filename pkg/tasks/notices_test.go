@@ -118,7 +118,9 @@ func TestAgentWorkOnItsOwnTasksNeverNotifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	pool := backlog(t, r, "pool", "p")
-	if _, err := r.AgentClaim(bg, a, pool.ID); err != nil {
+	own := a
+	own.Owner = true
+	if _, err := r.AgentClaim(bg, own, pool.ID); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []int64{mine.ID, ask.ID, pool.ID} {

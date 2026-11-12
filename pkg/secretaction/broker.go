@@ -80,6 +80,9 @@ type Request struct {
 	ActionFingerprint string    `json:"actionFingerprint"`
 	Fields            []Field   `json:"fields"`
 	RequestedAt       time.Time `json:"requestedAt"`
+	// HoldMaxHours > 0 offers the owner to remember the values for up to
+	// that many hours (see Memory); only set on Rememberable requests.
+	HoldMaxHours int `json:"holdMaxHours,omitempty"`
 }
 
 // Answer is the owner's decision. Values are indexed like Request.Fields and
@@ -87,6 +90,10 @@ type Request struct {
 type Answer struct {
 	Allow  bool
 	Values [][]byte
+	// Hold > 0 asks to remember the values for that long; HoldEpoch is the
+	// Memory epoch when the owner approved.
+	Hold      time.Duration
+	HoldEpoch uint64
 }
 
 // Wipe zeroes every value. Best effort: Go may have copied the bytes before.
@@ -196,10 +203,23 @@ func (b *Broker) Request(ctx context.Context, req Request) (Answer, error) {
 	return Answer{}, ctx.Err()
 }
 
+// SessionID names the session whose requests this broker holds.
+func (b *Broker) SessionID() string { return b.sessionID }
+
 // Resolve answers a pending request. values are indexed like the request's
 // fields; on allow every field needs a non-empty value. The broker copies
 // them: the caller keeps (and must wipe) its own slices whatever the result.
 func (b *Broker) Resolve(id string, allow bool, values [][]byte) error {
+	return b.resolve(id, allow, values, 0, 0)
+}
+
+// ResolveHold allows a request and asks the tool to remember its values for
+// hold. The request must be Rememberable.
+func (b *Broker) ResolveHold(id string, values [][]byte, hold time.Duration, epoch uint64) error {
+	return b.resolve(id, true, values, hold, epoch)
+}
+
+func (b *Broker) resolve(id string, allow bool, values [][]byte, hold time.Duration, epoch uint64) error {
 	b.mu.Lock()
 	p, ok := b.pending[id]
 	if !ok || p.resolved || p.ctx.Err() != nil {
@@ -227,6 +247,14 @@ func (b *Broker) Resolve(id string, allow bool, values [][]byte) error {
 		for i, v := range values {
 			ans.Values[i] = append(make([]byte, 0, len(v)), v...)
 		}
+	}
+	if hold > 0 {
+		if !Rememberable(p.req) || ValidateRemember(MemoryKeys(p.req.Fields), ans.Values) != nil {
+			b.mu.Unlock()
+			ans.Wipe()
+			return ErrInvalidValue
+		}
+		ans.Hold, ans.HoldEpoch = hold, epoch
 	}
 	ans.Allow = allow
 	p.resolved = true
