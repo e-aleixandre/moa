@@ -2165,6 +2165,14 @@ func admitToolStart(runCtx context.Context, cfg *loopConfig, batch *toolBatch) s
 			return toolWithdrawnForSteer
 		}
 	}
+	// The call's work starts now. A run blocked on a permission resumes here,
+	// before its next provider request: that request is too late to tell the
+	// session's work it proceeds.
+	if cfg.agent != nil {
+		if err := cfg.agent.enterWorkLocked(WorkEntry{Work: true, Resumed: true}); err != nil {
+			return err.Error()
+		}
+	}
 	return ""
 }
 
