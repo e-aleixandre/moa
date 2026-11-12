@@ -624,7 +624,7 @@ func TestGitChildrenHoldTheRunLock(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	r.Close() // the parent lets go; the child still holds the description
+	_ = r.Close() // the parent lets go; the child still holds the description
 	if _, ok, _ := storelock.TryLock(s.workDir()); ok {
 		t.Fatal("the run lock was free while a child held it")
 	}
