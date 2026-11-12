@@ -26,7 +26,7 @@ func TestReReview2DeletingTaskDuringNoticeRenderDoesNotPanic(t *testing.T) {
 	m, own, child, task := reviewLinkedChild(t)
 	m.reports.BeginShutdown()
 	removed := false
-	tasks.AfterBareRead = func(where string, recs []tasks.Record) {
+	hook := func(where string, recs []tasks.Record) {
 		if removed || !strings.Contains(where, "id IN (SELECT task_id FROM task_execution_links)") || len(recs) == 0 || recs[0].ID != task.ID {
 			return
 		}
@@ -36,7 +36,8 @@ func TestReReview2DeletingTaskDuringNoticeRenderDoesNotPanic(t *testing.T) {
 		}
 		removed = true
 	}
-	defer func() { tasks.AfterBareRead = nil }()
+	tasks.AfterBareRead.Store(&hook)
+	defer tasks.AfterBareRead.Store(nil)
 	var got []owner.Report
 	var panicked any
 	func() {

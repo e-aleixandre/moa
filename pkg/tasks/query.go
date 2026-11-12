@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"sync/atomic"
 )
 
 // querier is what *sql.DB and *sql.Tx share, so reads work in or out of a
@@ -83,8 +84,8 @@ func loadRecords(ctx context.Context, q querier, where string, args ...any) ([]R
 	if err != nil {
 		return nil, err
 	}
-	if AfterBareRead != nil {
-		AfterBareRead(where, recs)
+	if hook := AfterBareRead.Load(); hook != nil {
+		(*hook)(where, recs)
 	}
 	if err := attachRelations(ctx, q, recs); err != nil {
 		return nil, err
@@ -285,5 +286,5 @@ func nullInt(v int64) any {
 
 // AfterBareRead is a test seam between a query's task rows and the reads that
 // attach their relations, where a concurrent write can land. Nil in
-// production.
-var AfterBareRead func(where string, recs []Record)
+// production; atomic because watchers read tasks while a test sets it.
+var AfterBareRead atomic.Pointer[func(where string, recs []Record)]
