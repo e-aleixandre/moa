@@ -464,6 +464,10 @@ func (m *Manager) executionsBySession(own owner.Owner) (map[string][]tasks.Recor
 	}
 	out := map[string][]tasks.Record{}
 	for _, r := range recs {
+		// A link revoked between the query's reads: the task is not linked.
+		if r.Execution == nil {
+			continue
+		}
 		out[r.Execution.SessionID] = append(out[r.Execution.SessionID], r)
 	}
 	return out, nil
