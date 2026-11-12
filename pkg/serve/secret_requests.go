@@ -162,20 +162,17 @@ func handleRememberedSecrets(mgr *Manager) http.HandlerFunc {
 	}
 }
 
-// handleForgetSecrets forgets everything: DELETE /api/remembered-secrets.
-// Idempotent; answers with the new status.
+// handleForgetSecrets forgets: DELETE /api/remembered-secrets forgets
+// everything; with ?alias=<alias> only that alias (every kind under it). The
+// alias travels as a query value, not a path segment, so "." and ".." stay
+// ordinary aliases. Idempotent; answers with the new status.
 func handleForgetSecrets(mgr *Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		mgr.secretMemory.ForgetAll()
-		writeRememberedSecrets(w, mgr)
-	}
-}
-
-// handleForgetSecret forgets one alias (every kind under it):
-// DELETE /api/remembered-secrets/{alias}. Idempotent.
-func handleForgetSecret(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		mgr.secretMemory.Forget(r.PathValue("alias"))
+		if q := r.URL.Query(); q.Has("alias") {
+			mgr.secretMemory.Forget(q.Get("alias"))
+		} else {
+			mgr.secretMemory.ForgetAll()
+		}
 		writeRememberedSecrets(w, mgr)
 	}
 }

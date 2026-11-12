@@ -3,7 +3,7 @@ import { KeyRound } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import {
-  forgetRemembered, lastDeadline, rememberedAliases, rememberedRuns, rememberedSlice,
+  forgetRemembered, isForgetting, lastDeadline, rememberedAliases, rememberedRuns, rememberedSlice,
 } from "../../data/remembered-secrets.js";
 import { addToast } from "../../data/notifications.js";
 import "./RememberedSecrets.css";
@@ -33,7 +33,15 @@ function forget(alias) {
   forgetRemembered(alias).catch(() => addToast({ title: "Could not forget. Try again.", type: "error" }));
 }
 
-export function RememberedSheetBody({ rows, runs, onForgetAll }) {
+function ForgetButton({ busy, onClick }) {
+  return (
+    <button type="button" class="zl-rem-btn" disabled={busy} onClick={onClick}>
+      {busy ? "Forgetting…" : "Forget"}
+    </button>
+  );
+}
+
+export function RememberedSheetBody({ rows, runs, slice, dropped = 0, onForgetAll }) {
   return (
     <div class="zl-rem-sheet">
       {rows.map((r) => (
@@ -42,7 +50,7 @@ export function RememberedSheetBody({ rows, runs, onForgetAll }) {
             <span class="zl-rem-alias zl-data">{r.alias}</span>
             <small>until {clockTime(r.expiresAt)} · {usesText(r.uses)}</small>
           </div>
-          <button type="button" class="zl-rem-btn" onClick={() => forget(r.alias)}>Forget</button>
+          <ForgetButton busy={isForgetting(slice, r.alias)} onClick={() => forget(r.alias)} />
         </div>
       ))}
       {runs.length > 0 && <div class="zl-rem-sec">Used</div>}
@@ -54,7 +62,8 @@ export function RememberedSheetBody({ rows, runs, onForgetAll }) {
           <code class="zl-rem-use-c zl-data">{u.command}</code>
         </div>
       ))}
-      <button type="button" class="zl-rem-all" onClick={onForgetAll}>Forget all</button>
+      {dropped > 0 && <div class="zl-rem-use-m">Older uses are in the server log.</div>}
+      <button type="button" class="zl-rem-all" disabled={isForgetting(slice, "")} onClick={onForgetAll}>Forget all</button>
     </div>
   );
 }
@@ -73,13 +82,15 @@ export function RememberedStrip() {
             <KeyRound size={14} aria-hidden="true" />
             <span class="zl-rem-txt">{stripText(rows)}</span>
           </button>
-          <button type="button" class="zl-rem-btn" onClick={() => forget("")}>Forget</button>
+          <ForgetButton busy={isForgetting(slice, "")} onClick={() => forget("")} />
         </div>
       )}
       <Sheet open={open && rows.length > 0} onClose={close} title="Remembered passwords">
         <RememberedSheetBody
           rows={rows}
           runs={rememberedRuns(slice)}
+          slice={slice}
+          dropped={slice.usesDropped}
           onForgetAll={() => { close(); forget(""); }}
         />
       </Sheet>

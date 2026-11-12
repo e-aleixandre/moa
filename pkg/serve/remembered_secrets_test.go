@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -199,11 +200,11 @@ func TestForgetShowsTheCardAgain(t *testing.T) {
 	}
 	waitMemoryIdle(t, f.sess)
 	// Forgetting another alias leaves it; forgetting its alias drops it.
-	st := f.memoryStatusAt(t, "DELETE", "/api/remembered-secrets/sudo-prod")
+	st := f.memoryStatusAt(t, "DELETE", "/api/remembered-secrets?alias=sudo-prod")
 	if entries, _ := st["entries"].([]any); len(entries) != 1 {
 		t.Fatalf("forgetting another alias: %v", st)
 	}
-	st = f.memoryStatusAt(t, "DELETE", "/api/remembered-secrets/"+testAlias)
+	st = f.memoryStatusAt(t, "DELETE", "/api/remembered-secrets?alias="+testAlias)
 	if entries, _ := st["entries"].([]any); len(entries) != 0 {
 		t.Fatalf("after DELETE: %v", st)
 	}
@@ -318,5 +319,19 @@ func TestRememberedSecretsDoNotSurviveRestart(t *testing.T) {
 	f.mgr.Shutdown()
 	if len(f.mgr.secretMemory.Status().Entries) != 0 {
 		t.Fatal("remembered after shutdown")
+	}
+}
+
+func TestForgetDotAliases(t *testing.T) {
+	f := newSecretFixture(t)
+	for _, alias := range []string{".", ".."} {
+		key := secretaction.MemoryKey{Alias: alias, Kind: secretaction.FieldPassword}
+		if _, _, err := f.mgr.secretMemory.RememberMany([]secretaction.MemoryKey{key}, [][]byte{[]byte("x")}, time.Hour, f.mgr.secretMemory.Epoch(), secretaction.MemoryUse{}); err != nil {
+			t.Fatal(err)
+		}
+		st := f.memoryStatusAt(t, "DELETE", "/api/remembered-secrets?alias="+url.QueryEscape(alias))
+		if entries, _ := st["entries"].([]any); len(entries) != 0 {
+			t.Fatalf("alias %q not forgotten: %v", alias, st)
+		}
 	}
 }

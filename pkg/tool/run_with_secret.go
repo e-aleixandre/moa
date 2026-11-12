@@ -40,9 +40,9 @@ const (
 	// background grandchild can keep the terminal open after bash exits.
 	ptyDrainDelay  = 2 * time.Second
 	maxPromptRegex = 500
-	// rememberedWriteTimeout bounds typing a remembered value, which holds
-	// the memory's lock: a terminal that stopped reading must not stall
-	// Forget.
+	// rememberedWriteTimeout bounds how long typing a remembered value
+	// holds the memory's lock: a terminal that stopped reading must not
+	// stall Forget.
 	rememberedWriteTimeout = 2 * time.Second
 )
 
@@ -476,13 +476,16 @@ func (r *ptyRun) answer() {
 		// Typed under the memory's lock, with a bounded write: once Forget
 		// returns, nothing more reaches the terminal.
 		ran, err := r.memory.Dispatch(p.key, p.gen, func() error {
-			_ = r.ptmx.SetWriteDeadline(time.Now().Add(rememberedWriteTimeout))
-			defer func() { _ = r.ptmx.SetWriteDeadline(time.Time{}) }()
-			return r.typeValue(p.value)
+			return boundedWrite(r.ptmx, p.value, rememberedWriteTimeout)
 		})
 		if !ran || err != nil {
 			r.forgotten, r.writeStuck = !ran, err != nil
 			killProcGroup(r.cmd)
+			if r.writeStuck {
+				// Nobody in the command reads the terminal: closing it is the
+				// only way to fail the write still pending.
+				_ = r.ptmx.Close()
+			}
 			return
 		}
 	} else {
@@ -500,6 +503,34 @@ func (r *ptyRun) answer() {
 	r.byKind[p.kind]++
 	r.tail.reset()
 	r.failTail.reset()
+}
+
+var errWriteStuck = errors.New("the terminal did not accept the value in time")
+
+// boundedWrite types value and a newline into the terminal, giving up after
+// timeout. The PTY descriptor is blocking (creack/pty leaves it so), so a
+// deadline would be ignored: the write runs on its own goroutine and the
+// caller stops waiting. On timeout the caller kills the command and closes
+// the terminal; the abandoned write can then only fail, or land in a
+// terminal nothing of ours reads.
+func boundedWrite(f *os.File, value []byte, timeout time.Duration) error {
+	msg := make([]byte, 0, len(value)+1)
+	msg = append(msg, value...)
+	msg = append(msg, '\n')
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.Write(msg)
+		secretaction.Wipe(msg)
+		done <- err
+	}()
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-t.C:
+		return errWriteStuck
+	}
 }
 
 // typeValue writes value and a newline to the terminal.

@@ -5,7 +5,7 @@
 import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { store, setState } from './store.js';
 import {
-  REMEMBERED_INITIAL, _resetRememberedForTest, forgetRemembered, lastDeadline, loadRemembered,
+  REMEMBERED_INITIAL, _resetRememberedForTest, forgetRemembered, isForgetting, lastDeadline, loadRemembered,
   normalizeRemembered, rememberedAliases, rememberedRuns, rememberedSlice,
 } from './remembered-secrets.js';
 import { buildAllowBody, holdChoices, normalizeSecretRequest } from './secret-action.js';
@@ -48,36 +48,66 @@ test('runs exclude the remembering, newest first', () => {
   expect(runs.map((u) => u.at)).toEqual(['c', 'b']);
 });
 
-test('a status read started before Forget cannot bring entries back', async () => {
-  let release;
-  globalThis.fetch = (url, opts) => {
-    if (opts.method === 'GET') return new Promise((r) => { release = () => r(respond({ entries: [entry('a', 1)], uses: [] })); });
-    return respond({ entries: [], uses: [] });
-  };
+function deferred() { let resolve; const p = new Promise((r) => { resolve = r; }); return { p, resolve }; }
+
+test('a read started before Forget cannot bring entries back', async () => {
+  const get = deferred();
+  globalThis.fetch = (url, opts) => opts.method === 'GET' ? get.p : respond({ entries: [], uses: [] });
   setState({ rememberedSecrets: normalizeRemembered({ entries: [entry('a', 1)] }) });
   const slow = loadRemembered();
   await forgetRemembered();
   expect(rememberedSlice(store.get()).entries).toEqual([]);
-  release();
+  get.resolve(respond({ entries: [entry('a', 1)], uses: [] }));
   await slow;
   expect(rememberedSlice(store.get()).entries).toEqual([]);
 });
 
-test('Forget one alias calls its DELETE and drops only it at once', async () => {
-  const calls = [];
-  globalThis.fetch = (url, opts) => { calls.push([opts.method, url]); return respond({ entries: [entry('b', 1)], uses: [] }); };
-  setState({ rememberedSecrets: normalizeRemembered({ entries: [entry('a', 1), entry('b', 1)] }) });
-  const p = forgetRemembered('a');
-  expect(rememberedSlice(store.get()).entries.map((e) => e.alias)).toEqual(['b']);
-  await p;
-  expect(calls).toEqual([['DELETE', '/api/remembered-secrets/a']]);
+test('a read started during Forget cannot undo it', async () => {
+  const del = deferred();
+  const get = deferred();
+  globalThis.fetch = (url, opts) => opts.method === 'GET' ? get.p : del.p;
+  setState({ rememberedSecrets: normalizeRemembered({ entries: [entry('a', 1)] }) });
+  const forgetting = forgetRemembered('a');
+  const read = loadRemembered();
+  // The DELETE answers first; the read (served before it) answers later.
+  del.resolve(respond({ entries: [], uses: [] }));
+  await forgetting;
+  get.resolve(respond({ entries: [entry('a', 1)], uses: [] }));
+  await read;
+  expect(rememberedSlice(store.get()).entries).toEqual([]);
 });
 
-test('a failed Forget reloads the real state and reports the error', async () => {
-  globalThis.fetch = (url, opts) => opts.method === 'DELETE' ? respond({}, 500) : respond({ entries: [entry('a', 1)], uses: [] });
+test('Forget keeps the entry, marked pending, until the server confirms', async () => {
+  const del = deferred();
+  const calls = [];
+  globalThis.fetch = (url, opts) => { calls.push([opts.method, url]); return del.p; };
+  setState({ rememberedSecrets: normalizeRemembered({ entries: [entry('a', 1), entry('b', 1)] }) });
+  const p = forgetRemembered('a');
+  expect(rememberedSlice(store.get()).entries.length).toBe(2);
+  expect(isForgetting(rememberedSlice(store.get()), 'a')).toBe(true);
+  expect(isForgetting(rememberedSlice(store.get()), 'b')).toBe(false);
+  await Promise.resolve();
+  del.resolve(respond({ entries: [entry('b', 1)], uses: [] }));
+  await p;
+  expect(calls).toEqual([['DELETE', '/api/remembered-secrets?alias=a']]);
+  expect(rememberedSlice(store.get()).entries.map((e) => e.alias)).toEqual(['b']);
+  expect(isForgetting(rememberedSlice(store.get()), 'a')).toBe(false);
+});
+
+test('dot aliases travel as a query value', async () => {
+  const calls = [];
+  globalThis.fetch = (url, opts) => { calls.push(url); return respond({ entries: [], uses: [] }); };
+  await forgetRemembered('..');
+  expect(calls).toEqual(['/api/remembered-secrets?alias=..']);
+});
+
+test('a failed Forget, even offline, leaves the entries and Forget available', async () => {
+  globalThis.fetch = () => Promise.reject(new TypeError('offline'));
   setState({ rememberedSecrets: normalizeRemembered({ entries: [entry('a', 1)] }) });
   await expect(forgetRemembered()).rejects.toBeDefined();
-  expect(rememberedSlice(store.get()).entries.length).toBe(1);
+  const slice = rememberedSlice(store.get());
+  expect(slice.entries.length).toBe(1);
+  expect(isForgetting(slice, 'a')).toBe(false);
 });
 
 test('hold choices only on a request that offers them', () => {

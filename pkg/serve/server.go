@@ -171,7 +171,6 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/secret-requests/{reqId}", handleSecretRequestResponse(manager))
 	mux.HandleFunc("GET /api/remembered-secrets", handleRememberedSecrets(manager))
 	mux.HandleFunc("DELETE /api/remembered-secrets", handleForgetSecrets(manager))
-	mux.HandleFunc("DELETE /api/remembered-secrets/{alias}", handleForgetSecret(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/resume", handleResumeSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/read", handleReadSession(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", handleCancel(manager))

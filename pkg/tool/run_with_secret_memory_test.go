@@ -4,12 +4,16 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/secretaction"
@@ -188,4 +192,64 @@ func waitForFile(t *testing.T, path string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", path)
+}
+
+// A terminal whose program never reads fills up; typing into it must give up
+// in bounded time, and Forget must not wait behind it.
+func TestRememberedWriteIntoAStalledTerminalIsBounded(t *testing.T) {
+	cmd := exec.Command("bash", "-c", "stty raw -echo; sleep 30")
+	f, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait(); _ = f.Close() }()
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := f.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(200 * time.Millisecond) // stty has run
+
+	m := secretaction.NewMemory()
+	defer m.Shutdown()
+	gens, _, err := m.RememberMany([]secretaction.MemoryKey{vaultKey}, [][]byte{[]byte(memValue)}, time.Hour, m.Epoch(), secretaction.MemoryUse{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := make([]byte, secretaction.MaxHoldValueBytes)
+	for i := range value {
+		value[i] = 'x'
+	}
+	const timeout = 300 * time.Millisecond
+	stuck := false
+	for i := 0; i < 400 && !stuck; i++ {
+		start := time.Now()
+		ran, werr := m.Dispatch(vaultKey, gens[0], func() error { return boundedWrite(f, value, timeout) })
+		if !ran {
+			t.Fatal("not dispatched")
+		}
+		if werr != nil {
+			if !errors.Is(werr, errWriteStuck) {
+				t.Fatalf("write error = %v", werr)
+			}
+			if d := time.Since(start); d > timeout+time.Second {
+				t.Fatalf("stuck write took %v", d)
+			}
+			stuck = true
+		}
+	}
+	if !stuck {
+		t.Skip("the terminal never filled on this system")
+	}
+	// The lock is free again: Forget returns at once.
+	done := make(chan struct{})
+	go func() { m.ForgetAll(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Forget blocked behind a stuck write")
+	}
 }

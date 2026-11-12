@@ -10,13 +10,12 @@
 // reloaded on start, when the app becomes visible, every minute while it is
 // visible and after the owner's own actions (answering a card, Forget). Each
 // deadline is known, so an entry hides itself at its expiresAt without
-// asking. A response is applied only if no newer request was answered first:
-// a slow read started before Forget cannot bring an entry back.
+// asking. // a read that overlapped a Forget is dropped (see Ordering below).
 
 import { api } from './api.js';
 import { store, setState } from './store.js';
 
-export const REMEMBERED_INITIAL = Object.freeze({ entries: [], uses: [], loaded: false });
+export const REMEMBERED_INITIAL = Object.freeze({ entries: [], uses: [], loaded: false, pending: [] });
 
 const REFRESH_MS = 60_000;
 const BASE = '/api/remembered-secrets';
@@ -34,6 +33,7 @@ export function normalizeRemembered(data) {
   const uses = Array.isArray(data?.uses) ? data.uses : [];
   return {
     loaded: true,
+    usesDropped: Number.isInteger(data?.usesDropped) ? data.usesDropped : 0,
     entries: entries.map((e) => ({
       alias: str(e?.alias),
       kind: str(e?.kind),
@@ -86,37 +86,62 @@ export function rememberedRuns(slice) {
   return (slice?.uses || []).filter((u) => u.kind === 'use').slice().reverse();
 }
 
-let seq = 0;
-let applied = 0;
+// Ordering. A read only counts if no Forget was in flight while it ran:
+// `mutations` changes when one starts and when it ends, and a read applies
+// its answer only if the counter is the same as when it started and nothing
+// is pending. Forgets run one after another; each applies the status its
+// DELETE answers with.
+let reads = 0;
+let readApplied = 0;
+let mutations = 0;
+let inFlight = 0;
+let queue = Promise.resolve();
 
-function apply(mySeq, data) {
-  if (mySeq < applied) return;
-  applied = mySeq;
-  setState({ rememberedSecrets: normalizeRemembered(data) });
+function setPending(pending) {
+  setState({ rememberedSecrets: { ...rememberedSlice(store.get()), pending } });
 }
 
 export function loadRemembered() {
-  const mySeq = ++seq;
+  const mySeq = ++reads;
+  const myMutations = mutations;
   return api('GET', BASE, undefined, { cache: 'no-store' })
-    .then((data) => apply(mySeq, data))
+    .then((data) => {
+      if (inFlight > 0 || mutations !== myMutations || mySeq < readApplied) return;
+      readApplied = mySeq;
+      setState({ rememberedSecrets: { ...normalizeRemembered(data), pending: rememberedSlice(store.get()).pending } });
+    })
     .catch(() => {});
 }
 
-// forgetRemembered forgets one alias, or everything without one. What is
-// forgotten leaves the screen at once; the server's answer (the new status)
-// confirms it. A failure reloads the real state and rethrows.
-export async function forgetRemembered(alias = '') {
-  const mySeq = ++seq;
-  applied = mySeq;
-  const prev = rememberedSlice(store.get());
-  setState({ rememberedSecrets: { ...prev, entries: alias ? prev.entries.filter((e) => e.alias !== alias) : [] } });
-  try {
-    const data = await api('DELETE', alias ? `${BASE}/${encodeURIComponent(alias)}` : BASE);
-    apply(mySeq, data);
-  } catch (e) {
-    await loadRemembered();
-    throw e;
-  }
+// forgetRemembered forgets one alias, or everything without one. Nothing
+// leaves the screen until the server confirms: meanwhile the entries show as
+// being forgotten (`pending`), and a failure leaves them as they were, so
+// Forget is still there to try again. Rejects on failure.
+export function forgetRemembered(alias = '') {
+  const pending = rememberedSlice(store.get()).pending || [];
+  setPending([...pending, alias || '*']);
+  mutations++;
+  inFlight++;
+  const run = queue.then(async () => {
+    try {
+      const data = await api('DELETE', alias ? `${BASE}?alias=${encodeURIComponent(alias)}` : BASE);
+      setState({ rememberedSecrets: { ...normalizeRemembered(data), pending: rememberedSlice(store.get()).pending } });
+    } finally {
+      mutations++;
+      inFlight--;
+      const left = [...(rememberedSlice(store.get()).pending || [])];
+      left.splice(left.indexOf(alias || '*'), 1);
+      setPending(left);
+    }
+  });
+  queue = run.catch(() => {});
+  return run;
+}
+
+// isForgetting — whether a Forget covering `alias` is waiting for the server.
+export function isForgetting(slice, alias) {
+  const p = slice?.pending || [];
+  return p.includes('*') || (alias ? p.includes(alias) : false);
 }
 
 let started = false;
@@ -155,8 +180,11 @@ export function startRememberedSecrets(win = typeof window !== 'undefined' ? win
 
 // Test hook.
 export function _resetRememberedForTest() {
-  seq = 0;
-  applied = 0;
+  reads = 0;
+  readApplied = 0;
+  mutations = 0;
+  inFlight = 0;
+  queue = Promise.resolve();
   started = false;
   clearInterval(timer);
   clearTimeout(expiryTimer);
