@@ -118,6 +118,13 @@ func (s *ManagedSession) workGate(fn func()) {
 // the check and the mark, and work entering afterwards clears the mark. Only
 // local writes happen under it — never a delivery or an acknowledgement.
 func (m *Manager) admitTaskNotices(sess *ManagedSession, rep owner.Report, persist func(owner.Report) (added, durable bool)) (added, durable bool) {
+	if !m.mayNoticeTasks(rep) {
+		// Nothing to name, and nothing can become due meanwhile: a link made
+		// now comes with work, so the session is not stopped. The gate is
+		// left alone, so a session executing nothing never waits on it.
+		rep.LinkedTasks = nil
+		return persist(rep)
+	}
 	sess.workGate(func() {
 		ids := m.taskNotices(sess, &rep)
 		if m.testTaskNoticeDecided != nil {
@@ -132,6 +139,18 @@ func (m *Manager) admitTaskNotices(sess *ManagedSession, rep owner.Report, persi
 		}
 	})
 	return added, durable
+}
+
+// mayNoticeTasks says the report's session has tasks it could be told to
+// have stopped on: open ones it executes whose stop was not said yet.
+func (m *Manager) mayNoticeTasks(rep owner.Report) bool {
+	if m.tasks == nil || rep.UserKind != "" || rep.SessionID == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
+	defer cancel()
+	recs, err := m.tasks.UnwarnedExecutions(ctx, rep.SessionID)
+	return err != nil || len(recs) > 0
 }
 
 // taskNotices fills the report's linked tasks: the open ones the session
