@@ -124,9 +124,14 @@ func (r *Repo) LinkExecution(ctx context.Context, a Actor, id int64, executor st
 
 // MarkExecutionStarted is work of sessionID: its linked tasks that were still
 // pending are now in progress, the first start is kept, and a previous stop is
-// cleared so the next one is said again. The tasks in queued are left alone:
-// their instruction is still waiting for the session.
-func (r *Repo) MarkExecutionStarted(ctx context.Context, sessionID string, queued ...int64) error {
+// cleared so the next one is said again.
+func (r *Repo) MarkExecutionStarted(ctx context.Context, sessionID string) error {
+	return r.MarkExecutionStartedExcept(ctx, sessionID, nil)
+}
+
+// MarkExecutionStartedExcept is MarkExecutionStarted leaving alone the tasks
+// in queued: their instruction is still waiting for the session.
+func (r *Repo) MarkExecutionStartedExcept(ctx context.Context, sessionID string, queued []int64) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
@@ -161,10 +166,15 @@ func (r *Repo) MarkExecutionStarted(ctx context.Context, sessionID string, queue
 }
 
 // MarkExecutionStopped records that sessionID went quiet and returns the open
-// tasks it is the current executor of that were not told so yet — of only, if
-// given, the ones a report named. A second call for the same stop returns
-// nothing: only a new start rearms it.
-func (r *Repo) MarkExecutionStopped(ctx context.Context, sessionID string, only ...int64) ([]Record, error) {
+// tasks it is the current executor of that were not told so yet. A second
+// call for the same stop returns nothing: only a new start rearms it.
+func (r *Repo) MarkExecutionStopped(ctx context.Context, sessionID string) ([]Record, error) {
+	return r.MarkExecutionsStopped(ctx, sessionID, nil)
+}
+
+// MarkExecutionsStopped is MarkExecutionStopped for only the tasks a report
+// named (all of them when only is empty).
+func (r *Repo) MarkExecutionsStopped(ctx context.Context, sessionID string, only []int64) ([]Record, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, nil
 	}

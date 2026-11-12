@@ -95,7 +95,7 @@ func (w *sessionWork) enter(e agent.WorkEntry) error {
 			queued = append(queued, t.id)
 		}
 	}
-	if err := tasksRepo.MarkExecutionStarted(ctx, w.sessionID, queued...); err != nil {
+	if err := tasksRepo.MarkExecutionStartedExcept(ctx, w.sessionID, queued); err != nil {
 		return fmt.Errorf("live tasks: the start of this session's linked tasks was not recorded: %w", err)
 	}
 	w.noticed = false
@@ -232,7 +232,7 @@ func (m *Manager) withRunState(rep *owner.Report) {
 func (m *Manager) markExecutionStopped(sessionID string, ids ...int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
 	defer cancel()
-	if _, err := m.tasks.MarkExecutionStopped(ctx, sessionID, ids...); err != nil {
+	if _, err := m.tasks.MarkExecutionsStopped(ctx, sessionID, ids); err != nil {
 		slog.Warn("live tasks: stop not recorded; the owner may hear it again", "session", sessionID, "error", err)
 	}
 }
