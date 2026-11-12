@@ -18,6 +18,7 @@ import { loadEvents, openInbox } from "./data/events.js"; // wake-on-event
 import { loadOwners } from "./data/owners.js";
 import { loadProviderStatus } from "./data/providers.js";
 import { startTasksSync, resumeTasksSync } from "./data/tasks.js";
+import { startRememberedSecrets } from "./data/remembered-secrets.js";
 import { TasksScreen } from "./components/Tasks/TasksScreen.jsx";
 import { ForYouScreen } from "./components/ForYou/ForYou.jsx";
 import { loadForYou } from "./data/for-you.js";
@@ -192,6 +193,8 @@ function useBootstrap() {
     startTasksSync();
     // Owners asking to talk: the incoming call card reads this slice.
     startCallRequestsSync();
+    // Secrets the owner chose to remember: the strip that lists them.
+    startRememberedSecrets();
     // The owners are read with the first roster above and again on return,
     // like the model catalog: an owner is created by hand and their number is
     // one per project, so nothing is gained by polling them.

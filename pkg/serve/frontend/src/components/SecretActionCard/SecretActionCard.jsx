@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { KeyRound, Lock, ScanFace } from "lucide-preact";
 import { Field } from "../../primitives/index.js";
 import {
-  browserMapping, fieldAutocomplete, fieldInputName, requesterLabel, secretCopy,
+  browserMapping, fieldAutocomplete, fieldInputName, holdChoices, requesterLabel, secretCopy,
 } from "../../data/secret-action.js";
+import { RememberChips } from "../RememberedSecrets/RememberedSecrets.jsx";
 import { savedSecretsBridge } from "../../data/saved-secrets.js";
 import { autofocusAllowed, createSecretCard } from "../../data/secret-card.js";
 import "../PermissionCard/PermissionCard.css";
@@ -161,6 +162,13 @@ export function SecretActionView({ session, request, position = 1, total = 1, ca
           );
         })}
       </div>
+      <RememberChips
+        choices={holdChoices(request)}
+        value={state.holdHours}
+        onChange={(h) => card.setHold(h)}
+        disabled={busy}
+        aliases={[...new Set(request.fields.map((f) => f.alias))]}
+      />
       {bridge && d.saveable.length > 0 && (
         <label class="zl-sx-save">
           <button

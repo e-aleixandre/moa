@@ -440,7 +440,7 @@ func TestANSIStripperAcrossChunks(t *testing.T) {
 }
 
 func TestRunWithSecretAuthFailureSplitAcrossChunks(t *testing.T) {
-	r := newPtyRun(context.Background(), nil, &exec.Cmd{}, []secretPrompt{{kind: secretaction.FieldPassword, re: defaultPasswordPrompt, delivered: true}}, nil, nil)
+	r := newPtyRun(context.Background(), nil, &exec.Cmd{}, []secretPrompt{{kind: secretaction.FieldPassword, re: defaultPasswordPrompt, delivered: true}}, nil, nil, nil)
 	for _, c := range []string{"Sorry, try ag", "ain.\n", strings.Repeat(" ", 9000) + "\n", "Password: "} {
 		r.feed([]byte(c))
 	}

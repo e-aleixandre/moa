@@ -353,6 +353,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		ForYouSnapshot:      m.forYouSnapshot(askAsync, id, &notifyOn, func() *ManagedSession { return sess }),
 		OnWork:              onWork,
 		EnableSecretActions: true,
+		SecretMemory:        m.secretMemory,
 		OwnerSession:        opts != nil && opts.ownerSession,
 		SessionTitle:        m.sessionTitle,
 		CreatorTZ:           creatorTZ,
@@ -1514,6 +1515,7 @@ const shutdownDrainBudget = 5 * time.Second
 // captures the complete final turn rather than a partial one. If the budget
 // expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
+	m.secretMemory.Shutdown()
 	// Voice calls first: their minutes are written into sessions that are
 	// still alive, and no call keeps a provider open past shutdown.
 	m.closeVoiceCalls()
@@ -1547,6 +1549,7 @@ func (m *Manager) Shutdown() {
 	// owner session that is about to be torn down. The actor stays alive and
 	// keeps ACCEPTING: a turn reported below must still reach the outbox.
 	m.heartbeat.Close()
+	m.dreaming.Close()
 	m.reports.BeginShutdown()
 	if m.pushPolicy != nil {
 		m.pushPolicy.Close() // pending summaries are not persisted; see push.Policy

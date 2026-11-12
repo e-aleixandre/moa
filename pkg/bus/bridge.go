@@ -300,6 +300,9 @@ type SessionContext struct {
 	runGen     uint64                  // incremented each run; used to avoid clearing a newer run's cancel
 	runStatsMu sync.Mutex
 	runStats   runStats
+	// Manual verification occupies the state without an agent run. Guarded by
+	// abortMu so Stop cannot mistake its admission or tail for an orphan.
+	manualVerifyRunning bool
 
 	// Background work that can outlive a foreground RunEnded. Headless callers
 	// use it to wait for the complete autonomous chain, not merely the first

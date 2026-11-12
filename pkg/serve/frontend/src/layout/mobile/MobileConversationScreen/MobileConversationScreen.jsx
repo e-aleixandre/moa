@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { RememberedSheet } from "../../../components/RememberedSecrets/RememberedSecrets.jsx";
 import { Plus } from "lucide-preact";
 import { updateSession, store } from "../../../data/store.js";
 import { ownersSlice } from "../../../data/owners.js";
@@ -571,6 +572,7 @@ function MobileSessionChrome({ version, forceMobile = false, drawerPanelRef }) {
 
   return (
     <>
+      <RememberedSheet />
       {chrome.showChip && !chrome.inboxOpen && !tasksOpen && !forYouOpen && (
         <MobileChrome
           title={chrome.title}

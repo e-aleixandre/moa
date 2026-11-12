@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { RememberedBlock } from "../RememberedSecrets/RememberedSecrets.jsx";
 import { ArrowUp, ArrowUpRight, Check, ChevronRight, Info, KeyRound, Lock, MessageCircleQuestionMark, SquareTerminal, TriangleAlert } from "lucide-preact";
 import { useStore } from "../../hooks/useStore.js";
 import { useEdgeSwipeBack } from "../../hooks/useEdgeSwipeBack.js";
@@ -299,6 +300,7 @@ function List({ phone, scope, onOpenAll, onLeave, onReturn }) {
   const upToDate = loaded && waiting.length === 0 && requests.length === 0 && !news.some((n) => !n.read_at);
   return (
     <>
+      <RememberedBlock onLeave={onLeave} />
       {waiting.length > 0 && (
         <section class="fy-sec">
           <div class="fy-sec-head">

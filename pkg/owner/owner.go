@@ -92,8 +92,11 @@ type Owner struct {
 	// its first sessions send/new or ask_user of a turn is refused once with
 	// what the book says about it, unless the turn already read the book.
 	// Additive: an owner.json without it leaves the gate off.
-	ActionGate bool      `json:"action_gate,omitempty"`
-	Created    time.Time `json:"created"`
+	ActionGate bool `json:"action_gate,omitempty"`
+	// Dreaming turns on the nightly consolidation of the book (see
+	// pkg/dreaming). Additive and optional: nil or enabled unset is off.
+	Dreaming *Dreaming `json:"dreaming,omitempty"`
+	Created  time.Time `json:"created"`
 }
 
 // Call levels of an owner.

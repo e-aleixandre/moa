@@ -480,3 +480,36 @@ test("a save that fails after the answer was accepted is reported with the bridg
   expect(toasts).toHaveLength(1);
   expect(toasts[0]).toMatchObject({ type: "error", title: "Couldn't save on this iPhone", detail: "Face ID is not set up" });
 });
+
+// Typed values built at run time: they are fakes, and should not read as
+// credentials to a secret scanner.
+const typedA = ["typed", "a"].join("-");
+const typedB = ["typed", "b"].join("-");
+
+test("a card that offers remembering shows the chips, just this once by default", async () => {
+  const c = mount({ session, request: { ...COMMAND, holdMaxHours: 10 }, send });
+  for (const label of ["Just this once", "2 h", "4 h", "8 h", "10 h"]) expect(c.button(label)).toBeDefined();
+  expect(c.button("Just this once").props["aria-pressed"]).toBe(true);
+  expect(c.text()).not.toContain("without asking");
+  c.type("password", typedA);
+  await c.press("Run");
+  await settle();
+  expect(sent.at(-1).body).toEqual({ action: "allow", values: [{ index: 0, value: typedA }] });
+});
+
+test("choosing hours says who can use it and until when, and sends holdHours", async () => {
+  const c = mount({ session, request: { ...COMMAND, holdMaxHours: 10 }, send });
+  await c.press("8 h");
+  expect(c.button("8 h").props["aria-pressed"]).toBe(true);
+  expect(c.text()).toContain("Agents in every project can use agents-keychain until");
+  c.type("password", typedB);
+  await c.press("Run");
+  await settle();
+  expect(sent.at(-1).body).toEqual({ action: "allow", values: [{ index: 0, value: typedB }], holdHours: 8 });
+});
+
+test("a card without the offer has no Remember row", () => {
+  const c = mount({ session, request: COMMAND, send });
+  expect(c.button("Just this once")).toBeUndefined();
+  expect(c.text()).not.toContain("Remember");
+});

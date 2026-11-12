@@ -21,6 +21,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/book"
 	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/dreaming"
 	"github.com/e-aleixandre/moa/pkg/extension"
 	"github.com/e-aleixandre/moa/pkg/git"
 	"github.com/e-aleixandre/moa/pkg/goal"
@@ -127,6 +128,9 @@ type SessionConfig struct {
 	// when a browser MCP is present). Only for frontends that can answer a
 	// secret request (serve); the CLI cannot, so it stays off.
 	EnableSecretActions bool
+	// SecretMemory holds the secrets the owner chose to remember, shared by every
+	// session; nil turns it off.
+	SecretMemory *secretaction.Memory
 
 	// OwnerSession marks this build as a project owner's own conversation, so
 	// it gets the owner role prompt and the writable half of the book. Every
@@ -576,12 +580,12 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		})
 	}
 	if secretBroker != nil {
-		core.RegisterOrLog(toolReg, tool.NewRunWithSecret(tool.ToolConfig{
+		core.RegisterOrLog(toolReg, tool.NewRunWithSecretMemory(tool.ToolConfig{
 			WorkspaceRoot: cfg.CWD,
 			PathPolicy:    pathPolicy,
 			BashTimeout:   5 * time.Minute,
 			BashState:     bashState,
-		}, secretBroker))
+		}, secretBroker, cfg.SecretMemory))
 		secretaction.SyncBrowserFillTool(toolReg, secretBroker)
 	}
 
@@ -665,6 +669,9 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 					return err == nil && found && current.ActionGate
 				},
 			})
+		}
+		if cfg.OwnerSession && projectOwner.Dreaming != nil {
+			core.RegisterOrLog(toolReg, dreaming.NewUndoTool(ownerStore.CodebaseDir(projectOwner.CodebaseKey)))
 		}
 	}
 

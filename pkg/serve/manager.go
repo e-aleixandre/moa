@@ -29,6 +29,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/push"
 	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
@@ -888,6 +889,7 @@ type Manager struct {
 	defaultDaybreak        bool
 	daybreakCatalog        func() core.DaybreakAvailability
 	workspaceRoot          string
+	secretMemory           *secretaction.Memory // remembered secrets; process memory only, a restart empties it
 	moaCfg                 core.MoaConfig
 	configLoader           func(cwd string) core.MoaConfig
 	keepAlive              *keepAliveService
@@ -975,6 +977,8 @@ type Manager struct {
 	// heartbeat wakes an owner when the project changed without anyone talking
 	// to it. nil when owners are unavailable.
 	heartbeat *heartbeatService
+	// dreaming consolidates the books of owners that turned it on, nightly.
+	dreaming *dreamingService
 	// ownerRefs memoizes which owner a working directory reports to, keyed by
 	// cwd. Dropped whole whenever an owner is created, renamed or deleted.
 	// ownerRefMu is held across the resolution, not only around the map: see
@@ -1186,6 +1190,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	m := &Manager{
 		tasks:                       taskRepo,
 		taskHub:                     newTasksHub(),
+		secretMemory:                secretaction.NewMemory(),
 		tasksCancel:                 tasksCancel,
 		sessions:                    make(map[string]*ManagedSession),
 		resuming:                    make(map[string]struct{}),
@@ -1270,6 +1275,9 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	} else if m.tasks != nil {
 		m.tasks.SetClock(m.clock.Now)
 	}
+	// A night that crashed is finished or rolled back before any session,
+	// task or dispatcher can resume and write the book.
+	m.dreaming = newDreamingService(m)
 	if m.tasks != nil {
 		m.questions = newQuestionService(m)
 		// Before anything can admit or continue an answer: a Stop the last
@@ -1295,6 +1303,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	// has recovered it.
 	m.heartbeat = newHeartbeatService(m)
 	m.heartbeat.Start()
+	m.dreaming.Start()
 	reapStaleAttachments()
 	secrets.Reap()
 	// The manager, rather than its caller's context, owns this process-wide
