@@ -435,6 +435,9 @@ func (m *Manager) ownerSendCustom(own owner.Owner, id, text string, custom map[s
 	// skips nor refuses for it.
 	var ask *bus.PendingAskInfo
 	sess, loaded := m.Get(id)
+	if afterSendSnapshot != nil {
+		afterSendSnapshot(id, loaded)
+	}
 	if _, linking := liveTaskOf(custom); loaded && linking {
 		// The task follows this session's reports to the owner, whoever
 		// started it before the project had one.
@@ -592,6 +595,10 @@ func (m *Manager) ownerSendWithTask(ctx context.Context, own owner.Owner, params
 	}
 	return res
 }
+
+// afterSendSnapshot is a test seam right after the sessions tool's send reads
+// whether its target is loaded. Nil in production.
+var afterSendSnapshot func(id string, loaded bool)
 
 // ensureOwnerObserver gives a loaded child that predates its project's owner
 // the observer that reports its turns, so the owner hears of a task it hands

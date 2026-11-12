@@ -202,6 +202,10 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
+	if beforeSessionPublish != nil {
+		beforeSessionPublish(sess)
+	}
+
 	m.mu.Lock()
 	m.initializeAttentionRuntimeLocked(sess)
 	m.sessions[sess.ID] = sess
@@ -2122,6 +2126,10 @@ func creatorTZOf(meta map[string]any) string {
 // session's file is gone and its settlement is not yet committed. Nil in
 // production.
 var afterSessionUnlink func(sessionID string)
+
+// beforeSessionPublish is a test seam between a built session's persistence
+// and its publication in the manager. Nil in production.
+var beforeSessionPublish func(*ManagedSession)
 
 // settleScheduledWork settles, before a session is deleted, the scheduled
 // runs bound to it, including a run that reserved it and is not yet bound
