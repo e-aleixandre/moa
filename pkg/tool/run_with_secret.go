@@ -316,6 +316,13 @@ func runOnPTY(ctx context.Context, command, cwd string, timeout time.Duration, p
 
 	// Wide enough that a prompt is never wrapped before it is matched.
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 50, Cols: 250})
+	if err == nil {
+		ptmx, err = pollablePTY(ptmx)
+		if err != nil {
+			killProcGroup(cmd)
+			_ = cmd.Wait()
+		}
+	}
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("failed to start on a terminal: %v", err))
 	}
@@ -481,11 +488,6 @@ func (r *ptyRun) answer() {
 		if !ran || err != nil {
 			r.forgotten, r.writeStuck = !ran, err != nil
 			killProcGroup(r.cmd)
-			if r.writeStuck {
-				// Nobody in the command reads the terminal: closing it is the
-				// only way to fail the write still pending.
-				_ = r.ptmx.Close()
-			}
 			return
 		}
 	} else {
@@ -508,29 +510,25 @@ func (r *ptyRun) answer() {
 var errWriteStuck = errors.New("the terminal did not accept the value in time")
 
 // boundedWrite types value and a newline into the terminal, giving up after
-// timeout. The PTY descriptor is blocking (creack/pty leaves it so), so a
-// deadline would be ignored: the write runs on its own goroutine and the
-// caller stops waiting. On timeout the caller kills the command and closes
-// the terminal; the abandoned write can then only fail, or land in a
-// terminal nothing of ours reads.
+// timeout. It returns only once the write has stopped: the terminal is
+// pollable (pollablePTY), so the deadline really interrupts it and nothing
+// is left writing once the caller releases the memory's lock.
 func boundedWrite(f *os.File, value []byte, timeout time.Duration) error {
 	msg := make([]byte, 0, len(value)+1)
 	msg = append(msg, value...)
 	msg = append(msg, '\n')
-	done := make(chan error, 1)
-	go func() {
-		_, err := f.Write(msg)
-		secretaction.Wipe(msg)
-		done <- err
-	}()
-	t := time.NewTimer(timeout)
-	defer t.Stop()
-	select {
-	case err := <-done:
+	defer secretaction.Wipe(msg)
+	if err := f.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
 		return err
-	case <-t.C:
-		return errWriteStuck
 	}
+	defer func() { _ = f.SetWriteDeadline(time.Time{}) }()
+	if _, err := f.Write(msg); err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			return errWriteStuck
+		}
+		return err
+	}
+	return nil
 }
 
 // typeValue writes value and a newline to the terminal.

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/secretaction"
@@ -194,24 +195,32 @@ func waitForFile(t *testing.T, path string) {
 	t.Fatalf("timed out waiting for %s", path)
 }
 
-// A terminal whose program never reads fills up; typing into it must give up
-// in bounded time, and Forget must not wait behind it.
+// A terminal whose program never reads fills up. Typing a remembered value
+// into it must give up in bounded time, leave nothing writing once it has
+// given up (so nothing lands after Forget), and not hold Forget behind it.
 func TestRememberedWriteIntoAStalledTerminalIsBounded(t *testing.T) {
-	cmd := exec.Command("bash", "-c", "stty raw -echo; sleep 30")
-	f, err := pty.Start(cmd)
+	master, tty, err := pty.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait(); _ = f.Close() }()
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			if _, err := f.Read(buf); err != nil {
-				return
-			}
+	defer func() { _ = tty.Close() }()
+	raw := exec.Command("stty", "raw", "-echo")
+	raw.Stdin = tty
+	if err := raw.Run(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := pollablePTY(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	queued := func() int {
+		n, err := unix.IoctlGetInt(int(tty.Fd()), unix.TIOCINQ)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}()
-	time.Sleep(200 * time.Millisecond) // stty has run
+		return n
+	}
 
 	m := secretaction.NewMemory()
 	defer m.Shutdown()
@@ -242,14 +251,22 @@ func TestRememberedWriteIntoAStalledTerminalIsBounded(t *testing.T) {
 		}
 	}
 	if !stuck {
-		t.Skip("the terminal never filled on this system")
+		t.Fatal("the terminal never filled")
 	}
-	// The lock is free again: Forget returns at once.
 	done := make(chan struct{})
 	go func() { m.ForgetAll(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Forget blocked behind a stuck write")
+	}
+	// Throw away everything the terminal holds. A write still in progress
+	// would now get through; one that really stopped leaves it empty.
+	if err := unix.IoctlSetInt(int(tty.Fd()), unix.TCFLSH, unix.TCIFLUSH); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := queued(); n != 0 {
+		t.Fatalf("%d bytes arrived after the write gave up and Forget returned", n)
 	}
 }
