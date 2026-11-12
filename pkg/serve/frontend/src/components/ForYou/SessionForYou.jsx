@@ -6,7 +6,7 @@ import { openForYouView } from "../../data/for-you.js";
 import { Sheet } from "../Sheet/Sheet.jsx";
 import { MobileSheet } from "../../layout/mobile/MobileSheet/MobileSheet.jsx";
 import { SessionForYouList } from "./ForYou.jsx";
-import { RememberedKey } from "../RememberedSecrets/RememberedSecrets.jsx";
+import { RememberedKey, useRemembered } from "../RememberedSecrets/RememberedSecrets.jsx";
 import "./ForYou.css";
 
 // useSessionForYou — the header button's two numbers for one conversation:
@@ -24,7 +24,8 @@ export function useSessionForYou(sessionId) {
 // are only found again through it. `phone` is the capsule of the mobile
 // chrome (MobileChrome.css); otherwise it is a head action of the desktop's.
 export function SessionForYouButton({ waiting = 0, unread = 0, phone = false, open = false, onClick }) {
-  const label = sessionForYouLabel(waiting, unread);
+  const remembered = useRemembered();
+  const label = `${sessionForYouLabel(waiting, unread)}${remembered ? ", passwords remembered" : ""}`;
   return (
     <button
       type="button"

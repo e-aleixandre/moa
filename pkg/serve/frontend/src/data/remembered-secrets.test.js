@@ -5,7 +5,7 @@
 import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { store, setState } from './store.js';
 import {
-  REMEMBERED_INITIAL, _resetRememberedForTest, forgetRemembered, isForgetting, lastDeadline, loadRemembered,
+  REMEMBERED_INITIAL, _resetRememberedForTest, closeSheetIfEmpty, forgetRemembered, startRememberedSecrets, isForgetting, lastDeadline, loadRemembered,
   normalizeRemembered, rememberedAliases, rememberedRuns, rememberedSlice,
 } from './remembered-secrets.js';
 import { buildAllowBody, holdChoices, normalizeSecretRequest } from './secret-action.js';
@@ -122,4 +122,20 @@ test('allow body carries holdHours only when chosen', () => {
   expect(buildAllowBody(fields, { 0: 'v' })).toEqual({ action: 'allow', values: [{ index: 0, value: 'v' }] });
   expect(buildAllowBody(fields, { 0: 'v' }, 0)).not.toHaveProperty('holdHours');
   expect(buildAllowBody(fields, { 0: 'v' }, 8).holdHours).toBe(8);
+});
+
+test('the sheet does not reopen by itself after everything was forgotten', async () => {
+  globalThis.fetch = () => respond({ entries: [], uses: [] });
+  setState({ rememberedSecrets: normalizeRemembered({ entries: [entry('a', 1)] }), rememberedSheetOpen: true });
+  startRememberedSecrets({ document: { visibilityState: 'visible', addEventListener() {} } });
+  setState({ rememberedSecrets: normalizeRemembered({ entries: [] }) });
+  expect(store.get().rememberedSheetOpen).toBe(false);
+  setState({ rememberedSecrets: normalizeRemembered({ entries: [entry('b', 1)] }) });
+  expect(store.get().rememberedSheetOpen).toBe(false);
+});
+
+test('an expired entry counts as nothing remembered', () => {
+  setState({ rememberedSecrets: normalizeRemembered({ entries: [entry('a', -1)] }), rememberedSheetOpen: true });
+  closeSheetIfEmpty();
+  expect(store.get().rememberedSheetOpen).toBe(false);
 });

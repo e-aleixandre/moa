@@ -144,6 +144,15 @@ export function isForgetting(slice, alias) {
   return p.includes('*') || (alias ? p.includes(alias) : false);
 }
 
+// closeSheetIfEmpty drops the intent to show the sheet once nothing is
+// remembered (Forget, expiry, another device), so it cannot reopen by itself
+// when something is remembered again later.
+export function closeSheetIfEmpty(state = store.get()) {
+  if (state?.rememberedSheetOpen && liveEntries(rememberedSlice(state)).length === 0) {
+    setState({ rememberedSheetOpen: false });
+  }
+}
+
 let started = false;
 let timer = null;
 let expiryTimer = null;
@@ -174,6 +183,7 @@ export function startRememberedSecrets(win = typeof window !== 'undefined' ? win
     if (next !== last) {
       last = next;
       scheduleExpiry();
+      closeSheetIfEmpty();
     }
   });
 }
