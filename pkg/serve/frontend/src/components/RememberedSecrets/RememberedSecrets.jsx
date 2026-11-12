@@ -80,12 +80,12 @@ export function useRemembered() {
   return useStore((s) => rememberedAliases(rememberedSlice(s)).length > 0);
 }
 
-// RememberedKey — the For you button's mark that secrets are remembered: a
-// small key, never a number or a dot, so it does not read as something
-// waiting or unread.
-export function RememberedKey({ size = 11 }) {
+// RememberedKey — the For you tray's mark that secrets are remembered: a
+// small key badge on the tray icon's corner, never a number or a dot, so it
+// does not read as something waiting or unread. Its parent positions it.
+export function RememberedKey({ size = 9 }) {
   if (!useRemembered()) return null;
-  return <KeyRound size={size} class="zl-rem-key" aria-hidden="true" />;
+  return <span class="zl-rem-key" aria-hidden="true"><KeyRound size={size} /></span>;
 }
 
 // RememberedBlock — the first line of For you while secrets are remembered.
