@@ -30,6 +30,9 @@ type runOutcome struct {
 	InterruptedByRestart bool
 	FollowUpOf           string
 	ReportedAt           time.Time
+	// Starts is the session's start count when the turn ended (owner
+	// observer): admitting the report later can tell it worked again since.
+	Starts uint64
 }
 
 // subscribeRunOutcomes installs the observer that turns bus traffic into

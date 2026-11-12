@@ -98,6 +98,17 @@ type ownerReportObserver struct {
 	// was cut by the restart rather than by a user's Stop. Nil in tests that
 	// build an observer on its own: never a restart.
 	restarting func() bool
+	// starts counts the session's run starts and the queued instructions it
+	// consumed, in publication order. A report carries the count its turn
+	// ended at, so admitting it later can tell the session worked again.
+	starts uint64
+	// onStart is called, on the subscriber goroutine and after starts is
+	// counted, for each of them: the Manager marks the session's linked tasks
+	// started (live_tasks.go). Nil in tests that build an observer on its own.
+	onStart func()
+	// execMu orders the session's execution writes: a start against an older
+	// report deciding the session stopped.
+	execMu sync.Mutex
 	// closed stops new work being admitted once the session is being torn
 	// down. discard additionally abandons what was pending (an explicit
 	// delete: the conversation is gone, and so is the reason to report it).
@@ -177,6 +188,12 @@ func newOwnerReportObserver(sess *ManagedSession, emit func(runOutcome)) *ownerR
 		case bus.RunStarted:
 			clear(openPrompts)
 			o.beginRun(e.RunGen, e.Origin)
+			o.started()
+		case bus.Steered:
+			// A queued instruction is consumed only now: being queued is not
+			// starting it.
+			o.countStart()
+			o.started()
 		case bus.SubagentStarted:
 			o.attachJob(e.JobID)
 		case bus.BashJobStarted:
@@ -253,6 +270,28 @@ func (o *ownerReportObserver) beginRun(gen uint64, origin bus.RunOrigin) {
 	o.runTurn[gen] = turn
 	o.currentTurn = turn
 	o.openRuns[turn]++
+	o.starts++
+}
+
+// countStart counts a start that is not a run of its own.
+func (o *ownerReportObserver) countStart() {
+	o.mu.Lock()
+	o.starts++
+	o.mu.Unlock()
+}
+
+// started hands a counted start to the Manager.
+func (o *ownerReportObserver) started() {
+	if o.onStart != nil {
+		o.onStart()
+	}
+}
+
+// startedSince says the session started again after a report counted starts.
+func (o *ownerReportObserver) startedSince(starts uint64) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.starts != starts
 }
 
 // resolveTurnLocked decides which turn a run belongs to. Callers hold mu.
@@ -320,13 +359,14 @@ func (o *ownerReportObserver) attachJob(jobID string) {
 // reported. The turn is not marked reported either — it still owes its
 // eventual done/failed outcome.
 func (o *ownerReportObserver) blocked(runGen uint64, pending *CallbackPending) {
+	out := runOutcome{Status: callbackStatusNeedsInput, RunGen: runGen, Pending: pending}
 	o.mu.Lock()
 	if !o.admitLocked() {
 		o.mu.Unlock()
 		return
 	}
+	out.Starts = o.starts
 	o.mu.Unlock()
-	out := runOutcome{Status: callbackStatusNeedsInput, RunGen: runGen, Pending: pending}
 	o.launch(func() {
 		if o.discarded() {
 			return
@@ -369,7 +409,7 @@ func (o *ownerReportObserver) runEnded(e bus.RunEnded) {
 		followUpOf = prev.FollowUpOf
 	}
 	o.latest[turn] = runOutcome{Status: callbackStatusDone, RunGen: e.RunGen, FinalText: e.FinalText,
-		FollowUpOf: followUpOf, InterruptedByRestart: o.restartCancelled(e)}
+		FollowUpOf: followUpOf, InterruptedByRestart: o.restartCancelled(e), Starts: o.starts}
 	if !o.admitLocked() {
 		o.mu.Unlock()
 		return
@@ -401,6 +441,7 @@ func (o *ownerReportObserver) failed(e bus.RunEnded) {
 	}
 	o.reported[turn] = true
 	delete(o.latest, turn)
+	starts := o.starts
 	o.mu.Unlock()
 
 	out := runOutcome{
@@ -409,6 +450,7 @@ func (o *ownerReportObserver) failed(e bus.RunEnded) {
 		FinalText:  e.FinalText,
 		Err:        e.Err.Error(),
 		FollowUpOf: followUpOf,
+		Starts:     starts,
 	}
 	o.launch(func() {
 		// The quiescence counters are maintained by a different subscriber, so
@@ -443,9 +485,11 @@ func (o *ownerReportObserver) reopenLocked(turn uint64) (followUpOf string, reop
 }
 
 // restartCancelled says a run was cut by moa stopping. A user's Stop cancels
-// the run too, but leaves the process running.
+// the run too, but leaves the process running. The event may be handled after
+// shutdown began even though Stop ended the run before it, so the Stop is
+// told apart by its cause, recorded before it cancelled this generation.
 func (o *ownerReportObserver) restartCancelled(e bus.RunEnded) bool {
-	return e.Cancelled && o.restarting != nil && o.restarting()
+	return e.Cancelled && o.restarting != nil && o.restarting() && o.sess.userStopGen.Load() != e.RunGen
 }
 
 // stamp is stampLocked for a caller that does not hold mu.
@@ -557,6 +601,7 @@ func (o *ownerReportObserver) awaitAndEmit(turn uint64) {
 // them is the process exiting. Reporting just the newest would silently drop
 // the others.
 func (o *ownerReportObserver) flush() {
+	background := o.sess.runtime.BackgroundWork()
 	o.mu.Lock()
 	if o.discard {
 		o.closed = true
@@ -564,11 +609,23 @@ func (o *ownerReportObserver) flush() {
 		o.cancel()
 		return
 	}
-	turns := make([]uint64, 0, len(o.latest))
+	turns := make([]uint64, 0, len(o.latest)+len(o.followUps))
 	for turn := range o.latest {
 		if !o.reported[turn] {
 			turns = append(turns, turn)
 		}
+	}
+	// A turn already reported with work still running was promised another
+	// report. The process ending is that work's end: conclude it, linked or
+	// not, rather than leave the owner waiting for a follow-up that cannot
+	// come. One whose continuation already ended is pending in latest; with
+	// nothing left running, there is nothing for shutdown to cut.
+	for turn, at := range o.followUps {
+		if _, pending := o.latest[turn]; !pending && background > 0 {
+			turns = append(turns, turn)
+			o.latest[turn] = runOutcome{Status: callbackStatusDone, FollowUpOf: at, InterruptedByRestart: true, Starts: o.starts}
+		}
+		delete(o.followUps, turn)
 	}
 	sort.Slice(turns, func(i, j int) bool { return turns[i] < turns[j] })
 	pending := make([]runOutcome, 0, len(turns))
@@ -585,7 +642,6 @@ func (o *ownerReportObserver) flush() {
 	o.mu.Unlock()
 	o.cancel()
 
-	background := o.sess.runtime.BackgroundWork()
 	for i, out := range pending {
 		out.BackgroundCount = background
 		// Whatever the turn left running dies with the process: it will not

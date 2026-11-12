@@ -126,6 +126,10 @@ type reportCommand struct {
 	// the outbox boundary only when this closes — before that the report exists
 	// solely in a channel, which a process exit does not preserve.
 	ack chan struct{}
+	// durable, for a report, is set before ack closes: the report is in the
+	// outbox on disk or confirmed in the owner's transcript, so a crash can no
+	// longer lose it. A failed write keeps it only in memory.
+	durable *bool
 }
 
 type heartbeatCommand struct {
@@ -211,12 +215,22 @@ func (c *reportCoordinator) post(cmd reportCommand) bool {
 }
 
 // add records one report for the codebase's owner and waits for the actor to
-// have processed it (queued, and its persistence attempted).
+// have processed it (queued, and its persistence attempted). It returns
+// whether the report is durable: what a sink records as told on the strength
+// of it must not outlive a report that only exists in memory.
 //
 // The wait is what makes a sink's completion meaningful: "this turn was
 // reported" has to mean it reached the outbox, not that it reached a channel.
 // Nudges stay asynchronous — they carry nothing that can be lost.
 func (c *reportCoordinator) add(key string, rep owner.Report) bool {
+	return c.addVia(key, rep, nil)
+}
+
+// addVia is add for a sink that must decide the report's last details once it
+// is admitted — after a heartbeat holding admission, so on the state the
+// owner will actually be told — and act on its durability in the same step.
+// via gets the report and the function that persists it.
+func (c *reportCoordinator) addVia(key string, rep owner.Report, via func(owner.Report, func(owner.Report) bool) bool) bool {
 	if c == nil {
 		return false
 	}
@@ -225,12 +239,18 @@ func (c *reportCoordinator) add(key string, rep owner.Report) bool {
 	if c.testReportAdmitted != nil {
 		c.testReportAdmitted()
 	}
-	ack := make(chan struct{})
-	if !c.post(reportCommand{key: key, report: &rep, ack: ack}) {
-		return false
+	persist := func(rep owner.Report) bool {
+		ack, durable := make(chan struct{}), false
+		if !c.post(reportCommand{key: key, report: &rep, ack: ack, durable: &durable}) {
+			return false
+		}
+		<-ack
+		return durable
 	}
-	<-ack
-	return true
+	if via == nil {
+		return persist(rep)
+	}
+	return via(rep, persist)
 }
 
 // BeginShutdown puts the actor in accept-only mode and waits for it to be in
@@ -353,10 +373,14 @@ func (c *reportCoordinator) loop() {
 				continue
 			}
 			if cmd.report != nil {
+				var durable bool
 				if acceptOnly {
-					c.queue(cmd.key, batch, *cmd.report)
+					_, durable = c.queue(cmd.key, batch, *cmd.report)
 				} else {
-					c.accept(cmd.key, batch, *cmd.report)
+					durable = c.accept(cmd.key, batch, *cmd.report)
+				}
+				if cmd.durable != nil {
+					*cmd.durable = durable
 				}
 				ackCommand(cmd)
 				continue
@@ -478,7 +502,10 @@ func (c *reportCoordinator) drain(batches map[string]*reportBatch) {
 				continue // a nudge has nowhere to deliver to any more
 			}
 			batch := c.batch(cmd.key, batches)
-			c.queue(cmd.key, batch, *cmd.report)
+			_, durable := c.queue(cmd.key, batch, *cmd.report)
+			if cmd.durable != nil {
+				*cmd.durable = durable
+			}
 			ackCommand(cmd)
 		default:
 			for key, batch := range batches {
@@ -543,10 +570,12 @@ func (c *reportCoordinator) recover(batches map[string]*reportBatch) {
 // accept persists a new report and decides when it leaves. The outbox is
 // written BEFORE the report is queued in memory, so a crash between the two
 // leaves a report that will be redelivered rather than one that was promised
-// and then forgotten.
-func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Report) {
-	if !c.queue(key, batch, rep) {
-		return
+// and then forgotten. It returns whether the report is durable: on disk, or
+// delivered into the owner's flushed transcript.
+func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Report) bool {
+	added, durable := c.queue(key, batch, rep)
+	if !added {
+		return durable
 	}
 	// The report owns the next heartbeat even if this status flushes it now.
 	// Set this before delivery, which can block awaiting the owner transcript.
@@ -559,18 +588,19 @@ func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Rep
 	if rep.Status == callbackStatusDone || rep.Status == reportStatusUserSaid || rep.Status == reportStatusRestart ||
 		rep.FollowUpOf != "" {
 		c.arm(key, batch)
-		return
+		return durable
 	}
-	c.flush(key, batch)
+	return c.flush(key, batch) || durable
 }
 
 // queue adds a report to the batch and tries to persist the outbox, returning
-// whether the report is new. A failed write does NOT drop the report: it stays
+// whether the report is new and whether the batch holding it is on disk. A
+// failed write does NOT drop the report: it stays
 // in memory (and is retried on the next accept, flush or shutdown), because the
 // disk being full is exactly when losing the owner's picture of the project is
 // least acceptable. The warning is logged once per batch so a broken disk does
 // not flood the log with one line per outcome.
-func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Report) bool {
+func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Report) (added, durable bool) {
 	if len(batch.pending) == 0 {
 		c.reloadEmptyBatch(key, batch)
 	}
@@ -579,7 +609,7 @@ func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Repo
 	}
 	for _, existing := range batch.pending {
 		if existing.ID == rep.ID {
-			return false // the same outcome, re-delivered: already queued
+			return false, !batch.outboxFailed // the same outcome, re-delivered: already queued
 		}
 	}
 	batch.pending = append(batch.pending, rep)
@@ -591,7 +621,7 @@ func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Repo
 			slog.Warn("owner reports: could not persist the outbox; keeping the reports in memory",
 				"codebase", key, "session", rep.SessionID, "error", err)
 		}
-		return true
+		return true, false
 	}
 	batch.outbox = outbox
 	batch.preservedPaths = c.warnPreserved(key, outbox, batch.preservedPaths)
@@ -600,7 +630,7 @@ func (c *reportCoordinator) queue(key string, batch *reportBatch, rep owner.Repo
 	}
 	batch.outboxFailed = false
 	slog.Info("owner report accepted in outbox", "codebase", key, "session", rep.SessionID, "owner", "", "status", rep.Status, "run_gen", 0, "batch", "", "n", len(batch.pending))
-	return true
+	return true, true
 }
 
 func (c *reportCoordinator) arm(key string, batch *reportBatch) {
@@ -620,11 +650,12 @@ func (c *reportCoordinator) disarm(batch *reportBatch) {
 // flush attempts one delivery of everything pending for a codebase. A busy
 // owner keeps its batch until its run ends, except when it is blocked in an
 // interruptible wait. Its own run outcomes nudge the coordinator; the timer
-// is re-armed as a backstop in case no further run ever happens.
-func (c *reportCoordinator) flush(key string, batch *reportBatch) {
+// is re-armed as a backstop in case no further run ever happens. It returns
+// whether the batch reached the owner's flushed transcript.
+func (c *reportCoordinator) flush(key string, batch *reportBatch) bool {
 	c.disarm(batch)
 	if len(batch.pending) == 0 {
-		return
+		return false
 	}
 	reportDeliveryAttempts.Add(1)
 	slog.Info("owner reports delivery attempt", "codebase", key, "session", "", "owner", "", "status", "attempt", "run_gen", 0, "batch", "", "n", len(batch.pending))
@@ -637,7 +668,7 @@ func (c *reportCoordinator) flush(key string, batch *reportBatch) {
 		slog.Info("owner reports delivery result", "codebase", key, "session", "", "owner", "", "status", status, "run_gen", 0, "batch", "", "n", len(batch.pending), "error", err)
 		slog.Debug("owner reports: batch waiting", "codebase", key, "error", err)
 		c.arm(key, batch)
-		return
+		return false
 	}
 	slog.Info("owner reports delivery result", "codebase", key, "session", "", "owner", "", "status", "delivered", "run_gen", 0, "batch", "", "n", len(batch.pending))
 	batch.pending = nil
@@ -649,6 +680,7 @@ func (c *reportCoordinator) flush(key string, batch *reportBatch) {
 	} else {
 		batch.outbox = outbox
 	}
+	return true
 }
 
 // batch loads the lanes before the first report for a codebase. That matters
@@ -847,8 +879,8 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 	if len(pending) == 0 {
 		return sess.runtime.Flush()
 	}
-	text := reportsMessage(own, pending)
 	batchID := reportBatchID(pending)
+	text := reportsMessage(own, m.currentTaskNotices(own, pending))
 	sessions := make([]map[string]string, 0, len(pending))
 	for _, rep := range pending {
 		if rep.SessionID == "" {
@@ -987,13 +1019,10 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 		}
 		rep := reportFrom(sess, out)
 		m.withRunState(&rep, observer.running())
-		// The stop is recorded only once the report naming it is in the
-		// outbox: a crash in between says it twice rather than never.
-		if admitOwnerReport(reports, sess, key, rep) && len(rep.LinkedTasks) > 0 {
-			m.markExecutionStopped(sess.ID)
-		}
+		admitOwnerReportVia(reports, sess, key, rep, m.stopNoticeVia(observer, out.Starts))
 	})
 	observer.restarting = m.stopping
+	observer.onStart = func() { m.recordExecutionStart(observer) }
 	sess.mu.Lock()
 	sess.ownerObserver = observer
 	sess.mu.Unlock()
@@ -1003,13 +1032,19 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 // child has been detached. The detach check is repeated under ownerDetachMu so
 // that a detach which has returned can never be followed by an admitted report.
 func admitOwnerReport(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report) bool {
+	return admitOwnerReportVia(reports, sess, key, report, nil)
+}
+
+// admitOwnerReportVia is admitOwnerReport through the coordinator's addVia.
+func admitOwnerReportVia(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report,
+	via func(owner.Report, func(owner.Report) bool) bool) bool {
 	sess.ownerDetachMu.Lock()
 	defer sess.ownerDetachMu.Unlock()
 	if sess.ownerDetached.Load() {
 		slog.Info("owner report dropped: session detached", "session", sess.ID)
 		return false
 	}
-	return reports.add(key, report)
+	return reports.addVia(key, report, via)
 }
 
 // reportFrom turns a run outcome into the report the owner will read. The

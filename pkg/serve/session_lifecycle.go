@@ -821,9 +821,6 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// Project owners: children report their outcomes here, and the owner's own
 	// outcomes are what release a batch that was waiting for it to be free.
 	m.subscribeOwnerReports(sess, opts != nil && opts.ownerSession)
-	// Any session can be the executor of an owner's task: its run starts
-	// mark them started (live_tasks.go).
-	m.subscribeExecutionStarts(sess)
 
 	return sess, nil
 }

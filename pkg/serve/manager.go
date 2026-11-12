@@ -75,6 +75,10 @@ type ManagedSession struct {
 	// must not read disk: every report emission and every owner listing
 	// consults it. Written only by SetOwnerDetached.
 	ownerDetached atomic.Bool
+	// userStopGen is the run generation a user's Stop last cancelled, set
+	// before it cancels: the owner observer tells that run from one cut by moa
+	// stopping however late it handles the run's end.
+	userStopGen atomic.Uint64
 
 	// missedCallFrom is the owner whose call request went unanswered, set
 	// while its written question is open: that question's push then reads

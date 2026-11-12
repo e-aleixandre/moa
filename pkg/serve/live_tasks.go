@@ -59,27 +59,55 @@ func (m *Manager) stopping() bool {
 	return m.shuttingDown.Load() || m.baseCtx.Err() != nil
 }
 
-// subscribeExecutionStarts marks the session's linked tasks started on each
-// of its runs, whatever started it. The write happens off the bus callback;
-// a session with no links costs one indexed read.
-func (m *Manager) subscribeExecutionStarts(sess *ManagedSession) {
-	if m.tasks == nil {
+// recordExecutionStart marks the linked tasks of the observer's session
+// started: a run of it began, or a queued instruction reached it. The owner
+// observer calls it from its own ordered subscriber, after counting the start,
+// so no subscriber of its own reorders the session's other bookkeeping; the
+// write happens off that goroutine. It holds the observer's execution lock, so
+// it cannot interleave with an older report deciding to mark the session
+// stopped (stopNoticeVia).
+func (m *Manager) recordExecutionStart(o *ownerReportObserver) {
+	if m.tasks == nil || !m.executions.admit() {
 		return
 	}
-	id := sess.ID
-	sess.pushUnsubs = append(sess.pushUnsubs, sess.runtime.Bus.Subscribe(func(bus.RunStarted) {
-		if !m.executions.admit() {
-			return
+	id := o.sess.ID
+	go func() {
+		defer m.executions.wg.Done()
+		o.execMu.Lock()
+		defer o.execMu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
+		defer cancel()
+		if err := m.tasks.MarkExecutionStarted(ctx, id); err != nil {
+			slog.Warn("live tasks: run start not recorded", "session", id, "error", err)
 		}
-		go func() {
-			defer m.executions.wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
-			defer cancel()
-			if err := m.tasks.MarkExecutionStarted(ctx, id); err != nil {
-				slog.Warn("live tasks: run start not recorded", "session", id, "error", err)
-			}
-		}()
-	}))
+	}()
+}
+
+// stopNoticeVia admits a report naming linked tasks as the executor's stop.
+// The report was decided when its turn ended (after `starts` starts of the
+// session); it is admitted later, after any heartbeat holding admission. If
+// the session started again in between, the notice no longer holds: the new
+// run's own report will carry it. Otherwise the stop is recorded only once
+// the report is durable — a crash before that leaves boot recovery armed.
+// Start writes take the same lock, so they either see this mark and clear it
+// or come after a start this check already saw.
+func (m *Manager) stopNoticeVia(o *ownerReportObserver, starts uint64) func(owner.Report, func(owner.Report) bool) bool {
+	return func(rep owner.Report, persist func(owner.Report) bool) bool {
+		if len(rep.LinkedTasks) == 0 {
+			return persist(rep)
+		}
+		o.execMu.Lock()
+		defer o.execMu.Unlock()
+		if o.startedSince(starts) {
+			rep.LinkedTasks = nil
+			return persist(rep)
+		}
+		durable := persist(rep)
+		if durable && !o.startedSince(starts) {
+			m.markExecutionStopped(o.sess.ID)
+		}
+		return durable
+	}
 }
 
 // sessionTitle names a session, loaded or saved, for the owner's tasks list.
@@ -151,15 +179,57 @@ func (m *Manager) withRunState(rep *owner.Report, running bool) {
 	}
 }
 
-// markExecutionStopped records, once the report carrying them is in the
-// outbox, that the owner was told about these tasks: not again until the
-// session runs and stops once more.
+// markExecutionStopped records, once the report carrying them is durable,
+// that the owner was told about these tasks: not again until the session runs
+// and stops once more.
 func (m *Manager) markExecutionStopped(sessionID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
 	defer cancel()
 	if _, err := m.tasks.MarkExecutionStopped(ctx, sessionID); err != nil {
 		slog.Warn("live tasks: stop not recorded; the owner may hear it again", "session", sessionID, "error", err)
 	}
+}
+
+// currentTaskNotices drops, as a batch is painted for the owner, the linked
+// task notices that no longer hold: the task was closed, moved or relinked to
+// another session after the report was admitted. The report keeps its ID, so
+// the batch is the same one however it is painted. A failed read keeps the
+// notices: hearing one twice beats not hearing it.
+func (m *Manager) currentTaskNotices(own owner.Owner, pending []owner.Report) []owner.Report {
+	if m.tasks == nil {
+		return pending
+	}
+	linked := false
+	for _, rep := range pending {
+		linked = linked || len(rep.LinkedTasks) > 0
+	}
+	if !linked {
+		return pending
+	}
+	current, err := m.executionsBySession(own)
+	if err != nil {
+		slog.Warn("live tasks: linked tasks not read for a delivery", "owner", own.ID, "error", err)
+		return pending
+	}
+	out := make([]owner.Report, len(pending))
+	for i, rep := range pending {
+		out[i] = rep
+		if len(rep.LinkedTasks) == 0 {
+			continue
+		}
+		open := map[int64]bool{}
+		for _, r := range current[rep.SessionID] {
+			open[r.ID] = true
+		}
+		kept := make([]owner.ReportTask, 0, len(rep.LinkedTasks))
+		for _, t := range rep.LinkedTasks {
+			if open[t.ID] {
+				kept = append(kept, t)
+			}
+		}
+		out[i].LinkedTasks = kept
+	}
+	return out
 }
 
 // nextScheduledRun is the soonest enabled schedule aimed at the session.
@@ -228,12 +298,15 @@ func (m *Manager) reportInterruptedExecutions() {
 	}
 	for _, key := range keys {
 		list := groups[key]
-		m.reports.add(key, owner.Report{
+		if !m.reports.add(key, owner.Report{
 			ID:           newReportID(),
 			Status:       reportStatusRestart,
 			RestartTasks: list,
 			At:           time.Now().UTC().Format(time.RFC3339),
-		})
+		}) {
+			// Not durable: the next start says it again rather than never.
+			continue
+		}
 		marked := map[string]bool{}
 		for _, t := range list {
 			if !marked[t.SessionID] {
@@ -299,19 +372,28 @@ func (m *Manager) linkExecution(ctx context.Context, own owner.Owner, id int64, 
 // linkedTasksBySession maps each executor to the owner's open tasks it does,
 // for the sessions roster.
 func (m *Manager) linkedTasksBySession(own owner.Owner) map[string][]tasks.Record {
-	if m.tasks == nil || own.SessionID == "" {
+	out, err := m.executionsBySession(own)
+	if err != nil {
+		slog.Warn("live tasks: linked tasks not read for the roster", "owner", own.ID, "error", err)
 		return nil
+	}
+	return out
+}
+
+// executionsBySession maps each executor to the owner's open tasks it does.
+func (m *Manager) executionsBySession(own owner.Owner) (map[string][]tasks.Record, error) {
+	if m.tasks == nil || own.SessionID == "" {
+		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
 	defer cancel()
 	recs, err := m.tasks.OwnerExecutions(ctx, own.SessionID)
 	if err != nil {
-		slog.Warn("live tasks: linked tasks not read for the roster", "owner", own.ID, "error", err)
-		return nil
+		return nil, err
 	}
 	out := map[string][]tasks.Record{}
 	for _, r := range recs {
 		out[r.Execution.SessionID] = append(out[r.Execution.SessionID], r)
 	}
-	return out
+	return out, nil
 }
