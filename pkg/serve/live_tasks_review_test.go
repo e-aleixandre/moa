@@ -108,7 +108,7 @@ func TestReviewStopRemainsUnacknowledgedWhenOutboxCannotPersist(t *testing.T) {
 	if err := os.Chmod(dir, 0500); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(dir, 0700)
+	defer func() { _ = os.Chmod(dir, 0700) }()
 	publishRunEnd(child, 1, "quiet but report cannot persist")
 	child.ownerObserver.sync()
 	child.ownerObserver.waitWorkers()
