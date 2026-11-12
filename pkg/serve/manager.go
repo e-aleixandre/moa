@@ -29,6 +29,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/push"
 	"github.com/e-aleixandre/moa/pkg/release"
+	"github.com/e-aleixandre/moa/pkg/secretaction"
 	"github.com/e-aleixandre/moa/pkg/secrets"
 	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/subagent"
@@ -885,6 +886,7 @@ type Manager struct {
 	defaultDaybreak        bool
 	daybreakCatalog        func() core.DaybreakAvailability
 	workspaceRoot          string
+	secretMemory           *secretaction.Memory // remembered secrets; process memory only, a restart empties it
 	moaCfg                 core.MoaConfig
 	configLoader           func(cwd string) core.MoaConfig
 	keepAlive              *keepAliveService
@@ -1165,6 +1167,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	m := &Manager{
 		tasks:                       taskRepo,
 		taskHub:                     newTasksHub(),
+		secretMemory:                secretaction.NewMemory(),
 		tasksCancel:                 tasksCancel,
 		sessions:                    make(map[string]*ManagedSession),
 		resuming:                    make(map[string]struct{}),

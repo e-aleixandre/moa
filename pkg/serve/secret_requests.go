@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/secretaction"
 )
@@ -53,7 +54,10 @@ func handleSecretRequestResponse(mgr *Manager) http.HandlerFunc {
 
 		var body struct {
 			Action string `json:"action"`
-			Values []struct {
+			// HoldHours > 0 remembers the values for that many hours
+			// (secretaction.Memory).
+			HoldHours *int `json:"holdHours"`
+			Values    []struct {
 				Index *int            `json:"index"`
 				Value json.RawMessage `json:"value"`
 			} `json:"values"`
@@ -70,6 +74,22 @@ func handleSecretRequestResponse(mgr *Manager) http.HandlerFunc {
 		}
 
 		reqID := r.PathValue("reqId")
+		hold := 0
+		if body.HoldHours != nil {
+			hold = *body.HoldHours
+		}
+		// Checked before anything is resolved: a bad hold must not turn into
+		// a deny or a single use the owner did not choose.
+		if hold != 0 {
+			if body.Action != "allow" || hold < 0 || hold > secretaction.MaxHoldHours {
+				http.Error(w, "holdHours must be 1 to 10 hours, on allow", http.StatusBadRequest)
+				return
+			}
+			if mgr.secretMemory == nil {
+				http.Error(w, "holdHours is not available here", http.StatusBadRequest)
+				return
+			}
+		}
 		switch body.Action {
 		case "deny":
 			writeSecretResolveError(w, broker.Resolve(reqID, false, nil))
@@ -80,9 +100,12 @@ func handleSecretRequestResponse(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		var kind string
+		var fields []secretaction.Field
+		eligible := false
 		for _, p := range broker.Pending() {
 			if p.ID == reqID {
-				kind = p.Kind
+				kind, fields = p.Kind, p.Fields
+				eligible = secretaction.Rememberable(p) && p.HoldMaxHours > 0
 			}
 		}
 		if !broker.IsPending(reqID) {
@@ -112,8 +135,70 @@ func handleSecretRequestResponse(mgr *Manager) http.HandlerFunc {
 				return
 			}
 		}
-		writeSecretResolveError(w, broker.Resolve(reqID, true, values))
+		if hold == 0 {
+			writeSecretResolveError(w, broker.Resolve(reqID, true, values))
+			return
+		}
+		if !eligible {
+			http.Error(w, "this request cannot be remembered", http.StatusBadRequest)
+			return
+		}
+		if err := secretaction.ValidateRemember(secretaction.MemoryKeys(fields), values); err != nil {
+			http.Error(w, "these values cannot be remembered: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		// The epoch is read now, when the owner approves: a Forget pressed
+		// before the waiting tool remembers the values wins.
+		epoch := mgr.secretMemory.Epoch()
+		writeSecretResolveError(w, broker.ResolveHold(reqID, values, time.Duration(hold)*time.Hour, epoch))
 	}
+}
+
+// handleRememberedSecrets reports what is remembered:
+// GET /api/remembered-secrets. Metadata only; no value ever leaves Memory.
+func handleRememberedSecrets(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeRememberedSecrets(w, mgr)
+	}
+}
+
+// handleForgetSecrets forgets everything: DELETE /api/remembered-secrets.
+// Idempotent; answers with the new status.
+func handleForgetSecrets(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		mgr.secretMemory.ForgetAll()
+		writeRememberedSecrets(w, mgr)
+	}
+}
+
+// handleForgetSecret forgets one alias (every kind under it):
+// DELETE /api/remembered-secrets/{alias}. Idempotent.
+func handleForgetSecret(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mgr.secretMemory.Forget(r.PathValue("alias"))
+		writeRememberedSecrets(w, mgr)
+	}
+}
+
+type rememberedSecretUse struct {
+	secretaction.MemoryUse
+	SessionTitle string `json:"sessionTitle,omitempty"`
+}
+
+func writeRememberedSecrets(w http.ResponseWriter, mgr *Manager) {
+	st := mgr.secretMemory.Status()
+	uses := make([]rememberedSecretUse, len(st.Uses))
+	for i, u := range st.Uses {
+		uses[i].MemoryUse = u
+		if s, ok := mgr.Get(u.SessionID); ok {
+			uses[i].SessionTitle = s.title()
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, struct {
+		secretaction.MemoryStatus
+		Uses []rememberedSecretUse `json:"uses"`
+	}{st, uses})
 }
 
 // hasControlByte reports a C0 control or DEL. A terminal would act on them (a

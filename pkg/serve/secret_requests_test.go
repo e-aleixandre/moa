@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -40,9 +41,15 @@ type secretFixture struct {
 // covers everything the session persisted.
 func newSecretFixture(t *testing.T, handlers ...mockHandler) *secretFixture {
 	t.Helper()
+	return newSecretFixtureAt(t, t.TempDir(), handlers...)
+}
+
+// newSecretFixtureAt builds the fixture over an existing root: a second call
+// on the same root is a server restart.
+func newSecretFixtureAt(t *testing.T, root string, handlers ...mockHandler) *secretFixture {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -163,16 +170,28 @@ func toolResultText(t *testing.T, msgs []core.AgentMessage, callID string) strin
 func scanTreeFor(t *testing.T, root string, needle []byte) []string {
 	t.Helper()
 	var hits []string
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() {
 			return nil
 		}
 		b, err := os.ReadFile(path)
-		if err == nil && bytes.Contains(b, needle) {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil // removed while walking
+			}
+			return err
+		}
+		if bytes.Contains(b, needle) {
 			hits = append(hits, path)
 		}
 		return nil
 	})
+	if err != nil {
+		t.Fatalf("scan %s: %v", root, err)
+	}
 	return hits
 }
 

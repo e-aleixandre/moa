@@ -14,6 +14,12 @@ import {
   bridgeErrorText, faceIdReason, loadStatuses, onSavedChange, readSaved, recordUse, saveNotice,
 } from "./saved-secrets.js";
 import { addToast } from "./notifications.js";
+import { loadRemembered } from "./remembered-secrets.js";
+
+// The tool remembers the values a moment after the answer is accepted.
+function refreshRememberedSoon() {
+  setTimeout(loadRemembered, 1500);
+}
 
 // autofocusAllowed — focus the first field on desktop only: on a touch screen
 // it would pop the keyboard before the owner has read what is being asked.
@@ -21,7 +27,7 @@ export function autofocusAllowed(win = typeof window !== "undefined" ? window : 
   return !win?.matchMedia?.("(pointer: coarse)")?.matches;
 }
 
-export function createSecretCard({ request, send, bridge = null, onChange, notify = addToast }) {
+export function createSecretCard({ request, send, bridge = null, onChange, notify = addToast, onHoldOpened = refreshRememberedSoon }) {
   const state = {
     values: {},
     revealed: {},
@@ -29,6 +35,7 @@ export function createSecretCard({ request, send, bridge = null, onChange, notif
     typeAnother: {},
     fromSaved: {},
     saveOn: false,
+    holdHours: 0,
     busy: false,
     error: "",
   };
@@ -103,6 +110,12 @@ export function createSecretCard({ request, send, bridge = null, onChange, notif
 
     toggleSave() { patch({ saveOn: !state.saveOn }); },
 
+    setHold(hours) {
+      if (state.busy || !(request.holdMaxHours > 0)) return;
+      const h = Number.isInteger(hours) && hours > 0 ? Math.min(hours, request.holdMaxHours) : 0;
+      patch({ holdHours: h });
+    },
+
     typeInstead(index) { patch({ typeAnother: { ...state.typeAnother, [index]: true } }); },
 
     // The saved value was for another action: fill it in, never send it. The
@@ -162,7 +175,7 @@ export function createSecretCard({ request, send, bridge = null, onChange, notif
         : [];
       let body;
       try {
-        body = buildAllowBody(request.fields, merged);
+        body = buildAllowBody(request.fields, merged, request.holdMaxHours > 0 ? state.holdHours : 0);
       } catch {
         inFlight = false;
         patch({ busy: false });
@@ -179,6 +192,7 @@ export function createSecretCard({ request, send, bridge = null, onChange, notif
         patch({ error: secretErrorText(e), busy: false });
         return;
       }
+      if (body.holdHours) onHoldOpened?.();
       if (bridge) {
         const outcome = await recordUse(bridge, request, { touched: [...used, ...reused], saves });
         // The card is gone by now; the toast is how the owner learns the result.

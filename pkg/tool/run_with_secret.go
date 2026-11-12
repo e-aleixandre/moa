@@ -40,12 +40,24 @@ const (
 	// background grandchild can keep the terminal open after bash exits.
 	ptyDrainDelay  = 2 * time.Second
 	maxPromptRegex = 500
+	// rememberedWriteTimeout bounds typing a remembered value, which holds
+	// the memory's lock: a terminal that stopped reading must not stall
+	// Forget.
+	rememberedWriteTimeout = 2 * time.Second
 )
 
 // NewRunWithSecret creates the run_with_secret tool: the user approves the
 // exact command and hands it values that are typed into its terminal when a
 // prompt appears, without the values reaching the model or the disk.
 func NewRunWithSecret(cfg ToolConfig, broker *secretaction.Broker) core.Tool {
+	return NewRunWithSecretMemory(cfg, broker, nil)
+}
+
+// NewRunWithSecretMemory is NewRunWithSecret with the server's remembered
+// secrets: a card may offer to remember its values for a few hours, and while
+// every value a request needs is remembered it is answered without a card.
+// memory may be nil (nothing is remembered).
+func NewRunWithSecretMemory(cfg ToolConfig, broker *secretaction.Broker, memory *secretaction.Memory) core.Tool {
 	cfg.Defaults()
 	return core.Tool{
 		Name:  RunWithSecretToolName,
@@ -106,7 +118,7 @@ func NewRunWithSecret(cfg ToolConfig, broker *secretaction.Broker) core.Tool {
 			}
 
 			host := secretaction.ParseSSHHost(command)
-			ans, err := broker.Request(ctx, secretaction.Request{
+			req := secretaction.Request{
 				Requester:         secretaction.Requester(ctx),
 				Kind:              secretaction.KindCommand,
 				Command:           command,
@@ -114,7 +126,26 @@ func NewRunWithSecret(cfg ToolConfig, broker *secretaction.Broker) core.Tool {
 				SSHHost:           host,
 				Fields:            cardFields,
 				ActionFingerprint: secretaction.CommandFingerprint(command, cwd, host),
-			})
+			}
+			rememberable := memory != nil && secretaction.Rememberable(req)
+			keys := secretaction.MemoryKeys(cardFields)
+			use := secretaction.MemoryUse{SessionID: broker.SessionID(), Requester: req.Requester, Command: command, Cwd: cwd}
+			if rememberable {
+				if values, gens, until, ok := memory.TakeAll(keys, use); ok {
+					defer func() {
+						for _, v := range values {
+							secretaction.Wipe(v)
+						}
+					}()
+					for i := range prompts {
+						prompts[i].value, prompts[i].key, prompts[i].gen = values[i], keys[i], gens[i]
+					}
+					res := runOnPTY(ctx, command, cwd, timeout, prompts, values, onUpdate, memory)
+					return withNote(res, fmt.Sprintf("Answered with values the user chose to remember (until %s).", until.UTC().Format("15:04 UTC"))), nil
+				}
+				req.HoldMaxHours = secretaction.MaxHoldHours
+			}
+			ans, err := broker.Request(ctx, req)
 			// Every path below returns through here: the values die with the
 			// execution.
 			defer ans.Wipe()
@@ -127,9 +158,39 @@ func NewRunWithSecret(cfg ToolConfig, broker *secretaction.Broker) core.Tool {
 			for i := range prompts {
 				prompts[i].value = ans.Values[i]
 			}
-			return runOnPTY(ctx, command, cwd, timeout, prompts, ans.Values, onUpdate), nil
+			note := ""
+			var mem *secretaction.Memory
+			if ans.Hold > 0 && rememberable {
+				gens, until, err := memory.RememberMany(keys, ans.Values, ans.Hold, ans.HoldEpoch, use)
+				if err != nil {
+					note = fmt.Sprintf("The values were not remembered (%v); they were used for this command only.", err)
+				} else {
+					// From here these are remembered values: Forget stops
+					// them in this run too, and a rejection forgets them.
+					mem = memory
+					for i := range prompts {
+						prompts[i].key, prompts[i].gen = keys[i], gens[i]
+					}
+					note = fmt.Sprintf("The user chose to remember these values until %s.", until.UTC().Format("15:04 UTC"))
+				}
+			}
+			return withNote(runOnPTY(ctx, command, cwd, timeout, prompts, ans.Values, onUpdate, mem), note), nil
 		},
 	}
+}
+
+func withNote(res core.Result, note string) core.Result {
+	if note == "" {
+		return res
+	}
+	for i := range res.Content {
+		if res.Content[i].Type == "text" || res.Content[i].Type == "" {
+			res.Content[i].Text += "\n" + note
+			return res
+		}
+	}
+	res.Content = append(res.Content, core.TextResult(note).Content...)
+	return res
 }
 
 type secretPrompt struct {
@@ -138,6 +199,10 @@ type secretPrompt struct {
 	custom    bool
 	value     []byte
 	delivered bool
+	// gen != 0: value is remembered under key; typing it needs that entry
+	// still remembered, and an evident rejection forgets it.
+	key secretaction.MemoryKey
+	gen uint64
 }
 
 func parseSecretFields(params map[string]any) ([]secretPrompt, []secretaction.Field, error) {
@@ -212,9 +277,13 @@ type ptyRun struct {
 	byKind      map[string]int
 	authStopped bool
 	heldCR      bool
+
+	memory     *secretaction.Memory
+	forgotten  bool // a remembered value was forgotten: nothing more is typed
+	writeStuck bool // the terminal did not take a value in time
 }
 
-func newPtyRun(ctx context.Context, ptmx *os.File, cmd *exec.Cmd, prompts []secretPrompt, values [][]byte, onUpdate func(core.Result)) *ptyRun {
+func newPtyRun(ctx context.Context, ptmx *os.File, cmd *exec.Cmd, prompts []secretPrompt, values [][]byte, onUpdate func(core.Result), memory *secretaction.Memory) *ptyRun {
 	r := &ptyRun{
 		ctx:      ctx,
 		ptmx:     ptmx,
@@ -225,6 +294,7 @@ func newPtyRun(ctx context.Context, ptmx *os.File, cmd *exec.Cmd, prompts []secr
 		tail:     newWipeBuffer(maxPromptTail),
 		failTail: newWipeBuffer(failWindow),
 		byKind:   map[string]int{},
+		memory:   memory,
 	}
 	r.out.headMax = maxOutputBytes / 2
 	r.out.tailMax = maxOutputBytes / 2
@@ -232,7 +302,7 @@ func newPtyRun(ctx context.Context, ptmx *os.File, cmd *exec.Cmd, prompts []secr
 	return r
 }
 
-func runOnPTY(ctx context.Context, command, cwd string, timeout time.Duration, prompts []secretPrompt, values [][]byte, onUpdate func(core.Result)) core.Result {
+func runOnPTY(ctx context.Context, command, cwd string, timeout time.Duration, prompts []secretPrompt, values [][]byte, onUpdate func(core.Result), memory *secretaction.Memory) core.Result {
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -251,7 +321,7 @@ func runOnPTY(ctx context.Context, command, cwd string, timeout time.Duration, p
 	}
 	defer func() { _ = ptmx.Close() }()
 
-	r := newPtyRun(ctx, ptmx, cmd, prompts, values, onUpdate)
+	r := newPtyRun(ctx, ptmx, cmd, prompts, values, onUpdate, memory)
 	defer r.tail.wipe()
 	defer r.failTail.wipe()
 
@@ -294,6 +364,12 @@ func runOnPTY(ctx context.Context, command, cwd string, timeout time.Duration, p
 	}
 	if r.authStopped {
 		return core.ErrorResult(r.report(0) + "\nStopped: the prompt reappeared after an authentication failure; the password was not resent.")
+	}
+	if r.forgotten {
+		return core.ErrorResult(r.report(0) + "\nStopped: the user forgot the remembered value; nothing more was typed.")
+	}
+	if r.writeStuck {
+		return core.ErrorResult(r.report(0) + "\nStopped: the terminal did not accept the value in time.")
 	}
 	exitCode := 0
 	if waitErr != nil {
@@ -383,6 +459,11 @@ func (r *ptyRun) answer() {
 	}
 	if p.delivered && r.failSeen {
 		r.authStopped = true
+		if r.memory != nil && p.gen != 0 {
+			// The program evidently rejected it: no other session may
+			// keep sending it.
+			r.memory.AuthFailed(p.key, p.gen)
+		}
 		killProcGroup(r.cmd)
 		return
 	}
@@ -391,11 +472,22 @@ func (r *ptyRun) answer() {
 	if r.ctx.Err() != nil || r.exited.Load() {
 		return
 	}
-	msg := make([]byte, 0, len(p.value)+1)
-	msg = append(msg, p.value...)
-	msg = append(msg, '\n')
-	_, _ = r.ptmx.Write(msg)
-	secretaction.Wipe(msg)
+	if r.memory != nil && p.gen != 0 {
+		// Typed under the memory's lock, with a bounded write: once Forget
+		// returns, nothing more reaches the terminal.
+		ran, err := r.memory.Dispatch(p.key, p.gen, func() error {
+			_ = r.ptmx.SetWriteDeadline(time.Now().Add(rememberedWriteTimeout))
+			defer func() { _ = r.ptmx.SetWriteDeadline(time.Time{}) }()
+			return r.typeValue(p.value)
+		})
+		if !ran || err != nil {
+			r.forgotten, r.writeStuck = !ran, err != nil
+			killProcGroup(r.cmd)
+			return
+		}
+	} else {
+		_ = r.typeValue(p.value)
+	}
 	// A failure stays latched across later deliveries: answering a new
 	// field (a username after "Sorry, try again.") does not make resending a
 	// rejected one safe. Only output before the first delivery cannot be
@@ -408,6 +500,16 @@ func (r *ptyRun) answer() {
 	r.byKind[p.kind]++
 	r.tail.reset()
 	r.failTail.reset()
+}
+
+// typeValue writes value and a newline to the terminal.
+func (r *ptyRun) typeValue(value []byte) error {
+	msg := make([]byte, 0, len(value)+1)
+	msg = append(msg, value...)
+	msg = append(msg, '\n')
+	_, err := r.ptmx.Write(msg)
+	secretaction.Wipe(msg)
+	return err
 }
 
 // match picks the field whose prompt the current line shows: explicit
