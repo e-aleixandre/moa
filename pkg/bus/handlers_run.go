@@ -67,6 +67,18 @@ func registerRunControlHandlers(sctx *SessionContext) {
 		// cancelling the agent first lets it unwind and settle as an error.
 		sctx.cancelRun()
 		sctx.Agent.Abort()
+		// Normally the admitted run settles its own state. An orphan has no
+		// terminal callback left to do so. abortMu excludes new admissions;
+		// runInFlight also covers a run not yet inside Agent.Send or still
+		// publishing its terminal result, where IsRunning alone is not enough.
+		if sctx.State != nil && !sctx.runInFlight() && !sctx.Agent.IsRunning() &&
+			!sctx.Compacting() && !sctx.manualVerifyRunning && !sctx.quiescenceBlocked() &&
+			(sctx.Approvals == nil || !sctx.Approvals.hasBlockingPending()) &&
+			(sctx.SecretBroker == nil || len(sctx.SecretBroker.Pending()) == 0) {
+			if state := sctx.State.Current(); state == StateRunning || state == StatePermission {
+				_ = sctx.State.Transition(StateIdle)
+			}
+		}
 		if discardedOut != nil {
 			*discardedOut = discarded
 		}
