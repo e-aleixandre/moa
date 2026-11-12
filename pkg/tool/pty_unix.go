@@ -5,6 +5,8 @@ package tool
 import (
 	"os"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // pollablePTY returns the terminal master as a file Go's poller manages, so
@@ -20,13 +22,14 @@ func pollablePTY(f *os.File) (*os.File, error) {
 	}
 	nfd := -1
 	var dupErr error
-	if err := rc.Control(func(fd uintptr) { nfd, dupErr = syscall.Dup(int(fd)) }); err != nil {
+	// F_DUPFD_CLOEXEC: the copy is close-on-exec from birth, so a command
+	// another session starts at that moment cannot inherit the terminal.
+	if err := rc.Control(func(fd uintptr) { nfd, dupErr = unix.FcntlInt(fd, unix.F_DUPFD_CLOEXEC, 0) }); err != nil {
 		return nil, err
 	}
 	if dupErr != nil {
 		return nil, dupErr
 	}
-	syscall.CloseOnExec(nfd)
 	if err := syscall.SetNonblock(nfd, true); err != nil {
 		_ = syscall.Close(nfd)
 		return nil, err
