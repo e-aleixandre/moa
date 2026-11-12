@@ -206,6 +206,9 @@ func (m *Manager) CreateOwner(opts CreateOwnerOpts) (OwnerInfo, error) {
 	// Dropping the memo on every outcome is cheap and keeps it from naming an
 	// owner that a failed creation removed.
 	defer m.invalidateOwnerRefs()
+	if m.testOwnerPrechecked != nil {
+		m.testOwnerPrechecked()
+	}
 	own, err := store.Create(opts.Root, opts.Name, model, thinking, true, opts.Avatar)
 	if err != nil {
 		return OwnerInfo{}, err

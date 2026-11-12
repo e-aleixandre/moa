@@ -7,13 +7,14 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/owner"
@@ -24,90 +25,151 @@ import (
 // that followed no orderly shutdown: linked tasks whose session was working.
 const reportStatusRestart = "restart"
 
-// executionTimeout bounds one execution write; it never holds a bus callback.
+// executionTimeout bounds one execution write.
 const executionTimeout = 10 * time.Second
 
-// executionWorkers admits the goroutines that record run starts. Admission
-// and Add happen under one lock with the closed check, so close can wait for
-// them without racing a late Add from a bus callback.
-type executionWorkers struct {
-	mu     sync.Mutex
-	closed bool
-	wg     sync.WaitGroup
+// liveTaskKey is the Custom key of an owner's instruction that makes its
+// session the executor of a task (the sessions tool's task=N).
+const liveTaskKey = "live_task"
+
+// liveTaskInput is that instruction's task. Only the sessions tool makes one,
+// and it is a Go value no decoded message can hold, so nobody links a task by
+// sending a Custom of their own. A transcript keeps just the task id.
+type liveTaskInput struct {
+	id    int64
+	actor tasks.Actor
 }
 
-func (w *executionWorkers) admit() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.closed {
-		return false
+func (t liveTaskInput) MarshalJSON() ([]byte, error) { return json.Marshal(t.id) }
+
+// withLiveTask makes custom the provenance of an instruction for the owner's
+// task id: accepting it links the task to the session that accepts it.
+func withLiveTask(custom map[string]any, own owner.Owner, id int64) map[string]any {
+	custom[liveTaskKey] = liveTaskInput{id: id, actor: ownerActor(own)}
+	return custom
+}
+
+func liveTaskOf(custom map[string]any) (liveTaskInput, bool) {
+	t, ok := custom[liveTaskKey].(liveTaskInput)
+	return t, ok
+}
+
+// sessionWork records the facts a session's work gives its linked tasks, at
+// their source: the agent reports each input it accepts and each time work
+// proceeds (agent.WorkEntry), under the lock that admits and consumes its
+// input. So a link is made with the instruction it comes with, a task starts
+// only once its instruction left the queue, and a start can never land after
+// the stop of the work it started.
+type sessionWork struct {
+	m         *Manager
+	sessionID string
+	// noticed says a report told the owner this session stopped and no work
+	// entered since: a blocked run that goes on must say it works again.
+	// Used only under the agent's work gate.
+	noticed bool
+}
+
+// enter is the session's agent.AgentConfig.OnWork. An error refuses the input
+// or ends the run before its work proceeds: work the owner believes recorded
+// must not go on unrecorded.
+func (w *sessionWork) enter(e agent.WorkEntry) error {
+	tasksRepo := w.m.tasks
+	if tasksRepo == nil {
+		return nil
 	}
-	w.wg.Add(1)
-	return true
+	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
+	defer cancel()
+	if t, ok := liveTaskOf(e.Admitted); ok {
+		if _, err := tasksRepo.LinkExecution(ctx, t.actor, t.id, w.sessionID); err != nil {
+			return err
+		}
+	}
+	if !e.Work || e.Resumed && !w.noticed {
+		return nil
+	}
+	// Any work of the executor starts its tasks, except the ones whose
+	// instruction is still waiting in the queue: being queued is not started.
+	var queued []int64
+	for _, custom := range e.Queued {
+		if t, ok := liveTaskOf(custom); ok {
+			queued = append(queued, t.id)
+		}
+	}
+	if err := tasksRepo.MarkExecutionStarted(ctx, w.sessionID, queued...); err != nil {
+		return fmt.Errorf("live tasks: the start of this session's linked tasks was not recorded: %w", err)
+	}
+	w.noticed = false
+	return nil
 }
 
-func (w *executionWorkers) close() {
-	w.mu.Lock()
-	w.closed = true
-	w.mu.Unlock()
-	w.wg.Wait()
-}
-
-// stopping says moa itself is stopping: a run cancelled now was cut by the
-// restart, not by a user's Stop (which leaves the root context alive).
-func (m *Manager) stopping() bool {
-	return m.shuttingDown.Load() || m.baseCtx.Err() != nil
-}
-
-// recordExecutionStart marks the linked tasks of the observer's session
-// started: a run of it began, or a queued instruction reached it. The owner
-// observer calls it from its own ordered subscriber, after counting the start,
-// so no subscriber of its own reorders the session's other bookkeeping; the
-// write happens off that goroutine. It holds the observer's execution lock, so
-// it cannot interleave with an older report deciding to mark the session
-// stopped (stopNoticeVia).
-func (m *Manager) recordExecutionStart(o *ownerReportObserver) {
-	if m.tasks == nil || !m.executions.admit() {
+// workGate runs fn under the session's work gate (agent.Agent.WorkGate).
+func (s *ManagedSession) workGate(fn func()) {
+	if g, ok := s.runtime.Context().Agent.(interface{ WorkGate(func()) }); ok {
+		g.WorkGate(fn)
 		return
 	}
-	id := o.sess.ID
-	go func() {
-		defer m.executions.wg.Done()
-		o.execMu.Lock()
-		defer o.execMu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
-		defer cancel()
-		if err := m.tasks.MarkExecutionStarted(ctx, id); err != nil {
-			slog.Warn("live tasks: run start not recorded", "session", id, "error", err)
-		}
-	}()
+	fn()
 }
 
-// stopNoticeVia admits a report naming linked tasks as the executor's stop.
-// The report was decided when its turn ended (after `starts` starts of the
-// session); it is admitted later, after any heartbeat holding admission. If
-// the session started again in between, the notice no longer holds: the new
-// run's own report will carry it. Otherwise the stop is recorded only once
-// the report is durable — a crash before that leaves boot recovery armed.
-// Start writes take the same lock, so they either see this mark and clear it
-// or come after a start this check already saw.
-func (m *Manager) stopNoticeVia(o *ownerReportObserver, starts uint64) func(owner.Report, func(owner.Report) bool) bool {
-	return func(rep owner.Report, persist func(owner.Report) bool) bool {
-		if len(rep.LinkedTasks) == 0 {
-			return persist(rep)
+// admitTaskNotices persists a child's report through persist and, when the
+// session is quiet or blocked right now, names in it the linked tasks the
+// owner must decide on, marking them stopped once the report is durable. It
+// holds the session's work gate across exactly that: no work enters between
+// the check and the mark, and work entering afterwards clears the mark. Only
+// local writes happen under it — never a delivery or an acknowledgement.
+func (m *Manager) admitTaskNotices(sess *ManagedSession, rep owner.Report, persist func(owner.Report) (added, durable bool)) (added, durable bool) {
+	sess.workGate(func() {
+		ids := m.taskNotices(sess, &rep)
+		if m.testTaskNoticeDecided != nil {
+			m.testTaskNoticeDecided()
 		}
-		o.execMu.Lock()
-		defer o.execMu.Unlock()
-		if o.startedSince(starts) {
-			rep.LinkedTasks = nil
-			return persist(rep)
+		added, durable = persist(rep)
+		if added && durable && len(ids) > 0 {
+			m.markExecutionStopped(sess.ID, ids...)
+			if sess.work != nil {
+				sess.work.noticed = true
+			}
 		}
-		durable := persist(rep)
-		if durable && !o.startedSince(starts) {
-			m.markExecutionStopped(o.sess.ID)
-		}
-		return durable
+	})
+	return added, durable
+}
+
+// taskNotices fills the report's linked tasks: the open ones the session
+// executes and was not said to stop on, when it is quiet or blocked now.
+func (m *Manager) taskNotices(sess *ManagedSession, rep *owner.Report) []int64 {
+	rep.LinkedTasks = nil
+	if m.tasks == nil || rep.UserKind != "" || rep.SessionID == "" || !sessionStoppedFor(sess, *rep) {
+		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
+	defer cancel()
+	recs, err := m.tasks.UnwarnedExecutions(ctx, rep.SessionID)
+	if err != nil {
+		slog.Warn("live tasks: linked tasks not read for a report", "session", rep.SessionID, "error", err)
+		return nil
+	}
+	ids := make([]int64, 0, len(recs))
+	for _, r := range recs {
+		rep.LinkedTasks = append(rep.LinkedTasks, owner.ReportTask{ID: r.ID, Title: r.Title})
+		ids = append(ids, r.ID)
+	}
+	return ids
+}
+
+// sessionStoppedFor says the session, as it is now, is what the report says
+// of it: waiting on the prompt the report asks about, or quiet — no run, no
+// queued input, nothing left running (a restart ends what was). Called under
+// the work gate, so a run cannot start in between.
+func sessionStoppedFor(sess *ManagedSession, rep owner.Report) bool {
+	state := sess.runtime.State.Current()
+	if rep.Status == callbackStatusNeedsInput && state == bus.StatePermission {
+		return true
+	}
+	ag := sess.runtime.Context().Agent
+	if state == bus.StateRunning || state == bus.StatePermission || ag.IsRunning() || ag.QueueLen() > 0 {
+		return false
+	}
+	return rep.InterruptedByRestart || rep.BackgroundCount == 0 && sess.runtime.BackgroundJobs() == 0
 }
 
 // sessionTitle names a session, loaded or saved, for the owner's tasks list.
@@ -154,45 +216,31 @@ func (m *Manager) sessionWorking(id string) bool {
 }
 
 // withRunState adds to a child's report what decides its "now:" line beyond
-// the outcome itself — the next scheduled run — and the linked tasks the
-// owner must decide on because the session went quiet with them open.
-// running says another run of the session is already under way: then it is
-// not quiet, and that run's own report carries the notice.
-func (m *Manager) withRunState(rep *owner.Report, running bool) {
+// the outcome itself: the next scheduled run.
+func (m *Manager) withRunState(rep *owner.Report) {
 	if m.tasks == nil || rep.UserKind != "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
 	defer cancel()
 	rep.NextRun = m.nextScheduledRun(ctx, rep.SessionID)
-	quiet := rep.InterruptedByRestart || rep.BackgroundCount == 0
-	if !quiet || running && rep.Status != callbackStatusNeedsInput {
-		return
-	}
-	recs, err := m.tasks.UnwarnedExecutions(ctx, rep.SessionID)
-	if err != nil {
-		slog.Warn("live tasks: linked tasks not read for a report", "session", rep.SessionID, "error", err)
-		return
-	}
-	for _, r := range recs {
-		rep.LinkedTasks = append(rep.LinkedTasks, owner.ReportTask{ID: r.ID, Title: r.Title})
-	}
 }
 
 // markExecutionStopped records, once the report carrying them is durable,
-// that the owner was told about these tasks: not again until the session runs
-// and stops once more.
-func (m *Manager) markExecutionStopped(sessionID string) {
+// that the owner was told about these tasks (all of the session's when none
+// are named): not again until the session works and stops once more.
+func (m *Manager) markExecutionStopped(sessionID string, ids ...int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
 	defer cancel()
-	if _, err := m.tasks.MarkExecutionStopped(ctx, sessionID); err != nil {
+	if _, err := m.tasks.MarkExecutionStopped(ctx, sessionID, ids...); err != nil {
 		slog.Warn("live tasks: stop not recorded; the owner may hear it again", "session", sessionID, "error", err)
 	}
 }
 
 // currentTaskNotices drops, as a batch is painted for the owner, the linked
 // task notices that no longer hold: the task was closed, moved or relinked to
-// another session after the report was admitted. The report keeps its ID, so
+// another session after the report was admitted, or its executor is working
+// again (its next stop is said again). The report keeps its ID, so
 // the batch is the same one however it is painted. A failed read keeps the
 // notices: hearing one twice beats not hearing it.
 func (m *Manager) currentTaskNotices(own owner.Owner, pending []owner.Report) []owner.Report {
@@ -215,6 +263,10 @@ func (m *Manager) currentTaskNotices(own owner.Owner, pending []owner.Report) []
 	for i, rep := range pending {
 		out[i] = rep
 		if len(rep.LinkedTasks) == 0 {
+			continue
+		}
+		if m.sessionWorking(rep.SessionID) {
+			out[i].LinkedTasks = nil
 			continue
 		}
 		open := map[int64]bool{}

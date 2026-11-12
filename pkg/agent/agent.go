@@ -574,6 +574,11 @@ type AgentConfig struct {
 	// preparation runs never get one.
 	ForYouSnapshot func() (text string, empty bool)
 
+	// OnWork, when set, is told under the input lock as input is accepted or
+	// work proceeds (see WorkEntry). An error refuses the input, or ends the
+	// run before that work proceeds. Nil for subagents.
+	OnWork func(WorkEntry) error
+
 	// DrainTimeout is the maximum time Send/Run will wait for subscribers to
 	// finish processing events before returning. Default: 2s.
 	// Set to 0 to disable auto-drain.
@@ -1842,6 +1847,12 @@ func (a *Agent) TrySteer(it core.SteerItem) error {
 	if a.aborting || a.runTerminal {
 		return ErrSteerAdmissionClosed
 	}
+	if a.steers.len() >= steerBufferSize {
+		return ErrSteerQueueFull
+	}
+	if err := a.enterWorkLocked(WorkEntry{Admitted: it.Custom}); err != nil {
+		return err
+	}
 	if !a.steers.push(ownItem(it)) {
 		return ErrSteerQueueFull
 	}
@@ -1877,6 +1888,9 @@ func (a *Agent) TrySteerIfWaiting(it core.SteerItem) (bool, error) {
 		cancels = append(cancels, entry.cancel)
 	}
 	a.waitSteers.mu.Unlock()
+	if err := a.enterWorkLocked(WorkEntry{Admitted: it.Custom}); err != nil {
+		return false, err
+	}
 	accepted, err := a.steers.pushAfterNotifications(ownItem(it))
 	if !accepted || err != nil {
 		return accepted, err
@@ -2195,6 +2209,12 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		a.aborting = false
 	}
 	a.runTerminal = false
+	// Work enters before the run's first event: whatever records it is done
+	// before anything this run does can be observed.
+	var entryErr error
+	if ctx.Err() == nil {
+		entryErr = a.enterWorkLocked(WorkEntry{Work: true})
+	}
 	a.steerMu.Unlock()
 
 	// The user message appended by prepare (if any) is now visible to every
@@ -2203,6 +2223,9 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 	// clients never render run activity ahead of the message that started it.
 	if announce != nil {
 		announce()
+	}
+	if entryErr != nil {
+		return nil, entryErr
 	}
 
 	// Build stream options
@@ -2375,6 +2398,12 @@ func (a *Agent) executeWithOptions(ctx context.Context, prepare, announce func()
 		}
 		// Settle the drained steers' inflight bytes now that they are in history.
 		a.steers.settle(steered)
+		if werr := a.enterWorkLocked(WorkEntry{Work: true}); werr != nil {
+			a.runTerminal = true
+			a.steerMu.Unlock()
+			err = werr
+			break
+		}
 		a.steerMu.Unlock()
 	}
 

@@ -296,8 +296,8 @@ type SessionContext struct {
 	// without ever being returned to the client that needs to recall it.
 	abortMu    sync.Mutex
 	runMu      sync.Mutex
-	runCancel  context.CancelFunc // cancels the current run context; nil when idle
-	runGen     uint64             // incremented each run; used to avoid clearing a newer run's cancel
+	runCancel  context.CancelCauseFunc // cancels the current run context; nil when idle
+	runGen     uint64                  // incremented each run; used to avoid clearing a newer run's cancel
 	runStatsMu sync.Mutex
 	runStats   runStats
 
@@ -1004,7 +1004,7 @@ func (sctx *SessionContext) SetGate(g *permission.Gate) {
 // newRunContext creates a per-run context derived from SessionCtx.
 // Returns the context and a generation token. Caller must hold runMu.
 func (sctx *SessionContext) newRunContext() (context.Context, uint64) {
-	ctx, cancel := context.WithCancel(sctx.SessionCtx)
+	ctx, cancel := context.WithCancelCause(sctx.SessionCtx)
 	sctx.runCancel = cancel
 	sctx.runGen++
 	ctx = context.WithValue(ctx, runGenKey{}, sctx.runGen)
@@ -1157,12 +1157,13 @@ func (sctx *SessionContext) addRunBackgroundCost(gen uint64, usd float64) bool {
 	return true
 }
 
-// cancelRun cancels the current run context if any. Safe to call multiple times.
-func (sctx *SessionContext) cancelRun() {
+// cancelRun cancels the current run context if any, with who cancelled it.
+// Safe to call multiple times: the first cause stays.
+func (sctx *SessionContext) cancelRun(cause error) {
 	sctx.runMu.Lock()
 	defer sctx.runMu.Unlock()
 	if sctx.runCancel != nil {
-		sctx.runCancel()
+		sctx.runCancel(cause)
 		sctx.runCancel = nil
 	}
 }
@@ -1187,15 +1188,18 @@ func (sctx *SessionContext) settleRun(gen uint64) {
 }
 
 // settleRunCancel atomically closes the AbortRun window for gen and reports
-// whether it was cancelled before that terminal decision.
-func (sctx *SessionContext) settleRunCancel(gen uint64, ctx context.Context) bool {
+// whether it was cancelled before that terminal decision, and why.
+func (sctx *SessionContext) settleRunCancel(gen uint64, ctx context.Context) (bool, error) {
 	sctx.runMu.Lock()
 	defer sctx.runMu.Unlock()
 	cancelled := ctx.Err() != nil
 	if sctx.runGen == gen {
 		sctx.runCancel = nil
 	}
-	return cancelled
+	if !cancelled {
+		return false, nil
+	}
+	return true, context.Cause(ctx)
 }
 
 // ---------------------------------------------------------------------------

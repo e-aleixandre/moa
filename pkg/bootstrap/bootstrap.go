@@ -144,6 +144,9 @@ type SessionConfig struct {
 	// ForYouSnapshot is AgentConfig.ForYouSnapshot for this session.
 	ForYouSnapshot func() (text string, empty bool)
 
+	// OnWork is AgentConfig.OnWork for this session.
+	OnWork func(agent.WorkEntry) error
+
 	// BeforeWrite is called before write/edit tools modify a file.
 	// Used by the checkpoint system to capture pre-edit state.
 	BeforeWrite func(path string) error
@@ -860,6 +863,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		AttachmentScope:      cfg.AttachmentScope,
 		SessionCheckpoint:    sessionCheckpoint,
 		ForYouSnapshot:       cfg.ForYouSnapshot,
+		OnWork:               cfg.OnWork,
 		// The GLOBAL default only. A resumed session's own compact_at is applied
 		// afterwards via SetCompactAt, and the agent keeps the two apart, which is
 		// what lets a session's own choice win here without erasing the global

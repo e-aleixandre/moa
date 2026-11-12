@@ -130,6 +130,10 @@ type reportCommand struct {
 	// outbox on disk or confirmed in the owner's transcript, so a crash can no
 	// longer lose it. A failed write keeps it only in memory.
 	durable *bool
+	// from is the live child the report is about: the actor names in it the
+	// linked tasks the owner must decide on, as the session is when the report
+	// is persisted (admitTaskNotices). Nil for any other report.
+	from *ManagedSession
 }
 
 type heartbeatCommand struct {
@@ -223,14 +227,12 @@ func (c *reportCoordinator) post(cmd reportCommand) bool {
 // reported" has to mean it reached the outbox, not that it reached a channel.
 // Nudges stay asynchronous — they carry nothing that can be lost.
 func (c *reportCoordinator) add(key string, rep owner.Report) bool {
-	return c.addVia(key, rep, nil)
+	return c.addFrom(key, rep, nil)
 }
 
-// addVia is add for a sink that must decide the report's last details once it
-// is admitted — after a heartbeat holding admission, so on the state the
-// owner will actually be told — and act on its durability in the same step.
-// via gets the report and the function that persists it.
-func (c *reportCoordinator) addVia(key string, rep owner.Report, via func(owner.Report, func(owner.Report) bool) bool) bool {
+// addFrom is add for a report about the live child from, whose linked tasks
+// the actor decides as it persists the report.
+func (c *reportCoordinator) addFrom(key string, rep owner.Report, from *ManagedSession) bool {
 	if c == nil {
 		return false
 	}
@@ -239,18 +241,12 @@ func (c *reportCoordinator) addVia(key string, rep owner.Report, via func(owner.
 	if c.testReportAdmitted != nil {
 		c.testReportAdmitted()
 	}
-	persist := func(rep owner.Report) bool {
-		ack, durable := make(chan struct{}), false
-		if !c.post(reportCommand{key: key, report: &rep, ack: ack, durable: &durable}) {
-			return false
-		}
-		<-ack
-		return durable
+	ack, durable := make(chan struct{}), false
+	if !c.post(reportCommand{key: key, report: &rep, ack: ack, durable: &durable, from: from}) {
+		return false
 	}
-	if via == nil {
-		return persist(rep)
-	}
-	return via(rep, persist)
+	<-ack
+	return durable
 }
 
 // BeginShutdown puts the actor in accept-only mode and waits for it to be in
@@ -373,11 +369,9 @@ func (c *reportCoordinator) loop() {
 				continue
 			}
 			if cmd.report != nil {
-				var durable bool
-				if acceptOnly {
-					_, durable = c.queue(cmd.key, batch, *cmd.report)
-				} else {
-					durable = c.accept(cmd.key, batch, *cmd.report)
+				added, durable := c.queueReport(batch, cmd)
+				if added && !acceptOnly {
+					durable = c.release(cmd.key, batch, *cmd.report) || durable
 				}
 				if cmd.durable != nil {
 					*cmd.durable = durable
@@ -502,7 +496,7 @@ func (c *reportCoordinator) drain(batches map[string]*reportBatch) {
 				continue // a nudge has nowhere to deliver to any more
 			}
 			batch := c.batch(cmd.key, batches)
-			_, durable := c.queue(cmd.key, batch, *cmd.report)
+			_, durable := c.queueReport(batch, cmd)
 			if cmd.durable != nil {
 				*cmd.durable = durable
 			}
@@ -567,16 +561,24 @@ func (c *reportCoordinator) recover(batches map[string]*reportBatch) {
 	}
 }
 
-// accept persists a new report and decides when it leaves. The outbox is
-// written BEFORE the report is queued in memory, so a crash between the two
-// leaves a report that will be redelivered rather than one that was promised
-// and then forgotten. It returns whether the report is durable: on disk, or
-// delivered into the owner's flushed transcript.
-func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Report) bool {
-	added, durable := c.queue(key, batch, rep)
-	if !added {
-		return durable
+// queueReport queues a report command's report (queue), deciding first the
+// linked tasks of a report about a live child (admitTaskNotices).
+func (c *reportCoordinator) queueReport(batch *reportBatch, cmd reportCommand) (added, durable bool) {
+	if cmd.from == nil || c.mgr == nil {
+		return c.queue(cmd.key, batch, *cmd.report)
 	}
+	return c.mgr.admitTaskNotices(cmd.from, *cmd.report, func(rep owner.Report) (bool, bool) {
+		*cmd.report = rep
+		return c.queue(cmd.key, batch, rep)
+	})
+}
+
+// release decides when a report just queued leaves. The outbox was written
+// BEFORE the report was queued in memory, so a crash between the two leaves a
+// report that will be redelivered rather than one that was promised and then
+// forgotten. It returns whether the report reached the owner's flushed
+// transcript.
+func (c *reportCoordinator) release(key string, batch *reportBatch, rep owner.Report) bool {
 	// The report owns the next heartbeat even if this status flushes it now.
 	// Set this before delivery, which can block awaiting the owner transcript.
 	batch.deferNextHeartbeat = true
@@ -588,9 +590,9 @@ func (c *reportCoordinator) accept(key string, batch *reportBatch, rep owner.Rep
 	if rep.Status == callbackStatusDone || rep.Status == reportStatusUserSaid || rep.Status == reportStatusRestart ||
 		rep.FollowUpOf != "" {
 		c.arm(key, batch)
-		return durable
+		return false
 	}
-	return c.flush(key, batch) || durable
+	return c.flush(key, batch)
 }
 
 // queue adds a report to the batch and tries to persist the outbox, returning
@@ -1008,8 +1010,7 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 		}))
 		return
 	}
-	var observer *ownerReportObserver
-	observer = newOwnerReportObserver(sess, func(out runOutcome) {
+	observer := newOwnerReportObserver(sess, func(out runOutcome) {
 		// The observer stays installed while detached, so a reattach takes
 		// effect on the next turn without rewiring anything; the turns in
 		// between are simply never reported.
@@ -1018,11 +1019,9 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 			return
 		}
 		rep := reportFrom(sess, out)
-		m.withRunState(&rep, observer.running())
-		admitOwnerReportVia(reports, sess, key, rep, m.stopNoticeVia(observer, out.Starts))
+		m.withRunState(&rep)
+		admitOwnerReportFrom(reports, sess, key, rep)
 	})
-	observer.restarting = m.stopping
-	observer.onStart = func() { m.recordExecutionStart(observer) }
 	sess.mu.Lock()
 	sess.ownerObserver = observer
 	sess.mu.Unlock()
@@ -1032,19 +1031,23 @@ func (m *Manager) subscribeOwnerReports(sess *ManagedSession, ownerSession bool)
 // child has been detached. The detach check is repeated under ownerDetachMu so
 // that a detach which has returned can never be followed by an admitted report.
 func admitOwnerReport(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report) bool {
-	return admitOwnerReportVia(reports, sess, key, report, nil)
+	return admitOwnerReportOf(reports, sess, key, report, nil)
 }
 
-// admitOwnerReportVia is admitOwnerReport through the coordinator's addVia.
-func admitOwnerReportVia(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report,
-	via func(owner.Report, func(owner.Report) bool) bool) bool {
+// admitOwnerReportFrom is admitOwnerReport for a report about the child's own
+// turn, which names its linked tasks when the child is stopped (addFrom).
+func admitOwnerReportFrom(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report) bool {
+	return admitOwnerReportOf(reports, sess, key, report, sess)
+}
+
+func admitOwnerReportOf(reports *reportCoordinator, sess *ManagedSession, key string, report owner.Report, from *ManagedSession) bool {
 	sess.ownerDetachMu.Lock()
 	defer sess.ownerDetachMu.Unlock()
 	if sess.ownerDetached.Load() {
 		slog.Info("owner report dropped: session detached", "session", sess.ID)
 		return false
 	}
-	return reports.addVia(key, report, via)
+	return reports.addFrom(key, report, from)
 }
 
 // reportFrom turns a run outcome into the report the owner will read. The

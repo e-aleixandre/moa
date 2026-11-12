@@ -122,28 +122,36 @@ func (r *Repo) LinkExecution(ctx context.Context, a Actor, id int64, executor st
 	return out, err
 }
 
-// MarkExecutionStarted is an admitted run of sessionID: its linked tasks that
-// were still pending are now in progress, the first start is kept, and a
-// previous stop is cleared so the next one is said again.
-func (r *Repo) MarkExecutionStarted(ctx context.Context, sessionID string) error {
+// MarkExecutionStarted is work of sessionID: its linked tasks that were still
+// pending are now in progress, the first start is kept, and a previous stop is
+// cleared so the next one is said again. The tasks in queued are left alone:
+// their instruction is still waiting for the session.
+func (r *Repo) MarkExecutionStarted(ctx context.Context, sessionID string, queued ...int64) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
 	if ok, err := r.hasLinks(ctx, sessionID); err != nil || !ok {
 		return err
 	}
+	except, args := "", []any{}
+	if len(queued) > 0 {
+		except = ` AND task_id NOT IN (` + placeholders(len(queued)) + `)`
+		for _, id := range queued {
+			args = append(args, id)
+		}
+	}
 	return r.write(ctx, func(tx *sql.Tx) (bool, error) {
 		now := r.now().UnixMilli()
 		res, err := tx.ExecContext(ctx, `UPDATE tasks SET status = 'in_progress', updated_at = ?, revision = revision + 1
 			WHERE status = 'pending' AND place = 'agent' AND archived_at IS NULL
-			AND id IN (SELECT task_id FROM task_execution_links WHERE session_id = ?)`, now, sessionID)
+			AND id IN (SELECT task_id FROM task_execution_links WHERE session_id = ?`+except+`)`, append([]any{now, sessionID}, args...)...)
 		if err != nil {
 			return false, err
 		}
 		tasks, _ := res.RowsAffected()
 		res, err = tx.ExecContext(ctx, `UPDATE task_execution_links SET started_at = COALESCE(started_at, ?), stopped_at = NULL
-			WHERE session_id = ? AND (started_at IS NULL OR stopped_at IS NOT NULL)
-			AND task_id IN (SELECT id FROM tasks WHERE status <> 'done' AND archived_at IS NULL)`, now, sessionID)
+			WHERE session_id = ? AND (started_at IS NULL OR stopped_at IS NOT NULL)`+except+`
+			AND task_id IN (SELECT id FROM tasks WHERE status <> 'done' AND archived_at IS NULL)`, append([]any{now, sessionID}, args...)...)
 		if err != nil {
 			return false, err
 		}
@@ -153,9 +161,10 @@ func (r *Repo) MarkExecutionStarted(ctx context.Context, sessionID string) error
 }
 
 // MarkExecutionStopped records that sessionID went quiet and returns the open
-// tasks it is the current executor of that were not told so yet. A second
-// call for the same stop returns nothing: only a new start rearms it.
-func (r *Repo) MarkExecutionStopped(ctx context.Context, sessionID string) ([]Record, error) {
+// tasks it is the current executor of that were not told so yet — of only, if
+// given, the ones a report named. A second call for the same stop returns
+// nothing: only a new start rearms it.
+func (r *Repo) MarkExecutionStopped(ctx context.Context, sessionID string, only ...int64) ([]Record, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, nil
 	}
@@ -164,8 +173,15 @@ func (r *Repo) MarkExecutionStopped(ctx context.Context, sessionID string) ([]Re
 	}
 	var out []Record
 	err := r.write(ctx, func(tx *sql.Tx) (bool, error) {
-		recs, err := loadRecords(ctx, tx, `status <> 'done' AND place = 'agent' AND archived_at IS NULL
-			AND id IN (SELECT task_id FROM task_execution_links WHERE session_id = ? AND stopped_at IS NULL)`, sessionID)
+		where, args := `status <> 'done' AND place = 'agent' AND archived_at IS NULL
+			AND id IN (SELECT task_id FROM task_execution_links WHERE session_id = ? AND stopped_at IS NULL)`, []any{sessionID}
+		if len(only) > 0 {
+			where += ` AND id IN (` + placeholders(len(only)) + `)`
+			for _, id := range only {
+				args = append(args, id)
+			}
+		}
+		recs, err := loadRecords(ctx, tx, where, args...)
 		if err != nil || len(recs) == 0 {
 			return false, err
 		}

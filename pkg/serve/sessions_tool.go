@@ -391,6 +391,12 @@ func (m *Manager) savedQuestionLine(id string) string {
 }
 
 func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Result {
+	return m.ownerSendCustom(own, id, text, ownerPromptCustom(own))
+}
+
+// ownerSendCustom is ownerSendToSession for a message with the given
+// provenance (ownerPromptCustom, perhaps with a task).
+func (m *Manager) ownerSendCustom(own owner.Owner, id, text string, custom map[string]any) core.Result {
 	if text == "" {
 		return core.ErrorResult("text is required")
 	}
@@ -429,6 +435,11 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 	// skips nor refuses for it.
 	var ask *bus.PendingAskInfo
 	sess, loaded := m.Get(id)
+	if _, linking := liveTaskOf(custom); loaded && linking {
+		// The task follows this session's reports to the owner, whoever
+		// started it before the project had one.
+		m.ensureOwnerObserver(sess)
+	}
 	if loaded {
 		pending, _ := bus.QueryTyped[bus.GetPendingApproval, bus.PendingApprovalInfo](sess.runtime.Bus, bus.GetPendingApproval{})
 		if pending.Ask != nil && !pending.Ask.Async {
@@ -451,7 +462,7 @@ func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Resu
 	if ask != nil && ask.RequiresTap {
 		return core.ErrorResult(tapQuestionMessage(id, ask))
 	}
-	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", ownerPromptCustom(own), func(sess *ManagedSession) error {
+	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", custom, func(sess *ManagedSession) error {
 		return ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load())
 	})
 	if err != nil {
@@ -535,22 +546,24 @@ func (m *Manager) ownerNewSession(ctx context.Context, own owner.Owner, params m
 	if err != nil {
 		return core.ErrorResult(fmt.Sprintf("cannot create the session: %v", err))
 	}
-	linked := ""
+	linked, custom := "", ownerPromptCustom(own)
 	if !none {
-		// Before the prompt: its run start is what marks the task started.
-		if err := m.linkExecution(ctx, own, taskID, sess.ID); err != nil {
-			return core.ErrorResult(fmt.Sprintf("session %s was created but not started: %s", sess.ID, linkErrorText(taskID, err)))
-		}
+		// The prompt carries the task: accepting it links the task.
+		custom = withLiveTask(custom, own, taskID)
 		linked = fmt.Sprintf(" It works on task #%d.", taskID)
 	}
-	if _, _, _, err := m.send(sess.ID, prompt, nil, "", "", ownerPromptCustom(own)); err != nil {
+	if _, _, _, err := m.send(sess.ID, prompt, nil, "", "", custom); err != nil {
+		if !none {
+			return core.ErrorResult(fmt.Sprintf("session %s was created but the prompt was refused: %s", sess.ID, linkErrorText(taskID, err)))
+		}
 		return core.ErrorResult(fmt.Sprintf("session %s was created but the prompt was refused: %v", sess.ID, err))
 	}
 	return core.TextResult(fmt.Sprintf("Started session %s in %s.%s", sess.ID, cwd, linked))
 }
 
 // ownerSendWithTask is send, plus — when task is given — making the target
-// the task's executor first, so the run the message starts marks it started.
+// the task's executor as it accepts the message: the link and the message are
+// accepted together, or neither is.
 func (m *Manager) ownerSendWithTask(ctx context.Context, own owner.Owner, params map[string]any) core.Result {
 	id, text := getStr(params, "session_id"), getStr(params, "text")
 	taskID, none, given, err := executionTaskParam(params)
@@ -569,18 +582,34 @@ func (m *Manager) ownerSendWithTask(ctx context.Context, own owner.Owner, params
 	if err := m.checkExecutionLink(ctx, own, taskID); err != nil {
 		return core.ErrorResult(linkErrorText(taskID, err))
 	}
-	if err := m.linkExecution(ctx, own, taskID, id); err != nil {
-		return core.ErrorResult(linkErrorText(taskID, err))
-	}
-	res := m.ownerSendToSession(own, id, text)
+	res := m.ownerSendCustom(own, id, text, withLiveTask(ownerPromptCustom(own), own, taskID))
 	note := fmt.Sprintf(" It works on task #%d.", taskID)
 	if res.IsError {
-		note = fmt.Sprintf(" Task #%d is linked to %s anyway: send again, or pass task=%d to another session.", taskID, id, taskID)
+		note = fmt.Sprintf(" Task #%d was not linked to %s.", taskID, id)
 	}
 	if n := len(res.Content); n > 0 {
 		res.Content[n-1].Text += note
 	}
 	return res
+}
+
+// ensureOwnerObserver gives a loaded child that predates its project's owner
+// the observer that reports its turns, so the owner hears of a task it hands
+// to it (a saved child gets one when it is resumed). Idempotent.
+func (m *Manager) ensureOwnerObserver(sess *ManagedSession) {
+	sess.lifecycle.RLock()
+	defer sess.lifecycle.RUnlock()
+	if sess.closing.Load() || sess.Kind == session.KindOwner {
+		return
+	}
+	m.ownerObserverInstall.Lock()
+	defer m.ownerObserverInstall.Unlock()
+	sess.mu.Lock()
+	installed := sess.ownerObserver != nil
+	sess.mu.Unlock()
+	if !installed {
+		m.subscribeOwnerReports(sess, false)
+	}
 }
 
 // linkErrorText says why a task cannot follow a session and how to fix it.

@@ -276,7 +276,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		return nil, fmt.Errorf("provider: %w", err)
 	}
 
-	sessionCtx, sessionCancel := context.WithCancel(m.baseCtx)
+	// The session's runs are cancelled with why: unloading or deleting it is
+	// not a user's Stop, nor a restart (which ends m.runsCtx first).
+	sessionCtx, cancelSession := context.WithCancelCause(m.runsCtx)
+	sessionCancel := func() { cancelSession(bus.ErrStopClosed) }
 	moaCfg := m.loadConfig(cwd)
 	// Decided once, when the session is built: a session does not change
 	// contract under a config edit, and the switch needs the question store.
@@ -308,6 +311,13 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 
 	// Forward-declare for closures.
 	var sess *ManagedSession
+	// Every runtime records its own work for the tasks it executes, owner or
+	// not: an executor's start never depends on who observes its reports.
+	work := &sessionWork{m: m, sessionID: id}
+	var onWork func(agent.WorkEntry) error
+	if m.tasks != nil {
+		onWork = work.enter
+	}
 	// notifyOn is decided once the build knows whether the codebase has an
 	// owner, before the session's first request.
 	var notifyOn bool
@@ -337,6 +347,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		EnableAskUser:       true,
 		AsyncQuestions:      askAsync,
 		ForYouSnapshot:      m.forYouSnapshot(askAsync, id, &notifyOn, func() *ManagedSession { return sess }),
+		OnWork:              onWork,
 		EnableSecretActions: true,
 		OwnerSession:        opts != nil && opts.ownerSession,
 		SessionTitle:        m.sessionTitle,
@@ -742,6 +753,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		sessionBriefModel:   briefModel,
 		sessionBriefEnabled: briefEnabled,
 		runtime:             rt,
+		work:                work,
 		subagents:           bs.Subagents,
 		bashJobs:            bs.BashJobs,
 		pathPolicy:          bs.PathPolicy,
@@ -1498,7 +1510,6 @@ const shutdownDrainBudget = 5 * time.Second
 // captures the complete final turn rather than a partial one. If the budget
 // expires we flush regardless (best effort beats losing the turn entirely).
 func (m *Manager) Shutdown() {
-	m.shuttingDown.Store(true)
 	// Voice calls first: their minutes are written into sessions that are
 	// still alive, and no call keeps a provider open past shutdown.
 	m.closeVoiceCalls()
@@ -1536,6 +1547,9 @@ func (m *Manager) Shutdown() {
 	if m.pushPolicy != nil {
 		m.pushPolicy.Close() // pending summaries are not persisted; see push.Policy
 	}
+	// Every run still going is cut by moa stopping, and says so: a signal has
+	// usually cancelled it already, with the same cause.
+	m.endRuns(bus.ErrStopRestart)
 
 	m.mu.RLock()
 	sessions := make([]*ManagedSession, 0, len(m.sessions))
@@ -1585,8 +1599,6 @@ func (m *Manager) Shutdown() {
 
 	// What the user said has been relayed by now; nothing more is admitted.
 	m.userSaid.close()
-	// The last run starts were recorded; no session runs any more.
-	m.executions.close()
 
 	// 5. Everything that was going to be reported has been handed over and
 	// acknowledged. Close shuts the admission gate, waits for the senders

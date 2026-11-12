@@ -146,6 +146,7 @@ func TestRunStartedMarksOnlyTheExecutorsTasks(t *testing.T) {
 	}
 	// A continuation, not an explicit message: any origin is a start.
 	publishRunStart(worker, 1, bus.RunOrigin{ContinueCurrent: true})
+	enterWork(t, worker)
 	pollUntil(t, 5*time.Second, "the executor's task marked started", func() bool {
 		return liveTask(t, mgr, mine.ID).Status == tasks.StatusInProgress
 	})

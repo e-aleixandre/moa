@@ -24,15 +24,13 @@ type runOutcome struct {
 	// go quiet. Zero everywhere else, which is what it has always meant.
 	BackgroundCount int
 	// Owner reports only. InterruptedByRestart: the run was cut by moa
-	// stopping. FollowUpOf: the At of the report this one concludes.
-	// ReportedAt: when the observer decided the report, which a follow-up
-	// names.
+	// stopping; UserStopped: by a user's Stop. FollowUpOf: the At of the
+	// report this one concludes. ReportedAt: when the observer decided the
+	// report, which a follow-up names.
 	InterruptedByRestart bool
+	UserStopped          bool
 	FollowUpOf           string
 	ReportedAt           time.Time
-	// Starts is the session's start count when the turn ended (owner
-	// observer): admitting the report later can tell it worked again since.
-	Starts uint64
 }
 
 // subscribeRunOutcomes installs the observer that turns bus traffic into

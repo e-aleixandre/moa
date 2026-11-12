@@ -33,11 +33,33 @@ func reviewLinkedChild(t *testing.T) (*Manager, owner.Owner, *ManagedSession, ta
 }
 
 func TestReviewRestartedExecutorCannotBeMarkedStoppedByPriorReport(t *testing.T) {
-	m, own, child, task := reviewLinkedChild(t)
-	publishRunStart(child, 1, bus.RunOrigin{Explicit: true})
-	pollUntil(t, 5*time.Second, "first start recorded", func() bool { return liveTask(t, m, task.ID).Execution.StartedAt != 0 })
+	shortReportWindow(t, time.Hour)
+	shortOwnerQuiescence(t, 100*time.Millisecond)
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	entered, release := make(chan struct{}), make(chan struct{})
+	provider := reviewProvider(func(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		if requestMentions(req, "second turn") {
+			close(entered)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return simpleResponse("old turn done"), nil
+	})
+	m := newTestManagerWithConfig(t, context.Background(), provider, t.TempDir(), core.MoaConfig{DisableSandbox: true, AutoTitleModel: "off", SessionBriefModel: "off"})
+	defer close(release)
+	root := t.TempDir()
+	info, ownSess := ownerWithSession(t, m, root, "Review owner")
+	own := owner.Owner{ID: info.ID, SessionID: ownSess.ID, CodebaseKey: info.CodebaseKey}
+	child := ownerChild(t, m, root, "review child")
+	task := liveOwnerTask(t, m, ownSess, "Live task")
+	if err := m.linkExecution(context.Background(), own, task.ID, child.ID); err != nil {
+		t.Fatal(err)
+	}
 	// A heartbeat has exclusive admission while it waits for the actor. This
-	// holds the previous report between reading the link and admitting it.
+	// holds the previous report between its turn ending and its admission.
 	m.reports.admission.Lock()
 	locked := true
 	defer func() {
@@ -45,7 +67,10 @@ func TestReviewRestartedExecutorCannotBeMarkedStoppedByPriorReport(t *testing.T)
 			m.reports.admission.Unlock()
 		}
 	}()
-	publishRunEnd(child, 1, "old turn done")
+	if _, _, _, err := m.Send(child.ID, "first turn", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "first start recorded", func() bool { return liveTask(t, m, task.ID).Execution.StartedAt != 0 })
 	pollUntil(t, 5*time.Second, "prior report waiting for admission", func() bool {
 		if child.ownerDetachMu.TryLock() {
 			child.ownerDetachMu.Unlock()
@@ -53,17 +78,18 @@ func TestReviewRestartedExecutorCannotBeMarkedStoppedByPriorReport(t *testing.T)
 		}
 		return true
 	})
-	publishRunStart(child, 2, bus.RunOrigin{Explicit: true})
-	child.ownerObserver.sync()
-	child.runtime.Bus.Drain(time.Second)
-	// Join all start writes while the old stop report is blocked.
-	m.executions.wg.Wait()
-	if !child.ownerObserver.running() {
+	// The executor really works again before the old report is admitted.
+	if _, _, _, err := m.Send(child.ID, "second turn", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
 		t.Fatal("fixture: executor did not restart")
 	}
 	m.reports.admission.Unlock()
 	locked = false
-	child.ownerObserver.waitWorkers()
+	pollUntil(t, 5*time.Second, "the old report persisted", func() bool { return len(outbox(t, m, own.CodebaseKey)) == 1 })
 	got := outbox(t, m, own.CodebaseKey)
 	ex := liveTask(t, m, task.ID).Execution
 	if ex.StoppedAt != 0 || len(got) != 1 || len(got[0].LinkedTasks) != 0 {
@@ -74,8 +100,7 @@ func TestReviewRestartedExecutorCannotBeMarkedStoppedByPriorReport(t *testing.T)
 func TestReviewRelinkBeforeDeliveryRevokesOldReportNotice(t *testing.T) {
 	m, own, child, task := reviewLinkedChild(t)
 	publishRunStart(child, 1, bus.RunOrigin{Explicit: true})
-	child.runtime.Bus.Drain(time.Second)
-	m.executions.wg.Wait()
+	enterWork(t, child)
 	publishRunEnd(child, 1, "old executor finished")
 	child.ownerObserver.sync()
 	child.ownerObserver.waitWorkers()
@@ -103,6 +128,7 @@ func TestReviewStopRemainsUnacknowledgedWhenOutboxCannotPersist(t *testing.T) {
 	}
 	m, own, child, task := reviewLinkedChild(t)
 	publishRunStart(child, 1, bus.RunOrigin{Explicit: true})
+	enterWork(t, child)
 	pollUntil(t, 5*time.Second, "start recorded", func() bool { return liveTask(t, m, task.ID).Execution.StartedAt != 0 })
 	dir := m.reports.store.CodebaseDir(own.CodebaseKey)
 	if err := os.Chmod(dir, 0500); err != nil {
@@ -129,6 +155,7 @@ func TestReviewStopRemainsUnacknowledgedWhenOutboxCannotPersist(t *testing.T) {
 func TestReviewShutdownConcludesAlreadyReportedBackgroundTurn(t *testing.T) {
 	m, own, child, task := reviewLinkedChild(t)
 	publishRunStart(child, 1, bus.RunOrigin{Explicit: true})
+	enterWork(t, child)
 	pollUntil(t, 5*time.Second, "start recorded", func() bool { return liveTask(t, m, task.ID).Execution.StartedAt != 0 })
 	child.runtime.Bus.Publish(bus.BashJobStarted{SessionID: child.ID, JobID: "long-job"})
 	publishRunEnd(child, 1, "job still working")
@@ -260,7 +287,6 @@ func TestReviewQueuedLinkedSteerStartsWhenConsumed(t *testing.T) {
 		t.Fatal("provider not started")
 	}
 	child.runtime.Bus.Drain(time.Second)
-	m.executions.wg.Wait()
 	task := liveOwnerTask(t, m, ownSess, "Next step handed to busy executor")
 	res := m.ownerSendWithTask(context.Background(), own, map[string]any{"session_id": child.ID, "text": "review linked instruction", "task": float64(task.ID)})
 	if res.IsError {
@@ -275,7 +301,6 @@ func TestReviewQueuedLinkedSteerStartsWhenConsumed(t *testing.T) {
 	close(release)
 	pollUntil(t, 5*time.Second, "linked instruction consumed and run idle", func() bool { return consumed.Load() && sessState(child) == StateIdle })
 	child.runtime.Bus.Drain(time.Second)
-	m.executions.wg.Wait()
 	after := liveTask(t, m, task.ID)
 	if after.Status != tasks.StatusInProgress || after.Execution.StartedAt == 0 {
 		t.Fatalf("provider consumed and completed linked steer, but task never started: status=%s execution=%+v", after.Status, after.Execution)
