@@ -53,6 +53,35 @@ export function accountList(row) {
   return row?.id === "anthropic" && Array.isArray(row.accounts) ? row.accounts : [];
 }
 
+// accountBars — the 5h and weekly readings of one entry of the accounts-usage
+// answer, or null when the account has none to show.
+export function accountBars(entry) {
+  const usage = entry?.usage;
+  if (!usage) return null;
+  const bar = (label, w) => (w && Number.isFinite(w.utilization) ? { label, pct: Math.round(w.utilization), resetsAt: w.resets_at || null } : null);
+  const bars = [bar("5h", usage.five_hour), bar("Week", usage.seven_day)].filter(Boolean);
+  return bars.length ? bars : null;
+}
+
+// accountUsageNote — why an account shows no bars.
+export function accountUsageNote(entry) {
+  switch (entry?.reason) {
+    case "temporarily_unavailable":
+      return "Usage unavailable for now";
+    case "reconnect":
+      return "";
+    default:
+      return "";
+  }
+}
+
+// removeAccountWarning — what removing this account changes beyond the
+// account, or "" when nothing: with the API key beside the plan, the last
+// account's removal makes the key pay for everything.
+export function removeAccountWarning(row) {
+  return accountList(row).length === 1 && planKey(row) ? "From then on, everything is paid with the API key." : "";
+}
+
 function clock(date, locale) {
   return date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
 }

@@ -465,3 +465,43 @@ func TestAnthropicChainRetrySaveReachesALaterAccount(t *testing.T) {
 		t.Fatal("retry reported success over a conflicting rotation")
 	}
 }
+
+// The account being spent: the one of the last good response while it is in
+// the chain; before any response, the first without a remembered limit.
+func TestAnthropicChainServingAccount(t *testing.T) {
+	s, _, genA, genB := chainStore(t, false)
+	now := time.Now()
+	serving := func(at time.Time) string {
+		t.Helper()
+		a, ok := s.ServingAnthropicAccount(at)
+		if !ok {
+			t.Fatal("no serving account")
+		}
+		return a.Generation
+	}
+	if got := serving(now); got != genA {
+		t.Fatalf("fresh store: %s, want the first account", got)
+	}
+	s.RememberAnthropicPlanLimit(genA, now.Add(time.Hour))
+	if got := serving(now); got != genB {
+		t.Fatalf("A exhausted and nothing answered yet: %s, want B", got)
+	}
+	// A response from B is what makes it "the one being spent", even once A's
+	// limit has passed and no request has gone back to A yet.
+	s.RecordUse(CredentialSnapshot{Provider: "anthropic", Source: core.CredentialSourceStore, Kind: "oauth", Generation: genB}, nil)
+	if got := serving(now.Add(2 * time.Hour)); got != genB {
+		t.Fatalf("after B answered: %s, want B", got)
+	}
+	// A failed use does not move it.
+	s.RecordUse(CredentialSnapshot{Provider: "anthropic", Source: core.CredentialSourceStore, Kind: "oauth", Generation: genA}, core.NewProviderCredentialError("anthropic", core.CredentialSourceStore, "inference", core.CredentialReconnect))
+	if got := serving(now.Add(2 * time.Hour)); got != genB {
+		t.Fatalf("after a failed use of A: %s, want B", got)
+	}
+	// The answering account left: back to the first one that is not exhausted.
+	if err := s.RemoveAnthropicAccount(genB); err != nil {
+		t.Fatal(err)
+	}
+	if got := serving(now.Add(2 * time.Hour)); got != genA {
+		t.Fatalf("after removing B: %s, want A", got)
+	}
+}

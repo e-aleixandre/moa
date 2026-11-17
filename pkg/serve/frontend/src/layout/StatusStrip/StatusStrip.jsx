@@ -4,6 +4,8 @@ import "../../components/Daybreak/Daybreak.css";
 import { statusItemPriority, statusStripModel } from "../../data/util/status-strip-model.js";
 import { activityPhase } from "../../data/util/activity.js";
 import { sessionOnAPIKey } from "../../data/provider-wait.js";
+import { servingAccount } from "../../data/anthropic-accounts.js";
+import { AccountName } from "../../components/AccountName/AccountName.jsx";
 import { TokenFlow } from "../../components/index.js";
 
 // StatusStrip — the line under the composer. Markup and CSS are the
@@ -100,6 +102,9 @@ export function StatusStrip({
   tasks = null,
   onOpenTasks,
   onAPI,
+  // The plan account serving a child's run when it is not the first; the
+  // session's own is read from its execution.
+  account: accountProp,
   children,
 }) {
   const hasCtx = typeof ctxPercent === "number" && ctxPercent >= 0;
@@ -115,6 +120,7 @@ export function StatusStrip({
   // Paid like fast, so it sits beside fast; an alarm's priority, so a phone
   // still shows it. A child's strip passes its own execution.
   const apiKey = onAPI ?? sessionOnAPIKey(session);
+  const account = accountProp !== undefined ? accountProp : servingAccount(session?.providerExecution);
   const phase = activityPhase(session);
   // taskLive overrides the session-derived liveness for a strip whose task
   // belongs to something other than the main run — a subagent's, whose activity
@@ -205,6 +211,12 @@ export function StatusStrip({
           <span class={`zl-st zl-st-fast zl-${statusItemPriority("fast")}`} title="Fast mode: billed at a premium rate">
             <svg class="zl-st-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5L3.5 9h4l-.5 5.5L12.5 7h-4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
             <span class="zl-st-word">fast</span>
+          </span>
+        )}
+
+        {account && !apiKey && (
+          <span class={`zl-st zl-st-acct zl-${statusItemPriority("account")}`} aria-label="Plan account in use">
+            <AccountName account={account} class="zl-st-word" />
           </span>
         )}
 

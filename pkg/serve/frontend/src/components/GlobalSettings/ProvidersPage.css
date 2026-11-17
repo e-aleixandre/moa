@@ -87,7 +87,15 @@
 }
 .zl-prov-acct + .zl-prov-acct { border-top: 1px solid var(--zl-line); }
 .zl-prov-acct-txt { flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.zl-prov-acct-n { color: var(--zl-t1); overflow-wrap: anywhere; }
+.zl-prov-acct-n { color: var(--zl-t1); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zl-prov-bars { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+.zl-prov-bar { display: flex; align-items: center; gap: var(--space-2); font-size: 12px; color: var(--zl-t3); }
+.zl-prov-bar-k { flex: none; min-width: 34px; }
+.zl-prov-bar-track { flex: 1 1 auto; max-width: 160px; height: 4px; border-radius: 2px; background: var(--zl-line-2); overflow: hidden; }
+.zl-prov-bar-track i { display: block; height: 100%; background: var(--zl-accent); }
+.zl-prov-bar-track i.is-med { background: var(--zl-yellow); }
+.zl-prov-bar-track i.is-high { background: var(--zl-red); }
+.zl-prov-bar-v { flex: none; min-width: 32px; font-variant-numeric: tabular-nums; }
 .zl-prov-acct-acts { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .zl-prov-btn.is-icon { justify-content: center; padding: 0; min-width: var(--control-sm); }
 

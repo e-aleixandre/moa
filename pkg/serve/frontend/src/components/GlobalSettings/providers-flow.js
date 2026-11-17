@@ -84,6 +84,13 @@ export function saveApiKey(api, provider, key, generation, keyGeneration) {
   });
 }
 
+// accountsUsage — each Anthropic plan account's 5h and weekly usage. Asked
+// when the page is opened, never on a timer; the server never renews a token
+// to answer it.
+export function accountsUsage(api) {
+  return api("GET", `${base("anthropic")}/accounts/usage`, null, { cache: "no-store" });
+}
+
 // reorderAccounts — the new priority of Anthropic's plan accounts, as the
 // generations of exactly the accounts the page listed.
 export function reorderAccounts(api, provider, order) {

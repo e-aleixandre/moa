@@ -84,3 +84,28 @@ test("a child's own strip takes its execution", () => {
   expect(apiItem({ onAPI: true })).toBeTruthy();
   expect(apiItem({ session: { providerExecution: API }, onAPI: false })).toBeFalsy();
 });
+
+const OAUTH2 = { generation: 1, epoch: 3, phase: "working", source: { kind: "oauth", account: 2, primary_generation: "g2" } };
+const acctItem = (props) => descendants(StatusStrip(props)).find((node) => typeof node.props?.class === "string" && node.props.class.includes("zl-st-acct"));
+
+test("the line names the plan account only when it is not the first", () => {
+  const item = acctItem({ session: { providerExecution: OAUTH2 } });
+  expect(item).toBeTruthy();
+  expect(item.props.class).toContain("zl-p2");
+  const name = descendants(item).find((n) => n.props?.account);
+  expect(name.props.account).toEqual({ generation: "g2", position: 2 });
+  expect(acctItem({ session: { providerExecution: { ...OAUTH2, source: { kind: "oauth", primary_generation: "g1" } } } })).toBeFalsy();
+  expect(acctItem({ session: { providerExecution: { ...OAUTH2, phase: "" } } })).toBeFalsy();
+  // A child's own strip takes its own account, including none.
+  expect(acctItem({ account: { generation: "g3", position: 3 } })).toBeTruthy();
+  expect(acctItem({ session: { providerExecution: OAUTH2 }, account: null })).toBeFalsy();
+});
+
+test("the account's name is cut by CSS and keeps its word down to the dock", () => {
+  const css = readFileSync(join(here, "StatusStrip.css"), "utf8");
+  expect(css).toMatch(/\.zl-st-acct \.acct-name \{ max-width: 160px; \}/);
+  expect(css).toMatch(/\.zl-st-acct \.zl-st-word \{ display: inline-block; \}/);
+  expect(css).toMatch(/@container \(max-width: 400px\) \{\s*\.zl-st-acct \.acct-name \{ max-width: 84px; \}/);
+  const name = readFileSync(join(here, "../../components/AccountName/AccountName.css"), "utf8");
+  expect(name).toMatch(/text-overflow: ellipsis/);
+});

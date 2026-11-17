@@ -1,7 +1,7 @@
 // providers-model.test.js — what each row says and offers, owner vs device.
 import { test, expect } from "bun:test";
 import {
-  REPLACE_NOTICE, accountReading, flowErrorCopy, providersValue, replaceNotice, rowActions, rowReading,
+  REPLACE_NOTICE, accountBars, accountReading, accountUsageNote, removeAccountWarning, flowErrorCopy, providersValue, replaceNotice, rowActions, rowReading,
 } from "./providers-model.js";
 
 const row = (over = {}) => ({
@@ -99,4 +99,24 @@ test("an account reads available, exhausted until a time, or needing a reconnect
   const later = accountReading({ ...ACCOUNTS[1], limited_until: "2026-11-20T14:00:00Z" }, now);
   expect(later.text).toMatch(/^Exhausted until [A-Za-z]+ /);
   expect(accountReading({ state: "reconnect" }, now)).toEqual({ text: "Sign-in expired. Reconnect.", tone: "bad" });
+});
+
+test("an account's bars are its 5h and weekly readings, or nothing", () => {
+  const entry = { usage: { five_hour: { utilization: 91.4, resets_at: "2026-11-17T18:00:00Z" }, seven_day: { utilization: 45 } } };
+  expect(accountBars(entry)).toEqual([
+    { label: "5h", pct: 91, resetsAt: "2026-11-17T18:00:00Z" },
+    { label: "Week", pct: 45, resetsAt: null },
+  ]);
+  expect(accountBars({ usage: { five_hour: { utilization: "x" } } })).toBeNull();
+  expect(accountBars({ reason: "temporarily_unavailable" })).toBeNull();
+  expect(accountBars(undefined)).toBeNull();
+  expect(accountUsageNote({ reason: "temporarily_unavailable" })).toBe("Usage unavailable for now");
+  expect(accountUsageNote({ reason: "pending" })).toBe("");
+});
+
+test("only the last account with a key beside it warns on removal", () => {
+  const one = row({ kind: "oauth", accounts: [ACCOUNTS[0]], plan_api_key: { generation: "k", state: "configured" } });
+  expect(removeAccountWarning(one)).toMatch(/paid with the API key/);
+  expect(removeAccountWarning({ ...one, accounts: ACCOUNTS })).toBe("");
+  expect(removeAccountWarning({ ...one, plan_api_key: undefined })).toBe("");
 });
