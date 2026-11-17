@@ -107,6 +107,9 @@ type Store struct {
 	// planLimits are the remembered Anthropic plan limits by account
 	// generation (see RememberAnthropicPlanLimit), guarded by useMu.
 	planLimits map[string]time.Time
+	// servedGeneration is the Anthropic account that answered last, guarded
+	// by useMu (see ServingAnthropicAccount).
+	servedGeneration string
 	// useSelected, when set by a test, runs in RecordUse between the
 	// selection check and publication, to hold a result in that window.
 	useSelected func(useKey)
@@ -562,8 +565,9 @@ func (s *Store) StoredGeneration(provider string) (string, error) {
 func (s *Store) RetrySave(provider string) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	return s.transact(provider, "retry_save", func(map[string]Credential) (bool, *pendingRotation, error) {
-		if s.hasPending(provider) {
+	return s.transact(provider, "retry_save", func(disk map[string]Credential) (bool, *pendingRotation, error) {
+		// An Anthropic account keeps its pending rotation under its own record.
+		if (provider == "anthropic" && s.chainPending(disk)) || s.hasPending(provider) {
 			return false, nil, saveConflict(provider, "retry_save")
 		}
 		return false, nil, nil

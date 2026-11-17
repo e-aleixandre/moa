@@ -44,6 +44,8 @@ type chainFixture struct {
 	tr   *backupWire
 	req  core.Request
 	acct map[string]*chainAccount
+	// refreshes allows the test to rotate a token against the fake endpoint.
+	refreshes bool
 	// serve answers per account name ("A", "B", "C" or "API").
 	serve map[string]func() (int, http.Header, string)
 }
@@ -53,12 +55,13 @@ type chainFixture struct {
 func chainRuntime(t *testing.T, names string, withKey bool) *chainFixture {
 	t.Helper()
 	f := newRuntimeFixture(t)
+	h := &chainFixture{f: f, tr: &backupWire{}, acct: map[string]*chainAccount{}, serve: map[string]func() (int, http.Header, string){}}
 	t.Cleanup(func() {
-		if calls, tokens := f.u.snapshot(); len(calls) != 0 || len(tokens) != 0 {
+		calls, tokens := f.u.snapshot()
+		if len(calls) != 0 || (len(tokens) != 0 && !h.refreshes) {
 			t.Errorf("chain test escaped its fake wire or refreshed a sign-in: calls=%d token exchanges=%d", len(calls), len(tokens))
 		}
 	})
-	h := &chainFixture{f: f, tr: &backupWire{}, acct: map[string]*chainAccount{}, serve: map[string]func() (int, http.Header, string){}}
 	for _, name := range strings.Split(names, "") {
 		record := "anthropic"
 		if name != "A" {
@@ -401,7 +404,9 @@ func TestAnthropicChainRemovedFirstAccountIsSkipped(t *testing.T) {
 // error to fix on that account, not a reason to spend another one.
 func TestAnthropicChainRejectedSignInDoesNotSwitchAccount(t *testing.T) {
 	h := chainRuntime(t, "AB", true)
-	h.serve["A"] = func() (int, http.Header, string) { return 401, http.Header{}, `{"error":{"type":"authentication_error"}}` }
+	h.serve["A"] = func() (int, http.Header, string) {
+		return 401, http.Header{}, `{"error":{"type":"authentication_error"}}`
+	}
 	_, err := h.send(context.Background())
 	if pe, ok := core.AsProviderCredentialError(err); !ok || pe.Class != core.CredentialReconnect {
 		t.Fatalf("err = %v, want a reconnect error", err)

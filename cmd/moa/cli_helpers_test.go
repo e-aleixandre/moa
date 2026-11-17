@@ -81,7 +81,7 @@ func TestNewAnthropicUsagePoller_StoredXAIAPIKeyIsPlanUnsupported(t *testing.T) 
 	if err := store.Set("xai", auth.Credential{Type: "api_key", Key: "xai-" + "key"}); err != nil {
 		t.Fatal(err)
 	}
-	poller := newAnthropicUsagePoller(store)
+	poller := newAnthropicUsagePoller(store, nil)
 	status, ok := poller.StaticProviderStatus("xai")
 	if !ok || status.AuthKind != "api_key" || status.Reason != "plan_unsupported" {
 		t.Fatalf("xAI status = %#v, found=%v", status, ok)

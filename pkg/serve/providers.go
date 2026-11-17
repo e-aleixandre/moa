@@ -10,12 +10,13 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/usage"
 )
 
 const (
@@ -50,6 +51,7 @@ type providerCredentials struct {
 	store        *auth.Store
 	logins       *auth.ProviderLoginManager
 	secureCookie bool
+	usage        *usage.MultiPoller // optional; per-account plan usage
 }
 
 // WithProviderCredentials enables Settings → Providers on the given live
@@ -165,6 +167,11 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 		}
 		return r
 	}
+	if st.Provider == "anthropic" && st.Source == core.CredentialSourceStore && st.Kind == "oauth" {
+		// The owner's clients name the serving account (status line, usage
+		// widget) from this list, so it rides the light status as well.
+		r.Accounts = pc.accounts()
+	}
 	if !detailed {
 		return r
 	}
@@ -177,7 +184,6 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 			key = &anthropicPlanKey{Generation: backup.Revision.Key, State: backup.State}
 		}
 		r.PlanAPIKey = key
-		r.Accounts = pc.accounts()
 	}
 	if (st.Provider == "openai" || st.Provider == "xai") && st.Source == core.CredentialSourceStore && st.Kind == "oauth" {
 		// Reported like Anthropic's so the page adds or removes the key
@@ -204,8 +210,8 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 	return r
 }
 
-// accounts lists the plan sign-ins in priority order. An account that reports
-// no address is "Account N", by its position.
+// accounts lists the plan sign-ins in priority order, labelled by
+// auth.AnthropicAccount.Label.
 func (pc *providerCredentials) accounts() []providerAccount {
 	statuses, err := pc.store.AnthropicAccountStatuses(time.Now())
 	if err != nil {
@@ -213,11 +219,7 @@ func (pc *providerCredentials) accounts() []providerAccount {
 	}
 	out := make([]providerAccount, 0, len(statuses))
 	for _, st := range statuses {
-		label := st.Email
-		if label == "" {
-			label = "Account " + strconv.Itoa(st.Position)
-		}
-		out = append(out, providerAccount{Generation: st.Generation, Position: st.Position, Label: label, State: st.State, LimitedUntil: formatTime(st.LimitedUntil)})
+		out = append(out, providerAccount{Generation: st.Generation, Position: st.Position, Label: st.Label(), State: st.State, LimitedUntil: formatTime(st.LimitedUntil)})
 	}
 	return out
 }
@@ -263,6 +265,10 @@ func (pc *providerCredentials) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	rest, _ := strings.CutPrefix(path, providersPath+"/")
+	if rest == "anthropic/accounts/usage" {
+		pc.accountsUsage(w, r)
+		return
+	}
 	provider, action, ok := strings.Cut(rest, "/")
 	handlers := map[string]func(http.ResponseWriter, *http.Request, string){
 		"oauth/begin":    pc.begin,
@@ -563,6 +569,66 @@ func (pc *providerCredentials) apiKey(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	writeJSON(w, http.StatusOK, pc.row(pc.store.ProviderStatus(provider), true, true))
+}
+
+// accountUsage is one account's plan usage as Providers shows it.
+type accountUsage struct {
+	providerAccount
+	Serving bool `json:"serving,omitempty"`
+	// Usage is absent when the account has none to report; Reason says why:
+	// pending (nothing to show yet), temporarily_unavailable, or reconnect.
+	Usage  *usage.Snapshot `json:"usage,omitempty"`
+	Reason string          `json:"reason,omitempty"`
+}
+
+// accountsUsage answers each plan account's 5h and weekly usage, to the owner
+// and only when asked. Reading it never renews a token: an account whose token
+// has lapsed reports temporarily_unavailable until a request renews it.
+func (pc *providerCredentials) accountsUsage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeProviderError(w, http.StatusMethodNotAllowed, "", "method_not_allowed")
+		return
+	}
+	if !isOwnerIdentity(r) {
+		writeProviderError(w, http.StatusForbidden, "anthropic", "forbidden")
+		return
+	}
+	if pc.store == nil || pc.usage == nil || pc.usage.Accounts == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"accounts": []accountUsage{}})
+		return
+	}
+	accounts := pc.accounts()
+	serving, _ := pc.store.ServingAnthropicAccount(time.Now())
+	out := make([]accountUsage, len(accounts))
+	var wg sync.WaitGroup
+	for i, a := range accounts {
+		out[i] = accountUsage{providerAccount: a, Serving: a.Generation == serving.Generation && serving.Generation != ""}
+		if a.State == auth.AccountReconnect {
+			out[i].Reason = "reconnect"
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			snap, err := pc.usage.Accounts.Get(r.Context(), a.Generation)
+			switch {
+			case snap != nil:
+				out[i].Usage = snap
+			case err != nil:
+				out[i].Reason = "temporarily_unavailable"
+			default:
+				out[i].Reason = "pending"
+			}
+		}()
+	}
+	wg.Wait()
+	keep := make([]string, len(accounts))
+	for i, a := range accounts {
+		keep[i] = a.Generation
+	}
+	pc.usage.Accounts.Retain(keep)
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": out})
 }
 
 // reorderAccounts sets the priority of Anthropic's plan accounts. The order

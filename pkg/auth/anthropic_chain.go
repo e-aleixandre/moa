@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,8 @@ type AnthropicAccount struct {
 	Email      string
 	// Position is 1-based, in priority order.
 	Position int
+	// Unusable marks a sign-in that holds no token: it never serves.
+	Unusable bool
 	record   string
 }
 
@@ -41,6 +44,16 @@ type AnthropicAccount struct {
 type AnthropicChain struct {
 	Accounts []AnthropicAccount
 	Env      bool
+}
+
+// Label names the account in every place it is shown (Providers, the status
+// line, the usage widget): its address, or "Account N" when it reported none.
+// The clients truncate it by CSS; it is never cut here.
+func (a AnthropicAccount) Label() string {
+	if a.Email != "" {
+		return a.Email
+	}
+	return "Account " + strconv.Itoa(a.Position)
 }
 
 func isAnthropicAccountRecord(name string) bool {
@@ -71,11 +84,26 @@ func orderCredential(records []string) Credential {
 // ordered records that hold a usable plan sign-in, then any account that the
 // order does not mention ("anthropic" first, the others by name).
 func anthropicAccounts(disk map[string]Credential) []AnthropicAccount {
+	return listAnthropicAccounts(disk, false)
+}
+
+// anthropicAdminAccounts is the chain as Providers administers it: the same
+// order, plus the sign-ins that hold no token at all. They never serve, but
+// they must stay visible so they can be reconnected or removed.
+func anthropicAdminAccounts(disk map[string]Credential) []AnthropicAccount {
+	return listAnthropicAccounts(disk, true)
+}
+
+func listAnthropicAccounts(disk map[string]Credential, withUnusable bool) []AnthropicAccount {
 	var out []AnthropicAccount
 	seenRecord, seenGeneration := map[string]bool{}, map[string]bool{}
 	add := func(record string) {
 		cred, ok := disk[record]
-		if seenRecord[record] || !isAnthropicAccountRecord(record) || !ok || cred.Type != "oauth" || checkStored("anthropic", cred) != nil {
+		if seenRecord[record] || !isAnthropicAccountRecord(record) || !ok || cred.Type != "oauth" {
+			return
+		}
+		unusable := checkStored("anthropic", cred) != nil
+		if unusable && !withUnusable {
 			return
 		}
 		seenRecord[record] = true
@@ -83,7 +111,7 @@ func anthropicAccounts(disk map[string]Credential) []AnthropicAccount {
 			return
 		}
 		seenGeneration[cred.Generation] = true
-		out = append(out, AnthropicAccount{Generation: cred.Generation, Email: cred.Email, Position: len(out) + 1, record: record})
+		out = append(out, AnthropicAccount{Generation: cred.Generation, Email: cred.Email, Position: len(out) + 1, record: record, Unusable: unusable})
 	}
 	for _, record := range storedOrder(disk) {
 		add(record)
@@ -111,7 +139,16 @@ func accountRecords(accounts []AnthropicAccount) []string {
 }
 
 func findAnthropicAccount(disk map[string]Credential, generation string) (AnthropicAccount, bool) {
-	for _, a := range anthropicAccounts(disk) {
+	return findIn(anthropicAccounts(disk), generation)
+}
+
+// findAnthropicAdminAccount also finds a sign-in without tokens.
+func findAnthropicAdminAccount(disk map[string]Credential, generation string) (AnthropicAccount, bool) {
+	return findIn(anthropicAdminAccounts(disk), generation)
+}
+
+func findIn(accounts []AnthropicAccount, generation string) (AnthropicAccount, bool) {
+	for _, a := range accounts {
 		if a.Generation == generation {
 			return a, true
 		}
@@ -165,6 +202,16 @@ func (s *Store) chainPending(disk map[string]Credential) bool {
 	return false
 }
 
+// AnthropicAdminChain reads the accounts Providers lists, sign-ins without
+// tokens included. The chain that serves requests is AnthropicChain.
+func (s *Store) AnthropicAdminChain() (AnthropicChain, error) {
+	disk, err := s.reload()
+	if err != nil {
+		return AnthropicChain{}, storeUnavailable("anthropic", "chain")
+	}
+	return AnthropicChain{Accounts: anthropicAdminAccounts(disk), Env: envManaged("anthropic")}, nil
+}
+
 // AnthropicChain reads the chain from disk.
 func (s *Store) AnthropicChain() (AnthropicChain, error) {
 	disk, err := s.reload()
@@ -209,13 +256,15 @@ func (s *Store) AnthropicAccountStatuses(now time.Time) ([]AnthropicAccountStatu
 		return nil, storeUnavailable("anthropic", "chain")
 	}
 	var out []AnthropicAccountStatus
-	for _, a := range anthropicAccounts(disk) {
+	for _, a := range anthropicAdminAccounts(disk) {
 		st := AnthropicAccountStatus{AnthropicAccount: a, State: AccountAvailable}
 		rec, seen := s.observed(useKey{"anthropic", core.CredentialSourceStore, a.Generation})
 		until, limited := s.AnthropicPlanLimit(a.Generation, now)
 		switch {
 		case s.hasPending(a.record):
 			st.State = AccountSaveFailed
+		case a.Unusable:
+			st.State = AccountReconnect
 		case seen && rec.state == StatusReconnect:
 			st.State = AccountReconnect
 		case limited:
@@ -335,8 +384,8 @@ func (s *Store) AddAnthropicAccount(expectedLead string, cred Credential) (strin
 	cred.Generation, cred.extra = gen, nil
 	s.refreshMu.Lock()
 	err = s.transact("anthropic", "login", func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		accounts := anthropicAccounts(disk)
-		if len(accounts) == 0 {
+		accounts := anthropicAdminAccounts(disk)
+		if len(anthropicAccounts(disk)) == 0 {
 			return false, nil, credentialsChanged("anthropic", "login", "")
 		}
 		record, err := newAccountRecord(disk)
@@ -379,7 +428,7 @@ func (s *Store) ReplaceAnthropicAccount(expectedGeneration string, cred Credenti
 	cred.Generation, cred.extra = gen, nil
 	s.refreshMu.Lock()
 	err = s.transact("anthropic", "login", func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		a, ok := findAnthropicAccount(disk, expectedGeneration)
+		a, ok := findAnthropicAdminAccount(disk, expectedGeneration)
 		if !ok {
 			return false, nil, credentialsChanged("anthropic", "login", expectedGeneration)
 		}
@@ -401,7 +450,7 @@ func (s *Store) ReorderAnthropicAccounts(order []string) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	return s.transact("anthropic", "accounts_order", func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		accounts := anthropicAccounts(disk)
+		accounts := anthropicAdminAccounts(disk)
 		if len(order) != len(accounts) {
 			return false, nil, credentialsChanged("anthropic", "accounts_order", "")
 		}
@@ -434,7 +483,7 @@ func (s *Store) RemoveAnthropicAccount(generation string) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	return s.transact("anthropic", "account_remove", func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		accounts := anthropicAccounts(disk)
+		accounts := anthropicAdminAccounts(disk)
 		var gone AnthropicAccount
 		var rest []string
 		found := false
@@ -469,4 +518,57 @@ func (s *Store) RemoveAnthropicAccount(generation string) error {
 		}
 		return false, nil, s.saveFencedMany("anthropic", "account_remove", disk, fenced...)
 	})
+}
+
+// noteAnthropicServed remembers which account answered last. It lives for the
+// process: after a restart the widget starts from the first account that is
+// not known to be exhausted, until a response says otherwise.
+func (s *Store) noteAnthropicServed(generation string) {
+	s.useMu.Lock()
+	s.servedGeneration = generation
+	s.useMu.Unlock()
+}
+
+// ServingAnthropicAccount is the account the plan is being spent on: the one
+// of the last good response while it is still in the chain, else the first
+// account with no remembered limit, else the first. ok is false without any
+// usable account, or when the environment manages Anthropic.
+func (s *Store) ServingAnthropicAccount(now time.Time) (AnthropicAccount, bool) {
+	chain, err := s.AnthropicChain()
+	if err != nil || chain.Env || len(chain.Accounts) == 0 {
+		return AnthropicAccount{}, false
+	}
+	s.useMu.Lock()
+	served := s.servedGeneration
+	s.useMu.Unlock()
+	if served != "" {
+		if a, ok := findIn(chain.Accounts, served); ok {
+			return a, true
+		}
+	}
+	for _, a := range chain.Accounts {
+		if _, limited := s.AnthropicPlanLimit(a.Generation, now); !limited {
+			return a, true
+		}
+	}
+	return chain.Accounts[0], true
+}
+
+// PeekAnthropicAccountToken is PeekOAuthToken for one account of the chain.
+// It never refreshes: an expired or unsaved token reports valid=false and a
+// real request renews it.
+func (s *Store) PeekAnthropicAccountToken(generation string) (token string, found, valid bool) {
+	disk, err := s.reload()
+	if err != nil {
+		return "", false, false
+	}
+	a, ok := findAnthropicAccount(disk, generation)
+	if !ok || envManaged("anthropic") {
+		return "", false, false
+	}
+	cred := disk[a.record]
+	if s.hasPending(a.record) || credentialExpired(cred) || cred.Access == "" {
+		return "", true, false
+	}
+	return cred.Access, true, true
 }

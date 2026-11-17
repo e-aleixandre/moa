@@ -217,6 +217,14 @@ type MultiPoller struct {
 	Pollers      map[string]*Poller
 	StaticStatus map[string]ProviderStatus
 
+	// Accounts and ServingAccount make Anthropic's snapshot the one of the
+	// account being spent when the plan has several sign-ins. ServingAccount
+	// returns its identity and 1-based place in the chain; without it (the
+	// environment manages the credential, no sign-in) the "anthropic" poller
+	// answers as before.
+	Accounts       *AccountPollers
+	ServingAccount func() (key string, position int, ok bool)
+
 	// observed holds provider usage reported opportunistically in successful
 	// model response headers. Unlike Pollers, these sources have no usage
 	// endpoint to refresh; their lifetime is intentionally just this process.
@@ -230,6 +238,10 @@ type MultiPoller struct {
 type ProviderStatus struct {
 	Available bool   `json:"available"`
 	AuthKind  string `json:"auth_kind,omitempty"`
+	// Account and AccountID say which account of a chain the snapshot is for
+	// (its 1-based place and its opaque identity), when there are several.
+	Account   int    `json:"account,omitempty"`
+	AccountID string `json:"account_id,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
@@ -292,10 +304,19 @@ func (m *MultiPoller) GetAll(ctx context.Context) (map[string]*Snapshot, map[str
 		if _, fixed := m.StaticStatus[name]; fixed {
 			continue
 		}
-		s, err := p.Get(ctx)
+		var s *Snapshot
+		var err error
+		var account ProviderStatus
+		if key, position, ok := m.serving(name); ok {
+			s, err = m.Accounts.Get(ctx, key)
+			account = ProviderStatus{Account: position, AccountID: key}
+		} else {
+			s, err = p.Get(ctx)
+		}
 		if s != nil {
 			snaps[name] = s
-			statuses[name] = ProviderStatus{Available: true, AuthKind: s.AuthKind}
+			account.Available, account.AuthKind = true, s.AuthKind
+			statuses[name] = account
 			continue
 		}
 		if err != nil {
@@ -315,12 +336,22 @@ func (m *MultiPoller) GetAll(ctx context.Context) (map[string]*Snapshot, map[str
 	m.observedMu.RUnlock()
 	return snaps, statuses
 }
+func (m *MultiPoller) serving(provider string) (string, int, bool) {
+	if provider != "anthropic" || m.ServingAccount == nil || m.Accounts == nil {
+		return "", 0, false
+	}
+	return m.ServingAccount()
+}
+
 func (m *MultiPoller) GetProvider(ctx context.Context, provider string) (*Snapshot, error) {
 	if m == nil {
 		return nil, nil
 	}
 	if observed := m.observedSnapshot(provider); observed != nil {
 		return observed, nil
+	}
+	if key, _, ok := m.serving(provider); ok {
+		return m.Accounts.Get(ctx, key)
 	}
 	if m.Pollers[provider] == nil {
 		return nil, nil

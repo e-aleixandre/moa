@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -40,10 +41,11 @@ func TestProviders_AnthropicAccountLabelsAndLimits(t *testing.T) {
 	if row.Accounts[1].State != "available" || row.Accounts[1].Generation != genB {
 		t.Fatalf("B = %+v", row.Accounts[1])
 	}
-	// The shared status read (what a paired device sees) carries no accounts or labels.
-	status := f.do(http.MethodGet, "/api/providers/status", "")
-	if strings.Contains(status.Body.String(), "ana@example.com") || strings.Contains(status.Body.String(), `"accounts"`) {
-		t.Fatalf("status leaks accounts: %s", status.Body.String())
+	// The owner's light status read carries the list too: the status line and
+	// the usage widget name the serving account from it.
+	raw := f.do(http.MethodGet, "/api/providers/status", "").Body.String()
+	if !strings.Contains(raw, `"accounts"`) || !strings.Contains(raw, "ana@example.com") {
+		t.Fatalf("owner status lacks the account list: %s", raw)
 	}
 }
 
@@ -106,5 +108,36 @@ func TestProviders_AccountRoutesAreAnthropicsAndNeedTheirBodies(t *testing.T) {
 	}
 	if rec := f.do(http.MethodGet, "/api/providers/anthropic/accounts/order", ""); rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET order = %d", rec.Code)
+	}
+}
+
+// A sign-in that holds no tokens is listed (to reconnect) and can be removed
+// from Providers; it never counts as a working account.
+func TestProviders_AnthropicTokenlessAccountCanBeReconnectedAndRemoved(t *testing.T) {
+	f := newProviderFixture(t, false)
+	genA, genB, _ := seedTwoAccountsAndKey(t, f)
+	disk := string(f.fileBytes())
+	broken := strings.Replace(disk, "REFRESH-B-SENTINEL", "", 1)
+	broken = strings.Replace(broken, "sk-"+"ant-oat01-B-SENTINEL", "", 1)
+	if broken == disk {
+		t.Fatal("setup")
+	}
+	if err := os.WriteFile(f.path, []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	row := anthropicRow(t, f)
+	if len(row.Accounts) != 2 || row.Accounts[1].Generation != genB || row.Accounts[1].State != "reconnect" {
+		t.Fatalf("accounts = %+v, want B listed and asking to reconnect", row.Accounts)
+	}
+	completeAccountSignIn(t, f, fmt.Sprintf(`{"expected_generation":%q,"target":"account"}`, genB))
+	row = anthropicRow(t, f)
+	if len(row.Accounts) != 2 || row.Accounts[1].State != "available" || row.Accounts[0].Generation != genA {
+		t.Fatalf("after reconnecting: %+v", row.Accounts)
+	}
+	if err := os.WriteFile(f.path, []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rec := f.do(http.MethodPost, "/api/providers/anthropic/accounts/remove", fmt.Sprintf(`{"generation":%q}`, genB)); rec.Code != http.StatusOK {
+		t.Fatalf("removing a token-less account = %d: %s", rec.Code, rec.Body.String())
 	}
 }

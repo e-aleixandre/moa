@@ -387,3 +387,81 @@ func TestAnthropicCodeExchangeReadsTheAccountAddressWhenThereIsOne(t *testing.T)
 		}
 	}
 }
+
+// A sign-in that holds no token never serves, but it stays listed so it can
+// be reconnected or removed, and it keeps the key from becoming primary
+// until it is gone.
+func TestAnthropicChainTokenlessAccountIsListedAndRemovable(t *testing.T) {
+	s, path, genA, genB := chainStore(t, true)
+	disk := readAuthFile(t, path)
+	a := disk["anthropic"]
+	a.Access, a.Refresh = "", ""
+	disk["anthropic"] = a
+	seedAuthFile(t, path, disk)
+	if got := chainGens(t, s); got != genB {
+		t.Fatalf("serving chain = %q, want only B", got)
+	}
+	statuses, err := s.AnthropicAccountStatuses(time.Now())
+	if err != nil || len(statuses) != 2 || statuses[0].Generation != genA || statuses[0].State != AccountReconnect || statuses[1].State != AccountAvailable {
+		t.Fatalf("statuses = %+v %v, want the token-less A to reconnect and B available", statuses, err)
+	}
+	// B alone leaves: the token-less A still holds "anthropic", so the key stays beside it.
+	if err := s.RemoveAnthropicAccount(genB); err != nil {
+		t.Fatal(err)
+	}
+	if after := readAuthFile(t, path); after["anthropic"].Generation != genA || after[anthropicBackupSlot].Key == "" {
+		t.Fatalf("removing B moved the key over a token-less sign-in: %+v", after)
+	}
+	if err := s.RemoveAnthropicAccount(genA); err != nil {
+		t.Fatalf("a token-less account cannot be removed: %v", err)
+	}
+	if after := readAuthFile(t, path); after["anthropic"].Type != "api_key" || after[anthropicBackupSlot].Key != "" {
+		t.Fatalf("the key did not become primary once the last sign-in went: %+v", after)
+	}
+}
+
+func TestAnthropicChainTokenlessAccountCanBeReconnected(t *testing.T) {
+	s, path, genA, genB := chainStore(t, false)
+	disk := readAuthFile(t, path)
+	b, _ := findAnthropicAccount(disk, genB)
+	broken := disk[b.record]
+	broken.Access, broken.Refresh = "", ""
+	disk[b.record] = broken
+	seedAuthFile(t, path, disk)
+	gen, err := s.ReplaceAnthropicAccount(genB, chainOAuth("B2"))
+	if err != nil {
+		t.Fatalf("reconnecting a token-less account: %v", err)
+	}
+	if got := chainGens(t, s); got != genA+","+gen {
+		t.Fatalf("chain = %q, want A then B's new login", got)
+	}
+}
+
+// RetrySave persists a pending rotation of any account, and keeps reporting
+// the conflict when it cannot.
+func TestAnthropicChainRetrySaveReachesALaterAccount(t *testing.T) {
+	s, path, genB := pendingOnB(t)
+	if err := s.RetrySave("anthropic"); err == nil {
+		t.Fatal("retry succeeded while the disk is still failing")
+	}
+	s.writeFile = writeCredentialFile
+	if err := s.RetrySave("anthropic"); err != nil {
+		t.Fatalf("retry after the disk recovered: %v", err)
+	}
+	b, _ := findAnthropicAccount(readAuthFile(t, path), genB)
+	if s.hasPending(b.record) || readAuthFile(t, path)[b.record].Refresh != "rotated-refresh" {
+		t.Fatal("B's rotation was not saved")
+	}
+	// A rotation another process superseded cannot be written: still a conflict.
+	s2, path2, genB2 := pendingOnB(t)
+	disk := readAuthFile(t, path2)
+	b2, _ := findAnthropicAccount(disk, genB2)
+	cred := disk[b2.record]
+	cred.Access, cred.Refresh = "other-access", "other-refresh"
+	disk[b2.record] = cred
+	seedAuthFile(t, path2, disk)
+	s2.writeFile = writeCredentialFile
+	if err := s2.RetrySave("anthropic"); err == nil {
+		t.Fatal("retry reported success over a conflicting rotation")
+	}
+}

@@ -135,6 +135,9 @@ func (s *Store) RecordUse(snap CredentialSnapshot, err error) {
 		s.useSelected(key)
 	}
 	s.observe(key, state)
+	if state == StatusReady && key.provider == "anthropic" && key.source == core.CredentialSourceStore && snap.Kind == "oauth" {
+		s.noteAnthropicServed(key.generation)
+	}
 }
 
 func useState(err error) string {

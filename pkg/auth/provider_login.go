@@ -154,7 +154,7 @@ func (m *ProviderLoginManager) BeginTarget(ctx context.Context, provider, browse
 		return LoginAttemptView{}, err
 	}
 	if target == LoginTargetAccount {
-		chain, err := m.store.AnthropicChain()
+		chain, err := m.store.AnthropicAdminChain()
 		if err != nil {
 			return LoginAttemptView{}, err
 		}

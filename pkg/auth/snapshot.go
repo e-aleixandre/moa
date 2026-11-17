@@ -121,10 +121,13 @@ func (s *Store) resolveStored(ctx context.Context, provider string, selection Sn
 	defer s.refreshMu.Unlock()
 	var result Credential
 	err = s.transact(provider, "refresh", func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		record, err := find(disk)
+		// The record is chosen again under the lock; the snapshot is built
+		// from the one that was actually read, not from the first guess.
+		current, err := find(disk)
 		if err != nil {
 			return false, nil, err
 		}
+		record = current
 		if s.hasPending(record) {
 			return false, nil, saveConflict(provider, "refresh")
 		}
