@@ -9,15 +9,19 @@
 //   - success says so and touches nothing else — no session, no turn.
 
 import {
-  beginSignIn, cancelSignIn, closeWindow, completeSignIn, openBlankWindow, removeApiKey, retrySave, saveApiKey, signInProgress,
+  beginSignIn, cancelSignIn, closeWindow, completeSignIn, openBlankWindow, removeAccount, removeApiKey, reorderAccounts,
+  retrySave, saveApiKey, signInProgress,
 } from "./providers-flow.js";
 import {
   SAVED_COPY, TERMINAL_PROGRESS, errorIntent, flowErrorCopy, progressEndCopy,
 } from "./providers-model.js";
 
 export const IDLE = Object.freeze({
-  step: "idle", // idle | signin | paste | device | key
+  step: "idle", // idle | signin | paste | device | key | remove
   draft: "",
+  target: "", // Anthropic chain: "" | "new_account" | "account"
+  expected: null, // generation the sign-in is about, when not the row's
+  account: null, // { generation, label } being removed
   busy: false,
   attempt: null,
   opened: false,
@@ -68,8 +72,10 @@ export function createRowController({
   return {
     // Shows the instructions (and, for a replacement, what it changes) before
     // anything is opened or requested.
-    startSignIn() {
-      set({ ...IDLE, step: "signin" });
+    // For an Anthropic plan account: { target: "new_account" } adds one,
+    // { target: "account", generation } signs that one in again.
+    startSignIn({ target = "", generation: expected = null } = {}) {
+      set({ ...IDLE, step: "signin", target, expected });
     },
 
     startApiKey() {
@@ -85,11 +91,12 @@ export function createRowController({
     async open() {
       if (get().busy) return;
       const handle = flow === "device" ? null : openWindow();
+      const { target, expected } = get();
       const { op, live } = begin();
       scope.begin = { op, handle };
       patch({ busy: true, message: null });
       try {
-        const { attempt, opened, stale } = await beginSignIn(api, provider, generation(), handle, live);
+        const { attempt, opened, stale } = await beginSignIn(api, provider, expected ?? generation(), handle, live, target);
         if (scope.begin?.op === op) scope.begin = null;
         if (stale) {
           // Cancelled while the request was out: end the attempt it started.
@@ -154,6 +161,44 @@ export function createRowController({
       try {
         const updated = await removeApiKey(api, provider, row()?.plan_api_key?.generation);
         if (live()) set({ ...IDLE, message: { text: "API key removed.", tone: "ok" } });
+        onChanged?.(updated && updated.id ? updated : null);
+      } catch (error) {
+        if (live()) fail(error);
+      }
+    },
+
+    // moveAccount — one place up (-1) or down (+1) in the chain's priority.
+    async moveAccount(generation, delta) {
+      if (get().busy) return;
+      const order = (row()?.accounts || []).map((a) => a.generation);
+      const from = order.indexOf(generation);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= order.length) return;
+      [order[from], order[to]] = [order[to], order[from]];
+      patch({ busy: true, message: null });
+      const { live } = begin();
+      try {
+        const updated = await reorderAccounts(api, provider, order);
+        if (live()) set({ ...IDLE });
+        onChanged?.(updated && updated.id ? updated : null);
+      } catch (error) {
+        if (live()) fail(error);
+      }
+    },
+
+    // Removing asks first: it deletes that account's sign-in from the server.
+    startRemoveAccount(account) {
+      set({ ...IDLE, step: "remove", account: { generation: account.generation, label: account.label } });
+    },
+
+    async removeAccount() {
+      const account = get().account;
+      if (get().busy || !account) return;
+      patch({ busy: true, message: null });
+      const { live } = begin();
+      try {
+        const updated = await removeAccount(api, provider, account.generation);
+        if (live()) set({ ...IDLE, message: { text: "Account removed.", tone: "ok" } });
         onChanged?.(updated && updated.id ? updated : null);
       } catch (error) {
         if (live()) fail(error);

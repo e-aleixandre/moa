@@ -222,3 +222,49 @@ test("the primary button follows the needed action", () => {
   expect(primary({ ...base, state: "reconnect", kind: "oauth", actions: ["sign_in", "api_key"] })).toEqual(["Reconnect"]);
   expect(primary({ ...base, state: "missing", kind: undefined })).toEqual(["Sign in"]);
 });
+
+const CHAIN = {
+  ...PLAN,
+  plan_api_key: { generation: "k1", state: "active" },
+  accounts: [
+    { generation: "g1", position: 1, label: "a@x.com", state: "available" },
+    { generation: "g2", position: 2, label: "Account 2", state: "reconnect" },
+  ],
+};
+
+test("plan accounts are listed in order with their state, before the API key actions", () => {
+  const tree = render("anthropic", { row: CHAIN });
+  const items = all(tree, (n) => n.type === "li");
+  expect(items.map((li) => text(li.props.children[0]))).toEqual(["a@x.comAvailable", "Account 2Sign-in expired. Reconnect."]);
+  const labels = buttons(tree).map((b) => b.props["aria-label"] || text(b).trim());
+  expect(labels).toEqual([
+    "Move a@x.com up", "Move a@x.com down", "Remove a@x.com",
+    "Reconnect", "Move Account 2 up", "Move Account 2 down", "Remove Account 2",
+    "Add another account", "Replace API key", "Remove API key",
+  ]);
+  // The first cannot go up, the last cannot go down.
+  const byLabel = (l) => buttons(tree).find((b) => b.props["aria-label"] === l);
+  expect(byLabel("Move a@x.com up").props.disabled).toBe(true);
+  expect(byLabel("Move Account 2 down").props.disabled).toBe(true);
+  // Still one text field at most: the API key, only when opened.
+  expect(fields(tree)).toEqual([]);
+});
+
+test("removing an account asks before it removes", () => {
+  const tree = render("anthropic", { row: CHAIN, state: { ...IDLE, step: "remove", account: { generation: "g2", label: "Account 2" } } });
+  expect(text(tree)).toContain("Remove Account 2?");
+  expect(buttons(tree).map((b) => text(b).trim())).toContain("Remove account");
+  expect(buttons(tree).map((b) => text(b).trim())).not.toContain("Add another account");
+});
+
+test("adding another account replaces nothing and shows no replace warning", () => {
+  const tree = render("anthropic", { row: CHAIN, state: { ...IDLE, step: "signin", target: "new_account" } });
+  expect(text(tree)).not.toContain("Existing history");
+  expect(text(tree)).toContain("Open Anthropic and approve access.");
+});
+
+test("a device sees no account controls", () => {
+  const tree = render("anthropic", { row: CHAIN, canAdmin: false });
+  expect(all(tree, (n) => n.type === "li")).toEqual([]);
+  expect(buttons(tree)).toEqual([]);
+});

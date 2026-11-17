@@ -27,10 +27,14 @@ export function listProviders(api) {
 // the caller must offer a link instead.
 // `isCurrent` false when the answer arrives means the caller moved on (Cancel,
 // unmount): the window is closed, nothing is navigated, and `stale` is set.
-export async function beginSignIn(api, provider, generation, handle = null, isCurrent = () => true) {
+// `target` is Anthropic's chain of plan accounts: "new_account" appends one,
+// "account" signs the account named by `generation` in again.
+export async function beginSignIn(api, provider, generation, handle = null, isCurrent = () => true, target = "") {
   let attempt;
   try {
-    attempt = await api("POST", `${base(provider)}/oauth/begin`, { expected_generation: generation || "" }, {
+    const body = { expected_generation: generation || "" };
+    if (target) body.target = target;
+    attempt = await api("POST", `${base(provider)}/oauth/begin`, body, {
       timeoutMs: PROVIDER_ACTION_TIMEOUT_MS,
     });
   } catch (e) {
@@ -78,6 +82,17 @@ export function saveApiKey(api, provider, key, generation, keyGeneration) {
   return api("POST", `${base(provider)}/api-key`, body, {
     timeoutMs: PROVIDER_ACTION_TIMEOUT_MS,
   });
+}
+
+// reorderAccounts — the new priority of Anthropic's plan accounts, as the
+// generations of exactly the accounts the page listed.
+export function reorderAccounts(api, provider, order) {
+  return api("POST", `${base(provider)}/accounts/order`, { order }, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
+}
+
+// removeAccount — one plan account, by generation. The API key stays.
+export function removeAccount(api, provider, generation) {
+  return api("POST", `${base(provider)}/accounts/remove`, { generation: generation || "" }, { timeoutMs: PROVIDER_ACTION_TIMEOUT_MS });
 }
 
 export function retrySave(api, provider) {

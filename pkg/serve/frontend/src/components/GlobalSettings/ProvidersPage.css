@@ -76,6 +76,21 @@
   .zl-prov-btn.is-primary:not([disabled]):hover { background: color-mix(in srgb, var(--zl-accent) 30%, transparent); color: var(--zl-accent); }
 }
 
+/* Anthropic's plan accounts, in priority order. */
+.zl-prov-accts { list-style: none; margin: var(--space-2) 0 0 38px; padding: 0; display: flex; flex-direction: column; }
+.zl-prov-acct {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+.zl-prov-acct + .zl-prov-acct { border-top: 1px solid var(--zl-line); }
+.zl-prov-acct-txt { flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.zl-prov-acct-n { color: var(--zl-t1); overflow-wrap: anywhere; }
+.zl-prov-acct-acts { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.zl-prov-btn.is-icon { justify-content: center; padding: 0; min-width: var(--control-sm); }
+
 .zl-prov-flow { margin: var(--space-3) 0 0 38px; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .zl-prov-step { margin: 0; color: var(--zl-t2); line-height: 1.5; overflow-wrap: anywhere; }
 .zl-prov-step.is-warn { color: var(--zl-yellow); }
@@ -140,8 +155,10 @@
 }
 
 .zl-set.is-phone .zl-prov-btn { min-height: var(--control-lg); }
+.zl-set.is-phone .zl-prov-btn.is-icon { min-width: var(--control-lg); }
 .zl-set.is-phone .zl-prov-flow,
 .zl-set.is-phone .zl-prov-acts,
+.zl-set.is-phone .zl-prov-accts,
 .zl-set.is-phone .zl-prov-msg { margin-left: 0; }
 
 @media (prefers-reduced-motion: reduce) {
