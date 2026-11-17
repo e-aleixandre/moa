@@ -32,6 +32,9 @@ type Credential struct {
 	// Generation identifies one login or key replacement. OAuth rotation keeps
 	// it, so a request can tell "same login, newer token" from "another login".
 	Generation string `json:"generation,omitempty"`
+	// Email labels an Anthropic plan sign-in in Providers when the token
+	// exchange reported one. It identifies nothing: the generation does.
+	Email string `json:"email,omitempty"`
 
 	// extra keeps fields this binary does not know, so rewriting the shared
 	// file never drops what a newer binary stored.
@@ -101,9 +104,9 @@ type Store struct {
 	// (see RecordUse); it lives for the process and is never persisted.
 	useMu sync.Mutex
 	uses  map[useKey]useRecord
-	// planLimits are the remembered Anthropic plan limits by sign-in and key
-	// pair (see RememberAnthropicPlanLimit), guarded by useMu.
-	planLimits map[BackupRevision]time.Time
+	// planLimits are the remembered Anthropic plan limits by account
+	// generation (see RememberAnthropicPlanLimit), guarded by useMu.
+	planLimits map[string]time.Time
 	// useSelected, when set by a test, runs in RecordUse between the
 	// selection check and publication, to hold a result in that window.
 	useSelected func(useKey)
@@ -117,6 +120,9 @@ type pendingRotation struct {
 	base     Credential
 	proposed Credential
 	fence    bool
+	// record is where the rotation is pending when that is not the provider's
+	// own name (an Anthropic account stored under another record).
+	record string
 }
 
 var errNoConfigDir = errors.New("no config directory")
@@ -283,8 +289,12 @@ func (s *Store) transact(provider, op string, fn func(disk map[string]Credential
 		}
 		if err := s.saveLocked(disk); err != nil {
 			if rotation != nil {
+				record := provider
+				if rotation.record != "" {
+					record = rotation.record
+				}
 				s.mu.Lock()
-				s.pending[provider] = *rotation
+				s.pending[record] = *rotation
 				s.mu.Unlock()
 			}
 			return persistenceFailed(provider, op)
@@ -379,7 +389,7 @@ func oauthCredential(provider string, previous Credential, refreshed *OAuthCrede
 	}
 	return Credential{
 		Type: "oauth", Access: refreshed.Access, Refresh: refresh, Expires: refreshed.Expires,
-		AccountID: account, Key: key, Generation: previous.Generation, extra: previous.extra,
+		AccountID: account, Key: key, Generation: previous.Generation, Email: previous.Email, extra: previous.extra,
 	}, nil
 }
 

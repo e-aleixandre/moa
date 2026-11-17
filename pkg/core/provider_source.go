@@ -19,6 +19,7 @@ type ProviderSource struct {
 	EstimatedCost        *float64   `json:"estimated_cost,omitempty"`
 	UsageComplete        bool       `json:"usage_complete,omitempty"`
 	InputTransformations []string   `json:"input_transformations,omitempty"`
+	Account              int        `json:"account,omitempty"` // 1-based place in the plan chain; omitted for the first
 }
 
 type ProviderDispatch func(context.Context, ProviderSource) error

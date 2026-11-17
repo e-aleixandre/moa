@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,6 +79,18 @@ type providerRow struct {
 	Actions       []string          `json:"actions,omitempty"`
 	PendingSave   *bool             `json:"pending_save,omitempty"`
 	PlanAPIKey    *anthropicPlanKey `json:"plan_api_key,omitempty"`
+	// Accounts are Anthropic's plan sign-ins in priority order (owner list only).
+	Accounts []providerAccount `json:"accounts,omitempty"`
+}
+
+// providerAccount is one plan sign-in of the Anthropic chain. It names the
+// account by generation and label; it never carries a token.
+type providerAccount struct {
+	Generation   string `json:"generation"`
+	Position     int    `json:"position"`
+	Label        string `json:"label"`
+	State        string `json:"state"`
+	LimitedUntil string `json:"limited_until,omitempty"`
 }
 
 type providersStatus struct {
@@ -164,6 +177,7 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 			key = &anthropicPlanKey{Generation: backup.Revision.Key, State: backup.State}
 		}
 		r.PlanAPIKey = key
+		r.Accounts = pc.accounts()
 	}
 	if (st.Provider == "openai" || st.Provider == "xai") && st.Source == core.CredentialSourceStore && st.Kind == "oauth" {
 		// Reported like Anthropic's so the page adds or removes the key
@@ -188,6 +202,24 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 		}
 	}
 	return r
+}
+
+// accounts lists the plan sign-ins in priority order. An account that reports
+// no address is "Account N", by its position.
+func (pc *providerCredentials) accounts() []providerAccount {
+	statuses, err := pc.store.AnthropicAccountStatuses(time.Now())
+	if err != nil {
+		return nil
+	}
+	out := make([]providerAccount, 0, len(statuses))
+	for _, st := range statuses {
+		label := st.Email
+		if label == "" {
+			label = "Account " + strconv.Itoa(st.Position)
+		}
+		out = append(out, providerAccount{Generation: st.Generation, Position: st.Position, Label: label, State: st.State, LimitedUntil: formatTime(st.LimitedUntil)})
+	}
+	return out
 }
 
 func (pc *providerCredentials) status(owner, detailed bool) providersStatus {
@@ -240,6 +272,9 @@ func (pc *providerCredentials) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		"api-key":        pc.apiKey,
 		"retry-save":     pc.retrySave,
 		"api-key/remove": pc.removeAPIKey,
+		// The chain of Anthropic plan accounts (see auth.AnthropicChain).
+		"accounts/order":  pc.reorderAccounts,
+		"accounts/remove": pc.removeAccount,
 	}
 	handle, known := handlers[action]
 	if !ok || !known {
@@ -255,7 +290,7 @@ func (pc *providerCredentials) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		writeProviderError(w, http.StatusForbidden, "", "origin_rejected")
 		return
 	}
-	if !supportedProvider(provider) {
+	if !supportedProvider(provider) || (strings.HasPrefix(action, "accounts/") && provider != "anthropic") {
 		writeProviderError(w, http.StatusNotFound, "", auth.LoginNotFound)
 		return
 	}
@@ -379,6 +414,9 @@ func (pc *providerCredentials) ensureBrowserBinding(w http.ResponseWriter, r *ht
 func (pc *providerCredentials) begin(w http.ResponseWriter, r *http.Request, provider string) {
 	var body struct {
 		ExpectedGeneration *string `json:"expected_generation"`
+		// Target is Anthropic's only: "new_account" appends another plan
+		// account, "account" signs the one named by expected_generation in again.
+		Target string `json:"target"`
 	}
 	if !decodeProviderBody(w, r, provider, &body) {
 		return
@@ -394,7 +432,7 @@ func (pc *providerCredentials) begin(w http.ResponseWriter, r *http.Request, pro
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), providersRequestTimeout)
 	defer cancel()
-	view, err := pc.logins.Begin(ctx, provider, binding, *body.ExpectedGeneration)
+	view, err := pc.logins.BeginTarget(ctx, provider, binding, *body.ExpectedGeneration, body.Target)
 	if err != nil {
 		writeProviderFailure(w, provider, "begin", err)
 		return
@@ -525,6 +563,62 @@ func (pc *providerCredentials) apiKey(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	writeJSON(w, http.StatusOK, pc.row(pc.store.ProviderStatus(provider), true, true))
+}
+
+// reorderAccounts sets the priority of Anthropic's plan accounts. The order
+// must name exactly the accounts the page listed, or nothing changes (409).
+func (pc *providerCredentials) reorderAccounts(w http.ResponseWriter, r *http.Request, provider string) {
+	var body struct {
+		Order []string `json:"order"`
+	}
+	if !decodeProviderBody(w, r, provider, &body) {
+		return
+	}
+	if body.Order == nil {
+		writeProviderError(w, http.StatusBadRequest, provider, "invalid_request")
+		return
+	}
+	if pc.chainManagedByEnv(w, provider) {
+		return
+	}
+	if err := pc.store.ReorderAnthropicAccounts(body.Order); err != nil {
+		writeProviderFailure(w, provider, "accounts_order", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pc.row(pc.store.ProviderStatus(provider), true, true))
+}
+
+// removeAccount signs one Anthropic plan account out of the chain. The API key
+// stays; when it was the last account the key becomes the primary credential.
+func (pc *providerCredentials) removeAccount(w http.ResponseWriter, r *http.Request, provider string) {
+	var body struct {
+		Generation *string `json:"generation"`
+	}
+	if !decodeProviderBody(w, r, provider, &body) {
+		return
+	}
+	if body.Generation == nil {
+		writeProviderError(w, http.StatusBadRequest, provider, "invalid_request")
+		return
+	}
+	if pc.chainManagedByEnv(w, provider) {
+		return
+	}
+	if err := pc.store.RemoveAnthropicAccount(*body.Generation); err != nil {
+		writeProviderFailure(w, provider, "account_remove", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pc.row(pc.store.ProviderStatus(provider), true, true))
+}
+
+// chainManagedByEnv answers 409 when the environment manages the provider,
+// which has no chain to administer.
+func (pc *providerCredentials) chainManagedByEnv(w http.ResponseWriter, provider string) bool {
+	if pc.store.ProviderStatus(provider).Source != core.CredentialSourceEnv {
+		return false
+	}
+	writeProviderError(w, http.StatusConflict, provider, auth.LoginEnvManaged)
+	return true
 }
 
 func (pc *providerCredentials) retrySave(w http.ResponseWriter, r *http.Request, provider string) {

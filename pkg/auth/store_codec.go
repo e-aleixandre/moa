@@ -63,6 +63,8 @@ func (c *Credential) UnmarshalJSON(data []byte) error {
 			err = decodeField(raw, &out.AccountID)
 		case "generation":
 			err = decodeField(raw, &out.Generation)
+		case "email":
+			err = decodeField(raw, &out.Email)
 		default:
 			if out.extra == nil {
 				out.extra = make(map[string]json.RawMessage)

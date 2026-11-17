@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -13,6 +15,9 @@ import (
 const anthropicBackupSlot = "__anthropic_backup_v1"
 
 // BackupRevision is a secret-free CAS tuple, not a credential or a capability.
+// Primary is the set of plan generations of the chain, sorted and joined by
+// commas (a set, not an order: reordering the accounts changes nothing the
+// key's admission depends on); with one sign-in it is just its generation.
 type BackupRevision struct {
 	Primary string `json:"primary_generation"`
 	Key     string `json:"key_generation"`
@@ -31,6 +36,8 @@ type AnthropicBackupStatus struct {
 type AnthropicBackupSelection struct {
 	Snapshot CredentialSnapshot `json:"-"`
 	Revision BackupRevision
+	// Accounts are the generations of the chain at admission, in priority order.
+	Accounts []string
 }
 
 // The primary can change without replacing the key. Include both in the
@@ -58,10 +65,22 @@ func backupView(disk map[string]Credential) (AnthropicBackupStatus, error) {
 	if err != nil {
 		return AnthropicBackupStatus{}, err
 	}
-	primary := disk["anthropic"]
-	st := AnthropicBackupStatus{Revision: BackupRevision{Primary: primary.Generation, Key: cred.Generation}, Configured: cred.Key != "", State: "not_configured"}
+	accounts := anthropicAccounts(disk)
+	// Without any plan sign-in the key is the primary credential and the
+	// revision keeps naming "anthropic", as before.
+	primary := disk["anthropic"].Generation
+	identified := len(accounts) > 0
+	if identified {
+		gens := accountGenerations(accounts)
+		sort.Strings(gens)
+		primary = strings.Join(gens, ",")
+		for _, a := range accounts {
+			identified = identified && a.Generation != ""
+		}
+	}
+	st := AnthropicBackupStatus{Revision: BackupRevision{Primary: primary, Key: cred.Generation}, Configured: cred.Key != "", State: "not_configured"}
 	_, env, _ := envSnapshot("anthropic")
-	st.Active = st.Configured && !env && primary.Type == "oauth" && primary.Generation != ""
+	st.Active = st.Configured && !env && identified
 	switch {
 	case st.Active:
 		st.State = "active"
@@ -84,7 +103,7 @@ func (s *Store) AnthropicBackupStatus() (AnthropicBackupStatus, error) {
 		if err != nil {
 			return err
 		}
-		if s.backupBlocked || s.hasPending("anthropic") {
+		if s.backupBlocked || s.chainPending(disk) {
 			out.Active = false
 			out.State = "save_failed"
 			return nil
@@ -109,6 +128,27 @@ func (s *Store) AnthropicBackupStatus() (AnthropicBackupStatus, error) {
 	return out, nil
 }
 
+// revisionAdmits reports whether a key admitted for expected may still be
+// used with the chain as it is now: same key, and no account that expected did
+// not consider. Reordering or removing accounts never makes a paid send
+// unsafe; an account that appeared since does, because paying while an
+// account nobody looked at may serve would be premature.
+func revisionAdmits(expected, current BackupRevision, accounts []AnthropicAccount) bool {
+	if expected.Key != current.Key || len(accounts) == 0 {
+		return false
+	}
+	considered := map[string]bool{}
+	for _, gen := range strings.Split(expected.Primary, ",") {
+		considered[gen] = true
+	}
+	for _, a := range accounts {
+		if !considered[a.Generation] {
+			return false
+		}
+	}
+	return true
+}
+
 // Backup results are attributed only to their exact generation pair. They
 // never feed the primary OAuth status or expire its access token.
 func (s *Store) RecordAnthropicBackupUse(revision BackupRevision, err error) {
@@ -117,7 +157,7 @@ func (s *Store) RecordAnthropicBackupUse(revision BackupRevision, err error) {
 		return
 	}
 	st, loadErr := backupView(disk)
-	if loadErr != nil || st.Revision != revision {
+	if loadErr != nil || !revisionAdmits(revision, st.Revision, anthropicAccounts(disk)) {
 		return
 	}
 	state := StatusReady
@@ -152,11 +192,12 @@ func (s *Store) SaveAnthropicAPIKey(expectedPrimary, key string) (string, error)
 	besidePlan := false
 	s.refreshMu.Lock()
 	err = s.transact("anthropic", "api_key", func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		primary := disk["anthropic"]
+		lead := anthropicLeadRecord(disk)
+		primary := disk[lead]
 		if primary.Generation != expectedPrimary {
 			return false, nil, credentialsChanged("anthropic", "api_key", primary.Generation)
 		}
-		if primary.Type != "oauth" {
+		if len(anthropicAccounts(disk)) == 0 {
 			return false, nil, nil
 		}
 		besidePlan = true
@@ -169,7 +210,7 @@ func (s *Store) SaveAnthropicAPIKey(expectedPrimary, key string) (string, error)
 			if primary.Generation, err = newGeneration(); err != nil {
 				return false, nil, persistenceFailed("anthropic", "api_key")
 			}
-			disk["anthropic"] = primary
+			disk[lead] = primary
 		}
 		disk[anthropicBackupSlot] = Credential{Type: "api_key", Key: key, Generation: gen}
 		s.mu.Lock()
@@ -253,7 +294,8 @@ func keepKeyBesidePlan(disk map[string]Credential, provider string, next Credent
 }
 
 // AdmitAnthropicBackup linearizes a paid dispatch while holding the existing
-// Store/file locks. The callback is a short Agent admission gate, never HTTP.
+// Store/file locks. expected may name any superset of the chain's accounts
+// (see revisionAdmits). The callback is a short Agent admission gate, never HTTP.
 // No resolved key escapes this method until durability and the current key
 // have both been acknowledged. Every retry calls it again after its sleep.
 func (s *Store) AdmitAnthropicBackup(ctx context.Context, expected BackupRevision, admit func(AnthropicBackupSelection) error) error {
@@ -270,7 +312,8 @@ func (s *Store) AdmitAnthropicBackup(ctx context.Context, expected BackupRevisio
 		if err != nil {
 			return false, nil, err
 		}
-		if s.backupBlocked || !st.Active || st.Revision != expected || s.hasPending("anthropic") {
+		accounts := anthropicAccounts(disk)
+		if s.backupBlocked || !st.Active || !revisionAdmits(expected, st.Revision, accounts) || s.chainPending(disk) {
 			return false, nil, credentialsChanged("anthropic", "backup", expected.Primary)
 		}
 		if err := s.saveLocked(disk); err != nil {
@@ -280,6 +323,6 @@ func (s *Store) AdmitAnthropicBackup(ctx context.Context, expected BackupRevisio
 			return false, nil, err
 		}
 		cred := disk[anthropicBackupSlot]
-		return false, nil, admit(AnthropicBackupSelection{Snapshot: storeSnapshot("anthropic", cred), Revision: st.Revision})
+		return false, nil, admit(AnthropicBackupSelection{Snapshot: storeSnapshot("anthropic", cred), Revision: st.Revision, Accounts: accountGenerations(accounts)})
 	})
 }

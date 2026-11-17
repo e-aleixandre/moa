@@ -82,8 +82,18 @@ type ProviderLoginManager struct {
 	attempts map[string]*loginAttempt
 }
 
+// Targets of an Anthropic sign-in. The default replaces the "anthropic"
+// sign-in; the others administer the chain of plan accounts.
+const (
+	// LoginTargetNewAccount appends another account after the existing ones.
+	LoginTargetNewAccount = "new_account"
+	// LoginTargetAccount signs the account holding the expected generation in again.
+	LoginTargetAccount = "account"
+)
+
 type loginAttempt struct {
 	provider string
+	target   string
 	flow     string
 	id       [sha256.Size]byte // hashes: the raw values are the caller's secrets
 	binding  [sha256.Size]byte
@@ -116,7 +126,18 @@ func envManaged(provider string) bool { return os.Getenv(envKeyForProvider(provi
 // different one means the page is stale. For xAI the device code is requested
 // with ctx, and polling then continues on the manager's lifetime.
 func (m *ProviderLoginManager) Begin(ctx context.Context, provider, browserBinding, expectedGeneration string) (LoginAttemptView, error) {
+	return m.BeginTarget(ctx, provider, browserBinding, expectedGeneration, "")
+}
+
+// BeginTarget is Begin for an Anthropic sign-in that administers the chain of
+// plan accounts. With LoginTargetNewAccount, expectedGeneration is the one of
+// the plan row the page showed and the result is appended as a new account;
+// with LoginTargetAccount it is the account to sign in again, in its place.
+func (m *ProviderLoginManager) BeginTarget(ctx context.Context, provider, browserBinding, expectedGeneration, target string) (LoginAttemptView, error) {
 	if !webLoginProvider(provider) {
+		return LoginAttemptView{}, loginError(provider, LoginUnsupported)
+	}
+	if target != "" && (provider != "anthropic" || (target != LoginTargetNewAccount && target != LoginTargetAccount)) {
 		return LoginAttemptView{}, loginError(provider, LoginUnsupported)
 	}
 	if browserBinding == "" {
@@ -126,8 +147,25 @@ func (m *ProviderLoginManager) Begin(ctx context.Context, provider, browserBindi
 		return LoginAttemptView{}, loginError(provider, LoginEnvManaged)
 	}
 	gen, err := m.store.StoredGeneration(provider)
+	if target == LoginTargetNewAccount {
+		gen, err = m.store.AnthropicLeadGeneration()
+	}
 	if err != nil {
 		return LoginAttemptView{}, err
+	}
+	if target == LoginTargetAccount {
+		chain, err := m.store.AnthropicChain()
+		if err != nil {
+			return LoginAttemptView{}, err
+		}
+		found := false
+		for _, a := range chain.Accounts {
+			found = found || a.Generation == expectedGeneration
+		}
+		if !found {
+			return LoginAttemptView{}, credentialsChanged(provider, "login", "")
+		}
+		gen = expectedGeneration
 	}
 	if gen != expectedGeneration {
 		return LoginAttemptView{}, credentialsChanged(provider, "login", gen)
@@ -138,7 +176,7 @@ func (m *ProviderLoginManager) Begin(ctx context.Context, provider, browserBindi
 	}
 	now := m.now()
 	att := &loginAttempt{
-		provider: provider, id: sha256.Sum256([]byte(id)), binding: sha256.Sum256([]byte(browserBinding)),
+		provider: provider, target: target, id: sha256.Sum256([]byte(id)), binding: sha256.Sum256([]byte(browserBinding)),
 		baseline: gen, expires: now.Add(loginAttemptTTL), state: attemptWaiting,
 	}
 	view := LoginAttemptView{Provider: provider, AttemptID: id}
@@ -263,7 +301,7 @@ func (m *ProviderLoginManager) Complete(ctx context.Context, provider, attemptID
 		m.settleLocked(att, attemptFailed, errorClass(err))
 		return err
 	}
-	return m.commitLocked(att, Credential{Type: "oauth", Access: creds.Access, Refresh: creds.Refresh, Expires: creds.Expires, AccountID: creds.AccountID})
+	return m.commitLocked(att, Credential{Type: "oauth", Access: creds.Access, Refresh: creds.Refresh, Expires: creds.Expires, AccountID: creds.AccountID, Email: creds.Email})
 }
 
 // Progress reports an attempt's state. It never exchanges or starts polling.
@@ -375,7 +413,16 @@ func (m *ProviderLoginManager) commitLocked(att *loginAttempt, cred Credential) 
 		m.settleLocked(att, attemptFailed, LoginEnvManaged)
 		return loginError(att.provider, LoginEnvManaged)
 	}
-	if _, err := m.store.CommitLogin(att.provider, att.baseline, cred); err != nil {
+	var err error
+	switch att.target {
+	case LoginTargetNewAccount:
+		_, err = m.store.AddAnthropicAccount(att.baseline, cred)
+	case LoginTargetAccount:
+		_, err = m.store.ReplaceAnthropicAccount(att.baseline, cred)
+	default:
+		_, err = m.store.CommitLogin(att.provider, att.baseline, cred)
+	}
+	if err != nil {
 		class := errorClass(err)
 		switch class {
 		case core.CredentialChanged:

@@ -120,6 +120,8 @@ func TestRememberedPlanLimitRenewsOnNewConfirmation(t *testing.T) {
 	}
 }
 
+// Only a new sign-in forgets a remembered plan limit. Several accounts can
+// share one key, so a limit is remembered per account and a key change leaves it.
 func TestRememberedPlanLimitIgnoresChangedCredentials(t *testing.T) {
 	for _, change := range []string{"oauth", "key"} {
 		t.Run(change, func(t *testing.T) {
@@ -143,8 +145,20 @@ func TestRememberedPlanLimitIgnoresChangedCredentials(t *testing.T) {
 				t.Fatal(err)
 			}
 			finishBackup(t, p, context.Background(), req)
-			if len(tr.headers) != 3 || tr.headers[2].Get("Authorization") == "" {
-				t.Fatalf("remembered limit survived a %s change: %v", change, tr.headers)
+			if len(tr.headers) != 3 {
+				t.Fatalf("%s change: want one more request, got %v", change, tr.headers)
+			}
+			if change == "oauth" {
+				// A new sign-in is a new account: the old one's limit says nothing about it.
+				if tr.headers[2].Get("Authorization") == "" {
+					t.Fatalf("remembered limit survived a new sign-in: %v", tr.headers)
+				}
+				return
+			}
+			// The limit belongs to the account, not to the pair it was seen
+			// with: replacing the key does not make the exhausted plan worth asking.
+			if tr.headers[2].Get("Authorization") != "" || tr.headers[2].Get("X-API-Key") != "fake-other-key" {
+				t.Fatalf("a key change made the exhausted plan be asked again: %v", tr.headers[2])
 			}
 		})
 	}

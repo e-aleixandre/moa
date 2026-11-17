@@ -7,7 +7,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -81,7 +80,7 @@ func TestAPIBackupPrewarmFreshNoResetAfterRememberedReset(t *testing.T) {
 		// A later reliable account-wide reset remains authoritative over
 		// this earlier no-reset observation; no old map entry is cleared.
 		nextReset := time.Now().Add(time.Hour)
-		h.f.store.RememberAnthropicPlanLimit(auth.BackupRevision{Primary: fresh.ProviderSource.PrimaryGeneration, Key: fresh.ProviderSource.BackupGeneration}, nextReset)
+		h.f.store.RememberAnthropicPlanLimit(fresh.ProviderSource.PrimaryGeneration, nextReset)
 		h.p.now = func() time.Time { return nextReset }
 		if _, err := h.p.Prewarm(context.Background(), req); err == nil || len(h.wire.headers) != before+3 {
 			t.Fatalf("later reliable reset ignored: err=%v calls=%d", err, len(h.wire.headers)-before)

@@ -383,3 +383,58 @@ func TestAnthropicChainKeepAliveFollowsServingAccount(t *testing.T) {
 		t.Fatalf("ping went to %v, want B", got)
 	}
 }
+
+// Removing the first account hands the request to the next one at once.
+func TestAnthropicChainRemovedFirstAccountIsSkipped(t *testing.T) {
+	h := chainRuntime(t, "AB", true)
+	h.sendExpect(t, "before", "A")
+	if err := h.f.store.RemoveAnthropicAccount(h.acct["A"].gen); err != nil {
+		t.Fatal(err)
+	}
+	msg := h.sendExpect(t, "after removing A", "B")
+	if src := msg.ProviderSource; src == nil || src.PrimaryGeneration != h.acct["B"].gen || src.Account != 0 {
+		t.Fatalf("source = %+v, want B as the first account", src)
+	}
+}
+
+// Only a confirmed limit moves along the chain: a rejected sign-in is an
+// error to fix on that account, not a reason to spend another one.
+func TestAnthropicChainRejectedSignInDoesNotSwitchAccount(t *testing.T) {
+	h := chainRuntime(t, "AB", true)
+	h.serve["A"] = func() (int, http.Header, string) { return 401, http.Header{}, `{"error":{"type":"authentication_error"}}` }
+	_, err := h.send(context.Background())
+	if pe, ok := core.AsProviderCredentialError(err); !ok || pe.Class != core.CredentialReconnect {
+		t.Fatalf("err = %v, want a reconnect error", err)
+	}
+	if got := h.calls(0); strings.Join(got, ",") != "A" {
+		t.Fatalf("dispatches %v, want only A", got)
+	}
+	statuses, err := h.f.store.AnthropicAccountStatuses(time.Now())
+	if err != nil || statuses[0].State != "reconnect" || statuses[1].State != "available" {
+		t.Fatalf("statuses = %+v %v, want only A to reconnect", statuses, err)
+	}
+}
+
+// The second account is the one that reports its position.
+func TestAnthropicChainSourceReportsThePositionOfTheServingAccount(t *testing.T) {
+	h := chainRuntime(t, "AB", false)
+	h.serve["A"] = func() (int, http.Header, string) { return backupRejectUntil("five_hour", time.Now().Add(time.Hour)) }
+	msg := h.sendExpect(t, "served by B", "A", "B")
+	if src := msg.ProviderSource; src == nil || src.Account != 2 {
+		t.Fatalf("source = %+v, want account 2", src)
+	}
+}
+
+// A request the key cannot replay (another model) never reaches it; it still
+// moves along the accounts.
+func TestAnthropicChainUnreplayableRequestSkipsTheKey(t *testing.T) {
+	h := chainRuntime(t, "AB", true)
+	h.serve["A"] = func() (int, http.Header, string) { return backupRejectUntil("five_hour", time.Now().Add(time.Hour)) }
+	h.serve["B"] = func() (int, http.Header, string) { return backupRejectUntil("five_hour", time.Now().Add(2*time.Hour)) }
+	other := h.req
+	other.Model.ID = "claude-haiku-4-5"
+	_, err := h.sendRequest(context.Background(), other)
+	if _, ok := core.AsQuotaExceeded(err); !ok || strings.Join(h.calls(0), ",") != "A,B" {
+		t.Fatalf("dispatches %v err=%v, want A,B and the quota error, never the key", h.calls(0), err)
+	}
+}

@@ -59,25 +59,24 @@ func TestAnthropicBackupLowCreditObservation(t *testing.T) {
 func TestAnthropicPlanResetRetainsReliableBoundary(t *testing.T) {
 	s, _, _ := backupFixture(t)
 	revision := saveBackup(t, s).Revision
+	gen := revision.Primary // one sign-in: the revision's primary is its generation
 	now := time.Now()
-	if _, known := s.AnthropicPlanReset(revision); known {
+	if _, known := s.AnthropicPlanReset(gen); known {
 		t.Fatal("invented reliable reset")
 	}
-	s.RememberAnthropicPlanLimit(revision, now.Add(-time.Minute))
-	if until, known := s.AnthropicPlanReset(revision); !known || !until.Equal(now.Add(-time.Minute)) {
+	s.RememberAnthropicPlanLimit(gen, now.Add(-time.Minute))
+	if until, known := s.AnthropicPlanReset(gen); !known || !until.Equal(now.Add(-time.Minute)) {
 		t.Fatal("expired boundary lost")
 	}
-	if _, live := s.AnthropicPlanLimit(revision, now); live {
+	if _, live := s.AnthropicPlanLimit(gen, now); live {
 		t.Fatal("expired boundary became a live limit")
 	}
-	s.RememberAnthropicPlanLimit(revision, now.Add(time.Hour))
-	s.RememberAnthropicPlanLimit(revision, now.Add(time.Minute))
-	if until, known := s.AnthropicPlanReset(revision); !known || !until.Equal(now.Add(time.Hour)) {
+	s.RememberAnthropicPlanLimit(gen, now.Add(time.Hour))
+	s.RememberAnthropicPlanLimit(gen, now.Add(time.Minute))
+	if until, known := s.AnthropicPlanReset(gen); !known || !until.Equal(now.Add(time.Hour)) {
 		t.Fatal("later account reset was shortened")
 	}
-	for _, other := range []BackupRevision{{Primary: "other", Key: revision.Key}, {Primary: revision.Primary, Key: "other"}} {
-		if _, known := s.AnthropicPlanReset(other); known {
-			t.Fatal("reset leaked across generations")
-		}
+	if _, known := s.AnthropicPlanReset("other"); known {
+		t.Fatal("reset leaked across generations")
 	}
 }
