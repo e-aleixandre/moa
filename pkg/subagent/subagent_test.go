@@ -3149,7 +3149,7 @@ func TestResolveModel_CapitalizedAliasResolves(t *testing.T) {
 	if res != nil {
 		t.Fatalf("unexpected error: %v", res.Content)
 	}
-	if model.ID != "gpt-6.1-sol" {
+	if model.ID != "gpt-6.2-sol" {
 		t.Fatalf("got %q", model.ID)
 	}
 }
@@ -3220,7 +3220,7 @@ func TestResolveModel_NoAllowlistAcceptsAnyKnownModel(t *testing.T) {
 // says so in terms the agent can act on.
 func TestResolveModel_AllowlistRejectsExcludedModel(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
-	allowed := []string{"gpt-6.1-sol"}
+	allowed := []string{"gpt-6.2-sol"}
 
 	_, _, res := resolveModel(fallback, false, map[string]any{"model": "terra"}, allowed)
 	if res == nil {
@@ -3241,7 +3241,7 @@ func TestResolveModel_AllowlistRejectsExcludedModel(t *testing.T) {
 	if res != nil {
 		t.Fatalf("an allowed model was rejected: %s", resultText(res))
 	}
-	if model.ID != "gpt-6.1-sol" {
+	if model.ID != "gpt-6.2-sol" {
 		t.Fatalf("got %q", model.ID)
 	}
 }
@@ -3249,7 +3249,7 @@ func TestResolveModel_AllowlistRejectsExcludedModel(t *testing.T) {
 // A custom "provider/model-id" spec must not be a way around the list.
 func TestResolveModel_AllowlistRejectsCustomSpec(t *testing.T) {
 	fallback := core.Model{ID: "claude-sonnet-5", Provider: "anthropic"}
-	if _, _, res := resolveModel(fallback, false, map[string]any{"model": "openai/my-finetune-v3"}, []string{"gpt-6.1-sol"}); res == nil {
+	if _, _, res := resolveModel(fallback, false, map[string]any{"model": "openai/my-finetune-v3"}, []string{"gpt-6.2-sol"}); res == nil {
 		t.Fatal("a custom spec bypassed the allowlist")
 	}
 }
@@ -3257,7 +3257,7 @@ func TestResolveModel_AllowlistRejectsCustomSpec(t *testing.T) {
 // Discovery is filtered too: a model the agent may not use must not be named
 // in the schema, or it will keep asking for it.
 func TestSubagentSchema_AllowlistHidesExcludedModels(t *testing.T) {
-	tool := newSubagent(Config{AllowedModels: []string{"gpt-6.1-sol"}}, &jobStore{})
+	tool := newSubagent(Config{AllowedModels: []string{"gpt-6.2-sol"}}, &jobStore{})
 
 	var parsed struct {
 		Properties struct {
@@ -3282,7 +3282,7 @@ func TestSubagentSchema_AllowlistHidesExcludedModels(t *testing.T) {
 }
 
 func TestSubagentLiveAllowlist_AcceptsModelAddedAfterConstruction(t *testing.T) {
-	allowed := []string{"gpt-6.1-sol"}
+	allowed := []string{"gpt-6.2-sol"}
 	provider := newMockProvider(textResponse("done"))
 	sub, _, _ := newSubagentTools(t, Config{
 		DefaultModel:      core.Model{ID: "claude-sonnet-5", Provider: "anthropic"},
@@ -3309,7 +3309,7 @@ func TestSubagentLiveAllowlist_RejectsModelRemovedAfterConstruction(t *testing.T
 		LoadAllowedModels: func() []string { return allowed },
 	})
 
-	allowed = []string{"gpt-6.1-sol"}
+	allowed = []string{"gpt-6.2-sol"}
 	res, err := sub.Execute(context.Background(), map[string]any{"task": "do it", "model": "terra"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -3320,7 +3320,7 @@ func TestSubagentLiveAllowlist_RejectsModelRemovedAfterConstruction(t *testing.T
 }
 
 func TestSubagentLiveAllowlist_EmptyAllowsAnyModel(t *testing.T) {
-	allowed := []string{"gpt-6.1-sol"}
+	allowed := []string{"gpt-6.2-sol"}
 	provider := newMockProvider(textResponse("done"))
 	sub, _, _ := newSubagentTools(t, Config{
 		DefaultModel:      core.Model{ID: "claude-sonnet-5", Provider: "anthropic"},
@@ -3343,7 +3343,7 @@ func TestSubagentLiveAllowlist_InheritsParentOutsideAllowlist(t *testing.T) {
 	provider := newMockProvider(textResponse("done"))
 	sub, _, _ := newSubagentTools(t, Config{
 		DefaultModel:      core.Model{ID: "gpt-5.6-terra", Provider: "openai"},
-		LoadAllowedModels: func() []string { return []string{"gpt-6.1-sol"} },
+		LoadAllowedModels: func() []string { return []string{"gpt-6.2-sol"} },
 		ProviderFactory:   func(core.Model) (core.Provider, error) { return provider, nil },
 	})
 
@@ -3357,7 +3357,7 @@ func TestSubagentLiveAllowlist_InheritsParentOutsideAllowlist(t *testing.T) {
 }
 
 func TestSubagentSchema_LiveAllowlistRefreshesDescription(t *testing.T) {
-	allowed := []string{"gpt-6.1-sol"}
+	allowed := []string{"gpt-6.2-sol"}
 	tool := newSubagent(Config{LoadAllowedModels: func() []string { return allowed }}, &jobStore{})
 
 	allowed = []string{"gpt-6.1-terra"}

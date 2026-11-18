@@ -28,7 +28,7 @@ func TestResolveModelDaybreak(t *testing.T) {
 		}
 	}
 	m, daybreak, ok := ResolveModelDaybreak("sol")
-	if !ok || daybreak || m.ID != "gpt-6.1-sol" {
+	if !ok || daybreak || m.ID != "gpt-6.2-sol" {
 		t.Errorf("ResolveModelDaybreak(sol) = (%s, %v, %v)", m.ID, daybreak, ok)
 	}
 	if m, ok := ResolveModel("daybreak"); !ok || m.ID != DaybreakModelID {

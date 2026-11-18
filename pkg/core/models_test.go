@@ -289,7 +289,7 @@ func TestGPT56TerraPricing(t *testing.T) {
 }
 
 func TestGPT6AstraPricing(t *testing.T) {
-	model, ok := ResolveModel("astra")
+	model, ok := ResolveModel("gpt-6-astra")
 	if !ok || model.ID != "gpt-6-astra" || model.Pricing == nil {
 		t.Fatalf("astra = %+v, %v", model, ok)
 	}
@@ -327,7 +327,7 @@ func TestGPT6SolPricing(t *testing.T) {
 }
 
 func TestGPT61SolPricingAndAlias(t *testing.T) {
-	model, ok := ResolveModel("sol")
+	model, ok := ResolveModel("gpt-6.1-sol")
 	if !ok || model.ID != "gpt-6.1-sol" || model.Pricing == nil {
 		t.Fatalf("sol = %+v, %v; want gpt-6.1-sol", model, ok)
 	}
@@ -745,18 +745,26 @@ func TestListModels_HasAliases(t *testing.T) {
 func TestListModels_PrefersLexicalAliasOnEqualLength(t *testing.T) {
 	for range 100 {
 		for _, entry := range ListModels() {
-			if entry.Model.ID == "gpt-6-astra" && entry.Alias != "astra" {
-				t.Fatalf("GPT-6 Astra alias = %q, want astra", entry.Alias)
+			if entry.Model.ID == "gpt-6.2-astra" && entry.Alias != "astra" {
+				t.Fatalf("GPT-6.2 Astra alias = %q, want astra", entry.Alias)
+			}
+			if entry.Model.ID == "gpt-6-astra" && entry.Alias != "gpt-6" {
+				t.Fatalf("GPT-6 Astra alias = %q, want gpt-6", entry.Alias)
 			}
 		}
 	}
 }
 
+// Owner decision 2026-11-18: astra and sol follow GPT-6.2; gpt-6 stays on
+// GPT-6 Astra; the older models stay selectable by ID.
 func TestResolveModel_GPT6Aliases(t *testing.T) {
-	for _, alias := range []string{"astra", "gpt-6"} {
+	for alias, want := range map[string]string{
+		"astra": "gpt-6.2-astra", "sol": "gpt-6.2-sol", "gpt-6": "gpt-6-astra",
+		"gpt-6-astra": "gpt-6-astra", "gpt-6.1-sol": "gpt-6.1-sol", "gpt-6-sol": "gpt-6-sol",
+	} {
 		model, ok := ResolveModel(alias)
-		if !ok || model.ID != "gpt-6-astra" {
-			t.Errorf("ResolveModel(%q) = %+v, %v; want gpt-6-astra", alias, model, ok)
+		if !ok || model.ID != want {
+			t.Errorf("ResolveModel(%q) = %+v, %v; want %s", alias, model, ok, want)
 		}
 	}
 }
@@ -917,15 +925,15 @@ func TestKnownModels_PricingIsExplicit(t *testing.T) {
 // the exact lowercase form resolved and everything else failed.
 func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 	cases := map[string]string{
-		"Sol":             "gpt-6.1-sol",
-		"SOL":             "gpt-6.1-sol",
+		"Sol":             "gpt-6.2-sol",
+		"SOL":             "gpt-6.2-sol",
 		"Terra":           "gpt-6.1-terra",
 		"Luna":            "gpt-6-luna",
-		"Astra":           "gpt-6-astra",
+		"Astra":           "gpt-6.2-astra",
 		"Opus":            "claude-opus-5-5",
 		"Fable":           "claude-fable-5-2",
-		" sol ":           "gpt-6.1-sol",
-		"openai/Sol":      "gpt-6.1-sol",
+		" sol ":           "gpt-6.2-sol",
+		"openai/Sol":      "gpt-6.2-sol",
 		"ANTHROPIC/Opus":  "claude-opus-5-5",
 		"Claude-Sonnet-5": "claude-sonnet-5",
 		"Claude Sonnet 5": "claude-sonnet-5",

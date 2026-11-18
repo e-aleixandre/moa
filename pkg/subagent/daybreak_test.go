@@ -47,7 +47,7 @@ func daybreakConfig(d *daybreakLaunch, parentOn bool, catalog func() core.Daybre
 }
 
 func subagentKnownCatalog() core.DaybreakAvailability {
-	return core.DaybreakAvailability{Transport: true, Known: true, Models: map[string]bool{"gpt-6-sol": true, "gpt-6.1-sol": false}}
+	return core.DaybreakAvailability{Transport: true, Known: true, Models: map[string]bool{"gpt-6-sol": true, "gpt-6.1-sol": false, "gpt-6.2-sol": false}}
 }
 
 const notApplied = "Daybreak not applied"
@@ -75,10 +75,10 @@ func TestSubagentIncompatibleOpenAIRunsStandard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model, program := d.last(); model != "gpt-6.1-sol" || program != "" {
-		t.Fatalf("child = %s program=%q, want standard gpt-6.1-sol", model, program)
+	if model, program := d.last(); model != "gpt-6.2-sol" || program != "" {
+		t.Fatalf("child = %s program=%q, want standard gpt-6.2-sol", model, program)
 	}
-	if want := "Daybreak not applied: GPT-6.1 Sol doesn't support it"; !strings.Contains(textOf(res), want) {
+	if want := "Daybreak not applied: GPT-6.2 Sol doesn't support it"; !strings.Contains(textOf(res), want) {
 		t.Fatalf("result %q lacks %q", textOf(res), want)
 	}
 }
@@ -152,7 +152,7 @@ func TestSubagentAsyncDaybreakNoteAndJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(textOf(res), "Daybreak not applied: GPT-6.1 Sol doesn't support it") {
+	if !strings.Contains(textOf(res), "Daybreak not applied: GPT-6.2 Sol doesn't support it") {
 		t.Fatalf("async start %q lacks the note", textOf(res))
 	}
 	res2, err := sub.Execute(context.Background(), map[string]any{"task": "hello", "async": true}, nil)
@@ -172,7 +172,7 @@ func TestSubagentAsyncDaybreakNoteAndJob(t *testing.T) {
 	for _, info := range infos {
 		byModel[info.Model] = info.Daybreak
 	}
-	if byModel["gpt-6.1-sol"] || !byModel["gpt-6-sol"] {
+	if byModel["gpt-6.2-sol"] || !byModel["gpt-6-sol"] {
 		t.Fatalf("job daybreak flags = %v (%s)", byModel, textOf(res2))
 	}
 }

@@ -173,10 +173,11 @@ func (o *OpenAI) Stream(ctx context.Context, req core.Request) (<-chan core.Assi
 	// The fallback without tool search resends the request as the caller
 	// made it: the adjustments below are not idempotent.
 	original := req
-	// GPT-6 Astra rejects temperature. The normal agent path does not set it,
-	// but clearing it here also keeps direct provider callers on the documented
+	// GPT-6 Astra and the GPT-6.2 models reject temperature (the 6.2 migration
+	// guide says to omit it). The normal agent path does not set it, but
+	// clearing it here also keeps direct provider callers on the documented
 	// contract without changing other OpenAI models.
-	if strings.EqualFold(req.Model.ID, "gpt-6-astra") {
+	if id := strings.ToLower(req.Model.ID); id == "gpt-6-astra" || id == "gpt-6.2-astra" || id == "gpt-6.2-sol" {
 		req.Options.Temperature = nil
 	}
 

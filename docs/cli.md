@@ -149,14 +149,14 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |
-| `astra` | `gpt-6-astra` |
+| `astra` | `gpt-6.2-astra` |
 | `gpt-6` | `gpt-6-astra` |
 | `grok` | `grok-4.7` (xAI) |
 | `grok-4.7-build` | `grok-4.7` (the subscription backend's name for it) |
 | `grok-4.6-build` | `grok-4.6` (the subscription backend's name for it) |
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
 | `muse` | `muse-spark-1.3` (Meta) |
-| `sol` | `gpt-6.1-sol` |
+| `sol` | `gpt-6.2-sol` |
 | `terra` | `gpt-6.1-terra` |
 | `luna` | `gpt-6-luna` |
 | `gpt-5.6` | `gpt-5.6-sol` |

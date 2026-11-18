@@ -48,8 +48,8 @@ func TestHandler_SwitchModel_RejectsIncompatibleUnderDaybreak(t *testing.T) {
 	fa := &fakeAgent{model: sol, thinkingLevel: "medium", daybreak: true}
 	_, _, b := daybreakSessionContext(t, fa, knownCatalog)
 	err := b.Execute(SwitchModel{ModelSpec: "sol"})
-	if err == nil || !strings.Contains(err.Error(), "GPT-6.1 Sol doesn't support Daybreak") {
-		t.Fatalf("switch to gpt-6.1-sol = %v, want a clear refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "GPT-6.2 Sol doesn't support Daybreak") {
+		t.Fatalf("switch to gpt-6.2-sol = %v, want a clear refusal", err)
 	}
 	if fa.Model().ID != "gpt-6-sol" || !fa.Daybreak() {
 		t.Fatalf("refused switch changed state: model=%s daybreak=%v", fa.Model().ID, fa.Daybreak())
