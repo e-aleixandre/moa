@@ -298,9 +298,9 @@ const (
 )
 
 // Regenerate is Reload plus a new date and git section: what a compaction or
-// Start fresh does, since the session's cached prefix is lost anyway. The date
-// keeps its pinned time while the day is the same, so regenerating twice in a
-// day does not move it. revert undoes all of it.
+// Start fresh does, since the session's cached prefix is lost anyway. The
+// prompt renders only the day, so a new time on the same day changes nothing
+// the model sees. revert undoes all of it.
 func (s *Sources) Regenerate() (changed []Changed, revert func()) {
 	if s == nil {
 		return nil, func() {}
@@ -317,7 +317,7 @@ func (s *Sources) Regenerate() (changed []Changed, revert func()) {
 	changed, revert = s.Reload()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !sameDay(now, s.now) {
+	if !now.Equal(s.now) {
 		changed = append(changed, Changed{Label: LabelDate, Content: now.Format("2006-01-02")})
 		s.now = now
 	}
@@ -326,10 +326,4 @@ func (s *Sources) Regenerate() (changed []Changed, revert func()) {
 		s.gitCtx = gitCtx
 	}
 	return changed, revert
-}
-
-func sameDay(a, b time.Time) bool {
-	ay, am, ad := a.Date()
-	by, bm, bd := b.Date()
-	return ay == by && am == bm && ad == bd
 }

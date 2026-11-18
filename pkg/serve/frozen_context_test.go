@@ -187,7 +187,9 @@ func TestFrozenContext_StartFreshRegenerates(t *testing.T) {
 	sess := sessionWithHistory(t, mgr1, cwd)
 	stopFrozenTestManager(t, mgr1)
 
-	changeEverything(t, cwd)
+	// Only the day and the commit move: a reload would keep the prompt, so
+	// this tells regenerating from reloading.
+	gitIn(t, cwd, "commit", "-q", "--allow-empty", "-m", "second commit")
 	prov2 := &recordingProvider{}
 	mgr2 := newFrozenTestManager(t, ctx, prov2, sessionDir, frozenDay2)
 	resumed, err := mgr2.ResumeSession(sess.ID)
@@ -200,7 +202,12 @@ func TestFrozenContext_StartFreshRegenerates(t *testing.T) {
 		t.Fatalf("start-fresh = %+v, %v", res, err)
 	}
 	sendAndWait(t, mgr2, resumed, "after fresh")
-	assertFreshContext(t, prov2.last().System, "Thursday, November 19, 2026")
+	sys := prov2.last().System
+	for _, want := range []string{"Thursday, November 19, 2026", "second commit"} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("start fresh did not regenerate %q:\n%s", want, sys)
+		}
+	}
 }
 
 // A session saved by a binary that did not freeze its prompt has none: it is

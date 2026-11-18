@@ -7,6 +7,7 @@
 package session
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -102,6 +103,21 @@ type PromptContext struct {
 	// System is the base system prompt exactly as the session last installed
 	// it (without the goal directive, which is composed on top).
 	System string `json:"system"`
+}
+
+// UnmarshalJSON never fails: the snapshot is derived data that can always be
+// rebuilt, so a value this binary cannot decode (a later format, a damaged
+// file) reads as an unusable one and the session is built afresh instead of
+// becoming impossible to open.
+func (pc *PromptContext) UnmarshalJSON(b []byte) error {
+	type plain PromptContext
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		*pc = PromptContext{}
+		return nil
+	}
+	*pc = PromptContext(p)
+	return nil
 }
 
 // Usable reports whether pc can be restored into a session working in cwd.
