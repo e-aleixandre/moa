@@ -133,6 +133,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("PATCH /api/compact-at", handleCompactAt(manager))
 	mux.HandleFunc("GET /api/compact-model", handleCompactModel(manager))
 	mux.HandleFunc("PATCH /api/compact-model", handleCompactModel(manager))
+	mux.HandleFunc("GET /api/dreaming-models", handleDreamingModels(manager))
+	mux.HandleFunc("PATCH /api/dreaming-models", handleDreamingModels(manager))
 	mux.HandleFunc("GET /api/cache-keepalive", handleCacheKeepAlive(manager))
 	mux.HandleFunc("PATCH /api/cache-keepalive", handleCacheKeepAlive(manager))
 	mux.HandleFunc("GET /api/compact-strategy", handleCompactStrategy(manager))

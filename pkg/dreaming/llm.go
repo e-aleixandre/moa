@@ -77,6 +77,9 @@ func Reservation(model core.Model, system, prompt string, requestedOut int) (flo
 type callResult struct {
 	Text string
 	Cost float64
+	// Truncated reports that the model ran out of output tokens: its answer
+	// stops mid-way, and with a reasoning model it can be empty.
+	Truncated bool
 }
 
 // call sends one tool-less request (I6): the model can only answer.
@@ -143,5 +146,5 @@ func (b *Budget) call(ctx context.Context, factory ProviderFactory, model core.M
 			}
 		}
 	}
-	return callResult{Text: out, Cost: spent}, nil
+	return callResult{Text: out, Cost: spent, Truncated: final != nil && final.StopReason == "max_tokens"}, nil
 }

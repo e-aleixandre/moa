@@ -15,6 +15,7 @@ type fakeProvider struct {
 	mu       sync.Mutex
 	requests []core.Request
 	usage    *core.Usage
+	stop     string // StopReason of every answer
 	answer   func(req core.Request) string
 }
 
@@ -25,7 +26,7 @@ func (f *fakeProvider) Stream(_ context.Context, req core.Request) (<-chan core.
 	ch := make(chan core.AssistantEvent, 2)
 	text := f.answer(req)
 	ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: text}
-	msg := &core.Message{Role: "assistant", Usage: f.usage}
+	msg := &core.Message{Role: "assistant", Usage: f.usage, StopReason: f.stop}
 	ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: msg}
 	close(ch)
 	return ch, nil
@@ -162,5 +163,50 @@ func TestNightWithoutBudgetCallsNothing(t *testing.T) {
 	}
 	if !equalTrees(tree(t, s), before) {
 		t.Fatal("the book changed")
+	}
+}
+
+// What the night could not honour of its owner's model choice is said in the
+// morning news, not only in a log.
+func TestMorningNewsSaysWhyTheChosenModelWasNotUsed(t *testing.T) {
+	cfg := NightConfig{Date: "2026-11-12", Notes: []string{"Lectura: «luna» no tiene credenciales ahora; se usó el de por defecto."}}
+	n := morningNews(cfg, Report{}, NightResult{}, nil, factOutcome{}, &Budget{Limit: 3})
+	if !strings.Contains(n.Body, "Lectura: «luna» no tiene credenciales") {
+		t.Fatalf("news body = %q", n.Body)
+	}
+	quiet := morningNews(NightConfig{Date: "2026-11-12"}, Report{}, NightResult{}, nil, factOutcome{}, &Budget{Limit: 3})
+	if strings.Contains(quiet.Body, "Lectura") {
+		t.Fatalf("a night with no fallback mentioned one: %q", quiet.Body)
+	}
+}
+
+// An analysis that stopped on the output cap is refused, not handed on whole:
+// the organizer would treat the unread rest of the sheet as unchanged.
+func TestTruncatedAnalysisIsRejectedNotPassedOn(t *testing.T) {
+	s := fixture(t)
+	fp, cfg, _ := fakeNight(t, 3)
+	inner := fp.answer
+	fp.answer = func(req core.Request) string {
+		if req.System != organizerSystem && req.System != memorySystem && req.System != pairerSystem {
+			fp.stop = "max_tokens"
+		} else {
+			fp.stop = ""
+		}
+		return inner(req)
+	}
+	res, err := s.Night(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 0 {
+		t.Fatalf("a sheet with a cut-off analysis was applied: %+v", res)
+	}
+	if why := res.Rejected["work/c.md"]; !strings.Contains(why, "sin espacio de respuesta") {
+		t.Fatalf("rejected = %v", res.Rejected)
+	}
+	for _, req := range fp.requests {
+		if req.System == organizerSystem {
+			t.Fatal("the organizer was called on a truncated analysis")
+		}
 	}
 }
