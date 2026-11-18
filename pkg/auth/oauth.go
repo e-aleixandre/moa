@@ -38,6 +38,9 @@ type OAuthCredentials struct {
 	// access token: Meta mints a Model API key, and api.meta.ai does not
 	// accept the access token itself.
 	APIKey string `json:"api_key,omitempty"`
+	// Email is the account address Anthropic's code exchange reports, when it
+	// does. It only labels the sign-in in Providers.
+	Email string `json:"email,omitempty"`
 }
 
 // LoginAnthropic runs the Anthropic OAuth PKCE sign-in for the CLI: it opens
@@ -113,6 +116,28 @@ type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
+	// Account is read only from Anthropic's code exchange, and only for its
+	// label; nothing else depends on it being present.
+	Account *struct {
+		EmailAddress string `json:"email_address"`
+	} `json:"account"`
+}
+
+// accountLabel returns the reported address when it is short plain text.
+func (t tokenResponse) accountLabel() string {
+	if t.Account == nil {
+		return ""
+	}
+	email := strings.TrimSpace(t.Account.EmailAddress)
+	if len(email) > 254 {
+		return ""
+	}
+	for _, r := range email {
+		if r < 0x20 || r == 0x7f {
+			return ""
+		}
+	}
+	return email
 }
 
 // exchangeAnthropicCode redeems an authorization code. The JSON body carries
@@ -154,6 +179,7 @@ func exchangeAnthropicCode(ctx context.Context, client *http.Client, endpoint, c
 		Access:  tok.AccessToken,
 		Refresh: tok.RefreshToken,
 		Expires: time.Now().UnixMilli() + int64(tok.ExpiresIn)*1000 - 5*60*1000,
+		Email:   tok.accountLabel(),
 	}, nil
 }
 

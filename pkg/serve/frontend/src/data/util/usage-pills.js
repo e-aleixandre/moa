@@ -148,6 +148,11 @@ export function usageForSession(session, globalUsage) {
   }
 
   const result = { fiveHour, week, extra, onOverage: !!s.onOverage };
+  // The readings are those of the account being spent; name it when it is not
+  // the first (the usual case needs no label).
+  if (isAnthropic && u && providerStatus?.account > 1) {
+    result.account = { position: providerStatus.account, generation: providerStatus.account_id || "" };
+  }
   if (u && (Array.isArray(u.money) || u.plan || u.stale)) {
     result.moneyBuckets = Array.isArray(u.money) ? u.money : [];
     result.tier = u.plan && u.plan.tier;

@@ -98,6 +98,11 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
 .zl-st-perm.is-ask { color: var(--zl-yellow); }
 .zl-st-perm.is-auto { color: var(--zl-t2); }
 .zl-st-fast { color: var(--zl-t3); padding: 0 6px; gap: 3px; }
+/* The plan account in use, when it is not the first: its address, cut by the
+   line's width (never by code) and whole in the title. It gives way before
+   the model name does. */
+.zl-st-acct { color: var(--zl-t3); padding: 0 6px; min-width: 0; flex: 0 1 auto; }
+.zl-st-acct .acct-name { max-width: 160px; }
 
 /* tier 3: events. Neutral by default; an alarm takes its state colour. */
 .zl-st-ev { gap: 5px; padding: 0 7px; color: var(--zl-t3); }
@@ -215,6 +220,12 @@ button.zl-st { cursor: pointer; transition: background var(--motion-hover) ease;
    Specificity beats `.zl-p2 .zl-st-word { display: none }` on purpose. */
 .zl-st-ev.is-alarm-yellow .zl-st-word,
 .zl-st-api .zl-st-word { display: inline; }
+/* The account keeps its name down to the dock, only shorter; the p2 rule that
+   drops words must not empty it (it comes after, with the same weight). */
+.zl-st-acct .zl-st-word { display: inline-block; }
+@container (max-width: 400px) {
+  .zl-st-acct .acct-name { max-width: 84px; }
+}
 
 /* Compact (grid pane, phone): goal is already dropped in the JSX;
    the line itself only tightens. */

@@ -28,7 +28,12 @@ func backupReplaySupported(req core.Request) bool {
 	return id == "claude-opus-5-5" || id == "claude-sonnet-5-5"
 }
 
-func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request, primary auth.CredentialSnapshot, secrets *secretSet) (<-chan core.AssistantEvent, error) {
+// streamAnthropic sends a request over the chain of Anthropic credentials: the
+// plan accounts in priority order, then the API key. An account is skipped
+// only on a confirmed 5h or weekly limit (its own, remembered until its reset)
+// and the key is used only when every account is exhausted. Everything is
+// resolved again at each send; nothing is held between requests.
+func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request, secrets *secretSet) (<-chan core.AssistantEvent, error) {
 	req.Options.APIKey = ""
 	dispatch := func(source core.ProviderSource) error {
 		if err := ctx.Err(); err != nil {
@@ -40,6 +45,8 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 		return nil
 	}
 	var source core.ProviderSource
+	// The key is considered as it stands when the request starts: a key or an
+	// account saved while the plan is being asked is never paid with by this send.
 	backup, backupErr := p.authStore.AnthropicBackupStatus()
 	if backupErr != nil {
 		backup.Active = false
@@ -48,8 +55,8 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 	if p.now != nil {
 		now = p.now
 	}
-	// remembered marks a send that skipped the plan on a remembered limit: it
-	// is admitted only while that limit still holds, else the plan is asked.
+	// remembered marks a send that skipped every account on a remembered limit:
+	// it is admitted only while those limits still hold, else an account is asked.
 	streamBackup := func(revision auth.BackupRevision, notBefore, observedAt *time.Time, remembered bool) (<-chan core.AssistantEvent, error) {
 		if !backupReplaySupported(req) {
 			return nil, errors.New("API backup cannot replay this model or mode. Stop and continue with a supported model, or wait for the plan")
@@ -82,11 +89,9 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 			var key string
 			passed := false
 			err := p.authStore.AdmitAnthropicBackup(ctx, revision, func(selected auth.AnthropicBackupSelection) error {
-				if remembered {
-					if _, ok := p.authStore.AnthropicPlanLimit(revision, now()); !ok {
-						passed = true
-						return errPlanLimitPassed
-					}
+				if remembered && !p.allAccountsLimited(selected.Accounts, now()) {
+					passed = true
+					return errPlanLimitPassed
 				}
 				next := core.ProviderSource{Kind: "api_backup", PrimaryGeneration: revision.Primary, BackupGeneration: revision.Key, WireProfile: "oauth", Provider: req.Model.Provider, Model: req.Model.ID, OAuthNotBefore: notBefore, OAuthQuotaObservedAt: observedAt}
 				if err := dispatch(next); err != nil {
@@ -119,66 +124,198 @@ func (p *snapshotProvider) streamAnthropic(ctx context.Context, req core.Request
 		}
 		return streamBackup(auth.BackupRevision{Primary: binding.PrimaryGeneration, Key: binding.BackupGeneration}, binding.OAuthNotBefore, binding.OAuthQuotaObservedAt, false)
 	}
-	backupEligible := primary.Source == core.CredentialSourceStore && primary.Kind == "oauth" && backup.Active && backup.Revision.Primary == primary.Generation && backupReplaySupported(req)
-	// A plan limit confirmed with a reliable reset holds for the whole account
-	// until that reset: asking the plan again before it only collects another
-	// rejection, so the request goes straight to the API.
-	if backupEligible {
-		if until, ok := p.authStore.AnthropicPlanLimit(backup.Revision, now()); ok {
-			ch, err := streamBackup(backup.Revision, &until, nil, true)
-			if !errors.Is(err, errPlanLimitPassed) {
+
+	stub := func(generation string) auth.CredentialSnapshot {
+		return auth.CredentialSnapshot{Provider: "anthropic", Source: core.CredentialSourceStore, Kind: "oauth", Generation: generation}
+	}
+	// sendAccount makes one request over the account holding generation. The
+	// bool reports that nothing was dispatched: no account request was admitted.
+	sendAccount := func(generation string) (<-chan core.AssistantEvent, bool, error) {
+		var accountSource core.ProviderSource
+		base := anthropic.NewWithKind("", true)
+		if p.httpClient != nil {
+			base.WithHTTPClient(p.httpClient)
+		}
+		base.WithDispatch(p.accountDispatch(generation, secrets, req.Model, func(next core.ProviderSource) error {
+			if err := dispatch(next); err != nil {
+				return err
+			}
+			accountSource = next
+			return nil
+		}))
+		ch, err := base.Stream(ctx, req)
+		if err != nil {
+			return nil, accountSource.Kind == "", err
+		}
+		snap := stub(generation)
+		return withAnthropicSource(ch, accountSource, secrets, func(err error) { p.authStore.RecordUse(snap, p.classify(ctx, snap, secrets, err)) }), false, nil
+	}
+
+	tried := map[string]bool{}
+	// quota is the confirmed limit of this request whose account returns first.
+	var quota *core.QuotaExceededError
+	// try sends to one account. more reports that the request goes on to the
+	// next link: after a confirmed limit, or when the account vanished before
+	// anything was sent (a removed or replaced sign-in is not a re-dispatch).
+	try := func(generation string) (ch <-chan core.AssistantEvent, more bool, err error) {
+		tried[generation] = true
+		ch, undispatched, err := sendAccount(generation)
+		if err == nil {
+			return ch, false, nil
+		}
+		if qe, ok := confirmedPlanQuota(err); ok {
+			// Only a complete reset is remembered; a bare backoff or Retry-After
+			// is no recovery date, and nothing beyond a week (plus margin) is.
+			if left := qe.Wait.NextAttemptAt.Sub(now()); qe.Wait.ResetAt != nil && left > 0 && left <= maxRememberedPlanLimit {
+				p.authStore.RememberAnthropicPlanLimit(generation, qe.Wait.NextAttemptAt)
+			}
+			if quota == nil || qe.Wait.NextAttemptAt.Before(quota.Wait.NextAttemptAt) {
+				quota = qe
+			}
+			return nil, true, nil
+		}
+		if pe, ok := core.AsProviderCredentialError(err); ok && undispatched && pe.Class == core.CredentialChanged && !p.accountPresent(generation) {
+			return nil, true, nil
+		}
+		snap := stub(generation)
+		err = p.classify(ctx, snap, secrets, err)
+		p.authStore.RecordUse(snap, err)
+		return nil, false, err
+	}
+
+	for round := 0; ; round++ {
+		var chain auth.AnthropicChain
+		for {
+			var err error
+			if chain, err = p.authStore.AnthropicChain(); err != nil {
+				p.authStore.RecordUse(auth.CredentialSnapshot{Provider: "anthropic"}, err)
+				return nil, err
+			}
+			if chain.Env {
+				return nil, core.NewProviderCredentialError("anthropic", core.CredentialSourceStore, "dispatch", core.CredentialChanged)
+			}
+			next := ""
+			found := false
+			for _, a := range chain.Accounts {
+				if _, limited := p.authStore.AnthropicPlanLimit(a.Generation, now()); !tried[a.Generation] && !limited {
+					next, found = a.Generation, true
+					break
+				}
+			}
+			if !found {
+				break
+			}
+			ch, more, err := try(next)
+			if !more {
 				return ch, err
 			}
 		}
-	}
-	base := anthropic.NewWithKind("", primary.Kind == "oauth")
-	if p.httpClient != nil {
-		base.WithHTTPClient(p.httpClient)
-	}
-	base.WithDispatch(p.primaryDispatch(primary, secrets, req.Model, func(next core.ProviderSource) error {
-		source = next
-		return dispatch(source)
-	}))
-	ch, err := base.Stream(ctx, req)
-	if err != nil {
-		if qe, ok := core.AsQuotaExceeded(err); ok && qe.Wait != nil && qe.Wait.Kind == "quota_confirmed" && (qe.Wait.Scope == "five_hour" || qe.Wait.Scope == "seven_day") && backupEligible {
-			notBefore := qe.Wait.NextAttemptAt
-			// Only a complete reset is remembered; a bare backoff or Retry-After
-			// is no recovery date, and nothing beyond a week (plus margin) is.
-			if left := notBefore.Sub(now()); qe.Wait.ResetAt != nil && left > 0 && left <= maxRememberedPlanLimit {
-				p.authStore.RememberAnthropicPlanLimit(backup.Revision, notBefore)
-			}
-			var observedAt *time.Time
-			if !qe.Wait.ObservedAt.IsZero() {
-				observedAt = &qe.Wait.ObservedAt
-			}
-			return streamBackup(backup.Revision, &notBefore, observedAt, false)
+		if len(chain.Accounts) == 0 {
+			return nil, core.NewProviderCredentialError("anthropic", core.CredentialSourceStore, "dispatch", core.CredentialChanged)
 		}
-		err = p.classify(ctx, primary, secrets, err)
-		p.authStore.RecordUse(primary, err)
-		return nil, err
+
+		// Every account is exhausted, remembered or confirmed just now. The
+		// key comes last, and only for a request it can replay.
+		if backup.Active && backupReplaySupported(req) && (len(tried) > 0 || round == 0) {
+			var until time.Time
+			consider := func(t time.Time) {
+				if until.IsZero() || t.Before(until) {
+					until = t
+				}
+			}
+			if quota != nil {
+				consider(quota.Wait.NextAttemptAt)
+			}
+			for _, a := range chain.Accounts {
+				if at, limited := p.authStore.AnthropicPlanLimit(a.Generation, now()); limited && !tried[a.Generation] {
+					consider(at)
+				}
+			}
+			var notBefore, observedAt *time.Time
+			if quota != nil || !until.IsZero() {
+				notBefore = &until
+			}
+			if quota != nil && !quota.Wait.ObservedAt.IsZero() {
+				observedAt = &quota.Wait.ObservedAt
+			}
+			remembered := len(tried) == 0
+			ch, err := streamBackup(backup.Revision, notBefore, observedAt, remembered)
+			if remembered && errors.Is(err, errPlanLimitPassed) && round == 0 {
+				continue
+			}
+			return ch, err
+		}
+		if quota != nil {
+			return nil, p.classify(ctx, stub(""), secrets, quota)
+		}
+		// Nobody was asked and nothing else can serve: one real request, to
+		// the account whose remembered reset comes first.
+		first, firstReset := chain.Accounts[0].Generation, time.Time{}
+		for _, a := range chain.Accounts {
+			if at, ok := p.authStore.AnthropicPlanReset(a.Generation); ok && (firstReset.IsZero() || at.Before(firstReset)) {
+				first, firstReset = a.Generation, at
+			}
+		}
+		ch, more, err := try(first)
+		if !more {
+			return ch, err
+		}
+		if quota != nil {
+			return nil, p.classify(ctx, stub(""), secrets, quota)
+		}
 	}
-	return withAnthropicSource(ch, source, secrets, func(err error) { p.authStore.RecordUse(primary, p.classify(ctx, primary, secrets, err)) }), nil
 }
 
-// primaryDispatch resolves, at each send, the stored sign-in a request was
-// prepared with and admits it: a sign-in replaced meanwhile fails the send
-// instead of serving it from another login. onSource sees the source before
-// the key is handed over and can veto it.
-func (p *snapshotProvider) primaryDispatch(primary auth.CredentialSnapshot, secrets *secretSet, model core.Model, onSource func(core.ProviderSource) error) func(context.Context) (string, error) {
+// confirmedPlanQuota reports a 5h or weekly limit the response itself
+// confirmed: the only thing that moves a request along the chain.
+func confirmedPlanQuota(err error) (*core.QuotaExceededError, bool) {
+	qe, ok := core.AsQuotaExceeded(err)
+	if !ok || qe.Wait == nil || qe.Wait.Kind != "quota_confirmed" || (qe.Wait.Scope != "five_hour" && qe.Wait.Scope != "seven_day") {
+		return nil, false
+	}
+	return qe, true
+}
+
+func (p *snapshotProvider) allAccountsLimited(generations []string, at time.Time) bool {
+	for _, gen := range generations {
+		if _, limited := p.authStore.AnthropicPlanLimit(gen, at); !limited {
+			return false
+		}
+	}
+	return true
+}
+
+// accountPresent reports whether the account holding generation is still in
+// the chain and Anthropic is not taken over by the environment.
+func (p *snapshotProvider) accountPresent(generation string) bool {
+	chain, err := p.authStore.AnthropicChain()
+	if err != nil || chain.Env {
+		return false
+	}
+	for _, a := range chain.Accounts {
+		if a.Generation == generation {
+			return true
+		}
+	}
+	return false
+}
+
+// accountDispatch resolves, at each send, the account a request was prepared
+// for and admits it: an account removed or signed in again meanwhile fails the
+// send instead of serving it from another login. onSource sees the source
+// before the token is handed over and can veto it.
+func (p *snapshotProvider) accountDispatch(generation string, secrets *secretSet, model core.Model, onSource func(core.ProviderSource) error) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
-		next, err := p.authStore.ResolveSnapshot(ctx, "anthropic")
+		next, err := p.authStore.ResolveAnthropicAccount(ctx, generation)
 		if err != nil {
 			return "", err
 		}
-		if next.Source != primary.Source || next.Kind != primary.Kind || next.Generation != primary.Generation || next.AccountID != primary.AccountID {
-			return "", core.NewProviderCredentialError("anthropic", primary.Source, "dispatch", core.CredentialChanged)
-		}
+		secrets.add(next)
 		var key string
-		err = p.authStore.AdmitSnapshot(ctx, next, func(selected auth.CredentialSnapshot) error {
-			source := core.ProviderSource{Kind: selected.Kind, PrimaryGeneration: selected.Generation, Provider: model.Provider, Model: model.ID}
-			if selected.Kind == "oauth" {
-				source.WireProfile = "oauth"
+		err = p.authStore.AdmitAnthropicAccount(ctx, generation, func(selected auth.CredentialSnapshot, position int) error {
+			source := core.ProviderSource{Kind: selected.Kind, PrimaryGeneration: selected.Generation, WireProfile: "oauth", Provider: model.Provider, Model: model.ID}
+			if position > 1 {
+				source.Account = position
 			}
 			if err := onSource(source); err != nil {
 				return err
@@ -207,12 +344,38 @@ func (p *snapshotProvider) Prewarm(ctx context.Context, req core.Request) (core.
 	if binding.Kind != "oauth" {
 		return core.Usage{}, core.ErrPrewarmUnsupported
 	}
-	snap, err := p.resolve(ctx)
+	chain, err := p.authStore.AnthropicChain()
 	if err != nil {
 		return core.Usage{}, err
 	}
-	if snap.Kind != "oauth" || snap.Source != core.CredentialSourceStore || snap.Generation != binding.PrimaryGeneration {
+	now := time.Now
+	if p.now != nil {
+		now = p.now
+	}
+	// The ping follows the account that served, but only while it is still the
+	// one the next request would use: not removed, not limited, and with no
+	// account ahead of it already recovered (the next request goes there, and
+	// warming the one below would spend quota for nothing).
+	serving := -1
+	for i, a := range chain.Accounts {
+		if a.Generation == binding.PrimaryGeneration {
+			serving = i
+		}
+	}
+	if chain.Env || serving < 0 {
 		return core.Usage{}, core.ErrPrewarmUnsupported
+	}
+	if _, limited := p.authStore.AnthropicPlanLimit(binding.PrimaryGeneration, now()); limited {
+		return core.Usage{}, core.ErrPrewarmUnsupported
+	}
+	for _, ahead := range chain.Accounts[:serving] {
+		if until, known := p.authStore.AnthropicPlanReset(ahead.Generation); known && !now().Before(until) {
+			return core.Usage{}, core.ErrPrewarmUnsupported
+		}
+	}
+	snap, err := p.authStore.ResolveAnthropicAccount(ctx, binding.PrimaryGeneration)
+	if err != nil {
+		return core.Usage{}, err
 	}
 	secrets := &secretSet{}
 	secrets.add(snap)
@@ -220,7 +383,7 @@ func (p *snapshotProvider) Prewarm(ctx context.Context, req core.Request) (core.
 	if p.httpClient != nil {
 		base.WithHTTPClient(p.httpClient)
 	}
-	base.WithDispatch(p.primaryDispatch(snap, secrets, req.Model, func(core.ProviderSource) error { return nil }))
+	base.WithDispatch(p.accountDispatch(binding.PrimaryGeneration, secrets, req.Model, func(core.ProviderSource) error { return nil }))
 	req.Options.APIKey = ""
 	req.Options.ProviderBinding = nil
 	usage, err := base.Prewarm(ctx, req)
@@ -251,11 +414,12 @@ func (p *snapshotProvider) prewarmAnthropicBackup(ctx context.Context, req core.
 			// Store failures are sanitized by transact; retain the caller's
 			// own refusal so unsupported/stale pings stay silent.
 			defer func() { refusal = err }()
-			if until, known := p.authStore.AnthropicPlanReset(revision); known {
-				at := now()
-				// An old binding stops at the reliable reset. Only a fresh
-				// plan rejection at/after it can authorize keeping API warm.
-				if !at.Before(until) && (source.OAuthQuotaObservedAt == nil || source.OAuthQuotaObservedAt.Before(until) || source.OAuthQuotaObservedAt.After(at)) {
+			at := now()
+			for _, gen := range selected.Accounts {
+				// An old binding stops at the first account's reliable reset
+				// that has passed: the next request goes back to it. Only a
+				// fresh plan rejection at/after it can authorize keeping API warm.
+				if until, known := p.authStore.AnthropicPlanReset(gen); known && !at.Before(until) && (source.OAuthQuotaObservedAt == nil || source.OAuthQuotaObservedAt.Before(until) || source.OAuthQuotaObservedAt.After(at)) {
 					return core.ErrPrewarmUnsupported
 				}
 			}

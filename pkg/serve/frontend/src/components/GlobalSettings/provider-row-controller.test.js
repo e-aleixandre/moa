@@ -400,3 +400,75 @@ test('late key save does not overwrite a newer operation', async () => {
   await p;
   expect(b.get().step).toBe('signin');
 });
+
+// ── Anthropic plan accounts ────────────────────────────────────────────────
+
+const CHAIN_ROW = {
+  ...ROW, kind: 'oauth', state: 'ready',
+  accounts: [
+    { generation: 'g1', position: 1, label: 'A', state: 'available' },
+    { generation: 'g2', position: 2, label: 'B', state: 'available' },
+    { generation: 'g3', position: 3, label: 'C', state: 'reconnect' },
+  ],
+};
+
+test('adding an account begins with the new_account target and the row generation', async () => {
+  const api = fakeApi({ '/oauth/begin': { flow: 'paste_code_state', attempt_id: 'att', authorize_url: 'https://claude.ai/x' } });
+  const m = make({ api, row: CHAIN_ROW });
+  m.ctl.startSignIn({ target: 'new_account' });
+  await m.ctl.open();
+  expect(api.calls[0].body).toEqual({ expected_generation: 'gen-1', target: 'new_account' });
+  expect(m.b.get().step).toBe('paste');
+});
+
+test('reconnecting an account names that account, not the row', async () => {
+  const api = fakeApi({ '/oauth/begin': { flow: 'paste_code_state', attempt_id: 'att', authorize_url: 'https://claude.ai/x' } });
+  const m = make({ api, row: CHAIN_ROW });
+  m.ctl.startSignIn({ target: 'account', generation: 'g3' });
+  await m.ctl.open();
+  expect(api.calls[0].body).toEqual({ expected_generation: 'g3', target: 'account' });
+});
+
+test('a plain sign-in sends no target', async () => {
+  const api = fakeApi({ '/oauth/begin': { flow: 'paste_code_state', attempt_id: 'att', authorize_url: 'https://claude.ai/x' } });
+  const m = make({ api });
+  m.ctl.startSignIn();
+  await m.ctl.open();
+  expect(api.calls[0].body).toEqual({ expected_generation: 'gen-1' });
+});
+
+test('moving an account sends the whole new order once and re-reads the row', async () => {
+  const api = fakeApi({ '/accounts/order': () => Promise.resolve({ ...CHAIN_ROW }) });
+  const m = make({ api, row: CHAIN_ROW });
+  await m.ctl.moveAccount('g2', -1);
+  expect(api.calls).toEqual([{ method: 'POST', path: '/api/providers/anthropic/accounts/order', body: { order: ['g2', 'g1', 'g3'] } }]);
+  expect(m.changed).toHaveLength(1);
+  // The ends do not move.
+  await m.ctl.moveAccount('g1', -1);
+  await m.ctl.moveAccount('g3', 1);
+  expect(api.calls).toHaveLength(1);
+});
+
+test('a stale order reloads the list instead of retrying', async () => {
+  const api = fakeApi({ '/accounts/order': () => Promise.reject(apiError(409, 'Credentials changed. Reload and try again.', { class: 'credentials_changed', action: 'reload' })) });
+  const m = make({ api, row: CHAIN_ROW });
+  await m.ctl.moveAccount('g2', -1);
+  expect(api.calls).toHaveLength(1);
+  expect(m.changed).toEqual([null]);
+  expect(m.b.get().message.tone).toBe('bad');
+});
+
+test('removing an account asks first, then sends its generation', async () => {
+  const api = fakeApi({ '/accounts/remove': () => Promise.resolve({ ...CHAIN_ROW }) });
+  const m = make({ api, row: CHAIN_ROW });
+  m.ctl.startRemoveAccount(CHAIN_ROW.accounts[1]);
+  expect(m.b.get()).toMatchObject({ step: 'remove', account: { generation: 'g2', label: 'B' } });
+  expect(api.calls).toEqual([]);
+  await m.ctl.removeAccount();
+  expect(api.calls).toEqual([{ method: 'POST', path: '/api/providers/anthropic/accounts/remove', body: { generation: 'g2' } }]);
+  expect(m.b.get()).toMatchObject({ step: 'idle', message: { text: 'Account removed.', tone: 'ok' } });
+  // Cancel before confirming sends nothing.
+  m.ctl.startRemoveAccount(CHAIN_ROW.accounts[0]);
+  m.ctl.cancel();
+  expect(api.calls).toHaveLength(1);
+});

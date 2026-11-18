@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Copy } from "lucide-preact";
+import { ArrowDown, ArrowUp, Copy } from "lucide-preact";
 import { api } from "../../data/api.js";
 import { Field } from "../../primitives/index.js";
 import { applyProviderStatus, loadProviderStatus, useProviderStatus } from "../../data/providers.js";
 import { createRowController, IDLE, newRowScope } from "./provider-row-controller.js";
-import { PROGRESS_INTERVAL_MS, copyText, listProviders } from "./providers-flow.js";
+import { PROGRESS_INTERVAL_MS, accountsUsage, copyText, listProviders } from "./providers-flow.js";
+import { usageLevel } from "../../data/util/usage-pills.js";
 import {
-  PROVIDER_ROWS, deadlineLabel, flowCopy, planKeyNote, replaceNotice, rowActions, rowKind, rowReading,
+  PROVIDER_ROWS, accountBars, accountList, accountReading, accountUsageNote, removeAccountWarning, deadlineLabel, flowCopy, planKeyNote, replaceNotice, rowActions, rowKind, rowReading,
 } from "./providers-model.js";
 import { providerHue } from "./settings-rows.js";
 import "./ProvidersPage.css";
@@ -156,7 +157,8 @@ export function ProviderRow({ def, row, canAdmin, loading, focused, returnSessio
   }, [attemptId]);
 
   const reading = loading ? { text: "…", tone: "muted" } : row ? rowReading(row, canAdmin) : { text: "Unavailable", tone: "muted" };
-  const actions = row ? rowActions(row, canAdmin) : { signIn: null, apiKey: null, removeKey: false, retrySave: false };
+  const actions = row ? rowActions(row, canAdmin) : { signIn: null, addAccount: null, apiKey: null, removeKey: false, retrySave: false };
+  const accounts = canAdmin ? accountList(row) : [];
   const keyNote = canAdmin ? planKeyNote(row) : "";
   const kind = row && row.source !== "env" ? rowKind(row) : "";
   const attention = !!row?.attention;
@@ -194,7 +196,12 @@ export function ProviderRow({ def, row, canAdmin, loading, focused, returnSessio
 
       {idle && keyNote && <p class="zl-prov-msg is-warn" role="status">{keyNote}</p>}
 
-      {idle && (actions.signIn || actions.apiKey || actions.retrySave) && (
+      {(idle || state.step === "remove") && accounts.length > 0 && (
+        <AccountList accounts={accounts} state={state} ctl={ctl} />
+      )}
+      {state.step === "remove" && <RemoveAccount state={state} ctl={ctl} warning={removeAccountWarning(row)} />}
+
+      {idle && (actions.signIn || actions.addAccount || actions.apiKey || actions.retrySave) && (
         <div class="zl-prov-acts">
           {actions.retrySave && (
             <button type="button" class={`zl-prov-btn${actions.primary === "retrySave" ? " is-primary" : ""}`} disabled={state.busy} onClick={() => ctl.retrySave()}>
@@ -204,6 +211,11 @@ export function ProviderRow({ def, row, canAdmin, loading, focused, returnSessio
           {actions.signIn && (
             <button type="button" class={`zl-prov-btn${actions.primary === "signIn" ? " is-primary" : ""}`} onClick={() => ctl.startSignIn()}>
               {actions.signIn}
+            </button>
+          )}
+          {actions.addAccount && (
+            <button type="button" class="zl-prov-btn" onClick={() => ctl.startSignIn({ target: "new_account" })}>
+              {actions.addAccount}
             </button>
           )}
           {actions.apiKey && (
@@ -227,6 +239,99 @@ export function ProviderRow({ def, row, canAdmin, loading, focused, returnSessio
   );
 }
 
+// Anthropic's plan accounts in priority order: the first that is not exhausted
+// serves, the API key comes after them all. Arrows, not dragging: it is a phone.
+// Each account shows its own 5h and weekly bars, read once when the list opens
+// (and again when the accounts change), never on a timer.
+function AccountList({ accounts, state, ctl }) {
+  const now = new Date();
+  const [usage, setUsage] = useState({});
+  const identity = accounts.map((a) => a.generation).join(",");
+  useEffect(() => {
+    let live = true;
+    accountsUsage(api)
+      .then((body) => {
+        if (!live) return;
+        const next = {};
+        for (const entry of body?.accounts || []) next[entry.generation] = entry;
+        setUsage(next);
+      })
+      .catch(() => { if (live) setUsage({}); });
+    return () => { live = false; };
+  }, [identity]);
+  return (
+    <ul class="zl-prov-accts" aria-label="Anthropic accounts">
+      {accounts.map((account, index) => {
+        const reading = accountReading(account, now);
+        const bars = accountBars(usage[account.generation]);
+        const note = bars ? "" : accountUsageNote(usage[account.generation]);
+        return (
+          <li class="zl-prov-acct" key={account.generation} data-generation={account.generation}>
+            <span class="zl-prov-acct-txt">
+              <span class="zl-prov-acct-n" title={account.label}>{account.label}</span>
+              <span class={`zl-prov-d is-${reading.tone}`}>{reading.text}</span>
+              {bars && (
+                <span class="zl-prov-bars">
+                  {bars.map((bar) => (
+                    <span class="zl-prov-bar" key={bar.label}>
+                      <span class="zl-prov-bar-k">{bar.label}</span>
+                      <span class="zl-prov-bar-track" role="meter" aria-label={`${account.label} ${bar.label}`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={bar.pct}>
+                        <i class={`is-${usageLevel(bar.pct)}`} style={{ width: `${Math.min(100, bar.pct)}%` }} />
+                      </span>
+                      <span class="zl-prov-bar-v">{bar.pct}%</span>
+                    </span>
+                  ))}
+                </span>
+              )}
+              {note && <span class="zl-prov-d is-muted">{note}</span>}
+            </span>
+            <span class="zl-prov-acct-acts">
+              {account.state === "save_failed" && (
+                <button type="button" class="zl-prov-btn is-primary" disabled={state.busy} onClick={() => ctl.retrySave()}>
+                  Retry saving
+                </button>
+              )}
+              <button type="button" class={`zl-prov-btn${account.state === "reconnect" ? " is-primary" : ""}`} disabled={state.busy}
+                aria-label={`Reconnect ${account.label}`}
+                onClick={() => ctl.startSignIn({ target: "account", generation: account.generation })}>
+                Reconnect
+              </button>
+              <button type="button" class="zl-prov-btn is-icon" aria-label={`Move ${account.label} up`}
+                disabled={state.busy || index === 0} onClick={() => ctl.moveAccount(account.generation, -1)}>
+                <ArrowUp size={14} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+              <button type="button" class="zl-prov-btn is-icon" aria-label={`Move ${account.label} down`}
+                disabled={state.busy || index === accounts.length - 1} onClick={() => ctl.moveAccount(account.generation, 1)}>
+                <ArrowDown size={14} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+              <button type="button" class="zl-prov-btn" aria-label={`Remove ${account.label}`}
+                disabled={state.busy} onClick={() => ctl.startRemoveAccount(account)}>
+                Remove
+              </button>
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function RemoveAccount({ state, ctl, warning }) {
+  return (
+    <div class="zl-prov-flow">
+      <p class="zl-prov-step">Remove {state.account?.label}?</p>
+      {warning && <p class="zl-prov-msg is-warn" role="status">{warning}</p>}
+      <div class="zl-prov-acts">
+        <button type="button" class="zl-prov-btn is-primary" disabled={state.busy} onClick={() => ctl.removeAccount()}>
+          {state.busy ? "Removing…" : "Remove account"}
+        </button>
+        <button type="button" class="zl-prov-btn" disabled={state.busy} onClick={() => ctl.cancel()}>Cancel</button>
+      </div>
+      <FlowError state={state} />
+    </div>
+  );
+}
+
 function Notice({ notice }) {
   if (!notice) return null;
   return (
@@ -246,7 +351,8 @@ function SignInStart({ def, row, state, ctl }) {
   const copy = flowCopy(def.id);
   return (
     <div class="zl-prov-flow">
-      <Notice notice={replaceNotice(row, "oauth")} />
+      {/* Adding or signing an account in again replaces no other credential. */}
+      <Notice notice={state.target ? null : replaceNotice(row, "oauth")} />
       <p class="zl-prov-step">{copy.before}</p>
       <div class="zl-prov-acts">
         <button type="button" class="zl-prov-btn is-primary" disabled={state.busy} onClick={() => ctl.open()}>

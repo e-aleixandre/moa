@@ -699,3 +699,6 @@
   .zl-btn { height: 44px; }
   .zl-mcp-oauth-link { min-height: 44px; }
 }
+
+/* The plan account whose readings these are: it takes the row's room and is cut by the layout. */
+.zl-kv-v.zl-kv-acct { flex: 0 1 auto; max-width: 70%; }

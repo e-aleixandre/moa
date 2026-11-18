@@ -222,3 +222,81 @@ test("the primary button follows the needed action", () => {
   expect(primary({ ...base, state: "reconnect", kind: "oauth", actions: ["sign_in", "api_key"] })).toEqual(["Reconnect"]);
   expect(primary({ ...base, state: "missing", kind: undefined })).toEqual(["Sign in"]);
 });
+
+const CHAIN = {
+  ...PLAN,
+  plan_api_key: { generation: "k1", state: "active" },
+  accounts: [
+    { generation: "g1", position: 1, label: "a@x.com", state: "available" },
+    { generation: "g2", position: 2, label: "Account 2", state: "reconnect" },
+  ],
+};
+
+test("plan accounts are listed in order with their state, before the API key actions", () => {
+  const tree = render("anthropic", { row: CHAIN });
+  const items = all(tree, (n) => n.type === "li");
+  expect(items.map((li) => text(li.props.children[0]))).toEqual(["a@x.comAvailable", "Account 2Sign-in expired. Reconnect."]);
+  const labels = buttons(tree).map((b) => b.props["aria-label"] || text(b).trim());
+  // Every account can be reconnected on purpose, not only a lapsed one.
+  expect(labels).toEqual([
+    "Reconnect a@x.com", "Move a@x.com up", "Move a@x.com down", "Remove a@x.com",
+    "Reconnect Account 2", "Move Account 2 up", "Move Account 2 down", "Remove Account 2",
+    "Add another account", "Replace API key", "Remove API key",
+  ]);
+  const reconnect = (l) => buttons(tree).find((b) => b.props["aria-label"] === l);
+  expect(reconnect("Reconnect a@x.com").props.class).not.toContain("is-primary");
+  expect(reconnect("Reconnect Account 2").props.class).toContain("is-primary");
+  // The first cannot go up, the last cannot go down.
+  const byLabel = (l) => buttons(tree).find((b) => b.props["aria-label"] === l);
+  expect(byLabel("Move a@x.com up").props.disabled).toBe(true);
+  expect(byLabel("Move Account 2 down").props.disabled).toBe(true);
+  // Still one text field at most: the API key, only when opened.
+  expect(fields(tree)).toEqual([]);
+});
+
+test("removing an account asks before it removes", () => {
+  const tree = render("anthropic", { row: CHAIN, state: { ...IDLE, step: "remove", account: { generation: "g2", label: "Account 2" } } });
+  expect(text(tree)).toContain("Remove Account 2?");
+  expect(buttons(tree).map((b) => text(b).trim())).toContain("Remove account");
+  expect(buttons(tree).map((b) => text(b).trim())).not.toContain("Add another account");
+});
+
+test("adding another account replaces nothing and shows no replace warning", () => {
+  const tree = render("anthropic", { row: CHAIN, state: { ...IDLE, step: "signin", target: "new_account" } });
+  expect(text(tree)).not.toContain("Existing history");
+  expect(text(tree)).toContain("Open Anthropic and approve access.");
+});
+
+test("a device sees no account controls", () => {
+  const tree = render("anthropic", { row: CHAIN, canAdmin: false });
+  expect(all(tree, (n) => n.type === "li")).toEqual([]);
+  expect(buttons(tree)).toEqual([]);
+});
+
+test("an account whose save failed offers to retry it, whichever place it holds", () => {
+  const row = { ...CHAIN, accounts: [CHAIN.accounts[0], { ...CHAIN.accounts[1], state: "save_failed" }] };
+  const tree = render("anthropic", { row });
+  expect(buttons(tree).map((b) => text(b).trim())).toContain("Retry saving");
+  expect(buttons(render("anthropic", { row: CHAIN })).map((b) => text(b).trim())).not.toContain("Retry saving");
+});
+
+test("removing the last account says everything will be paid with the API key", () => {
+  const last = { ...CHAIN, accounts: [CHAIN.accounts[0]] };
+  const state = { ...IDLE, step: "remove", account: { generation: "g1", label: "a@x.com" } };
+  expect(text(render("anthropic", { row: last, state }))).toContain("everything is paid with the API key");
+  // Another account remains, or there is no key to pay with: nothing to warn about.
+  expect(text(render("anthropic", { row: CHAIN, state }))).not.toContain("paid with the API key");
+  const noKey = { ...last, plan_api_key: { generation: "", state: "not_configured" } };
+  expect(text(render("anthropic", { row: noKey, state }))).not.toContain("paid with the API key");
+});
+
+test("an account label is cut by the layout and whole in the title, never by code", () => {
+  const long = "a-very-long-address-for-a-plan-account@a-long-company-domain.example.com";
+  const row = { ...CHAIN, accounts: [{ ...CHAIN.accounts[0], label: long }, CHAIN.accounts[1]] };
+  const tree = render("anthropic", { row });
+  const name = all(tree, (n) => n.props?.class === "zl-prov-acct-n")[0];
+  expect(name.props.title).toBe(long);
+  expect(text(name)).toBe(long);
+  const css = readFileSync(new URL("./ProvidersPage.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\.zl-prov-acct-n \{[^}]*text-overflow: ellipsis/);
+});

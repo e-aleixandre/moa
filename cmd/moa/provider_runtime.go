@@ -33,6 +33,11 @@ type snapshotProvider struct {
 }
 
 func (p *snapshotProvider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+	// Stored Anthropic plan accounts are chosen per send inside the chain, not
+	// from one snapshot taken here.
+	if p.usesAnthropicChain(req) {
+		return p.streamAnthropic(ctx, req, &secretSet{})
+	}
 	snap, err := p.resolve(ctx)
 	if err != nil {
 		if p.plan == nil {
@@ -42,9 +47,6 @@ func (p *snapshotProvider) Stream(ctx context.Context, req core.Request) (<-chan
 	}
 	secrets := &secretSet{}
 	secrets.add(snap)
-	if p.plan == nil && p.model.Provider == "anthropic" && ((snap.Kind == "oauth" && snap.Source == core.CredentialSourceStore) || (req.Options.ProviderBinding != nil && req.Options.ProviderBinding.Kind == "api_backup")) {
-		return p.streamAnthropic(ctx, req, snap, secrets)
-	}
 	base, err := provider.New(p.model, p.config(snap, secrets))
 	if err != nil {
 		return nil, err
@@ -61,6 +63,20 @@ func (p *snapshotProvider) Stream(ctx context.Context, req core.Request) (<-chan
 	// What the request found out feeds Settings → Providers; the store keeps
 	// it only while snap is still the selection.
 	return redactStream(ch, secrets, func(err error) { p.authStore.RecordUse(snap, err) }), nil
+}
+
+// usesAnthropicChain reports whether req goes through the chain of Anthropic
+// credentials: a stored plan sign-in is selected (no environment key, no voice
+// pin), or the request continues a paid send that was bound to the key.
+func (p *snapshotProvider) usesAnthropicChain(req core.Request) bool {
+	if p.plan != nil || p.model.Provider != "anthropic" {
+		return false
+	}
+	if b := req.Options.ProviderBinding; b != nil && b.Kind == "api_backup" {
+		return true
+	}
+	chain, err := p.authStore.AnthropicChain()
+	return err == nil && !chain.Env && len(chain.Accounts) > 0
 }
 
 // SupportsDocuments answers for the transport the next request would use,
@@ -210,6 +226,15 @@ func (p *snapshotProvider) classify(ctx context.Context, snap auth.CredentialSna
 // provider's selected credential: nil if it is, otherwise the classified
 // reason (credentials_changed, or the store's own failure).
 func (p *snapshotProvider) selectionChanged(snap auth.CredentialSnapshot) error {
+	// A plan account is selected by identity wherever it is stored.
+	if p.plan == nil && snap.Provider == "anthropic" && snap.Kind == "oauth" && snap.Source == core.CredentialSourceStore {
+		if p.accountPresent(snap.Generation) {
+			return nil
+		}
+		changed := core.NewProviderCredentialError(snap.Provider, snap.Source, "inference", core.CredentialChanged)
+		changed.Generation = snap.Generation
+		return changed
+	}
 	cur, err := p.peek()
 	if err != nil {
 		return err

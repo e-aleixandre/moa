@@ -1,3 +1,4 @@
+import { AccountName } from "../AccountName/AccountName.jsx";
 import "./UsagePanel.css";
 import { Copy } from "lucide-preact";
 import {
@@ -88,6 +89,12 @@ export function UsagePanel({ session, usage, ctxPercent, costUSD }) {
 
       {!!(u.fiveHour || u.week || extra || (u.moneyBuckets || []).length) && (
         <div class="usage-panel-group">
+          {u.account && (
+            <div class="usage-panel-row">
+              <span class="usage-panel-key">Account</span>
+              <span class="usage-panel-val usage-panel-acct"><AccountName account={u.account} /></span>
+            </div>
+          )}
           {u.fiveHour && (
             <div class="usage-panel-row usage-panel-meter-row">
               <span class="usage-panel-key">Plan · {u.fiveHour.label || "5h"}</span>

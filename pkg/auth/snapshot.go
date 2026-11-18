@@ -83,13 +83,26 @@ func (s *Store) ResolveSnapshot(ctx context.Context, provider string, sel ...Sna
 			return snap, err
 		}
 	}
+	return s.resolveStored(ctx, provider, selection, func(disk map[string]Credential) (string, error) {
+		return providerRecord(disk, provider), nil
+	})
+}
+
+// resolveStored is the stored half of ResolveSnapshot. find names the record
+// to resolve from a fresh read of disk; it runs again under the lock, so a
+// record chosen by identity (an Anthropic account) is never one that moved.
+func (s *Store) resolveStored(ctx context.Context, provider string, selection SnapshotSelection, find func(map[string]Credential) (string, error)) (CredentialSnapshot, error) {
 	planOnly := selection == SelectPlanOAuth
 	disk, err := s.reload()
 	if err != nil {
 		return CredentialSnapshot{}, storeUnavailable(provider, "resolve")
 	}
-	if !s.hasPending(provider) {
-		cred, ok := disk[provider]
+	record, err := find(disk)
+	if err != nil {
+		return CredentialSnapshot{}, err
+	}
+	if !s.hasPending(record) {
+		cred, ok := disk[record]
 		if !ok {
 			return CredentialSnapshot{}, missingCredential(provider)
 		}
@@ -100,7 +113,7 @@ func (s *Store) ResolveSnapshot(ctx context.Context, provider string, sel ...Sna
 			return CredentialSnapshot{}, planUnavailable(provider, cred.Generation)
 		}
 		if cred.Type != "oauth" || !credentialExpired(cred) {
-			return selected(storeSnapshot(provider, cred), selection), nil
+			return selected(storeSnapshotAt(provider, record, cred), selection), nil
 		}
 	}
 
@@ -108,10 +121,17 @@ func (s *Store) ResolveSnapshot(ctx context.Context, provider string, sel ...Sna
 	defer s.refreshMu.Unlock()
 	var result Credential
 	err = s.transact(provider, "refresh", func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		if s.hasPending(provider) {
+		// The record is chosen again under the lock; the snapshot is built
+		// from the one that was actually read, not from the first guess.
+		current, err := find(disk)
+		if err != nil {
+			return false, nil, err
+		}
+		record = current
+		if s.hasPending(record) {
 			return false, nil, saveConflict(provider, "refresh")
 		}
-		cur, ok := disk[provider]
+		cur, ok := disk[record]
 		if !ok {
 			return false, nil, missingCredential(provider)
 		}
@@ -129,13 +149,13 @@ func (s *Store) ResolveSnapshot(ctx context.Context, provider string, sel ...Sna
 		if err != nil {
 			return false, nil, err
 		}
-		disk[provider], result = next, next
-		return true, &pendingRotation{base: cur, proposed: next}, nil
+		disk[record], result = next, next
+		return true, &pendingRotation{base: cur, proposed: next, record: record}, nil
 	})
 	if err != nil {
 		return CredentialSnapshot{}, err
 	}
-	return selected(storeSnapshot(provider, result), selection), nil
+	return selected(storeSnapshotAt(provider, record, result), selection), nil
 }
 
 // resolveAPIKey resolves a SelectVoiceAPIKey snapshot. It never refreshes:
@@ -202,10 +222,11 @@ func (s *Store) PeekSnapshot(provider string, sel ...SnapshotSelection) (Credent
 	if err != nil {
 		return CredentialSnapshot{}, storeUnavailable(provider, "resolve")
 	}
-	if s.hasPending(provider) {
+	record := providerRecord(disk, provider)
+	if s.hasPending(record) {
 		return CredentialSnapshot{}, persistenceFailed(provider, "resolve")
 	}
-	cred, ok := disk[provider]
+	cred, ok := disk[record]
 	if !ok {
 		return CredentialSnapshot{}, missingCredential(provider)
 	}
@@ -215,7 +236,7 @@ func (s *Store) PeekSnapshot(provider string, sel ...SnapshotSelection) (Credent
 	if selection == SelectPlanOAuth && cred.Type != "oauth" {
 		return CredentialSnapshot{}, planUnavailable(provider, cred.Generation)
 	}
-	return selected(storeSnapshot(provider, cred), selection), nil
+	return selected(storeSnapshotAt(provider, record, cred), selection), nil
 }
 
 // AdmitSnapshot checks a prepared selection under the Store lock before the
@@ -308,15 +329,21 @@ func (s *Store) RefreshOAuthIfGeneration(ctx context.Context, snap CredentialSna
 		return CredentialSnapshot{}, credentialsChanged(provider, "refresh", snap.Generation)
 	}
 
+	// The snapshot says which record it was read from, so a rejected token is
+	// refreshed in place even when the account has no record of its own name.
+	record := snap.record
+	if record == "" {
+		record = provider
+	}
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	var result Credential
 	var refreshErr error
 	err := s.transact(provider, "refresh", func(disk map[string]Credential) (bool, *pendingRotation, error) {
-		if s.hasPending(provider) {
+		if s.hasPending(record) {
 			return false, nil, saveConflict(provider, "refresh")
 		}
-		cur, ok := disk[provider]
+		cur, ok := disk[record]
 		if !ok || cur.Type != "oauth" || cur.Generation != snap.Generation || cur.AccountID != snap.AccountID {
 			return false, nil, credentialsChanged(provider, "refresh", snap.Generation)
 		}
@@ -329,11 +356,11 @@ func (s *Store) RefreshOAuthIfGeneration(ctx context.Context, snap CredentialSna
 			// Do not keep serving a token the consumer explicitly rejected:
 			// persist it as expired so the next request refreshes instead.
 			cur.Expires = 0
-			disk[provider], refreshErr = cur, err
+			disk[record], refreshErr = cur, err
 			return true, nil, nil
 		}
-		disk[provider], result = next, next
-		return true, &pendingRotation{base: cur, proposed: next}, nil
+		disk[record], result = next, next
+		return true, &pendingRotation{base: cur, proposed: next, record: record}, nil
 	})
 	if refreshErr != nil {
 		return CredentialSnapshot{}, refreshErr
@@ -341,7 +368,7 @@ func (s *Store) RefreshOAuthIfGeneration(ctx context.Context, snap CredentialSna
 	if err != nil {
 		return CredentialSnapshot{}, err
 	}
-	return selected(storeSnapshot(provider, result), snap.selection), nil
+	return selected(storeSnapshotAt(provider, record, result), snap.selection), nil
 }
 
 // rotate performs one network refresh of cur and returns the rotated
@@ -393,6 +420,11 @@ func envSnapshot(provider string) (CredentialSnapshot, bool, error) {
 }
 
 func storeSnapshot(provider string, cred Credential) CredentialSnapshot {
+	return storeSnapshotAt(provider, provider, cred)
+}
+
+// storeSnapshotAt is storeSnapshot for a credential read from record.
+func storeSnapshotAt(provider, record string, cred Credential) CredentialSnapshot {
 	token := cred.Key
 	if cred.Type == "oauth" {
 		token = derivedToken(provider, cred)
@@ -405,7 +437,7 @@ func storeSnapshot(provider string, cred Credential) CredentialSnapshot {
 		Token:      token,
 		AccountID:  cred.AccountID,
 		Generation: cred.Generation,
-		record:     provider,
+		record:     record,
 	}
 }
 

@@ -1,3 +1,4 @@
+import { AccountName } from "../AccountName/AccountName.jsx";
 import { useEffect, useState } from "preact/hooks";
 import {
   usageForSession,
@@ -269,6 +270,12 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
         <>
           <div class="zl-group"><span>Plan · {providerName(session?.provider)}</span></div>
           <div class="zl-kv">
+            {u.account && (
+              <div class="zl-kv-row">
+                <span class="zl-kv-k">Account</span>
+                <span class="zl-kv-v zl-data zl-kv-acct"><AccountName account={u.account} /></span>
+              </div>
+            )}
             {u.fiveHour && (
               <div class="zl-kv-row is-meter">
                 <span class="zl-kv-k">{u.fiveHour.label || "5 hours"}</span>

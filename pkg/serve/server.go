@@ -298,7 +298,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/pulse/realtime/client-secret", handleRealtimeClientSecret(devices, o.realtimeKey, o.realtimeHTTP))
 	mux.HandleFunc("GET /api/pulse/guardian/ws", handleGuardianWebSocket(manager, devices))
 
-	providers := &providerCredentials{store: o.providerStore, logins: o.providerLogins, secureCookie: o.secureCookie}
+	providers := &providerCredentials{store: o.providerStore, logins: o.providerLogins, secureCookie: o.secureCookie, usage: manager.usagePoller}
 	if providers.store == nil || providers.logins == nil {
 		providers.store, providers.logins = nil, nil
 	}

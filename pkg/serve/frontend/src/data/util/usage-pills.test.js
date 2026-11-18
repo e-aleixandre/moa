@@ -197,3 +197,13 @@ test("null session is handled safely", () => {
   const out = usageForSession(null, null);
   expect(out).toEqual({ fiveHour: null, week: null, extra: null, onOverage: false });
 });
+
+test("the readings name their account only when it is not the first", () => {
+  const snap = { five_hour: { utilization: 20, resets_at: "x" }, seven_day: { utilization: 10, resets_at: "y" } };
+  const usage = (status) => ({ available: true, version: 2, providers: { anthropic: snap }, provider_status: { anthropic: status } });
+  expect(usageForSession({}, usage({ available: true, account: 2, account_id: "g2" })).account).toEqual({ position: 2, generation: "g2" });
+  expect(usageForSession({}, usage({ available: true, account: 1, account_id: "g1" })).account).toBeUndefined();
+  expect(usageForSession({}, usage({ available: true })).account).toBeUndefined();
+  // Other providers never carry an Anthropic account.
+  expect(usageForSession({ provider: "openai" }, { available: true, providers: { openai: snap }, provider_status: { openai: { account: 2 } } }).account).toBeUndefined();
+});

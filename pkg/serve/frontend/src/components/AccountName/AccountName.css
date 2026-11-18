@@ -1,0 +1,10 @@
+/* Cut by the layout (ellipsis), never by code: the title carries the whole. */
+.acct-name {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}

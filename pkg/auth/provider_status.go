@@ -135,6 +135,9 @@ func (s *Store) RecordUse(snap CredentialSnapshot, err error) {
 		s.useSelected(key)
 	}
 	s.observe(key, state)
+	if state == StatusReady && key.provider == "anthropic" && key.source == core.CredentialSourceStore && snap.Kind == "oauth" {
+		s.noteAnthropicServed(key.generation)
+	}
 }
 
 func useState(err error) string {
@@ -169,8 +172,15 @@ func (s *Store) isSelected(key useKey) bool {
 	if err != nil {
 		return false
 	}
-	cred, ok := disk[key.provider]
-	return ok && cred.Generation == key.generation
+	if cred, ok := disk[key.provider]; ok && cred.Generation == key.generation {
+		return true
+	}
+	// An Anthropic account is selected by identity wherever it is stored.
+	if key.provider == "anthropic" {
+		_, ok := findAnthropicAccount(disk, key.generation)
+		return ok
+	}
+	return false
 }
 
 // observe sets key's state. Records of earlier selections are kept rather

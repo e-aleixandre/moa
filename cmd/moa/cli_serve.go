@@ -120,7 +120,7 @@ func runServe(args []string) {
 			return build.Provider, nil
 		},
 		Transcriber:            transcriber,
-		UsagePoller:            newAnthropicUsagePoller(authStore),
+		UsagePoller:            newAnthropicUsagePoller(authStore, nil),
 		PushStore:              pushStore,
 		PushDispatcher:         pushDispatcher,
 		PushNative:             pushNative,
@@ -303,8 +303,12 @@ var errUsageTokenExpired = errors.New("oauth token expired")
 // It stays inert unless an Anthropic OAuth (Claude subscription) credential is
 // present — a plain API key has no plan usage to report. It reads the token
 // without triggering a refresh (see auth.Store.PeekOAuthToken).
-func newAnthropicUsagePoller(authStore *auth.Store) *usage.MultiPoller {
-	anthropic := usage.NewPoller(func(context.Context) (string, bool, error) {
+//
+// Stored plan sign-ins are polled one by one, and only when a client asks:
+// the widget reads the account being spent, Providers reads them all. client
+// is the HTTP client of the polls (nil for the default).
+func newAnthropicUsagePoller(authStore *auth.Store, client *http.Client) *usage.MultiPoller {
+	anthropic := usage.NewPollerWithClient(func(context.Context) (string, bool, error) {
 		token, isOAuth, valid := authStore.PeekOAuthToken("anthropic")
 		if !isOAuth {
 			return "", false, nil // no Claude subscription credential → inert
@@ -313,7 +317,7 @@ func newAnthropicUsagePoller(authStore *auth.Store) *usage.MultiPoller {
 			return "", false, errUsageTokenExpired
 		}
 		return token, true, nil
-	})
+	}, client)
 	// An API key selects xAI's developer product, whose consumer plan
 	// quota is unrelated and must never be displayed.
 	credential, storedXAIAPIKey := authStore.Get("xai")
@@ -333,6 +337,22 @@ func newAnthropicUsagePoller(authStore *auth.Store) *usage.MultiPoller {
 		return token, true, nil
 	}, usage.FetchXAI)
 	multi := &usage.MultiPoller{Pollers: map[string]*usage.Poller{"anthropic": anthropic, "xai": xaiPoller}}
+	multi.Accounts = &usage.AccountPollers{New: func(generation string) *usage.Poller {
+		return usage.NewPollerWithClient(func(context.Context) (string, bool, error) {
+			token, found, valid := authStore.PeekAnthropicAccountToken(generation)
+			switch {
+			case !found:
+				return "", false, nil // the account left the chain
+			case !valid:
+				return "", false, errUsageTokenExpired
+			}
+			return token, true, nil
+		}, client)
+	}}
+	multi.ServingAccount = func() (string, int, bool) {
+		account, ok := authStore.ServingAnthropicAccount(time.Now())
+		return account.Generation, account.Position, ok
+	}
 	if xaiAPIKey {
 		multi.StaticStatus = map[string]usage.ProviderStatus{"xai": {AuthKind: "api_key", Reason: "plan_unsupported"}}
 	}

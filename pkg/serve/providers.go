@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/usage"
 )
 
 const (
@@ -49,6 +51,7 @@ type providerCredentials struct {
 	store        *auth.Store
 	logins       *auth.ProviderLoginManager
 	secureCookie bool
+	usage        *usage.MultiPoller // optional; per-account plan usage
 }
 
 // WithProviderCredentials enables Settings → Providers on the given live
@@ -78,6 +81,18 @@ type providerRow struct {
 	Actions       []string          `json:"actions,omitempty"`
 	PendingSave   *bool             `json:"pending_save,omitempty"`
 	PlanAPIKey    *anthropicPlanKey `json:"plan_api_key,omitempty"`
+	// Accounts are Anthropic's plan sign-ins in priority order (owner list only).
+	Accounts []providerAccount `json:"accounts,omitempty"`
+}
+
+// providerAccount is one plan sign-in of the Anthropic chain. It names the
+// account by generation and label; it never carries a token.
+type providerAccount struct {
+	Generation   string `json:"generation"`
+	Position     int    `json:"position"`
+	Label        string `json:"label"`
+	State        string `json:"state"`
+	LimitedUntil string `json:"limited_until,omitempty"`
 }
 
 type providersStatus struct {
@@ -152,6 +167,11 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 		}
 		return r
 	}
+	if st.Provider == "anthropic" && st.Source == core.CredentialSourceStore && st.Kind == "oauth" {
+		// The owner's clients name the serving account (status line, usage
+		// widget) from this list, so it rides the light status as well.
+		r.Accounts = pc.accounts()
+	}
 	if !detailed {
 		return r
 	}
@@ -188,6 +208,20 @@ func (pc *providerCredentials) row(st auth.ProviderStatus, owner, detailed bool)
 		}
 	}
 	return r
+}
+
+// accounts lists the plan sign-ins in priority order, labelled by
+// auth.AnthropicAccount.Label.
+func (pc *providerCredentials) accounts() []providerAccount {
+	statuses, err := pc.store.AnthropicAccountStatuses(time.Now())
+	if err != nil {
+		return nil
+	}
+	out := make([]providerAccount, 0, len(statuses))
+	for _, st := range statuses {
+		out = append(out, providerAccount{Generation: st.Generation, Position: st.Position, Label: st.Label(), State: st.State, LimitedUntil: formatTime(st.LimitedUntil)})
+	}
+	return out
 }
 
 func (pc *providerCredentials) status(owner, detailed bool) providersStatus {
@@ -231,6 +265,10 @@ func (pc *providerCredentials) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	rest, _ := strings.CutPrefix(path, providersPath+"/")
+	if rest == "anthropic/accounts/usage" {
+		pc.accountsUsage(w, r)
+		return
+	}
 	provider, action, ok := strings.Cut(rest, "/")
 	handlers := map[string]func(http.ResponseWriter, *http.Request, string){
 		"oauth/begin":    pc.begin,
@@ -240,6 +278,9 @@ func (pc *providerCredentials) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		"api-key":        pc.apiKey,
 		"retry-save":     pc.retrySave,
 		"api-key/remove": pc.removeAPIKey,
+		// The chain of Anthropic plan accounts (see auth.AnthropicChain).
+		"accounts/order":  pc.reorderAccounts,
+		"accounts/remove": pc.removeAccount,
 	}
 	handle, known := handlers[action]
 	if !ok || !known {
@@ -255,7 +296,7 @@ func (pc *providerCredentials) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		writeProviderError(w, http.StatusForbidden, "", "origin_rejected")
 		return
 	}
-	if !supportedProvider(provider) {
+	if !supportedProvider(provider) || (strings.HasPrefix(action, "accounts/") && provider != "anthropic") {
 		writeProviderError(w, http.StatusNotFound, "", auth.LoginNotFound)
 		return
 	}
@@ -379,6 +420,9 @@ func (pc *providerCredentials) ensureBrowserBinding(w http.ResponseWriter, r *ht
 func (pc *providerCredentials) begin(w http.ResponseWriter, r *http.Request, provider string) {
 	var body struct {
 		ExpectedGeneration *string `json:"expected_generation"`
+		// Target is Anthropic's only: "new_account" appends another plan
+		// account, "account" signs the one named by expected_generation in again.
+		Target string `json:"target"`
 	}
 	if !decodeProviderBody(w, r, provider, &body) {
 		return
@@ -394,7 +438,7 @@ func (pc *providerCredentials) begin(w http.ResponseWriter, r *http.Request, pro
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), providersRequestTimeout)
 	defer cancel()
-	view, err := pc.logins.Begin(ctx, provider, binding, *body.ExpectedGeneration)
+	view, err := pc.logins.BeginTarget(ctx, provider, binding, *body.ExpectedGeneration, body.Target)
 	if err != nil {
 		writeProviderFailure(w, provider, "begin", err)
 		return
@@ -525,6 +569,122 @@ func (pc *providerCredentials) apiKey(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	writeJSON(w, http.StatusOK, pc.row(pc.store.ProviderStatus(provider), true, true))
+}
+
+// accountUsage is one account's plan usage as Providers shows it.
+type accountUsage struct {
+	providerAccount
+	Serving bool `json:"serving,omitempty"`
+	// Usage is absent when the account has none to report; Reason says why:
+	// pending (nothing to show yet), temporarily_unavailable, or reconnect.
+	Usage  *usage.Snapshot `json:"usage,omitempty"`
+	Reason string          `json:"reason,omitempty"`
+}
+
+// accountsUsage answers each plan account's 5h and weekly usage, to the owner
+// and only when asked. Reading it never renews a token: an account whose token
+// has lapsed reports temporarily_unavailable until a request renews it.
+func (pc *providerCredentials) accountsUsage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeProviderError(w, http.StatusMethodNotAllowed, "", "method_not_allowed")
+		return
+	}
+	if !isOwnerIdentity(r) {
+		writeProviderError(w, http.StatusForbidden, "anthropic", "forbidden")
+		return
+	}
+	if pc.store == nil || pc.usage == nil || pc.usage.Accounts == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"accounts": []accountUsage{}})
+		return
+	}
+	accounts := pc.accounts()
+	serving, _ := pc.store.ServingAnthropicAccount(time.Now())
+	out := make([]accountUsage, len(accounts))
+	var wg sync.WaitGroup
+	for i, a := range accounts {
+		out[i] = accountUsage{providerAccount: a, Serving: a.Generation == serving.Generation && serving.Generation != ""}
+		if a.State == auth.AccountReconnect {
+			out[i].Reason = "reconnect"
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			snap, err := pc.usage.Accounts.Get(r.Context(), a.Generation)
+			switch {
+			case snap != nil:
+				out[i].Usage = snap
+			case err != nil:
+				out[i].Reason = "temporarily_unavailable"
+			default:
+				out[i].Reason = "pending"
+			}
+		}()
+	}
+	wg.Wait()
+	keep := make([]string, len(accounts))
+	for i, a := range accounts {
+		keep[i] = a.Generation
+	}
+	pc.usage.Accounts.Retain(keep)
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": out})
+}
+
+// reorderAccounts sets the priority of Anthropic's plan accounts. The order
+// must name exactly the accounts the page listed, or nothing changes (409).
+func (pc *providerCredentials) reorderAccounts(w http.ResponseWriter, r *http.Request, provider string) {
+	var body struct {
+		Order []string `json:"order"`
+	}
+	if !decodeProviderBody(w, r, provider, &body) {
+		return
+	}
+	if body.Order == nil {
+		writeProviderError(w, http.StatusBadRequest, provider, "invalid_request")
+		return
+	}
+	if pc.chainManagedByEnv(w, provider) {
+		return
+	}
+	if err := pc.store.ReorderAnthropicAccounts(body.Order); err != nil {
+		writeProviderFailure(w, provider, "accounts_order", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pc.row(pc.store.ProviderStatus(provider), true, true))
+}
+
+// removeAccount signs one Anthropic plan account out of the chain. The API key
+// stays; when it was the last account the key becomes the primary credential.
+func (pc *providerCredentials) removeAccount(w http.ResponseWriter, r *http.Request, provider string) {
+	var body struct {
+		Generation *string `json:"generation"`
+	}
+	if !decodeProviderBody(w, r, provider, &body) {
+		return
+	}
+	if body.Generation == nil {
+		writeProviderError(w, http.StatusBadRequest, provider, "invalid_request")
+		return
+	}
+	if pc.chainManagedByEnv(w, provider) {
+		return
+	}
+	if err := pc.store.RemoveAnthropicAccount(*body.Generation); err != nil {
+		writeProviderFailure(w, provider, "account_remove", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pc.row(pc.store.ProviderStatus(provider), true, true))
+}
+
+// chainManagedByEnv answers 409 when the environment manages the provider,
+// which has no chain to administer.
+func (pc *providerCredentials) chainManagedByEnv(w http.ResponseWriter, provider string) bool {
+	if pc.store.ProviderStatus(provider).Source != core.CredentialSourceEnv {
+		return false
+	}
+	writeProviderError(w, http.StatusConflict, provider, auth.LoginEnvManaged)
+	return true
 }
 
 func (pc *providerCredentials) retrySave(w http.ResponseWriter, r *http.Request, provider string) {

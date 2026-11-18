@@ -288,7 +288,7 @@ func TestReviewRememberedTimingBoundaries(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				got, ok := s.AnthropicPlanLimit(st.Revision, observed)
+				got, ok := s.AnthropicPlanLimit(st.Revision.Primary, observed)
 				if ok != remember || (ok && !got.Equal(until)) {
 					t.Errorf("remember=%v want %v, until=%s want %s", ok, remember, got, until)
 				}
@@ -316,9 +316,9 @@ func TestReviewNewStoreDoesNotInheritMemo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.store.RememberAnthropicPlanLimit(st.Revision, time.Now().Add(time.Hour))
+	f.store.RememberAnthropicPlanLimit(st.Revision.Primary, time.Now().Add(time.Hour))
 	fresh := auth.NewStore(f.path)
-	if _, ok := fresh.AnthropicPlanLimit(st.Revision, time.Now()); ok {
+	if _, ok := fresh.AnthropicPlanLimit(st.Revision.Primary, time.Now()); ok {
 		t.Fatal("memo persisted")
 	}
 	tr := &backupWire{serve: func(*http.Request, int) (int, http.Header, string) { return backupOK("end_turn") }}

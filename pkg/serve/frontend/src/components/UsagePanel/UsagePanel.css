@@ -107,3 +107,6 @@
 .usage-panel-meter.usage-low .usage-panel-meter-fill { background: var(--green); }
 .usage-panel-meter.usage-med .usage-panel-meter-fill { background: var(--yellow); }
 .usage-panel-meter.usage-high .usage-panel-meter-fill { background: var(--red); }
+
+/* The plan account whose readings these are: cut by the layout, whole in the title. */
+.usage-panel-acct { min-width: 0; flex: 0 1 auto; overflow: hidden; }

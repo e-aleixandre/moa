@@ -48,6 +48,71 @@ export function planKeyNote(row) {
   }
 }
 
+// accountList — Anthropic's plan accounts in priority order (owner list only).
+export function accountList(row) {
+  return row?.id === "anthropic" && Array.isArray(row.accounts) ? row.accounts : [];
+}
+
+// accountBars — the 5h and weekly readings of one entry of the accounts-usage
+// answer, or null when the account has none to show.
+export function accountBars(entry) {
+  const usage = entry?.usage;
+  if (!usage) return null;
+  const bar = (label, w) => (w && Number.isFinite(w.utilization) ? { label, pct: Math.round(w.utilization), resetsAt: w.resets_at || null } : null);
+  const bars = [bar("5h", usage.five_hour), bar("Week", usage.seven_day)].filter(Boolean);
+  return bars.length ? bars : null;
+}
+
+// accountUsageNote — why an account shows no bars.
+export function accountUsageNote(entry) {
+  switch (entry?.reason) {
+    case "temporarily_unavailable":
+      return "Usage unavailable for now";
+    case "reconnect":
+      return "";
+    default:
+      return "";
+  }
+}
+
+// removeAccountWarning — what removing this account changes beyond the
+// account, or "" when nothing: with the API key beside the plan, the last
+// account's removal makes the key pay for everything.
+export function removeAccountWarning(row) {
+  return accountList(row).length === 1 && planKey(row) ? "From then on, everything is paid with the API key." : "";
+}
+
+function clock(date, locale) {
+  return date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+}
+
+// limitedLabel — "Exhausted until 14:00"; another day names it ("Fri 14:00").
+export function limitedLabel(until, now = new Date(), locale) {
+  const date = new Date(Date.parse(until || ""));
+  if (!Number.isFinite(date.getTime())) return "Exhausted";
+  const sameDay = date.toDateString() === now.toDateString();
+  const day = sameDay ? "" : `${date.toLocaleDateString(locale, { weekday: "short" })} `;
+  return `Exhausted until ${day}${clock(date, locale)}`;
+}
+
+// accountReading — the state line of one account.
+export function accountReading(account, now = new Date(), locale) {
+  switch (account?.state) {
+    case "available":
+      return { text: "Available", tone: "ok" };
+    case "limited":
+      return { text: limitedLabel(account.limited_until, now, locale), tone: "warn" };
+    case "reconnect":
+      return { text: "Sign-in expired. Reconnect.", tone: "bad" };
+    case "renew_on_use":
+      return { text: "Renews automatically on next use", tone: "muted" };
+    case "save_failed":
+      return { text: "Could not save credentials.", tone: "bad" };
+    default:
+      return { text: "", tone: "muted" };
+  }
+}
+
 // rowReading — the second line of a row: what state the credential is in and,
 // when it needs something, what to do. `tone` drives colour only.
 export function rowReading(row, canAdmin) {
@@ -96,12 +161,17 @@ export function rowReading(row, canAdmin) {
 // /api/providers) carries `actions`; a device reading /status gets none, so a
 // device row is words only. env and store_unavailable come with `[]` too.
 export function rowActions(row, canAdmin) {
-  const none = { signIn: null, apiKey: null, retrySave: false, primary: null };
+  const none = { signIn: null, addAccount: null, apiKey: null, retrySave: false, primary: null };
   if (!row || canAdmin === false || row.source === "env" || row.state === "store_unavailable") return none;
   const actions = Array.isArray(row.actions) ? row.actions : [];
-  const signIn = actions.includes("sign_in") && row.oauth_enabled !== false
+  // With plan accounts listed, signing in again belongs to each account and a
+  // new one is added next to them; the row has no single sign-in to redo.
+  const chained = accountList(row).length > 0;
+  const canSignIn = actions.includes("sign_in") && row.oauth_enabled !== false;
+  const signIn = canSignIn && !chained
     ? (row.kind === "api_key" ? "Use subscription" : row.kind === "oauth" ? "Reconnect" : "Sign in")
     : null;
+  const addAccount = canSignIn && chained ? "Add another account" : null;
   // Beside a plan sign-in the key is added, never swapped for the sign-in.
   const besidePlan = !!row.plan_api_key;
   const apiKey = actions.includes("api_key") && row.api_key_enabled !== false
@@ -114,7 +184,7 @@ export function rowActions(row, canAdmin) {
   const wanted = row.state === "key_rejected" ? ["apiKey", "signIn"] : ["retrySave", "signIn", "apiKey"];
   const have = { signIn, apiKey, retrySave };
   const primary = wanted.find((k) => have[k]) || null;
-  return { signIn, apiKey, removeKey, retrySave, primary };
+  return { signIn, addAccount, apiKey, removeKey, retrySave, primary };
 }
 
 export const REPLACE_NOTICE =

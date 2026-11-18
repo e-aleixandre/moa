@@ -113,6 +113,7 @@ export function statusItemPriority(kind, state) {
       return state === "unhealthy" || state === "needs-sign-in" ? "p2" : "p4";
     case "extra":
     case "api":
+    case "account":
       return "p2";
     case "tasks":
       return state === "for-you" || state === "pending" ? "p2" : "p4";
