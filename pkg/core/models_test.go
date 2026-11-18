@@ -297,13 +297,13 @@ func TestGPT6AstraPricing(t *testing.T) {
 		t.Fatalf("Astra limits = %+v", model)
 	}
 	p := model.Pricing
-	if got, want := *p, (Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_000, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}}); !reflect.DeepEqual(got, want) {
+	if got, want := *p, (Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_001, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Astra pricing = %+v, want %+v", got, want)
 	}
 	if got, want := p.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 2.774981; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("short Astra cost = %v, want %v", got, want)
 	}
-	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 5.565002; math.Abs(got-want) > 1e-12 {
+	if got, want := p.Cost(Usage{Input: 272_001, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 5.565022; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("long Astra cost = %v, want %v", got, want)
 	}
 }
@@ -332,15 +332,15 @@ func TestGPT61SolPricingAndAlias(t *testing.T) {
 		t.Fatalf("sol = %+v, %v; want gpt-6.1-sol", model, ok)
 	}
 	p := model.Pricing
-	if got, want := *p, (Pricing{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_000, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}}}); !reflect.DeepEqual(got, want) {
+	if got, want := *p, (Pricing{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_001, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}}}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("pricing = %+v, want %+v", got, want)
 	}
 	// 269_998*2 + 1*0.1 + 2000*2.5 + 1000*10 per MTok.
 	if got, want := p.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.5549961; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("short cost = %v, want %v", got, want)
 	}
-	// 272_000*4 + 1*0.2 + 2000*5 + 1000*15 per MTok.
-	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 1.1130002; math.Abs(got-want) > 1e-12 {
+	// 272_001*4 + 1*0.2 + 2000*5 + 1000*15 per MTok.
+	if got, want := p.Cost(Usage{Input: 272_001, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 1.1130042; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("long cost = %v, want %v", got, want)
 	}
 }

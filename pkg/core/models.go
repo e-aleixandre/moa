@@ -126,7 +126,7 @@ var knownModels = map[string]Model{
 		Pricing: &Pricing{
 			Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5,
 			Tiers: []PricingTier{
-				{Threshold: 272_000, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25},
+				{Threshold: 272_001, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25},
 			},
 		},
 	},
@@ -163,7 +163,7 @@ var knownModels = map[string]Model{
 		Pricing: &Pricing{
 			Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5,
 			Tiers: []PricingTier{
-				{Threshold: 272_000, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5},
+				{Threshold: 272_001, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5},
 			},
 		},
 	},
