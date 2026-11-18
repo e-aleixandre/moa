@@ -39,10 +39,10 @@ index.
 **Owner → sessions**: the `sessions` tool, scoped to the owner's codebase:
 `list` (which also names live sessions in other directories that no owner
 watches), `read`, `send` (message or steer), `new` (create a child in a
-directory of the codebase and send its first prompt), and `close` (unload a session
+directory of the codebase and send its first prompt), `close` (unload a session
 the owner started, as the UI's close does: it stays saved and can be reopened;
 refused for the user's sessions and for one that is working; if the session was
-the executor of an open task, the result says so), and `answer` (resolve a
+the executor of an open task, the result says so) and `answer` (resolve a
 pending `ask_user` of a child). `new` accepts `model: "daybreak"` (GPT-6 Sol with
 Daybreak) and fails, creating nothing, when the account's OpenAI plan login or
 its model catalog does not offer it. `new` needs `task`: the id of an open task on

@@ -117,7 +117,7 @@ func TestSessionsToolCloseSaysWhenATaskLosesItsExecutor(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("close failed: %s", toolText(res))
 	}
-	if txt := toolText(res); !strings.Contains(txt, "no executor") || !strings.Contains(txt, "#") {
+	if txt := toolText(res); !strings.Contains(txt, "nobody is working") || !strings.Contains(txt, "#") {
 		t.Fatalf("close does not report the orphaned task: %s", txt)
 	}
 }

@@ -545,7 +545,7 @@ func (m *Manager) ownerNewSession(ctx context.Context, own owner.Owner, params m
 		}
 	}
 	if err := m.daybreakUnavailable(getStr(params, "model")); err != nil {
-		return core.ErrorResult(err.Error())
+		return core.ErrorResult("Daybreak is not available: " + err.Error())
 	}
 	sess, err := m.CreateSession(CreateOpts{
 		CWD:      cwd,
@@ -582,17 +582,17 @@ func (m *Manager) daybreakUnavailable(spec string) error {
 	}
 	model, _, ok := core.ResolveModelDaybreak(spec)
 	if !ok {
-		return errors.New("Daybreak is not available: its model is unknown to this moa")
+		return errors.New("its model is unknown to this moa")
 	}
 	var availability core.DaybreakAvailability
 	if m.daybreakCatalog != nil {
 		availability = m.daybreakCatalog()
 	}
 	if !availability.Transport {
-		return errors.New("Daybreak is not available: it needs the user's OpenAI plan login (ChatGPT), which is not the selected credential. Nothing was created; start the session with another model or tell the user")
+		return errors.New("it needs the user's OpenAI plan login (ChatGPT), which is not the selected credential. Nothing was created; start the session with another model or tell the user")
 	}
 	if !availability.Sendable(model) {
-		return fmt.Errorf("Daybreak is not available: this account's catalog does not offer it for %s. Nothing was created; start the session with another model or tell the user", model.Name)
+		return fmt.Errorf("this account's catalog does not offer it for %s. Nothing was created; start the session with another model or tell the user", model.Name)
 	}
 	return nil
 }
@@ -622,7 +622,7 @@ func (m *Manager) ownerCloseSession(own owner.Owner, id string) core.Result {
 	}
 	msg := fmt.Sprintf("Closed session %s. It stays saved; the user can reopen it.", id)
 	for _, t := range linked {
-		msg += fmt.Sprintf(" Task #%d was its work and now has no executor: send it to another session with task=%d.", t.ID, t.ID)
+		msg += fmt.Sprintf(" Task #%d was its work and nobody is working on it now: send it to another session with task=%d.", t.ID, t.ID)
 	}
 	return core.TextResult(msg)
 }
