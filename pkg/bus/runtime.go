@@ -357,6 +357,9 @@ func (r *SessionRuntime) flush(acknowledged bool) error {
 	}
 
 	meta := collectMetadata(r.sctx)
+	if rp, ok := p.(TreeRevisionPersister); ok && r.sctx.Tree != nil {
+		return rp.SnapshotTreeRevision(r.sctx.Tree, meta, acknowledged)
+	}
 	if tp, ok := p.(TreePersister); ok && r.sctx.Tree != nil {
 		entries, leafID := r.sctx.Tree.Snapshot()
 		if acknowledged {

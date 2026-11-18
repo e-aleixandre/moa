@@ -199,6 +199,7 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	sp := newServePersister(persisted, store, sess.titleState)
 	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
 	sp.mcpTools = sess.mcpToolsSnapshot
+	sp.trustLoadedTree(sess.runtime.Context().Tree)
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
@@ -1482,6 +1483,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 	sp := newServePersister(saved, store, sess.titleState)
 	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
 	sp.mcpTools = sess.mcpToolsSnapshot
+	sp.trustLoadedTree(sess.runtime.Context().Tree)
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 

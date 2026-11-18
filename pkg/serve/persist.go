@@ -1,8 +1,11 @@
 package serve
 
 import (
+	"bytes"
+	"encoding/json"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -37,6 +40,12 @@ type servePersister struct {
 	// MetaMCPTools; ok is false when the session has no MCP servers. Nil
 	// leaves whatever the session file held.
 	mcpTools func() (snapshot any, ok bool)
+	// savedTree and savedRev name the tree revision whose entries are the
+	// ones on disk (and in persisted), so an unchanged session is not
+	// rewritten. Nil when unknown: after any failed write, or a save of
+	// entries that are not a revision of the live tree.
+	savedTree *session.Tree
+	savedRev  uint64
 }
 
 func newServePersister(persisted *session.Session, store *session.FileStore, titleState func() (string, string, bool)) *servePersister {
@@ -67,6 +76,10 @@ func (sp *servePersister) snapshot(messages []core.AgentMessage, epoch int, meta
 		}
 		return nil
 	}
+
+	// A flat snapshot holds no tree entries: what is on disk stops matching
+	// a revision of the tree.
+	sp.savedTree = nil
 
 	// A snapshot deliberately ignores `closing`: the final flush of a closing
 	// runtime is exactly what must reach disk.
@@ -117,19 +130,11 @@ func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, m
 		}
 		return nil
 	}
+	// These entries come from no revision of the live tree (the compaction
+	// commit saves a staged copy), so what is on disk no longer matches one.
+	sp.savedTree = nil
 
-	snapshot := *sp.persisted
-	snapshot.Title, snapshot.TitleSource, _ = sp.titleState() // see Snapshot
-	snapshot.Version = session.SessionVersion
-	snapshot.Entries = make([]session.Entry, len(entries))
-	copy(snapshot.Entries, entries)
-	snapshot.LeafID = leafID
-	sp.settleVoiceOwed(&snapshot)
-	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
-	// Clear v1 fields
-	snapshot.Messages = nil
-	snapshot.CompactionEpoch = 0
-
+	snapshot := sp.treeSnapshotLocked(append([]session.Entry(nil), entries...), leafID, metadata)
 	store := sp.store
 	// Save under the lock — see the rationale in Snapshot.
 	err := store.Save(&snapshot)
@@ -144,6 +149,123 @@ func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, m
 	}
 	sp.saved()
 	return nil
+}
+
+// SnapshotTreeRevision implements bus.TreeRevisionPersister. It saves like
+// SnapshotTree, but skips the write when the tree is still at the revision
+// last saved and the header (everything but the entries and the updated
+// time) is the one on disk: each write rewrites the whole transcript.
+func (sp *servePersister) SnapshotTreeRevision(tree *session.Tree, metadata map[string]any, acknowledged bool) error {
+	metadata = sp.withMCPTools(metadata)
+	rev := tree.Rev()
+	sp.mu.Lock()
+	unchanged := sp.treeSavedLocked(tree, rev)
+	var entries []session.Entry
+	var leafID string
+	if !unchanged {
+		// The deep copy runs outside sp.mu, as SnapshotTree's callers do it.
+		sp.mu.Unlock()
+		entries, leafID, rev = tree.SnapshotRev()
+		sp.mu.Lock()
+		unchanged = sp.treeSavedLocked(tree, rev)
+	}
+	if sp.deleted || sp.persisted == nil || sp.store == nil {
+		sp.mu.Unlock()
+		if acknowledged {
+			return core.ErrProviderWaitNotSaved
+		}
+		return nil
+	}
+	if unchanged {
+		entries, leafID = sp.persisted.Entries, sp.persisted.LeafID
+	}
+	snapshot := sp.treeSnapshotLocked(entries, leafID, metadata)
+	if unchanged && sameSavedHeader(&snapshot, sp.persisted) {
+		sp.mu.Unlock()
+		sp.saved()
+		return nil
+	}
+
+	err := sp.store.Save(&snapshot)
+	if err == nil {
+		*sp.persisted = snapshot
+		sp.savedTree, sp.savedRev = tree, rev
+	} else {
+		sp.savedTree = nil
+	}
+	sp.mu.Unlock()
+
+	if err != nil {
+		slog.Warn("session save failed", "error", err)
+		return err
+	}
+	sp.saved()
+	return nil
+}
+
+// treeSnapshotLocked is the session file a tree save writes. It keeps entries
+// as given: they must not be changed afterwards (persisted may end up holding
+// them). Called under sp.mu.
+func (sp *servePersister) treeSnapshotLocked(entries []session.Entry, leafID string, metadata map[string]any) session.Session {
+	snapshot := *sp.persisted
+	snapshot.Title, snapshot.TitleSource, _ = sp.titleState() // see Snapshot
+	snapshot.Version = session.SessionVersion
+	snapshot.Entries = entries
+	snapshot.LeafID = leafID
+	sp.settleVoiceOwed(&snapshot)
+	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
+	// Clear v1 fields
+	snapshot.Messages = nil
+	snapshot.CompactionEpoch = 0
+	return snapshot
+}
+
+// treeSavedLocked reports whether the file on disk holds tree's entries at
+// revision rev. Called under sp.mu.
+func (sp *servePersister) treeSavedLocked(tree *session.Tree, rev uint64) bool {
+	return sp.savedTree != nil && sp.savedTree == tree && sp.savedRev == rev
+}
+
+// trustLoadedTree records that tree holds the entries sp.persisted was read
+// with, so closing or reopening a session nothing changed writes nothing. A
+// tree that was repaired while loading has moved past revision 0 and is
+// saved as before. Called before the persister is attached.
+func (sp *servePersister) trustLoadedTree(tree *session.Tree) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if tree == nil || sp.persisted == nil || len(sp.persisted.Messages) != 0 {
+		return
+	}
+	if tree.Len() != len(sp.persisted.Entries) || tree.LeafID() != sp.persisted.LeafID {
+		return
+	}
+	// Read last: the revision only grows, so 0 here means no mutation came
+	// before the reads above either.
+	if tree.Rev() == 0 {
+		sp.savedTree, sp.savedRev = tree, 0
+	}
+}
+
+// sameSavedHeader reports whether a tree snapshot and the last saved session
+// differ in nothing but their entries and updated time. Both are encoded as
+// the file encodes them, so a value decoded from disk (a float64 for an int,
+// []any for []string) compares equal to the one that wrote it.
+func sameSavedHeader(next, saved *session.Session) bool {
+	if len(next.Messages) != 0 || len(saved.Messages) != 0 {
+		return false
+	}
+	a, b := *next, *saved
+	a.Entries, b.Entries = nil, nil
+	a.Updated, b.Updated = time.Time{}, time.Time{}
+	ja, err := json.Marshal(&a)
+	if err != nil {
+		return false
+	}
+	jb, err := json.Marshal(&b)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(ja, jb)
 }
 
 // withMCPTools sets the live MCP tool snapshot into a snapshot's metadata, so
@@ -205,6 +327,7 @@ func (sp *servePersister) saveTitle() {
 	sp.persisted.TitleSource = source
 	snapshot := *sp.persisted
 	if err := sp.store.Save(&snapshot); err != nil {
+		sp.savedTree = nil // persisted now holds a title the disk may lack
 		slog.Warn("session title save failed", "error", err)
 	}
 }
@@ -229,7 +352,11 @@ func (sp *servePersister) recordIdempotencyKey(key string) error {
 	}
 	sp.preserved[session.MetaIdempotencyKey] = key
 	snapshot := *sp.persisted
-	return sp.store.Save(&snapshot)
+	if err := sp.store.Save(&snapshot); err != nil {
+		sp.savedTree = nil // persisted now holds a key the disk may lack
+		return err
+	}
+	return nil
 }
 
 // recordOwnerDetached sets or clears the detach marker and saves synchronously.
@@ -256,6 +383,7 @@ func (sp *servePersister) recordOwnerDetached(detached bool) error {
 	}
 	snapshot := *sp.persisted
 	if err := sp.store.Save(&snapshot); err != nil {
+		sp.savedTree = nil // a failed write may or may not have replaced the file
 		if hadPersisted {
 			sp.persisted.Metadata[session.MetaOwnerDetached] = previousPersisted
 		} else {

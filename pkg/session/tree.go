@@ -620,6 +620,26 @@ func (t *Tree) Snapshot() ([]Entry, string) {
 	return entries, leafID
 }
 
+// Rev returns the tree's mutation counter: it changes with every Append,
+// Branch, BranchBefore, Clear and Adopt, and entries are never mutated in
+// place, so two equal revisions of one tree hold the same entries and leaf.
+func (t *Tree) Rev() uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.rev
+}
+
+// SnapshotRev is Snapshot plus the revision the copy was taken at.
+func (t *Tree) SnapshotRev() ([]Entry, string, uint64) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	entries := make([]Entry, len(t.entries))
+	for i, e := range t.entries {
+		entries[i] = DeepCopyEntry(e)
+	}
+	return entries, t.leafID, t.rev
+}
+
 // Len returns the total number of entries across all branches.
 func (t *Tree) Len() int {
 	t.mu.RLock()
