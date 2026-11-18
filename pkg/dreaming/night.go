@@ -28,6 +28,9 @@ type NightConfig struct {
 	Organizer core.Model // writes the plans and the cross-sheet view (Sonnet)
 	Publish   Publisher
 	Now       func() time.Time
+	// Notes are said in the morning news as they come: why the night did not
+	// use the models its owner chose.
+	Notes []string
 }
 
 // NightResult is what a night did.
@@ -46,7 +49,10 @@ type NightResult struct {
 
 // Output sizes asked of each model. They bound the reservation as well.
 const (
-	analyzerMaxOut  = 16_000
+	// analyzerMaxOut counts reasoning too: Haiku 5.5 used up 16,000 on the two
+	// largest sheets of the experiment and answered nothing; the largest took
+	// 26,443 with the cap lifted.
+	analyzerMaxOut  = 48_000
 	crossMaxOut     = 16_000
 	organizerMaxOut = 32_000
 	// chunkBytes is the most an analyzer reads in one call: the pilot's cheap
@@ -363,6 +369,12 @@ func (s Store) read(ctx context.Context, b *Budget, cfg NightConfig, snap Snapsh
 		if err != nil {
 			return "", err
 		}
+		// A cut-off analysis would reach the organizer as if it were whole:
+		// the sheet's later lines would silently go unread. Better to leave
+		// the sheet for another night with the reason said.
+		if res.Truncated {
+			return "", fmt.Errorf("el modelo de lectura se quedó sin espacio de respuesta en el tramo %d de %d", i+1, len(chunks))
+		}
 		out = append(out, res.Text)
 	}
 	return strings.Join(out, "\n\n"), nil
@@ -608,6 +620,9 @@ func morningNews(cfg NightConfig, rep Report, res NightResult, plans map[string]
 	}
 	if len(facts.review) > 0 {
 		fmt.Fprintf(&body, "- Memoria a revisar (la corrección dejaría mal su descripción): %s.\n", strings.Join(facts.review, ", "))
+	}
+	for _, n := range cfg.Notes {
+		fmt.Fprintf(&body, "- %s\n", n)
 	}
 	if len(res.Secrets) > 0 {
 		fmt.Fprintf(&body, "- Hojas con posibles secretos, sin tocar: %s.\n", strings.Join(res.Secrets, ", "))

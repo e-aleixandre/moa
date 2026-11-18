@@ -17,6 +17,7 @@ import {
 import {
   SESSION, isCustom, normalizeChoices,
 } from "./compact-model-model.js";
+import { ROLES, choicesFor, chosen, defaultHint, patchFor, rowValue, withRole } from "./dreaming-models-model.js";
 import {
   allowedCount, createAllowedModelsWriter, nextAllowedModels, rememberRestricted, scopeForAllowed, selectedScopeList,
 } from "./subagent-models-model.js";
@@ -266,6 +267,34 @@ function useCompactModel() {
   };
 
   return { spec, choices, loaded, save };
+}
+
+// The nightly dreaming's two models. An empty role is "the default for the
+// providers connected that night"; the server says what that is right now.
+function useDreamingModels() {
+  const [policy, setPolicy] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    api("GET", "/api/dreaming-models").catch(() => null).then((next) => {
+      if (live && next) setPolicy(next);
+    });
+    return () => { live = false; };
+  }, []);
+
+  const save = (role, spec) => {
+    if (!policy || chosen(policy, role) === spec) return;
+    const previous = policy;
+    setPolicy(withRole(policy, role, spec));
+    api("PATCH", "/api/dreaming-models", patchFor(role, spec))
+      .then((next) => setPolicy(next))
+      .catch((error) => {
+        setPolicy(previous);
+        addToast({ title: "Could not set the dreaming model", detail: String(error.message || error), type: "error" });
+      });
+  };
+
+  return { policy, loaded: policy !== null, save };
 }
 
 // Cache keep-alive: three switches, saved the moment they change like every
@@ -554,6 +583,40 @@ function CompactModelPage({ state, onDone }) {
       {loaded && choices.length === 0 && (
         <p class="zl-set-empty">No other model is connected yet.</p>
       )}
+    </>
+  );
+}
+
+function DreamingModelPage({ state, role, onDone }) {
+  const { policy, loaded, save } = state;
+  const current = chosen(policy, role);
+  const choices = choicesFor(policy, role);
+  return (
+    <>
+      <p class="zl-set-sum">
+        {role === "reader"
+          ? "Pick the model that reads what changed. A cheap one is enough."
+          : "Pick the model that writes the consolidated sheets."}
+      </p>
+      <div role="radiogroup" aria-label={role === "reader" ? "Dreaming reader model" : "Dreaming organizer model"}>
+        <Option
+          label="Default"
+          desc={defaultHint(policy, role) || "Chosen from your connected providers."}
+          on={current === ""}
+          disabled={!loaded}
+          onPick={() => { save(role, ""); onDone(); }}
+        />
+        {choices.map((choice) => (
+          <Option
+            key={choice.spec}
+            label={choice.name}
+            desc={choice.provider}
+            on={current === choice.spec}
+            disabled={!loaded}
+            onPick={() => { save(role, choice.spec); onDone(); }}
+          />
+        ))}
+      </div>
     </>
   );
 }
@@ -1104,6 +1167,7 @@ export function GlobalSettings({
   const strategy = useCompactStrategy();
   const compactModel = useCompactModel();
   const subagents = useSubagentModels();
+  const dreaming = useDreamingModels();
   const keepAlive = useKeepAlive(open);
   const devices = useDevices(open);
   const saved = useSavedSecrets(open);
@@ -1223,6 +1287,9 @@ export function GlobalSettings({
             {page === "compact-strategy" && <CompactStrategyPage state={strategy} onDone={() => setPage("root")} />}
             {page === "compact-model" && <CompactModelPage state={compactModel} onDone={() => setPage("root")} />}
             {page === "subagent-models" && <SubagentModelsPage state={subagents} />}
+            {ROLES.map((role) => page === `dreaming-${role}` && (
+              <DreamingModelPage key={role} state={dreaming} role={role} onDone={() => setPage("root")} />
+            ))}
             {page === "devices" && <DevicesPage state={devices} onClose={onClose} />}
             {page === "saved-secrets" && <SavedSecretsPage state={saved} />}
             {page === "voice" && <VoicePage state={voiceSettings} onProviders={() => setPage("providers")} onModel={() => setPage("voice-model")} onEditOwner={editOwner} />}
@@ -1301,6 +1368,26 @@ export function GlobalSettings({
                 loading={!subagents.loaded}
                 onOpen={() => setPage("subagent-models")}
                 pageLabel={SETTINGS_PAGES["subagent-models"]}
+              />
+            </div>
+
+            <div class="zl-set-sec">
+              <span class="zl-set-k">Dreaming</span>
+              <Row
+                label="Read with"
+                hint="The model that reads what changed."
+                value={rowValue(dreaming.policy, "reader")}
+                loading={!dreaming.loaded}
+                onOpen={() => setPage("dreaming-reader")}
+                pageLabel={SETTINGS_PAGES["dreaming-reader"]}
+              />
+              <Row
+                label="Organize with"
+                hint="The model that writes the sheets."
+                value={rowValue(dreaming.policy, "organizer")}
+                loading={!dreaming.loaded}
+                onOpen={() => setPage("dreaming-organizer")}
+                pageLabel={SETTINGS_PAGES["dreaming-organizer"]}
               />
             </div>
 

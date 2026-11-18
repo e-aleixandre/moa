@@ -24,9 +24,6 @@ import (
 // dreamingInterval is how often the clock looks. Overridden in tests.
 var dreamingInterval = 5 * time.Minute
 
-// dreamingModels are the cheap reader and the organizer the pilot used.
-var dreamingModels = [2]string{"luna", "sonnet"}
-
 type dreamingService struct {
 	mgr     *Manager
 	store   *owner.Store
@@ -125,15 +122,20 @@ func (d *dreamingService) tick(now time.Time) {
 		if date == "" || own.SessionID == "" || d.failed[own.CodebaseKey] || d.ctx.Err() != nil {
 			continue
 		}
-		analyzer, ok1 := core.ResolveModel(dreamingModels[0])
-		organizer, ok2 := core.ResolveModel(dreamingModels[1])
-		if !ok1 || !ok2 || d.mgr.providerFactory == nil {
+		// Resolved per night: the connected providers and the settings can
+		// change between one night and the next.
+		analyzer, organizer, notes, ok := core.ResolveDreamingModels(core.LoadGlobalConfig(), d.mgr.providerCredentialAvailable,
+			func(role string, m core.Model) bool { return dreaming.RoleFits(role, m, settings.BudgetUSD) })
+		if !ok || d.mgr.providerFactory == nil {
 			slog.Warn("dreaming: models unavailable", "owner", own.Name)
 			return
 		}
+		for _, n := range notes {
+			slog.Warn("dreaming: model setting not used", "owner", own.Name, "note", n)
+		}
 		res, err := dreaming.Store{Codebase: d.store.CodebaseDir(own.CodebaseKey)}.Night(d.ctx, dreaming.NightConfig{
 			Date: date, BudgetUSD: settings.BudgetUSD, Factory: d.mgr.providerFactory,
-			Analyzer: analyzer, Organizer: organizer, Publish: d.publisher(own),
+			Analyzer: analyzer, Organizer: organizer, Publish: d.publisher(own), Notes: notes,
 		})
 		if err != nil {
 			slog.Error("dreaming: night failed", "owner", own.Name, "date", date, "error", err)

@@ -115,6 +115,8 @@ type MoaConfig struct {
 	CompactAt              int                   `json:"compact_at,omitempty"`                    // Default soft compaction threshold in tokens for sessions with none of their own. 0 = compact at the model window.
 	CompactModel           string                `json:"compact_model,omitempty"`                 // Model that writes compaction summaries. Empty/"session" = the session's own model. See GetCompactModel.
 	CompactStrategy        string                `json:"compact_strategy,omitempty"`              // What happens before an automatic compaction: "plain", "notify" (default) or "prepare". See GetCompactStrategy.
+	DreamingReaderModel    string                `json:"dreaming_reader_model,omitempty"`         // Model that reads each changed sheet in the nightly dreaming. Empty = the default for the connected providers. See ResolveDreamingModels (global-only).
+	DreamingOrganizerModel string                `json:"dreaming_organizer_model,omitempty"`      // Model that cross-checks and writes the plans in the nightly dreaming. Empty = the default for the connected providers (global-only).
 	TrimDisabled           *bool                 `json:"trim_disabled,omitempty"`                 // Turn off the tool-result elision that runs before compaction. Absent/false = on. A pointer so an explicit false is distinguishable from "unset" when configs merge.
 	Events                 *EventsConfig         `json:"events,omitempty"`                        // wake-on-event: inbound webhook sources (global-only; see EventsConfig).
 	Preview                *PreviewConfig        `json:"preview,omitempty"`                       // Live Preview proxy address, remembered so the web UI does not ask again (global-only).
@@ -685,6 +687,10 @@ func mergeConfigs(base, override MoaConfig) MoaConfig {
 		// The preview address is the owner's, not a project's: a repository must
 		// never be able to tell Moa where to publish a proxy.
 		Preview: base.Preview,
+		// The dreaming runs for the server, not for a repository: only the
+		// global choice counts.
+		DreamingReaderModel:    base.DreamingReaderModel,
+		DreamingOrganizerModel: base.DreamingOrganizerModel,
 		// Global-only: a repository must not choose how, or at whose cost, the
 		// owner's calls are made.
 		Voice: base.Voice,

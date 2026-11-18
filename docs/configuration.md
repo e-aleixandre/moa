@@ -99,6 +99,8 @@ Global config only; also set from **Settings › Voice** in `moa serve`.
 | `compact_at` | int | `0` | Default auto-compaction threshold in tokens for sessions that set none of their own. `0` = automatic: compaction waits for the model's window. A session's own limit always wins, and a subagent inherits its parent's, falling back to this. Values under the engine's floor (reserve + kept context + margin, ≈41k) are raised, since a lower threshold would compact on every turn. Editable from the web Settings sheet |
 | `compact_strategy` | string | `notify` | What the agent gets before an **automatic** compaction, which otherwise arrives mid-task with no warning: anything it had worked out but not written down is replaced by the summary. `plain` = no warning. `notify` = a reminder as the threshold nears, so it can persist unfinished work first; costs nothing, since the notice rides on the next request. `prepare` = a full turn to write things down before summarizing; more thorough, but costs an extra request. Subagents are never warned under any setting: they have no memory or checkpoint to write to, and their findings already travel back in their report. Editable from the web Settings sheet |
 | `compact_model` | string | `session` | Model that writes compaction summaries. `session` (or unset) = the session's own model, which is how compaction has always behaved. Any model spec (`terra`, `sonnet`…) makes that model summarize instead. The summarizer request shares no cached prefix with the conversation. The chosen model needs its provider's credentials; when they are missing the session's model summarizes instead and the transcript says so. The same happens at run time: if that model fails with anything but an unrecoverable error (a temporary provider error, an overload, a usage limit), the summary is retried once with the session's model, the transcript says *Summarized with ‹model› — ‹compact model› was unavailable (‹reason›)*, and your setting is left as it is. Authentication and invalid-request errors, a context too long for the model, and a refusal are not retried Editable from the web Settings sheet |
+| `dreaming_reader_model` | string | _(unset)_ | Model that reads each changed sheet in the nightly dreaming. Unset means the default for the providers that are connected on the night: Haiku with only Anthropic, Luna otherwise. Only models whose one call fits the night's budget are accepted; a stored value that does not fit, is unknown or has no credentials falls back to the default and the morning news says so. Global config only. Editable from the web Settings sheet |
+| `dreaming_organizer_model` | string | _(unset)_ | Model that cross-checks and writes the dreaming's plans. Unset means the default for the connected providers: Sonnet when Anthropic is connected, Sol with only OpenAI. Same rules as `dreaming_reader_model`. Global config only. Editable from the web Settings sheet |
 | `trim_disabled` | bool | `false` | Turn off the tool-result elision that runs *before* a compaction. On by default: when context crosses the threshold, older tool outputs are replaced by short placeholders that name what was elided, and the conversation continues without a summary; only when that no longer frees enough does the summarizer run. The transcript keeps the original outputs — the elision applies to what the model is sent. Set `true` to go straight to compaction as before |
 | `update_check` | bool | `true` | Check GitHub for a newer stable Moa release (six-hour ETag cache); set `false` to opt out |
 | `events` | object | absent | Wake-on-event sources (`events.sources.<name>`). Each source is a webhook with its own `secret`, a `target` (`{project:dir}`, `{session:id}`, `{owner:id\|name}`, or `"inbox"`), `when_none` (`inbox`/`create`), `when_many` (`inbox`/`latest`), `create` (`model`, `thinking`, `yolo`, `title`), `autorun` (default false; set true to start a turn), and `rate` (auto-deliveries and session creations per rolling hour, default 10). **Global-only** — secrets live in `~/.config/moa/config.json`. See [Event hooks](./automation.md#event-hooks) and `moa hooks` |
@@ -145,11 +147,13 @@ cheap execution model (Standard mode only, no alias); a request with more than
 200K input tokens, cache included, is billed entirely at its higher long-context
 rates. Muse models always reason, so `off` resolves to the lowest effort.
 
-The OpenAI models `gpt-6.1-sol`, `gpt-6.1-terra` and `gpt-6-luna` are also available as `sol`,
-`terra` and `luna` (`gpt-6-sol` and `gpt-5.6-terra` stay selectable by ID). `gpt-6-astra` is available as
-`astra` (or `gpt-6`). Astra, GPT-6.1 Sol and GPT-6.1 Terra map their five thinking
-positions to `low`, `medium`, `high`, `xhigh`, and `max`, so the `off`
-position selects the lowest reasoning effort rather than disabling reasoning.
+The OpenAI aliases `sol`, `astra`, `terra` and `luna` point at `gpt-6.2-sol`,
+`gpt-6.2-astra`, `gpt-6.1-terra` and `gpt-6-luna`; `gpt-6` points at `gpt-6-astra`.
+`gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-astra` and `gpt-5.6-terra` stay selectable by ID.
+GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6.2 Astra and GPT-6.2 Sol map
+their five thinking positions to `low`, `medium`, `high`, `xhigh`, and `max`,
+so the `off` position selects the lowest reasoning effort rather than
+disabling reasoning.
 
 ### MCP servers
 

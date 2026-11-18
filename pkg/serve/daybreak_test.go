@@ -52,7 +52,7 @@ func (p *daybreakRecorder) requests() []core.Request {
 }
 
 func daybreakCatalogKnown() core.DaybreakAvailability {
-	return core.DaybreakAvailability{Transport: true, Known: true, Models: map[string]bool{"gpt-6-sol": true, "gpt-6-luna": true, "gpt-6.1-sol": false}}
+	return core.DaybreakAvailability{Transport: true, Known: true, Models: map[string]bool{"gpt-6-sol": true, "gpt-6-luna": true, "gpt-6.1-sol": false, "gpt-6.2-sol": false}}
 }
 
 func newDaybreakServer(t *testing.T, prov core.Provider, catalog func() core.DaybreakAvailability) (*httptest.Server, *Manager) {

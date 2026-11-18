@@ -22,6 +22,8 @@ export const SETTINGS_PAGES = {
   "compact-strategy": "Before compacting",
   "compact-model": "Summarize with",
   "subagent-models": "Subagent models",
+  "dreaming-reader": "Read with",
+  "dreaming-organizer": "Organize with",
   devices: "Devices",
   "saved-secrets": "Saved passwords",
   providers: "Providers",

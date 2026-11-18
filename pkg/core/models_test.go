@@ -289,7 +289,7 @@ func TestGPT56TerraPricing(t *testing.T) {
 }
 
 func TestGPT6AstraPricing(t *testing.T) {
-	model, ok := ResolveModel("astra")
+	model, ok := ResolveModel("gpt-6-astra")
 	if !ok || model.ID != "gpt-6-astra" || model.Pricing == nil {
 		t.Fatalf("astra = %+v, %v", model, ok)
 	}
@@ -297,13 +297,13 @@ func TestGPT6AstraPricing(t *testing.T) {
 		t.Fatalf("Astra limits = %+v", model)
 	}
 	p := model.Pricing
-	if got, want := *p, (Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_000, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}}); !reflect.DeepEqual(got, want) {
+	if got, want := *p, (Pricing{Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_001, Input: 20, Output: 75, CacheRead: 2, CacheWrite: 25}}}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Astra pricing = %+v, want %+v", got, want)
 	}
 	if got, want := p.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 2.774981; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("short Astra cost = %v, want %v", got, want)
 	}
-	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 5.565002; math.Abs(got-want) > 1e-12 {
+	if got, want := p.Cost(Usage{Input: 272_001, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 5.565022; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("long Astra cost = %v, want %v", got, want)
 	}
 }
@@ -327,20 +327,20 @@ func TestGPT6SolPricing(t *testing.T) {
 }
 
 func TestGPT61SolPricingAndAlias(t *testing.T) {
-	model, ok := ResolveModel("sol")
+	model, ok := ResolveModel("gpt-6.1-sol")
 	if !ok || model.ID != "gpt-6.1-sol" || model.Pricing == nil {
 		t.Fatalf("sol = %+v, %v; want gpt-6.1-sol", model, ok)
 	}
 	p := model.Pricing
-	if got, want := *p, (Pricing{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_000, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}}}); !reflect.DeepEqual(got, want) {
+	if got, want := *p, (Pricing{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_001, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}}}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("pricing = %+v, want %+v", got, want)
 	}
 	// 269_998*2 + 1*0.1 + 2000*2.5 + 1000*10 per MTok.
 	if got, want := p.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 0.5549961; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("short cost = %v, want %v", got, want)
 	}
-	// 272_000*4 + 1*0.2 + 2000*5 + 1000*15 per MTok.
-	if got, want := p.Cost(Usage{Input: 272_000, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 1.1130002; math.Abs(got-want) > 1e-12 {
+	// 272_001*4 + 1*0.2 + 2000*5 + 1000*15 per MTok.
+	if got, want := p.Cost(Usage{Input: 272_001, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}), 1.1130042; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("long cost = %v, want %v", got, want)
 	}
 }
@@ -745,18 +745,26 @@ func TestListModels_HasAliases(t *testing.T) {
 func TestListModels_PrefersLexicalAliasOnEqualLength(t *testing.T) {
 	for range 100 {
 		for _, entry := range ListModels() {
-			if entry.Model.ID == "gpt-6-astra" && entry.Alias != "astra" {
-				t.Fatalf("GPT-6 Astra alias = %q, want astra", entry.Alias)
+			if entry.Model.ID == "gpt-6.2-astra" && entry.Alias != "astra" {
+				t.Fatalf("GPT-6.2 Astra alias = %q, want astra", entry.Alias)
+			}
+			if entry.Model.ID == "gpt-6-astra" && entry.Alias != "gpt-6" {
+				t.Fatalf("GPT-6 Astra alias = %q, want gpt-6", entry.Alias)
 			}
 		}
 	}
 }
 
+// Owner decision 2026-11-18: astra and sol follow GPT-6.2; gpt-6 stays on
+// GPT-6 Astra; the older models stay selectable by ID.
 func TestResolveModel_GPT6Aliases(t *testing.T) {
-	for _, alias := range []string{"astra", "gpt-6"} {
+	for alias, want := range map[string]string{
+		"astra": "gpt-6.2-astra", "sol": "gpt-6.2-sol", "gpt-6": "gpt-6-astra",
+		"gpt-6-astra": "gpt-6-astra", "gpt-6.1-sol": "gpt-6.1-sol", "gpt-6-sol": "gpt-6-sol",
+	} {
 		model, ok := ResolveModel(alias)
-		if !ok || model.ID != "gpt-6-astra" {
-			t.Errorf("ResolveModel(%q) = %+v, %v; want gpt-6-astra", alias, model, ok)
+		if !ok || model.ID != want {
+			t.Errorf("ResolveModel(%q) = %+v, %v; want %s", alias, model, ok, want)
 		}
 	}
 }
@@ -917,15 +925,15 @@ func TestKnownModels_PricingIsExplicit(t *testing.T) {
 // the exact lowercase form resolved and everything else failed.
 func TestResolveModel_CaseAndSpaceInsensitive(t *testing.T) {
 	cases := map[string]string{
-		"Sol":             "gpt-6.1-sol",
-		"SOL":             "gpt-6.1-sol",
+		"Sol":             "gpt-6.2-sol",
+		"SOL":             "gpt-6.2-sol",
 		"Terra":           "gpt-6.1-terra",
 		"Luna":            "gpt-6-luna",
-		"Astra":           "gpt-6-astra",
+		"Astra":           "gpt-6.2-astra",
 		"Opus":            "claude-opus-5-5",
 		"Fable":           "claude-fable-5-2",
-		" sol ":           "gpt-6.1-sol",
-		"openai/Sol":      "gpt-6.1-sol",
+		" sol ":           "gpt-6.2-sol",
+		"openai/Sol":      "gpt-6.2-sol",
 		"ANTHROPIC/Opus":  "claude-opus-5-5",
 		"Claude-Sonnet-5": "claude-sonnet-5",
 		"Claude Sonnet 5": "claude-sonnet-5",
@@ -1044,6 +1052,53 @@ func TestAnthropicMaxOutputPinnedBySource(t *testing.T) {
 		model, ok := ResolveModel(id)
 		if !ok || model.MaxOutput != want {
 			t.Errorf("%s MaxOutput = %d, want %d", id, model.MaxOutput, want)
+		}
+	}
+}
+
+// GPT-6.2 figures: https://developers.openai.com/api/docs/models/gpt-6.2-astra
+// and .../gpt-6.2-sol (checked 2026-11-18). The long tier applies to "more
+// than 272K input tokens", so it starts at 272_001.
+func TestGPT62PricingAndEfforts(t *testing.T) {
+	cases := []struct {
+		id    string
+		want  Pricing
+		short float64 // Cost of {269_998 in, 1 cache read, 2000 cache write, 1000 out}
+		long  float64 // Cost of {272_001 in, 1 cache read, 2000 cache write, 1000 out}
+	}{
+		{"gpt-6.2-astra", Pricing{Input: 8, Output: 40, CacheRead: 0.4, CacheWrite: 10, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_001, Input: 16, Output: 60, CacheRead: 0.8, CacheWrite: 20}}},
+			269_998*8e-6 + 0.4e-6 + 2000*10e-6 + 1000*40e-6, 272_001*16e-6 + 0.8e-6 + 2000*20e-6 + 1000*60e-6},
+		{"gpt-6.2-sol", Pricing{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_001, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}}},
+			269_998*2e-6 + 0.1e-6 + 2000*2.5e-6 + 1000*10e-6, 272_001*4e-6 + 0.2e-6 + 2000*5e-6 + 1000*15e-6},
+	}
+	for _, c := range cases {
+		model, ok := ResolveModel(c.id)
+		if !ok || model.Pricing == nil || model.MaxInput != 1_050_000 || model.MaxOutput != 128_000 {
+			t.Fatalf("%s = %+v, %v", c.id, model, ok)
+		}
+		if !reflect.DeepEqual(*model.Pricing, c.want) {
+			t.Errorf("%s pricing = %+v, want %+v", c.id, *model.Pricing, c.want)
+		}
+		if got := model.Pricing.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}); math.Abs(got-c.short) > 1e-12 {
+			t.Errorf("%s short cost = %v, want %v", c.id, got, c.short)
+		}
+		if got := model.Pricing.Cost(Usage{Input: 272_000}); math.Abs(got-272_000*c.want.Input/1e6) > 1e-12 {
+			t.Errorf("%s at 272K must still be short context, got %v", c.id, got)
+		}
+		if got := model.Pricing.Cost(Usage{Input: 272_001, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}); math.Abs(got-c.long) > 1e-12 {
+			t.Errorf("%s long cost = %v, want %v", c.id, got, c.long)
+		}
+		// The API rejects reasoning effort "none": off must map to low.
+		for input, want := range map[string]string{"off": "low", "low": "medium", "medium": "high", "high": "xhigh", "xhigh": "max"} {
+			if got, err := EffectiveThinkingLevel(model, input); err != nil || got != want {
+				t.Errorf("%s EffectiveThinkingLevel(%q) = %q, %v; want %q", c.id, input, got, err, want)
+			}
+			if got := ThinkingPosition(model, want); got != input {
+				t.Errorf("%s ThinkingPosition(%q) = %q, want %q", c.id, want, got, input)
+			}
+		}
+		if got := ReasoningEffortsForModel(model); !reflect.DeepEqual(got, []string{"low", "medium", "high", "xhigh", "max"}) {
+			t.Errorf("%s efforts = %v", c.id, got)
 		}
 	}
 }

@@ -149,14 +149,14 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `codex` | `gpt-5.3-codex` |
 | `codex-spark` | `gpt-5.3-codex-spark` |
 | `codex-5.2` | `gpt-5.2-codex` |
-| `astra` | `gpt-6-astra` |
+| `astra` | `gpt-6.2-astra` |
 | `gpt-6` | `gpt-6-astra` |
 | `grok` | `grok-4.7` (xAI) |
 | `grok-4.7-build` | `grok-4.7` (the subscription backend's name for it) |
 | `grok-4.6-build` | `grok-4.6` (the subscription backend's name for it) |
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
 | `muse` | `muse-spark-1.3` (Meta) |
-| `sol` | `gpt-6.1-sol` |
+| `sol` | `gpt-6.2-sol` |
 | `terra` | `gpt-6.1-terra` |
 | `luna` | `gpt-6-luna` |
 | `gpt-5.6` | `gpt-5.6-sol` |
@@ -189,9 +189,10 @@ model does with them differs:
   above that the whole request is priced at $0.50 / $2.50.
 - **`xhigh`** is its own effort level on every Anthropic model except Haiku
   4.5, which caps it at `high`. OpenAI models accept `xhigh` as its own
-  effort level. On **GPT-6 Astra**, the five UI positions map to `low`,
-  `medium`, `high`, `xhigh`, and `max` respectively, so `off` is Astra's
-  lowest reasoning effort rather than disabled reasoning.
+  effort level. On **GPT-6 Astra**, **GPT-6.1 Sol**, **GPT-6.1 Terra**,
+  **GPT-6.2 Astra** and **GPT-6.2 Sol**, the five UI positions map to `low`,
+  `medium`, `high`, `xhigh`, and `max` respectively, so `off` is the lowest
+  reasoning effort rather than disabled reasoning.
 
 ## Fast mode
 
@@ -202,7 +203,7 @@ CLI flag, and only some models can serve it:
 | Provider | Models that support it | What it costs |
 |---|---|---|
 | Anthropic | Opus models and Fable 5.2 | 2.5× faster, billed as separate usage credits |
-| OpenAI | `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna` | Fast mode, 2× the token rate |
+| OpenAI | `gpt-6.2-astra`, `gpt-6.2-sol`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna` | Fast mode, 2× the token rate |
 | OpenAI | `gpt-5.6-sol` | up to 2.5× faster, burns credits 2× |
 | OpenAI | `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4-mini`, `gpt-5.3-codex` | Fast mode, burns credits 2× |
 | OpenAI | `gpt-5.5` | Fast mode, burns credits 2.5× |

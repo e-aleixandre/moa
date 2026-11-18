@@ -215,6 +215,8 @@ export function catalogResponse(method, path, body = null, sessions = CATALOG_SE
   // page behind "Summarize with" would offer only "Session model", which is a
   // different picture from the one production draws.
   if (m === "GET" && p === "/api/compact-model") return { compact_model: "session", choices: COMPACT_MODEL_CHOICES };
+  if (m === "GET" && p === "/api/dreaming-models") return { reader: "", organizer: "", defaults: { reader: "luna", organizer: "sonnet" }, reader_choices: COMPACT_MODEL_CHOICES, organizer_choices: COMPACT_MODEL_CHOICES };
+  if (m === "PATCH" && p === "/api/dreaming-models") return { reader: body?.reader ?? "", organizer: body?.organizer ?? "", defaults: { reader: "luna", organizer: "sonnet" }, reader_choices: COMPACT_MODEL_CHOICES, organizer_choices: COMPACT_MODEL_CHOICES };
   if (m === "PATCH" && p === "/api/compact-model") return { compact_model: body?.compact_model || "session", choices: COMPACT_MODEL_CHOICES };
   if (m === "GET" && p === "/api/cache-keepalive") return catalogKeepAlive;
   if (m === "PATCH" && p === "/api/cache-keepalive") { catalogKeepAlive = { ...catalogKeepAlive, ...body }; return catalogKeepAlive; }

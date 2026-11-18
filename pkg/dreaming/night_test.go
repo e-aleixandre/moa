@@ -3,6 +3,7 @@ package dreaming
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ type fakeProvider struct {
 	mu       sync.Mutex
 	requests []core.Request
 	usage    *core.Usage
+	stop     string // StopReason of every answer
 	answer   func(req core.Request) string
 }
 
@@ -25,7 +27,7 @@ func (f *fakeProvider) Stream(_ context.Context, req core.Request) (<-chan core.
 	ch := make(chan core.AssistantEvent, 2)
 	text := f.answer(req)
 	ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: text}
-	msg := &core.Message{Role: "assistant", Usage: f.usage}
+	msg := &core.Message{Role: "assistant", Usage: f.usage, StopReason: f.stop}
 	ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: msg}
 	close(ch)
 	return ch, nil
@@ -162,5 +164,209 @@ func TestNightWithoutBudgetCallsNothing(t *testing.T) {
 	}
 	if !equalTrees(tree(t, s), before) {
 		t.Fatal("the book changed")
+	}
+}
+
+// What the night could not honour of its owner's model choice is said in the
+// morning news, not only in a log.
+func TestMorningNewsSaysWhyTheChosenModelWasNotUsed(t *testing.T) {
+	cfg := NightConfig{Date: "2026-11-12", Notes: []string{"Lectura: «luna» no tiene credenciales ahora; se usó el de por defecto."}}
+	n := morningNews(cfg, Report{}, NightResult{}, nil, factOutcome{}, &Budget{Limit: 3})
+	if !strings.Contains(n.Body, "Lectura: «luna» no tiene credenciales") {
+		t.Fatalf("news body = %q", n.Body)
+	}
+	quiet := morningNews(NightConfig{Date: "2026-11-12"}, Report{}, NightResult{}, nil, factOutcome{}, &Budget{Limit: 3})
+	if strings.Contains(quiet.Body, "Lectura") {
+		t.Fatalf("a night with no fallback mentioned one: %q", quiet.Body)
+	}
+}
+
+// An analysis that stopped on the output cap is refused, not handed on whole:
+// the organizer would treat the unread rest of the sheet as unchanged.
+func TestTruncatedAnalysisIsRejectedNotPassedOn(t *testing.T) {
+	s := fixture(t)
+	fp, cfg, _ := fakeNight(t, 3)
+	inner := fp.answer
+	fp.answer = func(req core.Request) string {
+		if req.System != organizerSystem && req.System != memorySystem && req.System != pairerSystem {
+			fp.stop = "max_tokens"
+		} else {
+			fp.stop = ""
+		}
+		return inner(req)
+	}
+	res, err := s.Night(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 0 {
+		t.Fatalf("a sheet with a cut-off analysis was applied: %+v", res)
+	}
+	if why := res.Rejected["work/c.md"]; !strings.Contains(why, "sin espacio de respuesta") {
+		t.Fatalf("rejected = %v", res.Rejected)
+	}
+	for _, req := range fp.requests {
+		if req.System == organizerSystem {
+			t.Fatal("the organizer was called on a truncated analysis")
+		}
+	}
+}
+
+// Each default pair must be able to run a night inside the owner's budget:
+// the up-front reservation of one organizer call has to fit it, and a night
+// has to organize at least one sheet. With only OpenAI the pair once reserved
+// the model's whole 128k output at the fast-mode rate, more than the budget.
+func TestEveryDefaultPairFitsTheNightBudget(t *testing.T) {
+	has := func(ps ...string) core.AuxiliaryModelAvailable {
+		return func(p string) bool { return slices.Contains(ps, p) }
+	}
+	for name, avail := range map[string]core.AuxiliaryModelAvailable{
+		"only anthropic": has("anthropic"),
+		"only openai":    has("openai"),
+		"both":           has("anthropic", "openai"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader, organizer, notes, ok := core.ResolveDreamingModels(core.MoaConfig{}, avail, nil)
+			if !ok || len(notes) != 0 {
+				t.Fatalf("defaults: ok=%v notes=%v", ok, notes)
+			}
+			for _, m := range []core.Model{reader, organizer} {
+				res, err := Reservation(m, organizerSystem, strings.Repeat("x", 60*1024), organizerMaxOut)
+				if err != nil || res > 3 {
+					t.Fatalf("%s reserves $%.2f (err %v) against a $3 night", m.ID, res, err)
+				}
+			}
+			s := fixture(t)
+			_, cfg, _ := fakeNight(t, 3)
+			cfg.Analyzer, cfg.Organizer = reader, organizer
+			res, err := s.Night(t.Context(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(res.Applied, "book/work/c.md") {
+				t.Fatalf("no sheet was organized: applied=%v deferred=%v rejected=%v", res.Applied, res.Deferred, res.Rejected)
+			}
+		})
+	}
+}
+
+// The reservation counts what the call can really cost: the output it asks
+// for, not the model's maximum, no fast-mode premium the dreaming never asks
+// for, and the long-context tier only when the prompt reaches it.
+func TestReservationFollowsTheCallNotTheModel(t *testing.T) {
+	sol, ok1 := core.ResolveModel("sol")
+	sonnet, ok2 := core.ResolveModel("sonnet")
+	if !ok1 || !ok2 {
+		t.Fatal("models missing")
+	}
+	// Anthropic receives the cap the call asks for: that is what is reserved.
+	a, err := Reservation(sonnet, "s", "p", 32_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := 32_000*sonnet.Pricing.Output/1e6 + float64(2+transportOverheadBytes)*max(sonnet.Pricing.CacheWrite, sonnet.Pricing.CacheWrite1h)/1e6; a > want+1e-9 {
+		t.Fatalf("sonnet reserves $%.4f, want at most $%.4f (requested output)", a, want)
+	}
+	// OpenAI's plan login does not send the cap, so the model may write its
+	// whole maximum: that is reserved, without a fast-mode premium and in the
+	// short tier while the prompt is short.
+	short, err := Reservation(sol, "s", "p", 32_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := float64(sol.MaxOutput)*sol.Pricing.Output/1e6 + float64(2+transportOverheadBytes)*sol.Pricing.CacheWrite/1e6
+	if short < base-1e-9 || short > base+1e-9 {
+		t.Fatalf("sol reserves $%.4f, want $%.4f (model maximum, base tier, no fast)", short, base)
+	}
+	long, err := Reservation(sol, "s", strings.Repeat("x", 300_000), 32_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if long <= short*1.4 {
+		t.Fatalf("a prompt past the long-context threshold reserves $%.4f, barely above $%.4f", long, short)
+	}
+}
+
+// Stream refusing a request outright (a 429, no quota, a 401/400) means it was
+// never billed: it gives its reservation back. Once Stream returned a channel
+// the request was accepted, so whatever fails afterwards keeps it: a timeout
+// after long reasoning and an empty answer that still reports usage were both
+// billed.
+func TestFailedCallReleasesItsReservationOnlyWhenStreamRefusedIt(t *testing.T) {
+	_, sonnet := models(t)
+	run := func(p core.Provider) (*Budget, error) {
+		b := &Budget{Limit: 3}
+		_, err := b.call(t.Context(), func(core.Model) (core.Provider, error) { return p, nil }, sonnet, "s", "p", 1000)
+		return b, err
+	}
+	b, err := run(streamErrProvider{reject: true})
+	if err == nil || b.Spent != 0 {
+		t.Fatalf("refused by Stream: err=%v spent=%v, want an error and 0", err, b.Spent)
+	}
+	for name, p := range map[string]streamErrProvider{
+		"error before any output":        {},
+		"text, then an error":            {partial: true},
+		"reasoning, then the timeout":    {thinking: true, err: context.DeadlineExceeded},
+		"empty answer with billed usage": {err: errors.New("empty response (80000 in, 20000 out)")},
+	} {
+		b, err = run(p)
+		if err == nil || b.Spent <= 0 {
+			t.Errorf("%s: err=%v spent=%v, want the reservation kept", name, err, b.Spent)
+		}
+	}
+}
+
+type streamErrProvider struct {
+	reject, partial, thinking bool
+	err                       error
+}
+
+func (p streamErrProvider) Stream(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
+	if p.reject {
+		return nil, errors.New("429")
+	}
+	ch := make(chan core.AssistantEvent, 3)
+	if p.thinking {
+		ch <- core.AssistantEvent{Type: core.ProviderEventThinkingDelta, Delta: "hmm"}
+	}
+	if p.partial {
+		ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "abc"}
+	}
+	err := p.err
+	if err == nil {
+		err = errors.New("quota")
+	}
+	ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: err}
+	close(ch)
+	return ch, nil
+}
+
+// A model whose reservation does not fit the night's budget is left out, and
+// the default pairs always fit. Astra, GPT-5.5 and 5.6 may write 128k tokens a
+// call at $30-40 per million: more than $3 for one call.
+func TestRoleFitsLeavesOutWhatTheBudgetCannotPay(t *testing.T) {
+	for _, spec := range []string{"astra", "gpt5", "gpt-5.6"} {
+		m, ok := core.ResolveModel(spec)
+		if !ok {
+			t.Fatalf("%s missing from the catalog", spec)
+		}
+		for _, role := range []string{core.DreamingRoleReader, core.DreamingRoleOrganizer} {
+			if RoleFits(role, m, 3) {
+				t.Errorf("%s fits as %s in $3", spec, role)
+			}
+		}
+	}
+	for _, avail := range []func(string) bool{
+		func(p string) bool { return p == "anthropic" },
+		func(p string) bool { return p == "openai" },
+		func(string) bool { return true },
+	} {
+		r, o, _ := core.DreamingDefaultModels(avail)
+		for role, spec := range map[string]string{core.DreamingRoleReader: r, core.DreamingRoleOrganizer: o} {
+			m, _ := core.ResolveModel(spec)
+			if !RoleFits(role, m, 3) {
+				t.Errorf("default %s %s does not fit in $3", role, spec)
+			}
+		}
 	}
 }

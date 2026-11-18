@@ -88,40 +88,42 @@ func TestStream_GPT56SendsCacheBreakpoints(t *testing.T) {
 }
 
 func TestStream_GPT6AstraOmitsTemperature(t *testing.T) {
-	var body map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Errorf("read body: %v", err)
-			return
-		}
-		if err := json.Unmarshal(raw, &body); err != nil {
-			t.Errorf("decode body: %v", err)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`)))
-	}))
-	defer server.Close()
+	for _, spec := range []string{"gpt-6-astra", "astra", "sol", "gpt-6.2-sol"} {
+		var body map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read body: %v", err)
+				return
+			}
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Errorf("decode body: %v", err)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(sseEvent(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`)))
+		}))
 
-	temperature := 0.2
-	model, ok := core.ResolveModel("astra")
-	if !ok {
-		t.Fatal("astra must resolve")
-	}
-	prov := NewWithBaseURL("test-key", server.URL)
-	ch, err := prov.Stream(context.Background(), core.Request{
-		Model: model, Messages: []core.Message{core.NewUserMessage("hello")},
-		Options: core.StreamOptions{Temperature: &temperature},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range ch {
-	}
-	if _, present := body["temperature"]; present {
-		t.Fatalf("GPT-6 Astra body sent unsupported temperature: %#v", body["temperature"])
+		temperature := 0.2
+		model, ok := core.ResolveModel(spec)
+		if !ok {
+			t.Fatalf("%s must resolve", spec)
+		}
+		prov := NewWithBaseURL("test-key", server.URL)
+		ch, err := prov.Stream(context.Background(), core.Request{
+			Model: model, Messages: []core.Message{core.NewUserMessage("hello")},
+			Options: core.StreamOptions{Temperature: &temperature},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range ch {
+		}
+		server.Close()
+		if _, present := body["temperature"]; present {
+			t.Fatalf("%s body sent unsupported temperature: %#v", model.ID, body["temperature"])
+		}
 	}
 }
 

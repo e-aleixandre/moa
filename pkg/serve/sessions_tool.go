@@ -79,9 +79,9 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 	// What send does about a question depends on the session's contract: only
 	// a session whose own ask_user is asynchronous has questions that send
 	// leaves alone, and only it is told so.
-	actionHelp := "list, read, send, new or answer. send skips a pending question in the owner's own sessions and is refused in the user's; to answer it, use answer."
+	actionHelp := "list, read, send, new, close or answer. send skips a pending question in the owner's own sessions and is refused in the user's; to answer it, use answer."
 	if asyncQuestions {
-		actionHelp = "list, read, send, new or answer. send skips a blocking question in the owner's own sessions and is refused in the user's; an open (asynchronous) question is neither skipped nor in the way. To answer a question, use answer."
+		actionHelp = "list, read, send, new, close or answer. send skips a blocking question in the owner's own sessions and is refused in the user's; an open (asynchronous) question is neither skipped nor in the way. To answer a question, use answer."
 	}
 	actionHelpJSON, _ := json.Marshal(actionHelp)
 	return core.Tool{
@@ -102,10 +102,10 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 			"properties": {
 				"action": {
 					"type": "string",
-					"enum": ["list", "read", "send", "new", "answer"],
+					"enum": ["list", "read", "send", "new", "close", "answer"],
 					"description": ` + string(actionHelpJSON) + `
 				},
-				"session_id": {"type": "string", "description": "Target session (read, send, answer)."},
+				"session_id": {"type": "string", "description": "Target session (read, send, close, answer)."},
 				"text": {"type": "string", "description": "Message to send (send), or the prompt for a new session (new)."},
 				"limit": {"type": "integer", "description": "For read: how many recent messages (default 20, max 60)."},
 				"message_id": {"type": "string", "description": "For read: read this one message (or tool call) whole instead of the abridged list. \"last\" is the session's latest assistant message."},
@@ -114,7 +114,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 				"cwd": {"type": "string", "description": "For new: the directory to work in. Must belong to this project."},
 				"title": {"type": "string", "description": "For new: an explicit title."},
 				"task": {"type": ["integer", "string"], "description": "Required for new, optional for send: the id of the task of your checklist this session works on, so the task follows it (create it with tasks create first). \"none\" for new when it is not a commitment: a question or an exploration."},
-				"model": {"type": "string", "description": "For new: model spec (default: the usual default)."},
+				"model": {"type": "string", "description": "For new: model spec (default: the usual default). \"daybreak\" is GPT-6 Sol with the Daybreak cyber program, only if the user's OpenAI plan has it; otherwise new fails."},
 				"thinking": {"type": "string", "description": "For new: thinking level."},
 				"ask_id": {"type": "string", "description": "For answer: the id of the question, as reported."},
 				"answers": {
@@ -145,6 +145,8 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 				return mgr.ownerSendWithTask(ctx, own, params), nil
 			case "new":
 				return mgr.ownerNewSession(ctx, own, params), nil
+			case "close":
+				return mgr.ownerCloseSession(own, getStr(params, "session_id")), nil
 			case "answer":
 				return mgr.ownerAnswerAsk(own, getStr(params, "session_id"), getStr(params, "ask_id"), getStrings(params, "answers")), nil
 			default:
@@ -542,6 +544,9 @@ func (m *Manager) ownerNewSession(ctx context.Context, own owner.Owner, params m
 			return core.ErrorResult(linkErrorText(taskID, err))
 		}
 	}
+	if err := m.daybreakUnavailable(getStr(params, "model")); err != nil {
+		return core.ErrorResult("Daybreak is not available: " + err.Error())
+	}
 	sess, err := m.CreateSession(CreateOpts{
 		CWD:      cwd,
 		Title:    getStr(params, "title"),
@@ -565,6 +570,61 @@ func (m *Manager) ownerNewSession(ctx context.Context, own owner.Owner, params m
 		return core.ErrorResult(fmt.Sprintf("session %s was created but the prompt was refused: %v", sess.ID, err))
 	}
 	return core.TextResult(fmt.Sprintf("Started session %s in %s.%s", sess.ID, cwd, linked))
+}
+
+// daybreakUnavailable explains why a Daybreak spec cannot be honoured, using
+// the availability the UI reads (GET /api/sessions/{id}/daybreak): a session
+// created anyway would run without the program. Non-Daybreak specs and a
+// catalog not read yet pass, as in the UI.
+func (m *Manager) daybreakUnavailable(spec string) error {
+	if !core.DaybreakSpec(spec) {
+		return nil
+	}
+	model, _, ok := core.ResolveModelDaybreak(spec)
+	if !ok {
+		return errors.New("its model is unknown to this moa")
+	}
+	var availability core.DaybreakAvailability
+	if m.daybreakCatalog != nil {
+		availability = m.daybreakCatalog()
+	}
+	if !availability.Transport {
+		return errors.New("it needs the user's OpenAI plan login (ChatGPT), which is not the selected credential. Nothing was created; start the session with another model or tell the user")
+	}
+	if !availability.Sendable(model) {
+		return fmt.Errorf("this account's catalog does not offer it for %s. Nothing was created; start the session with another model or tell the user", model.Name)
+	}
+	return nil
+}
+
+// ownerCloseSession is the UI's close (Manager.CloseSession) for a session the
+// owner started: it unloads the session and leaves it saved. The owner directs
+// only its own sessions, and CloseSession itself refuses one that is working.
+func (m *Manager) ownerCloseSession(own owner.Owner, id string) core.Result {
+	info, err := m.ownerSession(own, id)
+	if err != nil {
+		return core.ErrorResult(err.Error())
+	}
+	if info.Origin != "owner" {
+		return core.ErrorResult(fmt.Sprintf("session %s is the user's: you cannot close it. Only sessions you started can be closed", id))
+	}
+	// Read before closing: the roster and the link are what the owner needs
+	// to know about, and closing changes neither.
+	linked := m.linkedTasksBySession(own)[id]
+	if err := m.CloseSession(id); err != nil {
+		switch {
+		case errors.Is(err, ErrBusy):
+			return core.ErrorResult(fmt.Sprintf("session %s is working (or has background work or a pending permission): it was not closed. Close it once it has stopped", id))
+		case errors.Is(err, ErrNotFound), errors.Is(err, session.ErrNotFound):
+			return core.ErrorResult(fmt.Sprintf("session %s not found", id))
+		}
+		return core.ErrorResult(fmt.Sprintf("cannot close %s: %v", id, err))
+	}
+	msg := fmt.Sprintf("Closed session %s. It stays saved; the user can reopen it.", id)
+	for _, t := range linked {
+		msg += fmt.Sprintf(" Task #%d was its work and nobody is working on it now: send it to another session with task=%d.", t.ID, t.ID)
+	}
+	return core.TextResult(msg)
 }
 
 // ownerSendWithTask is send, plus — when task is given — making the target
