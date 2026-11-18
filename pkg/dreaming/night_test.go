@@ -254,30 +254,45 @@ func TestEveryDefaultPairFitsTheNightBudget(t *testing.T) {
 // for, not the model's maximum, no fast-mode premium the dreaming never asks
 // for, and the long-context tier only when the prompt reaches it.
 func TestReservationFollowsTheCallNotTheModel(t *testing.T) {
-	sol, ok := core.ResolveModel("sol")
-	if !ok {
-		t.Fatal("sol missing")
+	sol, ok1 := core.ResolveModel("sol")
+	sonnet, ok2 := core.ResolveModel("sonnet")
+	if !ok1 || !ok2 {
+		t.Fatal("models missing")
 	}
+	// Anthropic receives the cap the call asks for: that is what is reserved.
+	a, err := Reservation(sonnet, "s", "p", 32_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := 32_000*sonnet.Pricing.Output/1e6 + float64(2+transportOverheadBytes)*max(sonnet.Pricing.CacheWrite, sonnet.Pricing.CacheWrite1h)/1e6; a > want+1e-9 {
+		t.Fatalf("sonnet reserves $%.4f, want at most $%.4f (requested output)", a, want)
+	}
+	// OpenAI's plan login does not send the cap, so the model may write its
+	// whole maximum: that is reserved, without a fast-mode premium and in the
+	// short tier while the prompt is short.
 	short, err := Reservation(sol, "s", "p", 32_000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := 32_000*sol.Pricing.Output/1e6 + float64(2+transportOverheadBytes)*sol.Pricing.CacheWrite/1e6; short > want+1e-9 {
-		t.Fatalf("short prompt reserves $%.4f, want at most $%.4f (requested output, base tier, no fast)", short, want)
+	base := float64(sol.MaxOutput)*sol.Pricing.Output/1e6 + float64(2+transportOverheadBytes)*sol.Pricing.CacheWrite/1e6
+	if short < base-1e-9 || short > base+1e-9 {
+		t.Fatalf("sol reserves $%.4f, want $%.4f (model maximum, base tier, no fast)", short, base)
 	}
 	long, err := Reservation(sol, "s", strings.Repeat("x", 300_000), 32_000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if long <= short*2 {
+	if long <= short*1.4 {
 		t.Fatalf("a prompt past the long-context threshold reserves $%.4f, barely above $%.4f", long, short)
 	}
 }
 
-// A request that never got an answer (rejected, or failed before a single
-// token) was not billed: it gives its reservation back. One that failed
-// mid-answer may have been, so it keeps it.
-func TestFailedCallReleasesItsReservationOnlyWhenNothingWasBilled(t *testing.T) {
+// Stream refusing a request outright (a 429, no quota, a 401/400) means it was
+// never billed: it gives its reservation back. Once Stream returned a channel
+// the request was accepted, so whatever fails afterwards keeps it: a timeout
+// after long reasoning and an empty answer that still reports usage were both
+// billed.
+func TestFailedCallReleasesItsReservationOnlyWhenStreamRefusedIt(t *testing.T) {
 	_, sonnet := models(t)
 	run := func(p core.Provider) (*Budget, error) {
 		b := &Budget{Limit: 3}
@@ -286,37 +301,49 @@ func TestFailedCallReleasesItsReservationOnlyWhenNothingWasBilled(t *testing.T) 
 	}
 	b, err := run(streamErrProvider{reject: true})
 	if err == nil || b.Spent != 0 {
-		t.Fatalf("rejected request: err=%v spent=%v, want an error and 0", err, b.Spent)
+		t.Fatalf("refused by Stream: err=%v spent=%v, want an error and 0", err, b.Spent)
 	}
-	b, err = run(streamErrProvider{})
-	if err == nil || b.Spent != 0 {
-		t.Fatalf("error before any output: err=%v spent=%v, want an error and 0", err, b.Spent)
-	}
-	b, err = run(streamErrProvider{partial: true})
-	if err == nil || b.Spent <= 0 {
-		t.Fatalf("error after output began: err=%v spent=%v, want the reservation kept", err, b.Spent)
+	for name, p := range map[string]streamErrProvider{
+		"error before any output":        {},
+		"text, then an error":            {partial: true},
+		"reasoning, then the timeout":    {thinking: true, err: context.DeadlineExceeded},
+		"empty answer with billed usage": {err: errors.New("empty response (80000 in, 20000 out)")},
+	} {
+		b, err = run(p)
+		if err == nil || b.Spent <= 0 {
+			t.Errorf("%s: err=%v spent=%v, want the reservation kept", name, err, b.Spent)
+		}
 	}
 }
 
-type streamErrProvider struct{ reject, partial bool }
+type streamErrProvider struct {
+	reject, partial, thinking bool
+	err                       error
+}
 
 func (p streamErrProvider) Stream(context.Context, core.Request) (<-chan core.AssistantEvent, error) {
 	if p.reject {
 		return nil, errors.New("429")
 	}
-	ch := make(chan core.AssistantEvent, 2)
+	ch := make(chan core.AssistantEvent, 3)
+	if p.thinking {
+		ch <- core.AssistantEvent{Type: core.ProviderEventThinkingDelta, Delta: "hmm"}
+	}
 	if p.partial {
 		ch <- core.AssistantEvent{Type: core.ProviderEventTextDelta, Delta: "abc"}
 	}
-	ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: errors.New("quota")}
+	err := p.err
+	if err == nil {
+		err = errors.New("quota")
+	}
+	ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: err}
 	close(ch)
 	return ch, nil
 }
 
 // A model whose reservation does not fit the night's budget is left out, and
-// the default pairs always fit. With the corrected reservation and the default
-// $3, Astra, GPT-5.5 and 5.6 do fit (about $1-2 a call); they drop out when the
-// owner's budget is smaller.
+// the default pairs always fit. Astra, GPT-5.5 and 5.6 may write 128k tokens a
+// call at $30-40 per million: more than $3 for one call.
 func TestRoleFitsLeavesOutWhatTheBudgetCannotPay(t *testing.T) {
 	for _, spec := range []string{"astra", "gpt5", "gpt-5.6"} {
 		m, ok := core.ResolveModel(spec)
@@ -324,11 +351,8 @@ func TestRoleFitsLeavesOutWhatTheBudgetCannotPay(t *testing.T) {
 			t.Fatalf("%s missing from the catalog", spec)
 		}
 		for _, role := range []string{core.DreamingRoleReader, core.DreamingRoleOrganizer} {
-			if !RoleFits(role, m, 3) {
-				t.Errorf("%s does not fit as %s in $3", spec, role)
-			}
-			if RoleFits(role, m, 0.9) {
-				t.Errorf("%s fits as %s in $0.9", spec, role)
+			if RoleFits(role, m, 3) {
+				t.Errorf("%s fits as %s in $3", spec, role)
 			}
 		}
 	}
@@ -340,10 +364,8 @@ func TestRoleFitsLeavesOutWhatTheBudgetCannotPay(t *testing.T) {
 		r, o, _ := core.DreamingDefaultModels(avail)
 		for role, spec := range map[string]string{core.DreamingRoleReader: r, core.DreamingRoleOrganizer: o} {
 			m, _ := core.ResolveModel(spec)
-			for _, budget := range []float64{3, 1} {
-				if !RoleFits(role, m, budget) {
-					t.Errorf("default %s %s does not fit in $%v", role, spec, budget)
-				}
+			if !RoleFits(role, m, 3) {
+				t.Errorf("default %s %s does not fit in $3", role, spec)
 			}
 		}
 	}

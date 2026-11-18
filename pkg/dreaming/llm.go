@@ -28,8 +28,13 @@ var ErrBudget = errors.New("the night's budget would be exceeded")
 // Budget is the night's hard cap (I10). Every call reserves its maximum cost
 // before it is sent: the prompt counted as one token per byte (a token is at
 // least one byte) at the dearest input rate the model has, plus the output cap
-// at the dearest output rate. What a call really cost replaces its
-// reservation; a call that reports no usage keeps its whole reservation.
+// at the dearest output rate. "Maximum" is what the provider can really be
+// made to produce: the cap the call asks for where it is sent (Anthropic), the
+// model's own maximum where it is not (OpenAI's plan login), and no
+// fast-mode premium (the dreaming never asks for it); a pricing tier counts
+// only when the prompt reaches it. What a call really cost replaces its
+// reservation; a call that reports no usage keeps its whole reservation, except
+// one that Stream refused outright, which was never billed.
 type Budget struct {
 	Limit float64
 	Spent float64
@@ -51,11 +56,13 @@ func maxRates(p *core.Pricing, inTokens int) (in, out float64) {
 	return in, out
 }
 
-// outputCap is the output (thinking included) a request may produce: what the
-// call asks for, never beyond the model's maximum. The model's whole maximum
-// is the cap only when the call asks for nothing.
+// outputCap is the output (thinking included) a request may produce: the cap
+// the call asks for only where it really reaches the provider (Anthropic).
+// OpenAI's plan login does not send it (the Codex backend answers 400), so
+// there the model may write up to its maximum and that is what is reserved:
+// the night's cap stays hard whatever the provider honours.
 func outputCap(model core.Model, requested int) int {
-	if requested > 0 {
+	if model.Provider == "anthropic" && requested > 0 {
 		return core.ResolveMaxOutputTokens(model, &requested)
 	}
 	if model.MaxOutput > 0 {
@@ -113,10 +120,11 @@ func (b *Budget) call(ctx context.Context, factory ProviderFactory, model core.M
 		},
 	}
 	// From here on the request may be billed: the night pays at least the
-	// reservation unless the provider says otherwise, or the request was
-	// refused or failed before any answer (a quota error, a rejected call):
-	// that one costs nothing, and keeping its reservation would let a provider
-	// that is down eat the whole night's cap within seconds.
+	// reservation unless the provider says otherwise, or Stream itself failed.
+	// Providers check the HTTP status before they return a channel, so a 429,
+	// an exhausted quota or a 401/400 come out of Stream unbilled; keeping
+	// their reservation would let a provider that is down eat the whole cap
+	// within seconds.
 	spent := res
 	defer func() { b.Spent += spent }()
 	ch, err := prov.Stream(ctx, req)
@@ -124,14 +132,15 @@ func (b *Budget) call(ctx context.Context, factory ProviderFactory, model core.M
 		spent = 0
 		return callResult{}, err
 	}
+	// Once Stream has returned a channel the request was accepted, so any
+	// later failure (a timeout after long reasoning, an empty answer that
+	// still reports usage) keeps the reservation or the reported usage.
 	var text strings.Builder
 	var final *core.Message
 	var streamErr error
-	answered := false
 	for ev := range ch {
 		switch ev.Type {
 		case core.ProviderEventTextDelta:
-			answered = true
 			text.WriteString(ev.Delta)
 		case core.ProviderEventDone:
 			final = ev.Message
@@ -143,9 +152,6 @@ func (b *Budget) call(ctx context.Context, factory ProviderFactory, model core.M
 		spent = model.Pricing.Cost(*final.Usage)
 	}
 	if streamErr != nil {
-		if final == nil && !answered {
-			spent = 0
-		}
 		return callResult{Cost: spent}, streamErr
 	}
 	out := text.String()

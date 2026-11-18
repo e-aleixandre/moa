@@ -76,12 +76,9 @@ func TestDreamingModelsEndpoint(t *testing.T) {
 	}
 
 	// A model whose reservation does not fit the night is refused by the API too.
-	// With a smaller night (as an owner's budget_usd could make it) the dear
-	// models no longer fit: Astra reserves about $1.3-2 a call, GPT-5.5 and 5.6
-	// about $1-1.5, the defaults well under $0.6.
+	// Astra and GPT-5.5/5.6 may write 128k tokens a call at $30-40/M: one call
+	// reserves more than the night's $3.
 	mgr.providerCredentialAvailable = func(string) bool { return true }
-	defer func(v float64) { dreamingSelectorBudget = v }(dreamingSelectorBudget)
-	dreamingSelectorBudget = 0.9
 	for _, spec := range []string{"astra", "gpt5", "gpt-5.6"} {
 		dreamingModelsCall(t, srv, http.MethodPatch, `{"organizer":"`+spec+`"}`, http.StatusUnprocessableEntity)
 	}
@@ -94,10 +91,9 @@ func TestDreamingModelsEndpoint(t *testing.T) {
 			t.Errorf("%s is offered", c.Spec)
 		}
 	}
-	if !has(all.ReaderChoices, "sonnet") {
-		t.Errorf("a smaller budget dropped a default: %+v", all.ReaderChoices)
+	if !has(all.ReaderChoices, "luna") || !has(all.OrganizerChoices, "sol") {
+		t.Errorf("a default pair member was dropped: %+v / %+v", all.ReaderChoices, all.OrganizerChoices)
 	}
-	dreamingSelectorBudget = 3
 	mgr.providerCredentialAvailable = func(p string) bool { return p == "anthropic" }
 
 	// Unknown spec and empty body are refused and change nothing.
