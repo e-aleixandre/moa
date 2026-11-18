@@ -1047,3 +1047,50 @@ func TestAnthropicMaxOutputPinnedBySource(t *testing.T) {
 		}
 	}
 }
+
+// GPT-6.2 figures: https://developers.openai.com/api/docs/models/gpt-6.2-astra
+// and .../gpt-6.2-sol (checked 2026-11-18). The long tier applies to "more
+// than 272K input tokens", so it starts at 272_001.
+func TestGPT62PricingAndEfforts(t *testing.T) {
+	cases := []struct {
+		id    string
+		want  Pricing
+		short float64 // Cost of {269_998 in, 1 cache read, 2000 cache write, 1000 out}
+		long  float64 // Cost of {272_001 in, 1 cache read, 2000 cache write, 1000 out}
+	}{
+		{"gpt-6.2-astra", Pricing{Input: 8, Output: 40, CacheRead: 0.4, CacheWrite: 10, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_001, Input: 16, Output: 60, CacheRead: 0.8, CacheWrite: 20}}},
+			269_998*8e-6 + 0.4e-6 + 2000*10e-6 + 1000*40e-6, 272_001*16e-6 + 0.8e-6 + 2000*20e-6 + 1000*60e-6},
+		{"gpt-6.2-sol", Pricing{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5, FastMultiplier: 2, Tiers: []PricingTier{{Threshold: 272_001, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5}}},
+			269_998*2e-6 + 0.1e-6 + 2000*2.5e-6 + 1000*10e-6, 272_001*4e-6 + 0.2e-6 + 2000*5e-6 + 1000*15e-6},
+	}
+	for _, c := range cases {
+		model, ok := ResolveModel(c.id)
+		if !ok || model.Pricing == nil || model.MaxInput != 1_050_000 || model.MaxOutput != 128_000 {
+			t.Fatalf("%s = %+v, %v", c.id, model, ok)
+		}
+		if !reflect.DeepEqual(*model.Pricing, c.want) {
+			t.Errorf("%s pricing = %+v, want %+v", c.id, *model.Pricing, c.want)
+		}
+		if got := model.Pricing.Cost(Usage{Input: 269_998, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}); math.Abs(got-c.short) > 1e-12 {
+			t.Errorf("%s short cost = %v, want %v", c.id, got, c.short)
+		}
+		if got := model.Pricing.Cost(Usage{Input: 272_000}); math.Abs(got-272_000*c.want.Input/1e6) > 1e-12 {
+			t.Errorf("%s at 272K must still be short context, got %v", c.id, got)
+		}
+		if got := model.Pricing.Cost(Usage{Input: 272_001, CacheRead: 1, CacheWrite: 2_000, Output: 1_000}); math.Abs(got-c.long) > 1e-12 {
+			t.Errorf("%s long cost = %v, want %v", c.id, got, c.long)
+		}
+		// The API rejects reasoning effort "none": off must map to low.
+		for input, want := range map[string]string{"off": "low", "low": "medium", "medium": "high", "high": "xhigh", "xhigh": "max"} {
+			if got, err := EffectiveThinkingLevel(model, input); err != nil || got != want {
+				t.Errorf("%s EffectiveThinkingLevel(%q) = %q, %v; want %q", c.id, input, got, err, want)
+			}
+			if got := ThinkingPosition(model, want); got != input {
+				t.Errorf("%s ThinkingPosition(%q) = %q, want %q", c.id, want, got, input)
+			}
+		}
+		if got := ReasoningEffortsForModel(model); !reflect.DeepEqual(got, []string{"low", "medium", "high", "xhigh", "max"}) {
+			t.Errorf("%s efforts = %v", c.id, got)
+		}
+	}
+}

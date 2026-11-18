@@ -92,6 +92,32 @@ var knownModels = map[string]Model{
 		Name: "GPT-5.2 Codex", MaxInput: 256_000, MaxOutput: 16384,
 		Pricing: &Pricing{Input: 1.25, Output: 10, CacheRead: 0.125},
 	},
+	"gpt-6.2-astra": {
+		ID: "gpt-6.2-astra", Provider: "openai", API: "openai-chat",
+		Name: "GPT-6.2 Astra", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (up to 272K input) pricing is $8/$40 input/output.
+		// OpenAI bills the whole request at 2x input and cache rates and 1.5x
+		// output above it, so the tier starts one token past 272K.
+		Pricing: &Pricing{
+			Input: 8, Output: 40, CacheRead: 0.4, CacheWrite: 10,
+			Tiers: []PricingTier{
+				{Threshold: 272_001, Input: 16, Output: 60, CacheRead: 0.8, CacheWrite: 20},
+			},
+		},
+	},
+	"gpt-6.2-sol": {
+		ID: "gpt-6.2-sol", Provider: "openai", API: "openai-chat",
+		Name: "GPT-6.2 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
+		// Short-context (up to 272K input) pricing is $2/$10 input/output.
+		// OpenAI bills the whole request at 2x input and cache rates and 1.5x
+		// output above it, so the tier starts one token past 272K.
+		Pricing: &Pricing{
+			Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5,
+			Tiers: []PricingTier{
+				{Threshold: 272_001, Input: 4, Output: 15, CacheRead: 0.2, CacheWrite: 5},
+			},
+		},
+	},
 	"gpt-6-astra": {
 		ID: "gpt-6-astra", Provider: "openai", API: "openai-chat",
 		Name: "GPT-6 Astra", MaxInput: 1_050_000, MaxOutput: 128_000,
@@ -506,6 +532,8 @@ var modelDisplayOrder = []string{
 	"muse-spark-1.3-contributor",
 	"muse-ember-1.0",
 	// OpenAI
+	"gpt-6.2-astra",
+	"gpt-6.2-sol",
 	"gpt-6-astra",
 	"gpt-6.1-sol",
 	"gpt-6.1-terra",

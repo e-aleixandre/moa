@@ -11,6 +11,8 @@ import (
 // the naming: gpt-5.4-mini has it while gpt-5.4-nano and the -pro models do
 // not. A catalogue model missing here is not offered fast mode.
 var openAIFastMultipliers = map[string]float64{
+	"gpt-6.2-astra": 2,
+	"gpt-6.2-sol":   2,
 	"gpt-6-astra":   2,
 	"gpt-6-sol":     2,
 	"gpt-6.1-sol":   2,

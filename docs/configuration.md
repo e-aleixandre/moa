@@ -147,7 +147,7 @@ rates. Muse models always reason, so `off` resolves to the lowest effort.
 
 The OpenAI models `gpt-6.1-sol`, `gpt-6.1-terra` and `gpt-6-luna` are also available as `sol`,
 `terra` and `luna` (`gpt-6-sol` and `gpt-5.6-terra` stay selectable by ID). `gpt-6-astra` is available as
-`astra` (or `gpt-6`). Astra, GPT-6.1 Sol and GPT-6.1 Terra map their five thinking
+`astra` (or `gpt-6`). Astra, GPT-6.1 Sol, GPT-6.1 Terra and the GPT-6.2 models (`gpt-6.2-astra`, `gpt-6.2-sol`) map their five thinking
 positions to `low`, `medium`, `high`, `xhigh`, and `max`, so the `off`
 position selects the lowest reasoning effort rather than disabling reasoning.
 

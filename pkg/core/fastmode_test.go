@@ -86,6 +86,8 @@ func TestOpenAIFastCatalogue(t *testing.T) {
 		fast       bool
 		multiplier float64
 	}{
+		{"gpt-6.2-astra", true, 2},
+		{"gpt-6.2-sol", true, 2},
 		{"gpt-6-astra", true, 2},
 		{"gpt-6-sol", true, 2},
 		{"gpt-6.1-sol", true, 2},
