@@ -202,7 +202,10 @@ func (m *Manager) subagentConversationSnapshot(sessionID, jobID string) (subagen
 		}
 		return subagentConversationSnapshot{}, ErrNotFound
 	}
-	_, store, err := session.FindSessionReadOnly(m.sessionBaseDir, sessionID)
+	// Only the directory is needed: the transcripts live beside the parent
+	// session file, and decoding a parent of 100+ MB to find that directory
+	// cost seconds per request.
+	store, err := session.FindSessionStoreReadOnly(m.sessionBaseDir, sessionID)
 	if err != nil {
 		return subagentConversationSnapshot{}, err
 	}
@@ -237,7 +240,7 @@ func (m *Manager) subagentSummaries(sessionID string) ([]SubagentSummary, error)
 		}
 		return sortedSubagentSummaries(items), nil
 	}
-	_, store, err := session.FindSessionReadOnly(m.sessionBaseDir, sessionID)
+	store, err := session.FindSessionStoreReadOnly(m.sessionBaseDir, sessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -323,6 +324,233 @@ func (t *Tree) validBranchTargetLocked(entryID string) error {
 		return fmt.Errorf("tree: cannot branch to %s: %w", entryID, err)
 	}
 	return nil
+}
+
+// BranchTarget is a message entry Branch would accept, with the number of
+// entries that name it as their parent.
+type BranchTarget struct {
+	Entry    Entry
+	Children int
+}
+
+// branchTargetCtxEvery is how many visited entries pass between context
+// checks in BranchTargets: often enough to stop within microseconds of a
+// cancellation, rarely enough to stay off the profile.
+const branchTargetCtxEvery = 1024
+
+// BranchTargets returns, in log order, every message entry for which
+// ValidBranchTarget reports nil, in one O(N) pass instead of one path copy per
+// entry. It is the bulk form of that check and must agree with it exactly.
+//
+// The pass walks the tree from its roots keeping the tool-call balance of the
+// context the current path would produce: a tool call is unresolved when its
+// last call comes after its last result. That context starts at the entry the
+// last boundary (compaction or non-empty fresh cut) keeps, which usually lies
+// above the boundary on the path, so reaching a boundary rebuilds the balance
+// from that entry; every other step adds or removes one entry's calls and is
+// undone on the way back up. Trims only rewrite the text of results, never
+// their call IDs, so they do not affect the balance.
+//
+// It returns ctx's error as soon as ctx is cancelled. The read lock is held
+// for the whole pass.
+func (t *Tree) BranchTargets(ctx context.Context) ([]BranchTarget, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	n := len(t.entries)
+	kids := make([][]int, n)
+	var roots []int
+	childCount := make(map[string]int, n)
+	for i := range t.entries {
+		parent := t.entries[i].ParentID
+		if parent != "" {
+			childCount[parent]++
+		}
+		if p, ok := t.index[parent]; ok && parent != "" {
+			kids[p] = append(kids[p], i)
+		} else {
+			roots = append(roots, i)
+		}
+	}
+
+	valid := make([]bool, n)
+	var st branchWalk
+	visited := 0
+	for _, root := range roots {
+		st.reset()
+		st.push(t, root)
+		for len(st.frames) > 0 {
+			f := &st.frames[len(st.frames)-1]
+			if f.next == 0 {
+				if visited++; visited%branchTargetCtxEvery == 0 {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+				}
+				e := &t.entries[f.idx]
+				valid[f.idx] = e.Type == EntryMessage && e.Message.Role != "tool_result" && len(st.pending) == 0
+			}
+			if f.next < len(kids[f.idx]) {
+				child := kids[f.idx][f.next]
+				f.next++
+				st.push(t, child)
+				continue
+			}
+			st.pop()
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	var out []BranchTarget
+	for i := range t.entries {
+		if valid[i] {
+			out = append(out, BranchTarget{Entry: t.entries[i], Children: childCount[t.entries[i].ID]})
+		}
+	}
+	return out, nil
+}
+
+// branchWalk is the running state of BranchTargets: the context the path from
+// a root to the entry on top of frames would produce, as far as its tool-call
+// balance goes.
+type branchWalk struct {
+	frames []branchFrame
+	// Boundary deciding where the context starts (see effectiveBoundary).
+	hasBoundary bool
+	boundaryID  string
+	firstKept   string
+	recovering  bool
+	// collecting is whether the context already started: always true without a
+	// boundary, and from the first path entry the boundary keeps otherwise.
+	collecting bool
+	pending    map[string]struct{}
+	undo       []pendingUndo
+}
+
+type branchFrame struct {
+	idx  int
+	next int
+	// State to restore on pop. savedPending is non-nil only when this entry
+	// replaced the pending set (a boundary); undoMark is where this entry's
+	// own edits to the set start in undo.
+	hasBoundary  bool
+	boundaryID   string
+	firstKept    string
+	recovering   bool
+	collecting   bool
+	savedPending map[string]struct{}
+	replaced     bool
+	undoMark     int
+}
+
+type pendingUndo struct {
+	id      string
+	present bool
+}
+
+func (w *branchWalk) reset() {
+	w.frames = w.frames[:0]
+	w.hasBoundary, w.boundaryID, w.firstKept, w.recovering = false, "", "", false
+	w.collecting = true
+	w.pending = map[string]struct{}{}
+	w.undo = w.undo[:0]
+}
+
+// add applies one entry to pending when it is part of the context.
+func (w *branchWalk) add(e *Entry) {
+	if !w.collecting || e.Type != EntryMessage || !isLLMRole(e.Message.Role) {
+		return
+	}
+	switch e.Message.Role {
+	case "assistant":
+		for _, c := range e.Message.Content {
+			if c.Type == "tool_call" && c.ToolCallID != "" {
+				w.set(c.ToolCallID, true)
+			}
+		}
+	case "tool_result":
+		w.set(e.Message.ToolCallID, false)
+	}
+}
+
+func (w *branchWalk) set(id string, present bool) {
+	_, was := w.pending[id]
+	if was == present {
+		return
+	}
+	w.undo = append(w.undo, pendingUndo{id: id, present: was})
+	if present {
+		w.pending[id] = struct{}{}
+	} else {
+		delete(w.pending, id)
+	}
+}
+
+func (w *branchWalk) push(t *Tree, idx int) {
+	e := &t.entries[idx]
+	f := branchFrame{
+		idx: idx, hasBoundary: w.hasBoundary, boundaryID: w.boundaryID, firstKept: w.firstKept,
+		recovering: w.recovering, collecting: w.collecting, undoMark: len(w.undo),
+	}
+	w.frames = append(w.frames, f)
+
+	boundary := e.Type == EntryCompaction || (e.Type == EntryFresh && !e.Fresh.IsEmpty())
+	if boundary {
+		f := &w.frames[len(w.frames)-1]
+		f.savedPending, f.replaced = w.pending, true
+		w.pending = map[string]struct{}{}
+		w.hasBoundary, w.boundaryID = true, e.ID
+		if e.Type == EntryCompaction {
+			w.firstKept = e.Compaction.FirstKeptEntryID
+			_, kept := t.index[w.firstKept]
+			w.recovering = w.firstKept == "" || !kept
+		} else {
+			w.firstKept = e.Fresh.FirstKeptEntryID
+			w.recovering = false
+		}
+		// Replay the whole path: the context starts at its first entry the
+		// boundary keeps, which is normally above this one.
+		w.collecting = false
+		for i := range w.frames {
+			pe := &t.entries[w.frames[i].idx]
+			w.start(pe)
+			w.add(pe)
+		}
+		return
+	}
+	if w.hasBoundary && !w.collecting {
+		w.start(e)
+	}
+	w.add(e)
+}
+
+// start begins collecting at the entry the boundary keeps.
+func (w *branchWalk) start(e *Entry) {
+	if e.ID == w.firstKept || (w.recovering && e.ID == w.boundaryID) {
+		w.collecting = true
+	}
+}
+
+func (w *branchWalk) pop() {
+	f := w.frames[len(w.frames)-1]
+	w.frames = w.frames[:len(w.frames)-1]
+	if f.replaced {
+		// The edits since undoMark were made on the set this entry created.
+		w.pending = f.savedPending
+	} else {
+		for i := len(w.undo) - 1; i >= f.undoMark; i-- {
+			u := w.undo[i]
+			if u.present {
+				w.pending[u.id] = struct{}{}
+			} else {
+				delete(w.pending, u.id)
+			}
+		}
+	}
+	w.undo = w.undo[:f.undoMark]
+	w.hasBoundary, w.boundaryID, w.firstKept, w.recovering, w.collecting = f.hasBoundary, f.boundaryID, f.firstKept, f.recovering, f.collecting
 }
 
 // HasMsgID reports whether an ID is reserved anywhere in the tree, by an entry

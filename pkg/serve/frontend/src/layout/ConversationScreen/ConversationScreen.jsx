@@ -305,7 +305,7 @@ export function ConversationScreen() {
                 openTimeline: () => setRewindOpen(true),
                 disabled: settingsBusy,
               }}
-              lead={<EarlierBranches sessionId={session.id} empty={!(session.messages?.length > 0)} onOpen={() => setRewindOpen(true)} />}
+              lead={<EarlierBranches sessionId={session.id} empty={!(session.messages?.length > 0)} initReceived={!!session.initReceived} onOpen={() => setRewindOpen(true)} />}
               onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
               tail={pendingPromptsTail(session)}
             />

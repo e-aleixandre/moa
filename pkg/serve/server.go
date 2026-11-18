@@ -146,7 +146,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("GET /api/version", handleVersion(manager, static.buildID))
 	mux.HandleFunc("GET /api/fs/complete", handleFSComplete())
 	mux.HandleFunc("GET /api/attention", handleAttention(manager))
-	mux.HandleFunc("GET /api/for-you", handleForYou(manager))
+	mux.HandleFunc("GET /api/for-you", withGzip(handleForYou(manager)))
 	mux.HandleFunc("POST /api/for-you/news/read", handleNewsRead(manager))
 	mux.HandleFunc("GET /api/sessions", withGzip(handleListSessions(manager)))
 	mux.HandleFunc("GET /api/owners", handleListOwners(manager))
@@ -182,7 +182,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/promote", handlePromoteSubagent(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/subagents/{jobID}", handleReconfigureSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steer", handleSteerSubagent(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/subagents", handleSubagentList(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/subagents", withGzip(handleSubagentList(manager)))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", withGzip(handleSubagentConversation(manager)))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/mcp", handleMCPStatus(manager))
@@ -197,19 +197,19 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/command", handleCommand(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/shell", handleShell(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/branch", handleBranch(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/branches", handleListBranches(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/branches", withGzip(handleListBranches(manager)))
 	mux.HandleFunc("GET /api/sessions/{id}/files", handleListFiles(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/mention-sessions", handleMentionSessions(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
 	mux.HandleFunc("HEAD /api/sessions/{id}/files/{fileID}", handleDownloadFile(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/artifacts", handleListArtifacts(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/artifacts", withGzip(handleListArtifacts(manager)))
 	mux.HandleFunc("GET /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("HEAD /api/sessions/{id}/attachments/{attID}", handleGetAttachment(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/ws", handleWebSocket(manager))
-	mux.HandleFunc("GET /api/sessions/{id}/tasks", handleSessionTasks(manager))
+	mux.HandleFunc("GET /api/sessions/{id}/tasks", withGzip(handleSessionTasks(manager)))
 	// Global tasks: the owner sees and edits everything. Agents reach tasks only
 	// through the tasks tool, never through these routes.
-	mux.HandleFunc("GET /api/tasks", handleListTasks(manager))
+	mux.HandleFunc("GET /api/tasks", withGzip(handleListTasks(manager)))
 	mux.HandleFunc("POST /api/tasks", handleCreateTask(manager))
 	mux.HandleFunc("GET /api/tasks/projects", handleTaskProjects(manager))
 	mux.HandleFunc("GET /api/tasks/ws", handleTasksWebSocket(manager))
@@ -1812,7 +1812,10 @@ func handleListBranches(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		points, _ := bus.QueryTyped[bus.GetBranchPoints, []bus.BranchPoint](sess.runtime.Bus, bus.GetBranchPoints{})
+		points, err := bus.QueryTyped[bus.GetBranchPoints, []bus.BranchPoint](sess.runtime.Bus, bus.GetBranchPoints{Ctx: r.Context()})
+		if err != nil && r.Context().Err() != nil {
+			return // the client left; nobody is waiting for the answer
+		}
 		writeJSON(w, http.StatusOK, points)
 	}
 }

@@ -30,6 +30,7 @@ const ctx = await context({
   format: "esm",
   jsx: "automatic",
   jsxImportSource: "preact",
+  loader: { ".woff2": "file" },
   sourcemap: true,
   minify: false,
 });

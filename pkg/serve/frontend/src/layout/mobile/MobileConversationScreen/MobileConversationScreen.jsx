@@ -316,7 +316,7 @@ function MobileConversationBody({ forceMobile = false }) {
             openTimeline: () => setRewindOpen(true),
             disabled: session.state === "running" || session.state === "permission",
           }}
-          lead={<EarlierBranches sessionId={session.id} empty={!(session.messages?.length > 0)} onOpen={() => setRewindOpen(true)} />}
+          lead={<EarlierBranches sessionId={session.id} empty={!(session.messages?.length > 0)} initReceived={!!session.initReceived} onOpen={() => setRewindOpen(true)} />}
           onOpenSubagent={(id) => openPersistedSubagent(session.id, id)}
           tail={pendingPromptsTail(session)}
         />

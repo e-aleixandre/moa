@@ -107,6 +107,10 @@ export function handleWsInit(id, data) {
     }, outcome);
   }
   updateSession(id, {
+    // Sticky: it says this session has had its authoritative snapshot, which
+    // survives a reconnect (unlike historyHydrated), so a view can tell "empty
+    // transcript" from "snapshot not here yet".
+    initReceived: true,
 	providerExecution: data.provider_execution || null,
     serverInstance,
     messages,

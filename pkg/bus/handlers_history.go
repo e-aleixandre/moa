@@ -667,20 +667,19 @@ func registerTreeHandlers(sctx *SessionContext) {
 			currentIDs[e.ID] = true
 		}
 
+		// Targets that would leave a dangling tool_call (e.g. an assistant turn
+		// whose tool results haven't landed on this path yet) are left out:
+		// Branch() enforces the same rule, and the picker must never offer a
+		// target it would reject. One pass over the tree, not one per entry.
+		targets, err := sctx.Tree.BranchTargets(branchPointsCtx(q))
+		if err != nil {
+			return nil, err
+		}
 		var points []BranchPoint
-		for _, e := range sctx.Tree.Entries() {
-			if e.Type != session.EntryMessage {
-				continue
-			}
+		for _, target := range targets {
+			e := target.Entry
 			// Only user/assistant entries are valid branch targets
 			if e.Message.Role != "user" && e.Message.Role != "assistant" {
-				continue
-			}
-			// Skip targets that would leave a dangling tool_call (e.g. an
-			// assistant turn whose tool results haven't landed on this path
-			// yet). Branch() enforces the same rule; filtering here keeps
-			// the picker from ever offering a target it would reject.
-			if err := sctx.Tree.ValidBranchTarget(e.ID); err != nil {
 				continue
 			}
 			source, _ := e.Message.Custom["source"].(string)
@@ -688,13 +687,12 @@ func registerTreeHandlers(sctx *SessionContext) {
 			if command, ok := core.SkillInvocation(e.Message.Custom); ok {
 				source, label = "skill", command
 			}
-			children := sctx.Tree.Children(e.ID)
 			points = append(points, BranchPoint{
 				EntryID:       e.ID,
 				Label:         label,
 				Role:          e.Message.Role,
 				Timestamp:     e.Timestamp.Unix(),
-				BranchCount:   len(children),
+				BranchCount:   target.Children,
 				IsCurrentPath: currentIDs[e.ID],
 				Source:        source,
 			})
