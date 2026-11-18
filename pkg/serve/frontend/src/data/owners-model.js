@@ -1,4 +1,4 @@
-import { idleWithBackgroundJobs, sessionDisplayDotState, sessionDotState, sessionTitle, waitsForYou } from "./util/format.js";
+import { idleWithBackgroundJobs, sessionDisplayDotState, sessionTitle, waitsForYou } from "./util/format.js";
 import { sessionRowReason } from "../layout/Sidebar/sessions.js";
 
 // owners-model — the only logic the Owners surface needs, kept out of the
@@ -253,7 +253,7 @@ export function ownerChildRow(sess, now = Date.now()) {
     id: sess.id,
     title: sessionTitle(sess),
     state: sessionDisplayDotState(sess),
-    running: sessionDotState(sess) === "running",
+    running: sess.state === "running",
     background: idleWithBackgroundJobs(sess),
     unseen: !!sess.unseen,
     when: relAge(sess.updated, now),
