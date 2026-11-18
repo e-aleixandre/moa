@@ -158,7 +158,7 @@ import {
   bookWrites,
   shortModel,
   modelCodename,
-  hasBackgroundJobs,
+  idleWithBackgroundJobs,
 } from './util/format.js';
 import { formatElapsed } from './util/activity.js';
 import { splitAskResponder, answererLabel } from './ask-user-machine.js';
@@ -1027,7 +1027,7 @@ export function liveTrayAgents(session, sessions = {}, owners = []) {
     if (!child || (child.ownerId || child.owner_id) !== owner.id) continue;
     // An idle child whose turn ended with async jobs still alive stays in the
     // list: the owner reads these names as "what is moving".
-    const lingering = child.state === 'idle' && hasBackgroundJobs(child);
+    const lingering = idleWithBackgroundJobs(child);
     if (child.state !== 'running' && child.state !== 'permission' && child.state !== 'error' && !lingering) continue;
     const chip = {
       id: child.id,

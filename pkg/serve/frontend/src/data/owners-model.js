@@ -1,4 +1,4 @@
-import { sessionDisplayDotState, sessionDotState, sessionTitle, waitsForYou } from "./util/format.js";
+import { idleWithBackgroundJobs, sessionDisplayDotState, sessionDotState, sessionTitle, waitsForYou } from "./util/format.js";
 import { sessionRowReason } from "../layout/Sidebar/sessions.js";
 
 // owners-model — the only logic the Owners surface needs, kept out of the
@@ -32,7 +32,7 @@ export const CHILD_GROUPS = [
 export function childGroup(child) {
   const state = child?.state || "idle";
   if (waitsOnYou(state)) return "waiting";
-  if (child?.running ?? state === "running") return "working";
+  if ((child?.running ?? state === "running") || child?.background) return "working";
   if (child?.unseen) return "unread";
   return "idle";
 }
@@ -65,8 +65,8 @@ export function childrenSummary(children = []) {
   // Working counts every child that runs, read or not: an unseen result on a
   // running session does not stop it moving. `state` is the display dot, which
   // folds running+unseen into "unseen", so the row carries `running` apart.
-  const working = children.filter((c) =>
-    childGroup(c) !== "waiting" && (c.running ?? (c.state || "idle") === "running"));
+  // A child idle with live background jobs counts too: the LiveBar tally lists it.
+  const working = children.filter((c) => childGroup(c) === "working");
   const locked = waiting.filter((c) => c.lock);
   return {
     locked: locked.length,
@@ -254,6 +254,7 @@ export function ownerChildRow(sess, now = Date.now()) {
     title: sessionTitle(sess),
     state: sessionDisplayDotState(sess),
     running: sessionDotState(sess) === "running",
+    background: idleWithBackgroundJobs(sess),
     unseen: !!sess.unseen,
     when: relAge(sess.updated, now),
     brief: reason?.text || "",

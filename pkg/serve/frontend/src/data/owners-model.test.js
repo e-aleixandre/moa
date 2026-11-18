@@ -355,3 +355,50 @@ test("a woken owner leaves the closed group", () => {
   );
   expect(splitOwners(rows).closed).toEqual([]);
 });
+
+// The sidebar count and the LiveBar tally must say the same number: both read
+// idleWithBackgroundJobs, so an idle child with live jobs is "working" in both.
+import { liveTrayAgents } from "./stream-model.js";
+
+const bgSession = (id, over) => ({
+  id, title: id, state: "idle", ownerId: "own_1", updated: 1, jobsFrom: "roster", backgroundJobs: 0, ...over,
+});
+const trayOwner = { id: "own_1", name: "Winerim", session_id: "os" };
+
+function summaryAndTray(sessions) {
+  const [row] = ownerRows([trayOwner], sessions);
+  const tray = liveTrayAgents({ id: "os", messages: [], subagents: {} }, sessions, [trayOwner]);
+  return { row, summary: childrenSummary(row.children), tray };
+}
+
+test("idle children with live background jobs count as working, as the tally lists them", () => {
+  const { row, summary, tray } = summaryAndTray({
+    a: bgSession("a", { state: "running" }),
+    b: bgSession("b", { state: "running" }),
+    c: bgSession("c", { state: "running" }),
+    d: bgSession("d", { backgroundJobs: 2 }),
+    e: bgSession("e", { backgroundJobs: 1, unseen: true }),
+  });
+  expect(summary.working).toBe(5);
+  expect(ownerLine(row).lead).toEqual({ tone: "blue", text: "5 working" });
+  expect(tray.length).toBe(5);
+  // Their own state in the list does not change: still idle.
+  expect(tray.find((c) => c.id === "d").state).toBe("idle");
+});
+
+test("an errored child with live jobs is waiting, never also working", () => {
+  const { summary, tray } = summaryAndTray({
+    a: bgSession("a", { state: "error", backgroundJobs: 2 }),
+  });
+  expect(summary).toMatchObject({ waiting: 1, working: 0 });
+  expect(tray.length).toBe(1);
+});
+
+test("idle children without jobs say nothing", () => {
+  const { row, summary, tray } = summaryAndTray({
+    a: bgSession("a"), b: bgSession("b", { backgroundJobs: 0 }),
+  });
+  expect(summary.working).toBe(0);
+  expect(ownerLine(row).lead).toBeFalsy();
+  expect(tray.length).toBe(0);
+});

@@ -614,6 +614,14 @@ export function hasBackgroundJobs(sess) {
   return hasLiveBackgroundWork(sess);
 }
 
+// idleWithBackgroundJobs — an idle session whose turn ended with async work
+// still alive. The one test behind both the LiveBar tally (which lists it) and
+// the owner's "N working" count, so the two cannot disagree. Its own state
+// stays idle; only the summary counts it as working.
+export function idleWithBackgroundJobs(sess) {
+  return sess?.state === 'idle' && hasBackgroundJobs(sess);
+}
+
 function hasLiveBackgroundWork(sess) {
   if (sess.subagentCount > 0) return true;
   const subs = sess.subagents;
