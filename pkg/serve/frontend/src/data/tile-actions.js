@@ -6,6 +6,7 @@ import { acknowledgeVisibleAttentionThrough, syncConnections } from './api.js';
 import { store, setState, updateSession, visibleSessionIds } from './store.js';
 import { armReadAnchor, __resetReadAnchorsForTests } from './stream-read-anchor.js';
 import { landingOrder } from './util/project-sessions.js';
+import { rosterSessions } from './roster.js';
 import {
   allTileIds, allSessionIds, findTile, tileCount,
   splitTileNode, removeTileNode, setTileSession, swapSessions,
@@ -215,11 +216,15 @@ export function watchLanding() {
   let last = null;
   let lastLanding = null;
   let seen = null;
+  let seenRoster = null;
   const check = (s) => {
     if (!s.sessionsLoaded) return;
-    // Every stream token is a store update; only the inputs of the key matter.
-    if (seen && seen.sessions === s.sessions && seen.owners === s.owners && seen.isMobile === s.isMobile) return;
+    // Every stream token is a store update; only the inputs of the key matter,
+    // and a token is not one of them (rosterSessions).
+    const roster = rosterSessions(s.sessions);
+    if (seen && seenRoster === roster && seen.owners === s.owners && seen.isMobile === s.isMobile) return;
     seen = s;
+    seenRoster = roster;
     const key = `${s.isMobile ? 1 : 0}|${Object.keys(s.sessions).length}`;
     const landing = landingKey(s);
     if (key === last && landing === lastLanding) return;

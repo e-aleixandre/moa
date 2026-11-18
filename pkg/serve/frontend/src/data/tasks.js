@@ -10,6 +10,7 @@
 import { api } from './api.js';
 import { store, setState, TASKS_INITIAL } from './store.js';
 import { conflictCurrent, sessionRecords } from './tasks-model.js';
+import { rosterSessions } from './roster.js';
 
 export { TASKS_INITIAL };
 
@@ -439,7 +440,7 @@ export function isNewRequest(task, newSince) {
 let directory = { sessions: null, owners: null, sig: '', value: {} };
 
 export function selectSessionDirectory(state) {
-  const sessions = state?.sessions || {};
+  const sessions = rosterSessions(state?.sessions || {});
   const owners = state?.owners?.list || [];
   if (sessions === directory.sessions && owners === directory.owners) return directory.value;
   const ownerOf = new Map(owners.filter((o) => o?.session_id).map((o) => [o.session_id, o]));

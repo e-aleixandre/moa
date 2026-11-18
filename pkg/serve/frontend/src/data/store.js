@@ -5,6 +5,7 @@ import {
 } from './tileTree.js';
 import { pruneDrawerCollapsed, isOrdinarySession, COLLAPSIBLE_SECTIONS, SIDEBAR_MODES } from './util/project-sessions.js';
 import { ARTIFACTS_CLOSED } from './artifacts-model.js';
+import { rosterSessions } from './roster.js';
 
 const STORAGE_KEY = 'moa-next-ui-state';
 
@@ -269,6 +270,13 @@ export const store = {
   },
 };
 
+// The previous map goes first: it is the one the roster slot already holds, so
+// only the new one pays for the comparison.
+function rosterChanged(before, after) {
+  const stable = rosterSessions(before);
+  return rosterSessions(after) !== stable;
+}
+
 export function setState(patch) {
   const next = typeof patch === 'function' ? patch(state) : patch;
   if (!next || typeof next !== 'object') return;
@@ -282,7 +290,9 @@ export function setState(patch) {
   if (!changed) return;
   const previous = state;
   state = { ...state, ...next };
-  if (state.sessions !== previous.sessions) {
+  // A stream token replaces `sessions` without touching anything a folder is
+  // made of, so the prune only runs when the roster itself changed.
+  if (state.sessions !== previous.sessions && rosterChanged(previous.sessions, state.sessions)) {
     const drawerCollapsed = pruneDrawerCollapsed(state.drawerCollapsed, Object.values(state.sessions));
     if (Object.keys(drawerCollapsed).length !== Object.keys(state.drawerCollapsed).length) state = { ...state, drawerCollapsed };
   }

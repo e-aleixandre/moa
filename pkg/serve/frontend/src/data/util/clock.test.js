@@ -107,3 +107,15 @@ test('every hour of the day renders the same number of characters', () => {
   }
   expect([...widths]).toEqual([5]);
 });
+
+// The formatters are built once and reused; they must print what the
+// per-call toLocale* they replaced printed.
+test('the cached formatters print what toLocaleTimeString and toLocaleString print', () => {
+  for (const at of [Date.UTC(2026, 0, 5, 0, 5), Date.UTC(2026, 5, 30, 23, 59), Date.UTC(2026, 9, 25, 12, 0), Date.UTC(2026, 2, 29, 1, 30)]) {
+    const date = new Date(at);
+    expect(clockHHMM(at / 1000)).toBe(date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+    expect(clockFull(at / 1000)).toBe(date.toLocaleString([], {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+    }));
+  }
+});

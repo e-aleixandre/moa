@@ -6,6 +6,7 @@ import { ownerRows } from "../../data/owners-model.js";
 import { ownersHealth, ownersSlice } from "../../data/owners.js";
 import { allTileIds, findTile } from "../../data/tileTree.js";
 import { inboxCards, inboxHealth, inboxHealthSig, inboxPendingCount, inboxSig } from "../../data/events.js"; // wake-on-event
+import { clockBucket, memoRefs, rosterSessions, sameBy } from "../../data/roster.js";
 
 function relAge(updated) {
   if (!updated) return "";
@@ -146,6 +147,10 @@ function ownersSig(list) {
   ].join("\0")).join("\n");
 }
 
+const sameOwners = sameBy(ownersSig);
+const sameInbox = sameBy(inboxSig);
+const sameSpineList = sameBy(spineListSig);
+
 function desktopChromeEqual(a, b) {
   return a.activeId === b.activeId
     && a.sidebarMode === b.sidebarMode
@@ -153,32 +158,42 @@ function desktopChromeEqual(a, b) {
     && a.ownersHealth?.status === b.ownersHealth?.status
     && a.ownersHealth?.error === b.ownersHealth?.error
     && a.ownersHealth?.retrying === b.ownersHealth?.retrying
-    && ownersSig(a.owners) === ownersSig(b.owners)
+    && sameOwners(a.owners, b.owners)
     && a.groupByProject === b.groupByProject
     && a.drawerCollapsed === b.drawerCollapsed
     && a.collapsedSections === b.collapsedSections
     && a.soundEnabled === b.soundEnabled
     && a.inboxOpen === b.inboxOpen // wake-on-event
     && a.inboxPending === b.inboxPending // wake-on-event
-    && inboxSig(a.inbox) === inboxSig(b.inbox) // wake-on-event
+    && sameInbox(a.inbox, b.inbox) // wake-on-event
     && inboxHealthSig(a.inboxHealth) === inboxHealthSig(b.inboxHealth) // wake-on-event
-    && spineListSig(a.active) === spineListSig(b.active)
-    && spineListSig(a.saved) === spineListSig(b.saved);
+    && sameSpineList(a.active, b.active)
+    && sameSpineList(a.saved, b.saved);
 }
+
+// What the whole roster contributes to the sidebar. It reads every session,
+// so it is recomputed only when a roster, the owners, the calls asking to
+// talk, the events, the grid's panes or the wall-clock bucket (the rows print
+// ages) change; a stream token changes none of them.
+const desktopRoster = memoRefs((roster, paneTree, ownersList, callList, events) => {
+  const { active, saved } = spineSessions(roster, paneTree ? paneBadges(paneTree) : undefined);
+  // The owners, joined with their children out of the roster this same
+  // snapshot holds: one projection, so the dossier, the list and the inbox's
+  // "send to the owner" destination can never disagree about which session
+  // is waiting.
+  const owners = ownerRows(ownersList, roster, undefined, wantsToTalkIds(callList));
+  const inbox = inboxCards(roster, events, owners); // wake-on-event
+  return { active, saved, owners, inbox, inboxPending: inboxPendingCount(inbox) };
+});
 
 // selectDesktopChrome — roster the sidebar actually paints. Streaming text,
 // tokens and messages are not on a row, so a token on any session returns the
 // previous object (Object.is) and DesktopShell does not re-render.
 export function selectDesktopChrome(state) {
   const inGrid = state.view === "grid";
-  const paneOf = inGrid ? paneBadges(state.tileTree) : undefined;
-  const { active, saved } = spineSessions(state.sessions, paneOf);
-  // The owners, joined with their children out of the roster this same
-  // snapshot holds: one projection, so the dossier, the list and the inbox's
-  // "send to the owner" destination can never disagree about which session
-  // is waiting.
-  const owners = ownerRows(ownersSlice(state).list, state.sessions, undefined, wantsToTalkIds(state.callRequests?.list));
-  const inbox = inboxCards(state.sessions, state.events, owners); // wake-on-event
+  const { active, saved, owners, inbox, inboxPending } = desktopRoster(
+    rosterSessions(state.sessions), inGrid ? state.tileTree : null, ownersSlice(state).list, state.callRequests?.list, state.events, clockBucket(),
+  );
   const next = {
     active,
     saved,
@@ -191,7 +206,7 @@ export function selectDesktopChrome(state) {
     // The count the foot's door shows. It travels with the list for the same
     // reason the health does: a chrome that held the rows but not their count
     // would make the door and the list disagree.
-    inboxPending: inboxPendingCount(inbox), // wake-on-event
+    inboxPending, // wake-on-event
     activeId: inGrid ? focusedTileSessionId(state) : focusedSessionId(state),
     owners,
     ownersHealth: ownersHealth(state),
@@ -215,4 +230,5 @@ export function selectDesktopChrome(state) {
 
 export function __resetDesktopChromeForTests() {
   selectDesktopChrome._prev = null;
+  desktopRoster.reset();
 }
