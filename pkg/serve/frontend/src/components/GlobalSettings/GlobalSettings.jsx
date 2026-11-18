@@ -17,7 +17,7 @@ import {
 import {
   SESSION, isCustom, normalizeChoices,
 } from "./compact-model-model.js";
-import { ROLES, chosen, defaultHint, patchFor, rowValue, withRole } from "./dreaming-models-model.js";
+import { ROLES, choicesFor, chosen, defaultHint, patchFor, rowValue, withRole } from "./dreaming-models-model.js";
 import {
   allowedCount, createAllowedModelsWriter, nextAllowedModels, rememberRestricted, scopeForAllowed, selectedScopeList,
 } from "./subagent-models-model.js";
@@ -277,7 +277,7 @@ function useDreamingModels() {
   useEffect(() => {
     let live = true;
     api("GET", "/api/dreaming-models").catch(() => null).then((next) => {
-      if (live && next) setPolicy({ ...next, choices: normalizeChoices(next.choices) });
+      if (live && next) setPolicy(next);
     });
     return () => { live = false; };
   }, []);
@@ -287,7 +287,7 @@ function useDreamingModels() {
     const previous = policy;
     setPolicy(withRole(policy, role, spec));
     api("PATCH", "/api/dreaming-models", patchFor(role, spec))
-      .then((next) => setPolicy({ ...next, choices: normalizeChoices(next.choices) }))
+      .then((next) => setPolicy(next))
       .catch((error) => {
         setPolicy(previous);
         addToast({ title: "Could not set the dreaming model", detail: String(error.message || error), type: "error" });
@@ -590,7 +590,7 @@ function CompactModelPage({ state, onDone }) {
 function DreamingModelPage({ state, role, onDone }) {
   const { policy, loaded, save } = state;
   const current = chosen(policy, role);
-  const choices = policy?.choices || [];
+  const choices = choicesFor(policy, role);
   return (
     <>
       <p class="zl-set-sum">

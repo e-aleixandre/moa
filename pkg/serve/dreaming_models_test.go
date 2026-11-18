@@ -44,10 +44,21 @@ func TestDreamingModelsEndpoint(t *testing.T) {
 	if got.Defaults.Reader != "claude-haiku-5-5" || got.Defaults.Organizer != "sonnet" {
 		t.Errorf("defaults with only Anthropic = %+v", got.Defaults)
 	}
-	for _, c := range got.Choices {
+	for _, c := range append(append([]compactModelChoice{}, got.ReaderChoices...), got.OrganizerChoices...) {
 		if c.Provider != "anthropic" {
 			t.Errorf("offered %q from %q, which has no credential", c.Spec, c.Provider)
 		}
+	}
+	has := func(list []compactModelChoice, spec string) bool {
+		for _, c := range list {
+			if c.Spec == spec {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(got.ReaderChoices, "claude-haiku-5-5") || !has(got.OrganizerChoices, "sonnet") {
+		t.Errorf("the default pair is not offered: %+v / %+v", got.ReaderChoices, got.OrganizerChoices)
 	}
 
 	got = dreamingModelsCall(t, srv, http.MethodPatch, `{"reader":"claude-haiku-5-5"}`, http.StatusOK)
@@ -63,6 +74,31 @@ func TestDreamingModelsEndpoint(t *testing.T) {
 	if cfg.CompactModel != "terra" {
 		t.Errorf("an existing setting was lost: compact_model = %q", cfg.CompactModel)
 	}
+
+	// A model whose reservation does not fit the night is refused by the API too.
+	// With a smaller night (as an owner's budget_usd could make it) the dear
+	// models no longer fit: Astra reserves about $1.3-2 a call, GPT-5.5 and 5.6
+	// about $1-1.5, the defaults well under $0.6.
+	mgr.providerCredentialAvailable = func(string) bool { return true }
+	defer func(v float64) { dreamingSelectorBudget = v }(dreamingSelectorBudget)
+	dreamingSelectorBudget = 0.9
+	for _, spec := range []string{"astra", "gpt5", "gpt-5.6"} {
+		dreamingModelsCall(t, srv, http.MethodPatch, `{"organizer":"`+spec+`"}`, http.StatusUnprocessableEntity)
+	}
+	if got := core.LoadGlobalConfig().DreamingOrganizerModel; got != "opus" {
+		t.Errorf("a refused model changed the setting to %q", got)
+	}
+	all := dreamingModelsCall(t, srv, http.MethodGet, "", http.StatusOK)
+	for _, c := range append(append([]compactModelChoice{}, all.ReaderChoices...), all.OrganizerChoices...) {
+		if c.Spec == "astra" || c.Spec == "gpt5" || c.Spec == "gpt-5.6" {
+			t.Errorf("%s is offered", c.Spec)
+		}
+	}
+	if !has(all.ReaderChoices, "sonnet") {
+		t.Errorf("a smaller budget dropped a default: %+v", all.ReaderChoices)
+	}
+	dreamingSelectorBudget = 3
+	mgr.providerCredentialAvailable = func(p string) bool { return p == "anthropic" }
 
 	// Unknown spec and empty body are refused and change nothing.
 	dreamingModelsCall(t, srv, http.MethodPatch, `{"reader":"no-such-model"}`, http.StatusBadRequest)

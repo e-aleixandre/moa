@@ -57,31 +57,43 @@ func TestResolveDreamingModels(t *testing.T) {
 	both := only("anthropic", "openai")
 
 	// Nothing set: the defaults, with nothing to report.
-	r, o, notes, ok := ResolveDreamingModels(MoaConfig{}, both)
+	r, o, notes, ok := ResolveDreamingModels(MoaConfig{}, both, nil)
 	if !ok || r.ID != "gpt-6-luna" || o.Provider != "anthropic" || len(notes) != 0 {
 		t.Fatalf("defaults = %s / %s, notes %v, ok %v", r.ID, o.ID, notes, ok)
 	}
 
 	// A usable choice wins over the default.
-	r, o, notes, ok = ResolveDreamingModels(MoaConfig{DreamingReaderModel: "claude-haiku-5-5", DreamingOrganizerModel: "opus"}, both)
+	r, o, notes, ok = ResolveDreamingModels(MoaConfig{DreamingReaderModel: "claude-haiku-5-5", DreamingOrganizerModel: "opus"}, both, nil)
 	if !ok || r.ID != "claude-haiku-5-5" || !strings.Contains(o.ID, "opus") || len(notes) != 0 {
 		t.Fatalf("choice = %s / %s, notes %v", r.ID, o.ID, notes)
 	}
 
 	// A model whose provider lost its credential falls back and says so.
-	r, _, notes, ok = ResolveDreamingModels(MoaConfig{DreamingReaderModel: "luna"}, only("anthropic"))
+	r, _, notes, ok = ResolveDreamingModels(MoaConfig{DreamingReaderModel: "luna"}, only("anthropic"), nil)
 	if !ok || r.ID != "claude-haiku-5-5" || len(notes) != 1 || !strings.Contains(notes[0], "Lectura") || !strings.Contains(notes[0], "luna") {
 		t.Fatalf("no credential: %s, notes %v", r.ID, notes)
 	}
 
 	// An unknown spec (hand-edited config) falls back for that role only.
-	r, o, notes, ok = ResolveDreamingModels(MoaConfig{DreamingOrganizerModel: "nope-9"}, only("openai"))
+	r, o, notes, ok = ResolveDreamingModels(MoaConfig{DreamingOrganizerModel: "nope-9"}, only("openai"), nil)
 	if !ok || r.ID != "gpt-6-luna" || o.Provider != "openai" || len(notes) != 1 || !strings.Contains(notes[0], "Organización") {
 		t.Fatalf("unknown: %s / %s, notes %v", r.ID, o.ID, notes)
 	}
 
 	// Nothing connected: no night, however it is configured.
-	if _, _, _, ok = ResolveDreamingModels(MoaConfig{DreamingReaderModel: "luna"}, only()); ok {
+	if _, _, _, ok = ResolveDreamingModels(MoaConfig{DreamingReaderModel: "luna"}, only(), nil); ok {
 		t.Fatal("a night was possible with no provider")
+	}
+}
+
+func TestResolveDreamingModelsFallsBackWhenTheChoiceDoesNotFit(t *testing.T) {
+	// "terra" fits the reader but not the organizer here: the rule is the caller's.
+	fits := func(role string, m Model) bool { return !(role == DreamingRoleOrganizer && m.ID == "claude-opus-5-5") }
+	r, o, notes, ok := ResolveDreamingModels(MoaConfig{DreamingReaderModel: "opus", DreamingOrganizerModel: "opus"}, only("anthropic"), fits)
+	if !ok || !strings.Contains(r.ID, "opus") || strings.Contains(o.ID, "opus") {
+		t.Fatalf("got %s / %s", r.ID, o.ID)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "Organización") || !strings.Contains(notes[0], "no cabe en el tope") {
+		t.Fatalf("notes = %v", notes)
 	}
 }

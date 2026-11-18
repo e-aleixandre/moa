@@ -158,3 +158,16 @@ func (b *Budget) call(ctx context.Context, factory ProviderFactory, model core.M
 	}
 	return callResult{Text: out, Cost: spent, Truncated: final != nil && final.StopReason == "max_tokens"}, nil
 }
+
+// RoleFits reports whether one call of the role can be reserved inside the
+// night's budget at all: even with an empty prompt, a model whose reservation
+// at the role's output cap exceeds it would have every call refused and the
+// night would defer everything.
+func RoleFits(role string, model core.Model, budget float64) bool {
+	out := organizerMaxOut
+	if role == core.DreamingRoleReader {
+		out = analyzerMaxOut
+	}
+	res, err := Reservation(model, "", "", out)
+	return err == nil && res <= budget
+}

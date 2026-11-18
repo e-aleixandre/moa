@@ -28,25 +28,38 @@ func DreamingDefaultModels(available AuxiliaryModelAvailable) (reader, organizer
 	return "", "", false
 }
 
+// The two roles of the night, as the callers name them.
+const (
+	DreamingRoleReader    = "reader"
+	DreamingRoleOrganizer = "organizer"
+)
+
+// DreamingFits says whether a model can run a role within the night's budget.
+// Nil means every model does.
+type DreamingFits func(role string, m Model) bool
+
 // ResolveDreamingModels picks the night's two models. An empty setting is the
 // default for the connected providers. A setting that names an unknown model,
-// or one whose provider has no credential, falls back to that default and says
+// or one whose provider has no credential, or one that does not fit the
+// night's budget, falls back to that default and says
 // so in notes: the night must neither break nor change models in silence.
 // ok is false when no model can run the night at all.
-func ResolveDreamingModels(cfg MoaConfig, available AuxiliaryModelAvailable) (reader, organizer Model, notes []string, ok bool) {
+func ResolveDreamingModels(cfg MoaConfig, available AuxiliaryModelAvailable, fits DreamingFits) (reader, organizer Model, notes []string, ok bool) {
 	defReader, defOrganizer, ok := DreamingDefaultModels(available)
 	if !ok {
 		return Model{}, Model{}, nil, false
 	}
-	pick := func(role, spec, def string) (Model, bool) {
+	pick := func(label, role, spec, def string) (Model, bool) {
 		spec = strings.TrimSpace(spec)
 		if spec != "" {
 			m, found := ResolveModel(spec)
 			switch {
 			case !found || m.ID == "":
-				notes = append(notes, fmt.Sprintf("%s: «%s» no es un modelo conocido; se usó el de por defecto.", role, spec))
+				notes = append(notes, fmt.Sprintf("%s: «%s» no es un modelo conocido; se usó el de por defecto.", label, spec))
 			case available != nil && !available(m.Provider):
-				notes = append(notes, fmt.Sprintf("%s: «%s» no tiene credenciales ahora; se usó el de por defecto.", role, spec))
+				notes = append(notes, fmt.Sprintf("%s: «%s» no tiene credenciales ahora; se usó el de por defecto.", label, spec))
+			case fits != nil && !fits(role, m):
+				notes = append(notes, fmt.Sprintf("%s: «%s» no cabe en el tope de la noche; se usó el de por defecto.", label, spec))
 			default:
 				return m, true
 			}
@@ -55,7 +68,7 @@ func ResolveDreamingModels(cfg MoaConfig, available AuxiliaryModelAvailable) (re
 		return m, found && m.ID != ""
 	}
 	var ok1, ok2 bool
-	reader, ok1 = pick("Lectura", cfg.DreamingReaderModel, defReader)
-	organizer, ok2 = pick("Organización", cfg.DreamingOrganizerModel, defOrganizer)
+	reader, ok1 = pick("Lectura", DreamingRoleReader, cfg.DreamingReaderModel, defReader)
+	organizer, ok2 = pick("Organización", DreamingRoleOrganizer, cfg.DreamingOrganizerModel, defOrganizer)
 	return reader, organizer, notes, ok1 && ok2
 }

@@ -226,7 +226,7 @@ func TestEveryDefaultPairFitsTheNightBudget(t *testing.T) {
 		"both":           has("anthropic", "openai"),
 	} {
 		t.Run(name, func(t *testing.T) {
-			reader, organizer, notes, ok := core.ResolveDreamingModels(core.MoaConfig{}, avail)
+			reader, organizer, notes, ok := core.ResolveDreamingModels(core.MoaConfig{}, avail, nil)
 			if !ok || len(notes) != 0 {
 				t.Fatalf("defaults: ok=%v notes=%v", ok, notes)
 			}
@@ -311,4 +311,40 @@ func (p streamErrProvider) Stream(context.Context, core.Request) (<-chan core.As
 	ch <- core.AssistantEvent{Type: core.ProviderEventError, Error: errors.New("quota")}
 	close(ch)
 	return ch, nil
+}
+
+// A model whose reservation does not fit the night's budget is left out, and
+// the default pairs always fit. With the corrected reservation and the default
+// $3, Astra, GPT-5.5 and 5.6 do fit (about $1-2 a call); they drop out when the
+// owner's budget is smaller.
+func TestRoleFitsLeavesOutWhatTheBudgetCannotPay(t *testing.T) {
+	for _, spec := range []string{"astra", "gpt5", "gpt-5.6"} {
+		m, ok := core.ResolveModel(spec)
+		if !ok {
+			t.Fatalf("%s missing from the catalog", spec)
+		}
+		for _, role := range []string{core.DreamingRoleReader, core.DreamingRoleOrganizer} {
+			if !RoleFits(role, m, 3) {
+				t.Errorf("%s does not fit as %s in $3", spec, role)
+			}
+			if RoleFits(role, m, 0.9) {
+				t.Errorf("%s fits as %s in $0.9", spec, role)
+			}
+		}
+	}
+	for _, avail := range []func(string) bool{
+		func(p string) bool { return p == "anthropic" },
+		func(p string) bool { return p == "openai" },
+		func(string) bool { return true },
+	} {
+		r, o, _ := core.DreamingDefaultModels(avail)
+		for role, spec := range map[string]string{core.DreamingRoleReader: r, core.DreamingRoleOrganizer: o} {
+			m, _ := core.ResolveModel(spec)
+			for _, budget := range []float64{3, 1} {
+				if !RoleFits(role, m, budget) {
+					t.Errorf("default %s %s does not fit in $%v", role, spec, budget)
+				}
+			}
+		}
+	}
 }

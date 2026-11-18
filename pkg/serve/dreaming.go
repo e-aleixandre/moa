@@ -124,7 +124,8 @@ func (d *dreamingService) tick(now time.Time) {
 		}
 		// Resolved per night: the connected providers and the settings can
 		// change between one night and the next.
-		analyzer, organizer, notes, ok := core.ResolveDreamingModels(core.LoadGlobalConfig(), d.mgr.providerCredentialAvailable)
+		analyzer, organizer, notes, ok := core.ResolveDreamingModels(core.LoadGlobalConfig(), d.mgr.providerCredentialAvailable,
+			func(role string, m core.Model) bool { return dreaming.RoleFits(role, m, settings.BudgetUSD) })
 		if !ok || d.mgr.providerFactory == nil {
 			slog.Warn("dreaming: models unavailable", "owner", own.Name)
 			return

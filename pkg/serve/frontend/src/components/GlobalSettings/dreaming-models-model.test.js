@@ -1,16 +1,28 @@
 import { describe, it, expect } from 'bun:test';
-import { chosen, defaultHint, nameOf, patchFor, rowValue, withRole } from './dreaming-models-model.js';
+import { allChoices, choicesFor, chosen, defaultHint, nameOf, patchFor, rowValue, withRole } from './dreaming-models-model.js';
 
 const policy = {
   reader: '',
   organizer: 'opus',
   defaults: { reader: 'claude-haiku-5-5', organizer: 'sonnet' },
-  choices: [
+  reader_choices: [
     { spec: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', provider: 'anthropic' },
+    { spec: 'sonnet', name: 'Claude Sonnet 5.5', provider: 'anthropic' },
+  ],
+  organizer_choices: [
     { spec: 'sonnet', name: 'Claude Sonnet 5.5', provider: 'anthropic' },
     { spec: 'opus', name: 'Claude Opus 5.5', provider: 'anthropic' },
   ],
 };
+
+describe('choicesFor', () => {
+  it('offers each role only its own models', () => {
+    expect(choicesFor(policy, 'reader').map((c) => c.spec)).toEqual(['claude-haiku-5-5', 'sonnet']);
+    expect(choicesFor(policy, 'organizer').map((c) => c.spec)).toEqual(['sonnet', 'opus']);
+    expect(choicesFor({}, 'reader')).toEqual([]);
+    expect(allChoices(policy).length).toBe(4);
+  });
+});
 
 describe('rowValue', () => {
   it('says "Default" while a role follows the default', () => {

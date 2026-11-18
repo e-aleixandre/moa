@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/dreaming"
+	"github.com/e-aleixandre/moa/pkg/owner"
 )
 
 // dreamingModelsPolicy is the wire shape of the nightly dreaming's two models.
@@ -14,16 +16,25 @@ import (
 // Defaults, which depend on the providers connected when it runs. Defaults
 // is what that would be right now, so a client can say it without guessing.
 type dreamingModelsPolicy struct {
-	Reader    string               `json:"reader"`
-	Organizer string               `json:"organizer"`
-	Defaults  dreamingDefaults     `json:"defaults"`
-	Choices   []compactModelChoice `json:"choices"`
+	Reader    string           `json:"reader"`
+	Organizer string           `json:"organizer"`
+	Defaults  dreamingDefaults `json:"defaults"`
+	// Choices per role: the connected models whose reservation fits the
+	// night's budget at that role's output cap. The two roles differ because
+	// the reader reserves a larger output than the organizer.
+	ReaderChoices    []compactModelChoice `json:"reader_choices"`
+	OrganizerChoices []compactModelChoice `json:"organizer_choices"`
 }
 
 type dreamingDefaults struct {
 	Reader    string `json:"reader"`
 	Organizer string `json:"organizer"`
 }
+
+// dreamingSelectorBudget is the night's cap the settings are checked against:
+// the default one. An owner with its own budget_usd is checked against that
+// one when its night runs, with a note in the morning news. Tests override it.
+var dreamingSelectorBudget = owner.DefaultDreamingBudgetUSD
 
 func handleDreamingModels(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -53,21 +64,31 @@ func handleDreamingModelsPatch(w http.ResponseWriter, r *http.Request, mgr *Mana
 	}
 	// An unknown spec is refused now rather than accepted and quietly replaced
 	// by the default on a night nobody is watching.
-	check := func(p *string) (string, bool) {
+	check := func(role string, p *string) (spec string, status int) {
 		if p == nil {
-			return "", true
+			return "", 0
 		}
-		spec := strings.TrimSpace(*p)
+		spec = strings.TrimSpace(*p)
 		if spec == "" {
-			return "", true
+			return "", 0
 		}
-		_, ok := core.ResolveModel(spec)
-		return spec, ok
+		m, ok := core.ResolveModel(spec)
+		if !ok {
+			return spec, http.StatusBadRequest
+		}
+		if !dreaming.RoleFits(role, m, dreamingSelectorBudget) {
+			return spec, http.StatusUnprocessableEntity
+		}
+		return spec, 0
 	}
-	reader, ok1 := check(body.Reader)
-	organizer, ok2 := check(body.Organizer)
-	if !ok1 || !ok2 {
+	reader, st1 := check(core.DreamingRoleReader, body.Reader)
+	organizer, st2 := check(core.DreamingRoleOrganizer, body.Organizer)
+	if st1 == http.StatusBadRequest || st2 == http.StatusBadRequest {
 		http.Error(w, "unknown model", http.StatusBadRequest)
+		return
+	}
+	if st1 != 0 || st2 != 0 {
+		http.Error(w, "model does not fit the night's budget", http.StatusUnprocessableEntity)
 		return
 	}
 
@@ -92,10 +113,21 @@ func handleDreamingModelsPatch(w http.ResponseWriter, r *http.Request, mgr *Mana
 
 func (m *Manager) dreamingModelsPolicy(cfg core.MoaConfig) dreamingModelsPolicy {
 	reader, organizer, _ := core.DreamingDefaultModels(m.providerCredentialAvailable)
+	all := m.compactModelPolicy("").Choices
+	forRole := func(role string) []compactModelChoice {
+		out := []compactModelChoice{}
+		for _, c := range all {
+			if model, ok := core.ResolveModel(c.Spec); ok && dreaming.RoleFits(role, model, dreamingSelectorBudget) {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
 	return dreamingModelsPolicy{
-		Reader:    strings.TrimSpace(cfg.DreamingReaderModel),
-		Organizer: strings.TrimSpace(cfg.DreamingOrganizerModel),
-		Defaults:  dreamingDefaults{Reader: reader, Organizer: organizer},
-		Choices:   m.compactModelPolicy("").Choices,
+		Reader:           strings.TrimSpace(cfg.DreamingReaderModel),
+		Organizer:        strings.TrimSpace(cfg.DreamingOrganizerModel),
+		Defaults:         dreamingDefaults{Reader: reader, Organizer: organizer},
+		ReaderChoices:    forRole(core.DreamingRoleReader),
+		OrganizerChoices: forRole(core.DreamingRoleOrganizer),
 	}
 }
