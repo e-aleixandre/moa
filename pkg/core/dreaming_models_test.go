@@ -88,7 +88,7 @@ func TestResolveDreamingModels(t *testing.T) {
 
 func TestResolveDreamingModelsFallsBackWhenTheChoiceDoesNotFit(t *testing.T) {
 	// "terra" fits the reader but not the organizer here: the rule is the caller's.
-	fits := func(role string, m Model) bool { return !(role == DreamingRoleOrganizer && m.ID == "claude-opus-5-5") }
+	fits := func(role string, m Model) bool { return role != DreamingRoleOrganizer || m.ID != "claude-opus-5-5" }
 	r, o, notes, ok := ResolveDreamingModels(MoaConfig{DreamingReaderModel: "opus", DreamingOrganizerModel: "opus"}, only("anthropic"), fits)
 	if !ok || !strings.Contains(r.ID, "opus") || strings.Contains(o.ID, "opus") {
 		t.Fatalf("got %s / %s", r.ID, o.ID)
