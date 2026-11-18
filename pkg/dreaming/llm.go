@@ -35,26 +35,27 @@ type Budget struct {
 	Spent float64
 }
 
-func maxRates(p *core.Pricing) (in, out float64) {
+// maxRates are the dearest rates the call can be billed at. Pricing tiers
+// apply only once the prompt reaches their threshold, so a short prompt is not
+// reserved at the long-context rate. The fast-mode multiplier is ignored: the
+// dreaming never asks for fast mode, and Pricing.Cost applies it only to
+// usage the provider reports as fast.
+func maxRates(p *core.Pricing, inTokens int) (in, out float64) {
 	in, out = p.Input, p.Output
-	for _, w := range []float64{p.CacheWrite, p.CacheWrite1h} {
-		in = max(in, w)
-	}
+	in = max(in, p.CacheWrite, p.CacheWrite1h)
 	for _, t := range p.Tiers {
-		in = max(in, t.Input, t.CacheWrite, t.CacheWrite1h)
-		out = max(out, t.Output)
-	}
-	if p.FastMultiplier > 1 {
-		in *= p.FastMultiplier
-		out *= p.FastMultiplier
+		if inTokens >= t.Threshold {
+			in, out = max(t.Input, t.CacheWrite, t.CacheWrite1h), t.Output
+		}
 	}
 	return in, out
 }
 
-// outputCap is the output (thinking included) a request may produce: the cap
-// sent when the transport applies it, otherwise the model's maximum.
+// outputCap is the output (thinking included) a request may produce: what the
+// call asks for, never beyond the model's maximum. The model's whole maximum
+// is the cap only when the call asks for nothing.
 func outputCap(model core.Model, requested int) int {
-	if model.Provider == "anthropic" && requested > 0 {
+	if requested > 0 {
 		return core.ResolveMaxOutputTokens(model, &requested)
 	}
 	if model.MaxOutput > 0 {
@@ -68,8 +69,8 @@ func Reservation(model core.Model, system, prompt string, requestedOut int) (flo
 	if model.Pricing == nil || model.Pricing.Input <= 0 || model.Pricing.Output <= 0 {
 		return 0, fmt.Errorf("model %s has no known price; the dreaming does not use it", model.ID)
 	}
-	in, out := maxRates(model.Pricing)
 	inTokens := len(system) + len(prompt) + transportOverheadBytes
+	in, out := maxRates(model.Pricing, inTokens)
 	return float64(inTokens)*in/1e6 + float64(outputCap(model, requestedOut))*out/1e6, nil
 }
 
@@ -111,20 +112,26 @@ func (b *Budget) call(ctx context.Context, factory ProviderFactory, model core.M
 			CacheRetention: core.CacheOff,
 		},
 	}
-	// From here on the request may be billed: whatever happens, the night
-	// pays at least the reservation unless the provider says otherwise.
+	// From here on the request may be billed: the night pays at least the
+	// reservation unless the provider says otherwise, or the request was
+	// refused or failed before any answer (a quota error, a rejected call):
+	// that one costs nothing, and keeping its reservation would let a provider
+	// that is down eat the whole night's cap within seconds.
 	spent := res
 	defer func() { b.Spent += spent }()
 	ch, err := prov.Stream(ctx, req)
 	if err != nil {
+		spent = 0
 		return callResult{}, err
 	}
 	var text strings.Builder
 	var final *core.Message
 	var streamErr error
+	answered := false
 	for ev := range ch {
 		switch ev.Type {
 		case core.ProviderEventTextDelta:
+			answered = true
 			text.WriteString(ev.Delta)
 		case core.ProviderEventDone:
 			final = ev.Message
@@ -136,6 +143,9 @@ func (b *Budget) call(ctx context.Context, factory ProviderFactory, model core.M
 		spent = model.Pricing.Cost(*final.Usage)
 	}
 	if streamErr != nil {
+		if final == nil && !answered {
+			spent = 0
+		}
 		return callResult{Cost: spent}, streamErr
 	}
 	out := text.String()

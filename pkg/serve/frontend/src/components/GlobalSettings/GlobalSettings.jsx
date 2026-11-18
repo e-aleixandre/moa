@@ -597,7 +597,6 @@ function DreamingModelPage({ state, role, onDone }) {
         {role === "reader"
           ? "Pick the model that reads what changed. A cheap one is enough."
           : "Pick the model that writes the consolidated sheets."}
-        {" "}Only connected providers are offered.
       </p>
       <div role="radiogroup" aria-label={role === "reader" ? "Dreaming reader model" : "Dreaming organizer model"}>
         <Option
