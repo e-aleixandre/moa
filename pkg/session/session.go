@@ -65,6 +65,48 @@ type Session struct {
 	// V1 legacy (only present in old sessions, cleared after migration)
 	Messages        []core.AgentMessage `json:"messages,omitempty"`
 	CompactionEpoch int                 `json:"compaction_epoch,omitempty"`
+
+	// PromptContext is the session's frozen prompt. It comes after the
+	// conversation so listing sessions never reads it. Absent in sessions
+	// saved before it existed.
+	PromptContext *PromptContext `json:"prompt_context,omitempty"`
+}
+
+// PromptContextVersion is the current PromptContext format.
+const PromptContextVersion = 1
+
+// PromptContext is what a session's system prompt was built from, and the
+// prompt itself, frozen with the session.
+//
+// The prompt is part of the cached prefix, and Anthropic binds every signed
+// thinking block to that prefix: rebuilding it after a restart with a new
+// date, commit or AGENTS.md costs the cache and every thinking block in the
+// conversation. So a restored session sends System byte for byte, and only a
+// compaction, Start fresh or a reload builds a new one (owner's decision,
+// 18/11/2026).
+//
+// The inputs are kept beside the prompt so a rebuild that is not one of those
+// (the tool set changing) keeps the context the session was frozen with.
+type PromptContext struct {
+	Version int `json:"version"`
+	// CWD is the directory the prompt was built for; a session restored
+	// elsewhere builds a new one.
+	CWD         string    `json:"cwd"`
+	Now         time.Time `json:"now"`
+	Git         string    `json:"git,omitempty"`
+	AgentsMD    string    `json:"agents_md,omitempty"`
+	SkillsIndex string    `json:"skills_index,omitempty"`
+	MemoryIndex string    `json:"memory_index,omitempty"`
+	OwnerRole   string    `json:"owner_role,omitempty"`
+	OwnerBook   string    `json:"owner_book,omitempty"`
+	// System is the base system prompt exactly as the session last installed
+	// it (without the goal directive, which is composed on top).
+	System string `json:"system"`
+}
+
+// Usable reports whether pc can be restored into a session working in cwd.
+func (pc *PromptContext) Usable(cwd string) bool {
+	return pc != nil && pc.Version == PromptContextVersion && pc.System != "" && pc.CWD == cwd
 }
 
 // Summary is a lightweight session descriptor without messages.

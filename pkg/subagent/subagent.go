@@ -287,6 +287,10 @@ type ResumedTranscript struct {
 	// Daybreak is whether the child ran with the Daybreak program; with its
 	// recorded model it resumes in that mode.
 	Daybreak bool
+	// SystemPrompt is the prompt the child ran with. A resume sends it byte
+	// for byte, so the child keeps its cached prefix and its signed thinking;
+	// empty on transcripts saved before it was recorded, which get a new one.
+	SystemPrompt string
 }
 
 // RegisterAll registers the subagent tools on reg and returns a handle onto
@@ -440,7 +444,10 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			if cfg.Sources != nil {
 				agentsMD, skillsIndex, memoryIndex = cfg.Sources.Snapshot()
 			}
-			systemPrompt := buildSystemPrompt(promptBuilder, agentsMD, childReg.Specs(), cfg.WorkspaceRoot, skillsIndex, memoryIndex)
+			systemPrompt := resumed.SystemPrompt
+			if systemPrompt == "" {
+				systemPrompt = buildSystemPrompt(promptBuilder, agentsMD, childReg.Specs(), cfg.WorkspaceRoot, skillsIndex, memoryIndex)
+			}
 			// Captured from the launching (or resuming) run's tool call: the
 			// child's context derives from AppCtx, so whatever it charges must
 			// travel explicitly.
@@ -459,6 +466,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 				}
 				jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 				job := jobs.createWithOrigin(task, model.ID, jobCancel, originToolCallID, thinkingLevel)
+				jobs.setSystemPrompt(job.id, systemPrompt)
 				jobs.setDaybreak(job.id, daybreak)
 				// Isolate the child's shell state: seed a copy from the parent
 				// (read from the spawning ctx). Always tag the child context with
@@ -490,6 +498,7 @@ func newSubagent(cfg Config, jobs *jobStore) core.Tool {
 			// it has not been promoted.
 			jobCtx, jobCancel := context.WithCancel(cfg.AppCtx)
 			job := jobs.createSyncWithOrigin(task, model.ID, jobCancel, originToolCallID, thinkingLevel)
+			jobs.setSystemPrompt(job.id, systemPrompt)
 			jobs.setDaybreak(job.id, daybreak)
 			// Isolate the child's shell state (subshell semantics): seed a
 			// copy from the parent. Always tag the child ctx with the job's own

@@ -46,6 +46,9 @@ type servePersister struct {
 	// entries that are not a revision of the live tree.
 	savedTree *session.Tree
 	savedRev  uint64
+	// promptContext returns the session's frozen prompt, nil while it has
+	// none. Nil (or a nil result) leaves whatever the session file held.
+	promptContext func() *session.PromptContext
 }
 
 func newServePersister(persisted *session.Session, store *session.FileStore, titleState func() (string, string, bool)) *servePersister {
@@ -68,6 +71,7 @@ func (sp *servePersister) SnapshotAcknowledged(messages []core.AgentMessage, epo
 
 func (sp *servePersister) snapshot(messages []core.AgentMessage, epoch int, metadata map[string]any, acknowledged bool) error {
 	metadata = sp.withMCPTools(metadata)
+	prompt := sp.currentPromptContext()
 	sp.mu.Lock()
 	if sp.deleted || sp.persisted == nil || sp.store == nil {
 		sp.mu.Unlock()
@@ -89,6 +93,9 @@ func (sp *servePersister) snapshot(messages []core.AgentMessage, epoch int, meta
 	copy(snapshot.Messages, messages)
 	snapshot.CompactionEpoch = epoch
 	sp.settleVoiceOwed(&snapshot)
+	if prompt != nil {
+		snapshot.PromptContext = prompt
+	}
 	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
 
 	store := sp.store
@@ -122,6 +129,7 @@ func (sp *servePersister) SnapshotTreeAcknowledged(entries []session.Entry, leaf
 
 func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, metadata map[string]any, acknowledged bool) error {
 	metadata = sp.withMCPTools(metadata)
+	prompt := sp.currentPromptContext()
 	sp.mu.Lock()
 	if sp.deleted || sp.persisted == nil || sp.store == nil {
 		sp.mu.Unlock()
@@ -134,7 +142,7 @@ func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, m
 	// commit saves a staged copy), so what is on disk no longer matches one.
 	sp.savedTree = nil
 
-	snapshot := sp.treeSnapshotLocked(append([]session.Entry(nil), entries...), leafID, metadata)
+	snapshot := sp.treeSnapshotLocked(append([]session.Entry(nil), entries...), leafID, metadata, prompt)
 	store := sp.store
 	// Save under the lock — see the rationale in Snapshot.
 	err := store.Save(&snapshot)
@@ -157,6 +165,7 @@ func (sp *servePersister) snapshotTree(entries []session.Entry, leafID string, m
 // time) is the one on disk: each write rewrites the whole transcript.
 func (sp *servePersister) SnapshotTreeRevision(tree *session.Tree, metadata map[string]any, acknowledged bool) error {
 	metadata = sp.withMCPTools(metadata)
+	prompt := sp.currentPromptContext()
 	rev := tree.Rev()
 	sp.mu.Lock()
 	unchanged := sp.treeSavedLocked(tree, rev)
@@ -179,7 +188,7 @@ func (sp *servePersister) SnapshotTreeRevision(tree *session.Tree, metadata map[
 	if unchanged {
 		entries, leafID = sp.persisted.Entries, sp.persisted.LeafID
 	}
-	snapshot := sp.treeSnapshotLocked(entries, leafID, metadata)
+	snapshot := sp.treeSnapshotLocked(entries, leafID, metadata, prompt)
 	if unchanged && sameSavedHeader(&snapshot, sp.persisted) {
 		sp.mu.Unlock()
 		sp.saved()
@@ -206,13 +215,16 @@ func (sp *servePersister) SnapshotTreeRevision(tree *session.Tree, metadata map[
 // treeSnapshotLocked is the session file a tree save writes. It keeps entries
 // as given: they must not be changed afterwards (persisted may end up holding
 // them). Called under sp.mu.
-func (sp *servePersister) treeSnapshotLocked(entries []session.Entry, leafID string, metadata map[string]any) session.Session {
+func (sp *servePersister) treeSnapshotLocked(entries []session.Entry, leafID string, metadata map[string]any, prompt *session.PromptContext) session.Session {
 	snapshot := *sp.persisted
 	snapshot.Title, snapshot.TitleSource, _ = sp.titleState() // see Snapshot
 	snapshot.Version = session.SessionVersion
 	snapshot.Entries = entries
 	snapshot.LeafID = leafID
 	sp.settleVoiceOwed(&snapshot)
+	if prompt != nil {
+		snapshot.PromptContext = prompt
+	}
 	snapshot.Metadata = session.ApplyPreservedMetadata(metadata, sp.preserved)
 	// Clear v1 fields
 	snapshot.Messages = nil
@@ -266,6 +278,15 @@ func sameSavedHeader(next, saved *session.Session) bool {
 		return false
 	}
 	return bytes.Equal(ja, jb)
+}
+
+// currentPromptContext is the session's frozen prompt for the next snapshot.
+// Called before sp.mu, like withMCPTools: it reads the session's sources.
+func (sp *servePersister) currentPromptContext() *session.PromptContext {
+	if sp.promptContext == nil {
+		return nil
+	}
+	return sp.promptContext()
 }
 
 // withMCPTools sets the live MCP tool snapshot into a snapshot's metadata, so

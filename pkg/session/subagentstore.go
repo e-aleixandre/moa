@@ -46,6 +46,10 @@ type SubagentTranscript struct {
 	// resume continues in the same mode. Absent on older transcripts (off).
 	Daybreak bool                `json:"daybreak,omitempty"`
 	Messages []core.AgentMessage `json:"messages"`
+	// SystemPrompt is the prompt the child ran with, so a resume sends the
+	// same one. After the messages: summaries never read it. Absent on older
+	// transcripts.
+	SystemPrompt string `json:"system_prompt,omitempty"`
 }
 
 // SubagentStore persists subagent transcripts for one parent session in a

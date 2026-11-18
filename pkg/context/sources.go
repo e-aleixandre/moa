@@ -2,8 +2,11 @@ package agentcontext
 
 import (
 	"sync"
+	"time"
 
+	"github.com/e-aleixandre/moa/pkg/git"
 	"github.com/e-aleixandre/moa/pkg/memory"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/skill"
 )
 
@@ -33,6 +36,14 @@ type Sources struct {
 	// owner's conversation is open. Set only in an owner's session.
 	ownerRole     func() string
 	ownerRoleText string
+	// now and gitCtx date the prompt and name its last commit. They are pinned
+	// like the inputs above: only a regeneration moves them.
+	clock  func() time.Time
+	now    time.Time
+	gitCtx string
+	// system is the base prompt last built from these values: with them, it
+	// is what a session freezes (see session.PromptContext).
+	system string
 }
 
 // NewSources captures what a session was built with. cwd and memStore are kept
@@ -45,6 +56,101 @@ func NewSources(cwd string, memStore *memory.Store, agentsMD, skillsIndex, memor
 		skillsIndex: skillsIndex,
 		memoryIndex: memoryIndex,
 	}
+}
+
+// WithClock pins the date and the git section the prompt is built with,
+// reading them now; clock is also what a regeneration reads. Nil means
+// time.Now.
+func (s *Sources) WithClock(clock func() time.Time) *Sources {
+	if s == nil {
+		return s
+	}
+	if clock == nil {
+		clock = time.Now
+	}
+	gitCtx := git.Context(s.cwd)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clock = clock
+	s.now = clock()
+	s.gitCtx = gitCtx
+	return s
+}
+
+// Pinned returns the date and the git section the prompt is built with.
+func (s *Sources) Pinned() (time.Time, string) {
+	if s == nil {
+		return time.Time{}, ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.now, s.gitCtx
+}
+
+// RecordBuilt records the base prompt just built from these values, as the
+// one the session runs with.
+func (s *Sources) RecordBuilt(system string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.system = system
+}
+
+// Built returns the base prompt last recorded with RecordBuilt.
+func (s *Sources) Built() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.system
+}
+
+// Freeze returns the values and the prompt as one consistent set, for the
+// session to persist. ok is false until a prompt was recorded.
+func (s *Sources) Freeze() (pc session.PromptContext, ok bool) {
+	if s == nil {
+		return pc, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.system == "" {
+		return pc, false
+	}
+	return session.PromptContext{
+		Version:     session.PromptContextVersion,
+		CWD:         s.cwd,
+		Now:         s.now,
+		Git:         s.gitCtx,
+		AgentsMD:    s.agentsMD,
+		SkillsIndex: s.skillsIndex,
+		MemoryIndex: s.memoryIndex,
+		OwnerRole:   s.ownerRoleText,
+		OwnerBook:   s.ownerBookText,
+		System:      s.system,
+	}, true
+}
+
+// Restore replaces the values with a frozen set, so the session goes on with
+// the context it had rather than what is on disk now. The loaders stay: a
+// regeneration still reads the disk.
+func (s *Sources) Restore(pc session.PromptContext) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.now, s.gitCtx = pc.Now, pc.Git
+	s.agentsMD, s.skillsIndex, s.memoryIndex = pc.AgentsMD, pc.SkillsIndex, pc.MemoryIndex
+	if s.ownerRole != nil {
+		s.ownerRoleText = pc.OwnerRole
+	}
+	if s.ownerBook != nil {
+		s.ownerBookText = pc.OwnerBook
+	}
+	s.system = pc.System
 }
 
 // WithOwnerBook attaches the project-book loader and reads it once. A nil
@@ -151,7 +257,10 @@ func (s *Sources) Reload() (changed []Changed, revert func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	prev := struct{ agentsMD, skillsIndex, memoryIndex, ownerBook, ownerRole string }{s.agentsMD, s.skillsIndex, s.memoryIndex, s.ownerBookText, s.ownerRoleText}
+	prev := struct {
+		agentsMD, skillsIndex, memoryIndex, ownerBook, ownerRole, gitCtx, system string
+		now                                                                      time.Time
+	}{s.agentsMD, s.skillsIndex, s.memoryIndex, s.ownerBookText, s.ownerRoleText, s.gitCtx, s.system, s.now}
 	if agentsMD != s.agentsMD {
 		changed = append(changed, Changed{Label: "AGENTS.md", Content: agentsMD})
 		s.agentsMD = agentsMD
@@ -178,5 +287,49 @@ func (s *Sources) Reload() (changed []Changed, revert func()) {
 		s.agentsMD, s.skillsIndex, s.memoryIndex = prev.agentsMD, prev.skillsIndex, prev.memoryIndex
 		s.ownerBookText = prev.ownerBook
 		s.ownerRoleText = prev.ownerRole
+		s.now, s.gitCtx, s.system = prev.now, prev.gitCtx, prev.system
 	}
+}
+
+// Labels of the Changed entries Regenerate adds to Reload's.
+const (
+	LabelDate = "Date"
+	LabelGit  = "Last commit"
+)
+
+// Regenerate is Reload plus a new date and git section: what a compaction or
+// Start fresh does, since the session's cached prefix is lost anyway. The date
+// keeps its pinned time while the day is the same, so regenerating twice in a
+// day does not move it. revert undoes all of it.
+func (s *Sources) Regenerate() (changed []Changed, revert func()) {
+	if s == nil {
+		return nil, func() {}
+	}
+	s.mu.RLock()
+	clock := s.clock
+	s.mu.RUnlock()
+	if clock == nil {
+		clock = time.Now
+	}
+	now := clock()
+	gitCtx := git.Context(s.cwd)
+
+	changed, revert = s.Reload()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !sameDay(now, s.now) {
+		changed = append(changed, Changed{Label: LabelDate, Content: now.Format("2006-01-02")})
+		s.now = now
+	}
+	if gitCtx != s.gitCtx {
+		changed = append(changed, Changed{Label: LabelGit, Content: gitCtx})
+		s.gitCtx = gitCtx
+	}
+	return changed, revert
+}
+
+func sameDay(a, b time.Time) bool {
+	ay, am, ad := a.Date()
+	by, bm, bd := b.Date()
+	return ay == by && am == bm && ad == bd
 }

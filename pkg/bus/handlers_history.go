@@ -15,13 +15,17 @@ import (
 	"github.com/e-aleixandre/moa/pkg/tasks"
 )
 
-// reloadPromptAfterCut re-reads the prompt sources once the model's context has
+// reloadPromptAfterCut regenerates the prompt once the model's context has
 // been cut (compaction or Start fresh). The cached prefix is already lost at
-// that point, so picking up edited AGENTS.md, skills or memory is free. Silent,
-// like /reload. Must run with the agent idle: it is called right after the cut,
-// while the session still holds its busy state.
+// that point, so picking up edited AGENTS.md, skills or memory, today's date
+// and the last commit is free. Silent, like /reload. Must run with the agent
+// idle: it is called right after the cut, while the session still holds its
+// busy state.
 func reloadPromptAfterCut(sctx *SessionContext) {
-	if sctx.ReloadPrompt != nil {
+	switch {
+	case sctx.RegeneratePrompt != nil:
+		sctx.RegeneratePrompt()
+	case sctx.ReloadPrompt != nil:
 		sctx.ReloadPrompt()
 	}
 }

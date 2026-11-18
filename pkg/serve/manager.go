@@ -513,6 +513,9 @@ func (s *ManagedSession) saveSubagentTranscript(jobID, status, result, resultErr
 		CostUSD:    costUSD,
 		FinishedAt: finishedAt,
 		Messages:   s.subagents.Messages(jobID),
+		// The prompt the child runs with, or the one it was saved with when
+		// the job is no longer tracked here.
+		SystemPrompt: s.subagents.SystemPrompt(jobID),
 	}
 	for _, info := range s.subagents.Snapshot() {
 		if info.JobID == jobID {
@@ -531,8 +534,13 @@ func (s *ManagedSession) saveSubagentTranscript(jobID, status, result, resultErr
 			break
 		}
 	}
-	if previous, err := store.Load(jobID); err == nil && previous.Title != "" && t.Title == "" {
-		t.Title = previous.Title
+	if previous, err := store.Load(jobID); err == nil {
+		if previous.Title != "" && t.Title == "" {
+			t.Title = previous.Title
+		}
+		if t.SystemPrompt == "" {
+			t.SystemPrompt = previous.SystemPrompt
+		}
 	}
 	return s.persister.saveSubagentTranscript(s.ID, t)
 }
@@ -961,6 +969,8 @@ type Manager struct {
 	// its time source and the task repository's.
 	planner *taskScheduler
 	clock   taskClock
+	// promptClock: see ManagerConfig.promptClock.
+	promptClock func() time.Time
 	// questionCalls holds the questions whose escalation this process is
 	// firing (see escalateQuestions); questionCallHooks are its test seams.
 	questionCalls     sync.Map
@@ -1099,6 +1109,9 @@ type ManagerConfig struct {
 	// source; schedulerHooks are its test seams. Tests only.
 	clock          taskClock
 	schedulerHooks taskSchedulerHooks
+	// promptClock replaces the clock a session's prompt is dated with. Tests
+	// only: a restart on another day must be reproducible.
+	promptClock func() time.Time
 }
 
 // NewManager creates a Manager. The context controls the lifetime of all agent
@@ -1270,6 +1283,7 @@ func NewManager(ctx context.Context, cfg ManagerConfig) *Manager {
 	}
 	m.attention.Start()
 	m.clock = cfg.clock
+	m.promptClock = cfg.promptClock
 	if m.clock == nil {
 		m.clock = systemClock{}
 	} else if m.tasks != nil {
