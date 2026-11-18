@@ -4,7 +4,7 @@
 // words; numbered questions get quick replies.
 import { useEffect, useRef } from 'preact/hooks';
 import {
-  BLOCK_SELECTOR, INTERACTIVE_SELECTOR, QUICK_REPLIES, clip, questionMarker, resolveAnchors,
+  BLOCK_SELECTOR, INTERACTIVE_SELECTOR, docBlocks, QUICK_REPLIES, clip, questionMarker, resolveAnchors,
 } from '../../data/doc-notes.js';
 import { NOTES_MARKS, NOTES_PICK, NOTES_QUICK, NOTES_READY } from './notes-bridge.js';
 
@@ -22,9 +22,11 @@ function blockQuote(el) {
   if (el.tagName === 'TR') {
     return Array.from(el.children).map((cell) => clean(cell.textContent)).filter(Boolean).join(' | ');
   }
-  if (el.querySelector('ul, ol')) {
+  // A container (a callout div) is its own text, not its commentable children's.
+  const container = !el.matches(BLOCK_SELECTOR);
+  if (container || el.querySelector('ul, ol')) {
     const copy = el.cloneNode(true);
-    copy.querySelectorAll('ul, ol').forEach((list) => list.remove());
+    copy.querySelectorAll(container ? '[data-dn]' : 'ul, ol').forEach((list) => list.remove());
     return clean(copy.textContent);
   }
   return clean(el.textContent);
@@ -77,7 +79,7 @@ export function useMarkdownNotes(articleRef, dn, html) {
   useEffect(() => {
     const root = articleRef.current;
     if (!root || !html || !dnRef.current) return;
-    root.querySelectorAll(BLOCK_SELECTOR).forEach((el, index) => { el.dataset.dn = String(index); });
+    docBlocks(root).forEach((el, index) => { el.dataset.dn = String(index); });
     for (const p of root.querySelectorAll('p')) {
       const lead = p.firstElementChild;
       if (!lead || !['STRONG', 'B'].includes(lead.tagName) || !questionMarker(lead.textContent, p.textContent)) continue;

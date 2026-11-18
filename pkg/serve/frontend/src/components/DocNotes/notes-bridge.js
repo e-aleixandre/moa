@@ -3,7 +3,7 @@
 // ESCAPE_BRIDGE. The sandbox and the CSP are untouched; it is one more inline
 // script under the policy that already allows them. The host only listens to
 // its own iframe and validates every field it takes from here.
-import { BLOCK_SELECTOR, INTERACTIVE_SELECTOR, QUESTION_LEAD, QUICK_REPLIES } from '../../data/doc-notes.js';
+import { BLOCK_SELECTOR, CONTAINER_SELECTOR, NOT_CONTAINER_SELECTOR, INTERACTIVE_SELECTOR, QUESTION_LEAD, QUICK_REPLIES } from '../../data/doc-notes.js';
 
 export const NOTES_PICK = 'moa-dn-pick';
 export const NOTES_QUICK = 'moa-dn-quick';
@@ -11,15 +11,20 @@ export const NOTES_READY = 'moa-dn-ready';
 export const NOTES_MARKS = 'moa-dn-marks';
 
 export const NOTES_BRIDGE = String.raw`<script>(function(){
-var SEL=${JSON.stringify(BLOCK_SELECTOR)},INTER=${JSON.stringify(INTERACTIVE_SELECTOR)},QRE=new RegExp(${JSON.stringify(QUESTION_LEAD.source)}),REPLIES=${JSON.stringify(QUICK_REPLIES)};
+var SEL=${JSON.stringify(BLOCK_SELECTOR)},CONT=${JSON.stringify(CONTAINER_SELECTOR)},NOTC=${JSON.stringify(NOT_CONTAINER_SELECTOR)},INTER=${JSON.stringify(INTERACTIVE_SELECTOR)},QRE=new RegExp(${JSON.stringify(QUESTION_LEAD.source)}),REPLIES=${JSON.stringify(QUICK_REPLIES)};
 var st=document.createElement('style');
 st.textContent='[data-dn]{cursor:pointer}.dn-picked{background:rgba(250,179,135,.22)!important;box-shadow:-3px 0 0 #fab387!important;border-radius:3px}.dn-noted{box-shadow:-3px 0 0 #fab387!important}.dn-sent{box-shadow:-3px 0 0 #9399b2!important}.dn-quick-row{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 14px}.dn-quick{min-height:32px;padding:0 12px;border:1px solid #7f849c;border-radius:16px;background:none;color:inherit;font:inherit;font-size:14px;cursor:pointer}.dn-quick.is-on{border-color:#fab387;background:rgba(250,179,135,.2)}';
 (document.head||document.documentElement).appendChild(st);
-function all(){return Array.prototype.slice.call(document.body.querySelectorAll(SEL));}
+function own(el){return Array.prototype.some.call(el.childNodes,function(n){return n.nodeType===3&&n.data.trim();});}
+function container(el){
+  if(el.matches(NOTC)||el.closest(INTER)||!own(el))return false;
+  return el.matches(CONT)||!/^(inline|contents|none|ruby)/.test(getComputedStyle(el).display);
+}
+function all(){return Array.prototype.filter.call(document.body.querySelectorAll('*'),function(el){return el.matches(SEL)||container(el);});}
 function clean(t){return t.replace(/\s+/g,' ').trim();}
 function quote(el){
   if(el.tagName==='TR'){return Array.prototype.map.call(el.children,function(c){return clean(c.textContent);}).filter(Boolean).join(' | ');}
-  var c=el.cloneNode(true);Array.prototype.forEach.call(c.querySelectorAll('ul,ol'),function(n){n.remove();});
+  var box=!el.matches(SEL),c=el.cloneNode(true);Array.prototype.forEach.call(c.querySelectorAll(box?'[data-dn]':'ul,ol'),function(n){n.remove();});
   return clean(c.textContent);
 }
 function where(el){

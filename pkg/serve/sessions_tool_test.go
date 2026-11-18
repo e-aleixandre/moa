@@ -705,3 +705,37 @@ func TestSessionsToolSendRefusesAQuestionInTheUsersSession(t *testing.T) {
 		t.Fatalf("send queued %d messages, want none: %+v", len(steers), steers)
 	}
 }
+
+// An idle session with live async work must not read as stopped; without jobs
+// the line is unchanged.
+func TestSessionsToolListShowsBackgroundJobs(t *testing.T) {
+	ctx := context.Background()
+	mgr := newOwnerTestManager(t, ctx)
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	child := ownerChild(t, mgr, root, "child")
+
+	line := func() string {
+		for _, l := range strings.Split(toolText(runSessionsTool(t, ownerSess, map[string]any{"action": "list"})), "\n") {
+			if strings.HasPrefix(l, "- "+child.ID+" ") {
+				return l
+			}
+		}
+		t.Fatalf("session %s not listed", child.ID)
+		return ""
+	}
+	if l := line(); !strings.HasPrefix(l, "- "+child.ID+" [idle] ") {
+		t.Fatalf("no jobs: %q", l)
+	}
+	b := child.runtime.Bus
+	b.Publish(bus.SubagentStarted{SessionID: child.ID, JobID: "a1", Async: true})
+	rosterJobs(t, mgr, child.ID, 1)
+	if l := line(); !strings.HasPrefix(l, "- "+child.ID+" [idle · 1 background job] ") {
+		t.Fatalf("one job: %q", l)
+	}
+	b.Publish(bus.BashJobStarted{SessionID: child.ID, JobID: "b1", Command: "sleep 99"})
+	rosterJobs(t, mgr, child.ID, 2)
+	if l := line(); !strings.HasPrefix(l, "- "+child.ID+" [idle · 2 background jobs] ") {
+		t.Fatalf("two jobs: %q", l)
+	}
+}

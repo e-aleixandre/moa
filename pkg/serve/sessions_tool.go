@@ -232,6 +232,19 @@ func ownerTargetError(own owner.Owner, id, kind, cwd string, detached bool) erro
 	return nil
 }
 
+// rosterState is the state word of a roster line. A turn that ended with async
+// subagents or background jobs alive is idle, which reads as stopped; naming the
+// jobs says it still works. Without jobs the text is the bare state.
+func rosterState(info SessionInfo) string {
+	switch n := info.BackgroundJobs; {
+	case n == 1:
+		return string(info.State) + " · 1 background job"
+	case n > 1:
+		return fmt.Sprintf("%s · %d background jobs", info.State, n)
+	}
+	return string(info.State)
+}
+
 // ownerListSessions is the roster the owner's balance is built on, so it
 // prints the times that balance is asked for: how long ago each session moved,
 // and — when one is blocked — how long it has been waiting. A truncated list
@@ -273,7 +286,7 @@ func (m *Manager) ownerListSessions(own owner.Owner) core.Result {
 			fmt.Fprintf(&sb, "- %s detached by the user\n", info.ID)
 			continue
 		}
-		fmt.Fprintf(&sb, "- %s [%s] %s", info.ID, info.State, info.Title)
+		fmt.Fprintf(&sb, "- %s [%s] %s", info.ID, rosterState(info), info.Title)
 		if info.CWD != own.Root {
 			fmt.Fprintf(&sb, " (%s)", info.CWD)
 		}
