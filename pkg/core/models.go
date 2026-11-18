@@ -158,7 +158,7 @@ var knownModels = map[string]Model{
 	"gpt-6.1-sol": {
 		ID: "gpt-6.1-sol", Provider: "openai", API: "openai-chat",
 		Name: "GPT-6.1 Sol", MaxInput: 1_050_000, MaxOutput: 128_000,
-		// Short-context (under 272K tokens) pricing is $2/$10 input/output.
+		// Short-context (up to 272K input tokens) pricing is $2/$10 input/output.
 		// OpenAI bills the whole request at its long-context rates above it.
 		Pricing: &Pricing{
 			Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5,

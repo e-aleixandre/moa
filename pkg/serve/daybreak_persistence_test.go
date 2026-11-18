@@ -280,16 +280,16 @@ func TestSubagentConfigIncompatibleUnderDaybreak(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("PATCH %d %s", w.Code, w.Body.String())
 	}
-	if model, on := subagentInfo(t, s, jobID); model != "gpt-6.1-sol" || on {
-		t.Errorf("card after PATCH: model=%s daybreak=%v, want gpt-6.1-sol standard", model, on)
+	if model, on := subagentInfo(t, s, jobID); model != "gpt-6.2-sol" || on {
+		t.Errorf("card after PATCH: model=%s daybreak=%v, want gpt-6.2-sol standard", model, on)
 	}
 	finish()
 	reqs := p.requests()
 	if len(reqs) != 2 {
 		t.Fatalf("requests=%d", len(reqs))
 	}
-	if reqs[1].Model.ID != "gpt-6.1-sol" || reqs[1].Options.AccessProgram != "" {
-		t.Errorf("next request %s/%q, want gpt-6.1-sol standard", reqs[1].Model.ID, reqs[1].Options.AccessProgram)
+	if reqs[1].Model.ID != "gpt-6.2-sol" || reqs[1].Options.AccessProgram != "" {
+		t.Errorf("next request %s/%q, want gpt-6.2-sol standard", reqs[1].Model.ID, reqs[1].Options.AccessProgram)
 	}
 }
 

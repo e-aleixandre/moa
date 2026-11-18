@@ -189,9 +189,10 @@ model does with them differs:
   above that the whole request is priced at $0.50 / $2.50.
 - **`xhigh`** is its own effort level on every Anthropic model except Haiku
   4.5, which caps it at `high`. OpenAI models accept `xhigh` as its own
-  effort level. On **GPT-6 Astra**, **GPT-6.2 Astra** and **GPT-6.2 Sol**, the five UI positions map to `low`,
-  `medium`, `high`, `xhigh`, and `max` respectively, so `off` is Astra's
-  lowest reasoning effort rather than disabled reasoning.
+  effort level. On **GPT-6 Astra**, **GPT-6.1 Sol**, **GPT-6.1 Terra**,
+  **GPT-6.2 Astra** and **GPT-6.2 Sol**, the five UI positions map to `low`,
+  `medium`, `high`, `xhigh`, and `max` respectively, so `off` is the lowest
+  reasoning effort rather than disabled reasoning.
 
 ## Fast mode
 

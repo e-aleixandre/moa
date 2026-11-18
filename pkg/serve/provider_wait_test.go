@@ -454,7 +454,7 @@ func TestProviderWaitServeChildTargetedControlSidecarAndParentIsolation(t *testi
 		t.Fatalf("parent cascaded=%+v", snapshots)
 	}
 	captured, capturedTools, _ := sess.runtime.Context().SnapshotInFlightWithCut()
-	resp = apiReq(t, srv, http.MethodPatch, "/api/sessions/"+sess.ID+"/subagents/"+jobID, `{"model":"openai/gpt-6.1-sol","thinking":""}`)
+	resp = apiReq(t, srv, http.MethodPatch, "/api/sessions/"+sess.ID+"/subagents/"+jobID, `{"model":"openai/`+nextModel.ID+`","thinking":""}`)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		t.Fatalf("targeted PATCH=%d", resp.StatusCode)

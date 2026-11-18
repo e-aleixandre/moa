@@ -148,9 +148,10 @@ rates. Muse models always reason, so `off` resolves to the lowest effort.
 The OpenAI aliases `sol`, `astra`, `terra` and `luna` point at `gpt-6.2-sol`,
 `gpt-6.2-astra`, `gpt-6.1-terra` and `gpt-6-luna`; `gpt-6` points at `gpt-6-astra`.
 `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-astra` and `gpt-5.6-terra` stay selectable by ID.
-Astra, Sol 6.1 and Sol 6.2, GPT-6.1 Terra and GPT-6.2 Astra map their five thinking
-positions to `low`, `medium`, `high`, `xhigh`, and `max`, so the `off`
-position selects the lowest reasoning effort rather than disabling reasoning.
+GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6.2 Astra and GPT-6.2 Sol map
+their five thinking positions to `low`, `medium`, `high`, `xhigh`, and `max`,
+so the `off` position selects the lowest reasoning effort rather than
+disabling reasoning.
 
 ### MCP servers
 
