@@ -14,6 +14,29 @@ const QUOTE_MAX = 600;
 export const BLOCK_SELECTOR = 'li, p, h1, h2, h3, h4, h5, h6, blockquote, pre, tr, figure, dt, dd';
 export const INTERACTIVE_SELECTOR = 'a, button, input, select, textarea, summary, label, [role="button"], .dn-quick';
 
+// A container that is not one of those tags (a callout div, a card, an aside)
+// is a block too when text sits directly in it; a row's cells belong to the row.
+export const CONTAINER_SELECTOR = 'div, section, article, aside, header, footer, main, nav, details, fieldset, figcaption, address, form, center';
+export const NOT_CONTAINER_SELECTOR = `${BLOCK_SELECTOR}, td, th, script, style, noscript, template, .dn-quick-row, ${INTERACTIVE_SELECTOR}`;
+
+const defaultDisplay = (el) => globalThis.getComputedStyle?.(el)?.display || '';
+
+// isTextContainer — an element, outside BLOCK_SELECTOR, that is block-level
+// and holds text of its own (not only inside children). `displayOf` is a seam
+// so the check can run without a layout engine.
+export function isTextContainer(el, displayOf = defaultDisplay) {
+  if (el.matches(NOT_CONTAINER_SELECTOR) || el.closest(INTERACTIVE_SELECTOR)) return false;
+  if (!Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.data.trim())) return false;
+  return el.matches(CONTAINER_SELECTOR) || !/^(inline|contents|none|ruby)/.test(displayOf(el));
+}
+
+// docBlocks — the commentable blocks of a document, in document order. A tap
+// lands on the closest one (`closest('[data-dn]')`), so a container holding
+// paragraphs still gives each paragraph, and its own loose text the container.
+export function docBlocks(root, displayOf = defaultDisplay) {
+  return Array.from(root.querySelectorAll('*')).filter((el) => el.matches(BLOCK_SELECTOR) || isTextContainer(el, displayOf));
+}
+
 export const QUICK_REPLIES = ['Yes', 'No', 'Your call'];
 // "Your call" must reach the agent as an instruction, not as a bare phrase.
 const YOUR_CALL = 'Your call';
