@@ -10,7 +10,7 @@ import (
 // the owner's prompt:
 //
 //	PROJECT.md              the index every session of the project is given (8 KiB)
-//	OWNER.md                the user's preferences for the owner; the owner never writes it
+//	OWNER.md                the user's instructions for the owner; the owner never writes it
 //	areas/README.md         the shape of an area and of a sheet
 //	areas/<area>/README.md  the area's cover: what is inspected, what is missing
 //	areas/<area>/<sheet>.md one feature: frontmatter + the six sections
@@ -23,13 +23,13 @@ import (
 // owner's context proving it is not one.
 
 // ReservedFiles are book paths the owner's tool must never write. OWNER.md is
-// the user's half of the contract — the preferences the owner is given — and an
+// the user's half of the contract — the instructions the owner is given — and an
 // agent that can rewrite its own instructions has none.
 var ReservedFiles = map[string]bool{
 	"OWNER.md": true,
 }
 
-// OwnerFile is the user's preferences file, read into the owner's prompt.
+// OwnerFile is the user's instructions file, read into the owner's prompt.
 const OwnerFile = "OWNER.md"
 
 // Template is the initial book: one file per part of the schema, each

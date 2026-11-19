@@ -56,7 +56,7 @@ func NewTool(dir string, writable bool) core.Tool {
 
 // newTool is the single builder. hideReserved makes the user's files (OWNER.md)
 // invisible rather than merely unwritable, which is what a child of the owner
-// gets: the preferences the user wrote for the owner are not context for a
+// gets: the instructions the user wrote for the owner are not context for a
 // session the owner delegated to.
 func newTool(dir string, writable, hideReserved bool) core.Tool {
 	description := "Read the project book: the owner's curated record of this project " +

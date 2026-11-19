@@ -152,6 +152,9 @@ func TestRolePromptLetsOwnerMDGovern(t *testing.T) {
 	for _, gone := range []string{
 		"What you never decide", "never override", "never covers a deployment",
 		"Permissions, deployments, releases", "integration authorization",
+		// Public code does not assume a company behind every project, nor
+		// the section names of one user's private AGENTS.md.
+		"company and its customers", "Ownership section",
 	} {
 		if strings.Contains(flat, gone) {
 			t.Fatalf("the role prompt still carries the built-in policy %q", gone)
@@ -159,9 +162,9 @@ func TestRolePromptLetsOwnerMDGovern(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Your instructions set what you decide and what you ask",
-		"AGENTS.md", "Ownership", "ask with ask_user",
+		"the user's AGENTS.md files, OWNER.md and the book's decisions", "ask with ask_user",
 		"You cannot approve tool permissions",
-		"A company and its customers depend on this project",
+		"People depend on this project",
 	} {
 		if !strings.Contains(flat, want) {
 			t.Fatalf("role prompt missing %q", want)
@@ -313,5 +316,79 @@ func TestBookSectionDoesNotRankTheBookAboveTheCode(t *testing.T) {
 	}
 	if !strings.Contains(section, "read its sheet with the book tool") {
 		t.Fatal("the book section no longer asks to read the sheet first")
+	}
+}
+
+// Books seeded before 19/11 start with a header calling OWNER.md preferences
+// that "never override the owner's own rules", which contradicts the prompt
+// that now says the file governs. The exact historic headers are dropped on
+// read; the user's file on disk is left untouched.
+func TestOwnerPrefsDropTheLegacyTemplateHeader(t *testing.T) {
+	legacy := []string{
+		`# The user's preferences for this project
+
+Edit this file yourself. The owner reads it on every turn and cannot write it.
+It carries preferences — how to brief sessions, what to escalate, tone,
+conventions — not permissions: it never overrides the owner's own rules.
+`,
+		`# The user's preferences for this project
+
+Edit this file yourself. The owner cannot write it; it rereads it when its
+session starts, reloads or compacts, not on every turn.
+It carries preferences — how to brief sessions, what to escalate, tone,
+conventions — not permissions: it never overrides the owner's own rules.
+`,
+	}
+	store := NewStore(t.TempDir())
+	own, err := store.Create(t.TempDir(), "Winerim", "", "", false, Avatar{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store.BookDir(own.CodebaseKey), book.OwnerFile)
+	for i, header := range legacy {
+		for _, tc := range []struct{ file, want string }{
+			{header, ""},
+			{header + "\nMerge to master whenever tests pass.\n", "Merge to master whenever tests pass."},
+			{strings.ReplaceAll(header+"\nDeploy on green.\n", "\n", "\r\n"), "Deploy on green."},
+		} {
+			if err := os.WriteFile(path, []byte(tc.file), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got := store.OwnerPrefs(own.CodebaseKey)
+			if strings.TrimSpace(got) != tc.want {
+				t.Errorf("legacy header %d: OwnerPrefs = %q, want %q", i, got, tc.want)
+			}
+			if strings.Contains(RolePrompt("Winerim", "master", got), "never overrides the owner's own rules") {
+				t.Errorf("legacy header %d still reaches the role prompt", i)
+			}
+			if onDisk, _ := os.ReadFile(path); string(onDisk) != tc.file {
+				t.Fatalf("OwnerPrefs rewrote the user's file")
+			}
+		}
+	}
+	// The same words written by the user anywhere but as the seeded header stay.
+	quoted := "My rules.\n\n" + legacy[0]
+	if err := os.WriteFile(path, []byte(quoted), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.OwnerPrefs(own.CodebaseKey); got != quoted {
+		t.Fatalf("text that is not the seeded header was stripped: %q", got)
+	}
+}
+
+// Public docs describe OWNER.md as the user's instructions, and the owner as
+// answering what the book or the user's instructions let it decide.
+func TestDocsDescribeOwnerMDAsInstructions(t *testing.T) {
+	for file, stale := range map[string]string{
+		"../../docs/overview.md": "answers what the book already answers",
+		"../../docs/owners.md":   "your preferences for the owner",
+	} {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), stale) {
+			t.Errorf("%s still says %q", file, stale)
+		}
 	}
 }

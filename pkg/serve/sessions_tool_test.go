@@ -739,3 +739,25 @@ func TestSessionsToolListShowsBackgroundJobs(t *testing.T) {
 		t.Fatalf("two jobs: %q", l)
 	}
 }
+
+// The owner answers a session's question when the book or the user's
+// instructions let it decide (decision of 19/11), in the tool text as in the
+// owner's prompt; approving permissions stays out of the tool's reach.
+func TestSessionsToolAnswerDefersToInstructions(t *testing.T) {
+	m := &Manager{}
+	for _, async := range []bool{false, true} {
+		desc := newSessionsTool(m, "k", async).Description
+		if !strings.Contains(desc, "when the book or your instructions let you decide it") {
+			t.Errorf("async=%v: answer is not deferred to the user's instructions:\n%s", async, desc)
+		}
+		if strings.Contains(desc, "when the book already answers it") {
+			t.Errorf("async=%v: answer is still limited to the book", async)
+		}
+		if !strings.Contains(desc, "You cannot approve permissions") {
+			t.Errorf("async=%v: the capability limit was lost", async)
+		}
+		if !strings.Contains(strings.Join(strings.Fields(owner.RolePrompt("W", "main", "")), " "), "when the book or your instructions let you decide it") {
+			t.Error("the owner prompt and the sessions tool disagree")
+		}
+	}
+}
