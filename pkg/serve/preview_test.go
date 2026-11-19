@@ -511,11 +511,6 @@ func TestPreviewInitialPathComesOnlyFromTheTypedURL(t *testing.T) {
 	var paths []string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.RequestURI())
-		if r.URL.Path == "/redirect" {
-			w.Header().Set("Location", "/elsewhere?x=1")
-			w.WriteHeader(http.StatusFound)
-			return
-		}
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = io.WriteString(w, "ok")
 	}))
@@ -645,5 +640,91 @@ func TestPreviewTypedPreviewTokenIsNotTheCapability(t *testing.T) {
 	}
 	if u.Query().Get("keep") != "1" {
 		t.Fatalf("query lost: %s", u)
+	}
+}
+
+func TestPreviewFirstPageNeverLeavesTheOrigin(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer up.Close()
+	cases := []struct{ name, suffix string }{
+		{"double slash", "//evil.example/x"},
+		{"triple slash", "///evil.example/x"},
+		{"backslash", `/\evil`},
+		{"slash backslash slash", `/\/evil.example`},
+		{"slash double backslash", `/\\evil.example`},
+		{"encoded slashes", "/%2F%2Fevil.example/x"},
+		{"encoded lowercase", "/%2f%2fevil.example/x"},
+		{"encoded backslash", "/%5Cevil.example"},
+		{"at sign", "/@evil.example"},
+		{"dot segments", "/./..//evil.example"},
+		{"slashes with query", "//evil.example/x?a=1&b=2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newPreviewFor(t, up.URL+tc.suffix)
+			protected := p.ProtectedHandler([]string{"node.ts.net"})
+			req := httptest.NewRequest("GET", p.PreviewURL(), nil)
+			req.Host = "node.ts.net:7492"
+			grant := httptest.NewRecorder()
+			protected.ServeHTTP(grant, req)
+			assertOnOrigin(t, "exchange", grant)
+
+			// Same guard for a browser that already holds the cookie.
+			sep := "?"
+			if strings.Contains(tc.suffix, "?") {
+				sep = "&"
+			}
+			again := httptest.NewRequest("GET", "https://node.ts.net:7492"+tc.suffix+sep+"preview_token=junk", nil)
+			again.Host = "node.ts.net:7492"
+			again.AddCookie(findCookie(grant.Result().Cookies(), previewAuthCookie))
+			cookie := httptest.NewRecorder()
+			protected.ServeHTTP(cookie, again)
+			assertOnOrigin(t, "cookie", cookie)
+		})
+	}
+}
+
+func assertOnOrigin(t *testing.T, what string, w *httptest.ResponseRecorder) {
+	t.Helper()
+	loc := w.Header().Get("Location")
+	if w.Code != http.StatusFound {
+		t.Fatalf("%s: status %d", what, w.Code)
+	}
+	if !strings.HasPrefix(loc, "/") || strings.HasPrefix(loc, "//") || strings.HasPrefix(loc, `/\`) {
+		t.Fatalf("%s: Location %q can leave the origin", what, loc)
+	}
+	u, err := url.Parse(loc)
+	if err != nil || u.Host != "" || u.Scheme != "" {
+		t.Fatalf("%s: Location %q parses with host %q", what, loc, u.Host)
+	}
+}
+
+func TestPreviewRedirectKeepsTheQueryAsTyped(t *testing.T) {
+	w := httptest.NewRecorder()
+	redirectWithoutPreviewToken(w, httptest.NewRequest("GET", "/p?b=1&preview_token=x&a=two%20words&%70review_token=y&c", nil))
+	if got := w.Header().Get("Location"); got != "/p?b=1&a=two%20words&c" {
+		t.Fatalf("Location=%q", got)
+	}
+}
+
+func TestPreviewChangingTheURLResetsTheFirstPage(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer up.Close()
+	p := newPreviewFor(t, up.URL+"/first.html?a=1#f")
+	if got := p.PreviewURL(); !strings.Contains(got, "/first.html?a=1&preview_token=") || !strings.HasSuffix(got, "#f") {
+		t.Fatalf("first: %q", got)
+	}
+	if err := p.SetTarget(up.URL, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := p.PreviewURL()
+	if strings.Contains(got, "first.html") || strings.Contains(got, "a=1") || strings.Contains(got, "#") {
+		t.Fatalf("first page leaked into the next target: %q", got)
+	}
+	if err := p.SetTarget(up.URL+"/second.html", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.PreviewURL(); !strings.Contains(got, "/second.html?preview_token=") || strings.Contains(got, "first") {
+		t.Fatalf("second: %q", got)
 	}
 }

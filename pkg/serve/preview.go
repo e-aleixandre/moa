@@ -158,11 +158,7 @@ func (p *PreviewProxy) PreviewURL() string {
 		return u.String()
 	}
 	// A preview_token the user typed must never stand in for the capability.
-	q := u.Query()
-	if q.Has("preview_token") {
-		q.Del("preview_token")
-		u.RawQuery = q.Encode()
-	}
+	u.RawQuery = withoutPreviewToken(u.RawQuery)
 	if u.RawQuery != "" {
 		u.RawQuery += "&"
 	}
@@ -226,7 +222,7 @@ func (p *PreviewProxy) setTarget(raw string, aliases []string, parentOrigin stri
 	if err != nil {
 		return err
 	}
-	initial := previewInitial{path: u.EscapedPath(), query: u.RawQuery, fragment: u.EscapedFragment()}
+	initial := previewInitial{path: sameOriginPath(u.EscapedPath()), query: u.RawQuery, fragment: u.EscapedFragment()}
 	origin := &url.URL{Scheme: u.Scheme, Host: u.Host}
 	capability, err := newPreviewSecret()
 	if err != nil {
@@ -401,12 +397,45 @@ func (p *PreviewProxy) requireCapability(next http.Handler) http.Handler {
 	})
 }
 
+// sameOriginPath makes a path safe to put after our own origin: a leading run
+// of slashes or backslashes would otherwise read as a scheme-relative URL
+// (//host/x) and send the browser to another host. Empty stays empty.
+func sameOriginPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	return "/" + strings.TrimLeft(p, `/\`)
+}
+
+// withoutPreviewToken drops the capability from a raw query textually, so the
+// rest of the query reaches the app exactly as typed.
+func withoutPreviewToken(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	kept := make([]string, 0, 4)
+	for _, part := range strings.Split(rawQuery, "&") {
+		key, _, _ := strings.Cut(part, "=")
+		if k, err := url.QueryUnescape(key); err == nil && k == "preview_token" {
+			continue
+		}
+		kept = append(kept, part)
+	}
+	return strings.Join(kept, "&")
+}
+
+// redirectWithoutPreviewToken always answers with a root-relative path and
+// query, never a URL the client could read as another host.
 func redirectWithoutPreviewToken(w http.ResponseWriter, r *http.Request) {
-	u := *r.URL
-	q := u.Query()
-	q.Del("preview_token")
-	u.RawQuery = q.Encode()
-	http.Redirect(w, r, u.RequestURI(), http.StatusFound)
+	target := sameOriginPath(r.URL.EscapedPath())
+	if target == "" {
+		target = "/"
+	}
+	if q := withoutPreviewToken(r.URL.RawQuery); q != "" {
+		target += "?" + q
+	}
+	w.Header().Set("Location", target)
+	w.WriteHeader(http.StatusFound)
 }
 
 func (p *PreviewProxy) validAuthCookie(value string) bool {
