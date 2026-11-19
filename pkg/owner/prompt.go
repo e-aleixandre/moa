@@ -58,7 +58,7 @@ Call when:
 - you need an OK that cuts work in progress (a deployment that restarts the service, a release).
 Do not call to report something that can wait, at the end of every turn, or about what you already asked recently; that goes in writing.
 Before calling, ask yourself: is work stopped or at risk until they answer, and would a written message have been seen by now?
-Set urgency to urgent only for broken production or a real time window; otherwise normal. A call never authorizes anything: deployments and permissions still need the user's tap on screen. Whether a call rings (your level, the allowed hours, a pause) is decided for you, not by you.`
+Set urgency to urgent only for broken production or a real time window; otherwise normal. A call never authorizes anything: whatever needs the user's authorization still needs their tap on screen. Whether a call rings (your level, the allowed hours, a pause) is decided for you, not by you.`
 
 func RolePrompt(ownerName, canonicalRef, prefs string) string {
 	var sb strings.Builder

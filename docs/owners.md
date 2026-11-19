@@ -157,9 +157,9 @@ up an active escalation), without dismissing the question. Ordinary sessions,
 blocking questions, permissions, `tasks ask` requests and a `request_call`'s
 written fallback do not get this automatic escalation.
 
-**Calling is not authorization.** A deployment, merge, release or
-permission-like question marked `requires_tap` still needs your own tap or
-typed answer. Neither the voice relay, another agent nor automation may
+**Calling is not authorization.** Whatever needs your authorization still
+needs your tap on screen: a question marked `requires_tap` is closed only by
+your own tap or typed answer. Neither the voice relay, another agent nor automation may
 answer it. Actual tool permissions and passwords keep their own cards.
 
 ## Whose session is it
