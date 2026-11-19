@@ -317,7 +317,7 @@ func (s *Sources) Regenerate() (changed []Changed, revert func()) {
 	changed, revert = s.Reload()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !now.Equal(s.now) {
+	if !sameDay(now, s.now) {
 		changed = append(changed, Changed{Label: LabelDate, Content: now.Format("2006-01-02")})
 		s.now = now
 	}
@@ -326,4 +326,10 @@ func (s *Sources) Regenerate() (changed []Changed, revert func()) {
 		s.gitCtx = gitCtx
 	}
 	return changed, revert
+}
+
+func sameDay(a, b time.Time) bool {
+	ay, am, ad := a.Date()
+	by, bm, bd := b.Date()
+	return ay == by && am == bm && ad == bd
 }
