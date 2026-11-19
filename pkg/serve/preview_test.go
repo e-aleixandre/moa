@@ -504,3 +504,146 @@ func TestPreviewReusesUpstreamConnections(t *testing.T) {
 		t.Fatalf("connections grew per request: %d", got)
 	}
 }
+
+// A typed URL with a path is an origin plus a first page: the path must not be
+// appended to every request (a file server answered /page.html/ with a 404).
+func TestPreviewInitialPathComesOnlyFromTheTypedURL(t *testing.T) {
+	var paths []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.RequestURI())
+		if r.URL.Path == "/redirect" {
+			w.Header().Set("Location", "/elsewhere?x=1")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer up.Close()
+
+	cases := []struct {
+		name, suffix, wantPath, wantQuery, wantFragment string
+	}{
+		{"no path", "", "", "", ""},
+		{"root", "/", "/", "", ""},
+		{"file path", "/VERDADES-DUDOSAS.html", "/VERDADES-DUDOSAS.html", "", ""},
+		{"nested with query", "/docs/a%20b.html?lang=es&x=2", "/docs/a%20b.html", "lang=es&x=2", ""},
+		{"fragment", "/page.html#section-2", "/page.html", "", "section-2"},
+		{"query and fragment", "/app?tab=1#top", "/app", "tab=1", "top"},
+		{"fragment only", "#frag", "", "", "frag"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			paths = nil
+			p := newPreviewFor(t, up.URL+tc.suffix)
+			u, err := url.Parse(p.PreviewURL())
+			if err != nil {
+				t.Fatal(err)
+			}
+			q := u.Query()
+			if q.Get("preview_token") == "" {
+				t.Fatalf("no capability in %s", u)
+			}
+			q.Del("preview_token")
+			wantPath := tc.wantPath
+			if wantPath == "" {
+				wantPath = "/"
+			}
+			if u.EscapedPath() != wantPath && !(tc.wantPath == "" && u.Path == "") {
+				t.Fatalf("path=%q want %q (%s)", u.EscapedPath(), wantPath, u)
+			}
+			wantQ, _ := url.ParseQuery(tc.wantQuery)
+			if q.Encode() != wantQ.Encode() {
+				t.Fatalf("query=%q want %q", q.Encode(), wantQ.Encode())
+			}
+			if u.Fragment != tc.wantFragment {
+				t.Fatalf("fragment=%q want %q", u.Fragment, tc.wantFragment)
+			}
+
+			// Through the protected handler: token exchange lands on the typed page,
+			// and the upstream sees exactly that path, not path + "/".
+			protected := p.ProtectedHandler([]string{"node.ts.net"})
+			// Browsers never send the fragment to the server.
+			sent, _ := url.Parse(p.PreviewURL())
+			sent.Fragment, sent.RawFragment = "", ""
+			req := httptest.NewRequest("GET", sent.String(), nil)
+			req.Host = "node.ts.net:7492"
+			grant := httptest.NewRecorder()
+			protected.ServeHTTP(grant, req)
+			loc := grant.Header().Get("Location")
+			if grant.Code != http.StatusFound || strings.Contains(loc, "preview_token") {
+				t.Fatalf("exchange: %d %q", grant.Code, loc)
+			}
+			next := httptest.NewRequest("GET", loc, nil)
+			next.Host = "node.ts.net:7492"
+			next.AddCookie(findCookie(grant.Result().Cookies(), previewAuthCookie))
+			w := httptest.NewRecorder()
+			protected.ServeHTTP(w, next)
+			if w.Code != http.StatusOK || len(paths) != 1 {
+				t.Fatalf("status=%d upstream=%v", w.Code, paths)
+			}
+			wantReq := wantPath
+			if tc.wantQuery != "" {
+				wantReq += "?" + tc.wantQuery
+			}
+			if paths[0] != wantReq {
+				t.Fatalf("upstream got %q want %q", paths[0], wantReq)
+			}
+		})
+	}
+}
+
+func TestPreviewInitialPathIsNotSetByRedirectsOrOtherRequests(t *testing.T) {
+	var paths []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.RequestURI())
+		if r.URL.Path == "/redirect" {
+			w.Header().Set("Location", "/elsewhere?x=1")
+			w.WriteHeader(http.StatusFound)
+		}
+	}))
+	defer up.Close()
+	p := newPreviewFor(t, up.URL+"/start.html")
+	before := p.PreviewURL()
+
+	w := httptest.NewRecorder()
+	p.Handler().ServeHTTP(w, httptest.NewRequest("GET", "https://node.ts.net:7492/redirect", nil))
+	if got := w.Header().Get("Location"); got != "/elsewhere?x=1" {
+		t.Fatalf("Location=%q", got)
+	}
+	if after := p.PreviewURL(); after != before {
+		t.Fatalf("initial URL changed after a redirect: %q -> %q", before, after)
+	}
+	if paths[0] != "/redirect" {
+		t.Fatalf("a request for /redirect reached upstream as %q", paths[0])
+	}
+}
+
+func TestPreviewInitialPathKeepsTheSecurityChecks(t *testing.T) {
+	p := NewPreviewProxy("https://node.ts.net:7492", 7392, 7492)
+	defer p.Close()
+	for _, raw := range []string{
+		"http://user:pw@127.0.0.1:8481/page.html",
+		"http://100.100.100.200/page.html",
+		"http://127.0.0.1:7392/page.html",
+		"http://127.0.0.1:7492/page.html?x=1",
+		"http://8.8.8.8/page.html",
+	} {
+		if err := p.SetTarget(raw, nil); err == nil {
+			t.Fatalf("%s was accepted", raw)
+		}
+	}
+}
+
+func TestPreviewTypedPreviewTokenIsNotTheCapability(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer up.Close()
+	p := newPreviewFor(t, up.URL+"/a.html?preview_token=attacker&keep=1")
+	u, _ := url.Parse(p.PreviewURL())
+	if got := u.Query()["preview_token"]; len(got) != 1 || got[0] == "attacker" {
+		t.Fatalf("preview_token values = %v", got)
+	}
+	if u.Query().Get("keep") != "1" {
+		t.Fatalf("query lost: %s", u)
+	}
+}

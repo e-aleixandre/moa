@@ -29,13 +29,23 @@ const previewHTMLPrefix = 64 << 10
 const previewAuthCookie = "moa_preview_auth"
 
 type previewTarget struct {
+	// url is the upstream origin only. Whatever path the user typed lives in
+	// initial: joining it to every proxied request turned /page.html into
+	// /page.html/ for upstreams that serve files.
 	url             *url.URL
+	initial         previewInitial
 	aliases         []string
 	ips             []net.IP
 	port            string
 	generation      uint64
 	cookieNamespace string
 	parentOrigin    string
+}
+
+// previewInitial is the first page the iframe opens, taken from the URL the
+// user typed and from nothing else (never from an upstream redirect or request).
+type previewInitial struct {
+	path, query, fragment string
 }
 
 type previewDialPlanKey struct{}
@@ -131,13 +141,32 @@ func (p *PreviewProxy) PreviewURL() string {
 	}
 	p.mu.RLock()
 	capability := p.capability
-	p.mu.RUnlock()
-	if capability == "" {
-		return p.publicURL
+	var initial previewInitial
+	if p.target != nil {
+		initial = p.target.initial
 	}
+	p.mu.RUnlock()
+	u.Path, u.RawPath = "", ""
+	if initial.path != "" {
+		u.RawPath = initial.path
+		u.Path, _ = url.PathUnescape(initial.path)
+	}
+	u.RawQuery = initial.query
+	u.RawFragment = initial.fragment
+	u.Fragment, _ = url.PathUnescape(initial.fragment)
+	if capability == "" {
+		return u.String()
+	}
+	// A preview_token the user typed must never stand in for the capability.
 	q := u.Query()
-	q.Set("preview_token", capability)
-	u.RawQuery = q.Encode()
+	if q.Has("preview_token") {
+		q.Del("preview_token")
+		u.RawQuery = q.Encode()
+	}
+	if u.RawQuery != "" {
+		u.RawQuery += "&"
+	}
+	u.RawQuery += "preview_token=" + url.QueryEscape(capability)
 	return u.String()
 }
 
@@ -167,6 +196,18 @@ func (p *PreviewProxy) targetSnapshot() *previewTarget {
 	out.ips = append([]net.IP(nil), p.target.ips...)
 	return &out
 }
+
+// typedURL is the address as the user typed it: origin plus first page.
+func (t *previewTarget) typedURL() string {
+	u := *t.url
+	u.RawPath = t.initial.path
+	u.Path, _ = url.PathUnescape(t.initial.path)
+	u.RawQuery = t.initial.query
+	u.RawFragment = t.initial.fragment
+	u.Fragment, _ = url.PathUnescape(t.initial.fragment)
+	return u.String()
+}
+
 func cloneURL(u *url.URL) *url.URL { v := *u; return &v }
 
 func (p *PreviewProxy) SetTarget(raw string, aliases []string) error {
@@ -185,6 +226,8 @@ func (p *PreviewProxy) setTarget(raw string, aliases []string, parentOrigin stri
 	if err != nil {
 		return err
 	}
+	initial := previewInitial{path: u.EscapedPath(), query: u.RawQuery, fragment: u.EscapedFragment()}
+	origin := &url.URL{Scheme: u.Scheme, Host: u.Host}
 	capability, err := newPreviewSecret()
 	if err != nil {
 		return fmt.Errorf("preview capability: %w", err)
@@ -207,7 +250,7 @@ func (p *PreviewProxy) setTarget(raw string, aliases []string, parentOrigin stri
 	}
 	oldGeneration := p.generation
 	p.generation++
-	p.target = &previewTarget{url: u, aliases: clean, ips: ips, port: port, generation: p.generation, cookieNamespace: p.cookieNamespace, parentOrigin: parent}
+	p.target = &previewTarget{url: origin, initial: initial, aliases: clean, ips: ips, port: port, generation: p.generation, cookieNamespace: p.cookieNamespace, parentOrigin: parent}
 	p.capability = capability
 	p.authSecret = authSecret
 	p.clearPending = true
@@ -793,7 +836,7 @@ func handlePreviewTarget(c *PreviewController) http.HandlerFunc {
 			if proxy := c.Proxy(); proxy != nil {
 				out["preview_url"] = proxy.PreviewURL()
 				if t := proxy.targetSnapshot(); t != nil {
-					out["url"] = t.url.String()
+					out["url"] = t.typedURL()
 				}
 			}
 			writeJSON(w, http.StatusOK, out)
