@@ -544,7 +544,7 @@ func TestPreviewInitialPathComesOnlyFromTheTypedURL(t *testing.T) {
 			if wantPath == "" {
 				wantPath = "/"
 			}
-			if u.EscapedPath() != wantPath && !(tc.wantPath == "" && u.Path == "") {
+			if u.EscapedPath() != wantPath && (tc.wantPath != "" || u.Path != "") {
 				t.Fatalf("path=%q want %q (%s)", u.EscapedPath(), wantPath, u)
 			}
 			wantQ, _ := url.ParseQuery(tc.wantQuery)
