@@ -125,9 +125,10 @@ func TestChatGPTSignaling_RefusalsAndAmbiguityNeverRetry(t *testing.T) {
 					_ = conn.Close()
 				default:
 					status := 403
-					if mode == "429" {
+					switch mode {
+					case "429":
 						status = 429
-					} else if mode == "500" {
+					case "500":
 						status = 500
 					}
 					w.WriteHeader(status)

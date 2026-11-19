@@ -17,7 +17,7 @@ func DefaultIPv4RouteInterface() (string, error) {
 	if err != nil {
 		return "", errors.New("default IPv4 route unavailable")
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, 1<<20))
 	if err != nil || len(b) == 1<<20 {
 		return "", errors.New("default IPv4 route unavailable")
