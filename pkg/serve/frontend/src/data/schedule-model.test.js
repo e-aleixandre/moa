@@ -6,7 +6,7 @@ import {
   attentionCount, canReroute, confirmBody, createWhenInput, deliverySummary, isScheduled, lateBanner, lateRun, modelLabel,
   previewResult, rebaseSchedDraft, runOpenSession, runRows, schedActions, schedDraft, schedEyebrow, schedPin, schedRight,
   scheduleBody, schedulePatch, scheduledRows, sendLaterBody, submitSendLater, targetFromDest, targetName, targetSessionId,
-  waitingCount, whenLong, whenShort, ruleShort, ruleText, inWords, DEFAULT_DELIVERY,
+  waitingCount, whenLong, whenShort, ruleShort, ruleText, inWords, DEFAULT_DELIVERY, deviceZone,
 } from './schedule-model.js';
 import { groupTasks, pinnedLine, sessionRecords, sessionTasksStatus, sessionTasksVerdict } from './tasks-model.js';
 import { projectStream } from './stream-model.js';
@@ -431,4 +431,9 @@ test('an uncertain delivery warns that running it again could duplicate the work
   expect(model.uncertainRun(run)).toBe(true);
   expect(model.uncertainRun({ ...run, reason: 'regated' })).toBe(false);
   expect(lateBanner(run, NOW, TZ)).toBe('Was due today 09:00. It may already have been delivered — running it again could duplicate the work.');
+});
+
+test('the device zone is the one Intl resolves, asked once per minute rather than per render', () => {
+  expect(deviceZone()).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  expect(deviceZone()).toBe(deviceZone());
 });

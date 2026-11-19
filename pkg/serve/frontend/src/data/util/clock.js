@@ -53,7 +53,22 @@ export function clockMs(value) {
 export function clockHHMM(value) {
   const ms = clockMs(value);
   if (ms === null) return '';
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return formatter('hhmm', { hour: '2-digit', minute: '2-digit', hour12: false }).format(ms);
+}
+
+// toLocaleTimeString and toLocaleString build a formatter on every call, and
+// the transcript prints one hour per turn on every streamed frame. A formatter
+// is fixed to the zone it was made in, so each is rebuilt now and then to
+// follow a phone that changes zone while the app stays open.
+const FORMATTER_TTL_MS = 60_000;
+const formatters = new Map();
+function formatter(name, options) {
+  const now = Date.now();
+  const held = formatters.get(name);
+  if (held && now >= held.madeAt && now - held.madeAt < FORMATTER_TTL_MS) return held.format;
+  const format = new Intl.DateTimeFormat([], options);
+  formatters.set(name, { format, madeAt: now });
+  return format;
 }
 
 const DAY_MS = 86400000;
@@ -92,7 +107,7 @@ export function clockDayLabel(value, now = Date.now()) {
 export function clockFull(value) {
   const ms = clockMs(value);
   if (ms === null) return '';
-  return new Date(ms).toLocaleString([], {
+  return formatter('full', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -100,5 +115,5 @@ export function clockFull(value) {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  });
+  }).format(ms);
 }

@@ -410,8 +410,9 @@ func (s *FileStore) listLocked() ([]Summary, error) {
 // conversation history. readSummary stops decoding as soon as it sees one of
 // these keys, so their values are never read off disk.
 var heavySessionFields = map[string]bool{
-	"entries":  true,
-	"messages": true,
+	"entries":        true,
+	"messages":       true,
+	"prompt_context": true,
 }
 
 // readSummary reads only the header fields from a session file using a

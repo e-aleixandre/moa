@@ -112,3 +112,17 @@ func touch(t *testing.T, dir, rel string, hours int) {
 		t.Fatal(err)
 	}
 }
+
+// New books are seeded with an OWNER.md header that agrees with the owner's
+// prompt: the file governs, it is not subordinated preferences.
+func TestOwnerTemplateSaysTheFileGoverns(t *testing.T) {
+	tpl := Template()[OwnerFile]
+	for _, stale := range []string{"preferences", "never overrides", "not permissions"} {
+		if strings.Contains(tpl, stale) {
+			t.Errorf("the OWNER.md template still says %q", stale)
+		}
+	}
+	if !strings.Contains(tpl, "It governs how the owner works here") {
+		t.Errorf("the OWNER.md template does not say the file governs:\n%s", tpl)
+	}
+}

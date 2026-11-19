@@ -488,8 +488,11 @@ func registerRunReactors(sctx *SessionContext) {
 		if e.Cost == 0 {
 			return
 		}
-		total := sctx.addSessionCost(e.Cost)
-		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: e.Cost})
+		total := e.costTotal
+		if !e.costAdded {
+			total = sctx.addSessionCost(e.Cost)
+		}
+		sctx.Bus.Publish(SessionCostUpdated{SessionID: sctx.SessionID, TotalUSD: total, RunUSD: e.Cost, savedWithTurn: e.costAdded})
 	})
 	b.Subscribe(func(e SubagentEnded) {
 		delta := e.NewCostUSD()
@@ -847,6 +850,13 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 		if settled != nil {
 			settled(cancelled, runErr)
 		}
+		// The run's cost joins the session total before RunEnded is on the
+		// bus, so the save that follows the turn holds it and the cost needs
+		// no rewrite of its own (see RegisterPersistenceReactor).
+		var costTotal float64
+		if stats.costUSD != 0 {
+			costTotal = sctx.addSessionCost(stats.costUSD)
+		}
 		sctx.Bus.Publish(RunEnded{
 			SessionID: sctx.SessionID,
 			RunGen:    gen,
@@ -859,6 +869,8 @@ func launchRunWithSettled(sctx *SessionContext, label string, runFn func(ctx con
 			CancelCause: cause,
 			Cost:        stats.costUSD,
 			At:          time.Now(),
+			costAdded:   stats.costUSD != 0,
+			costTotal:   costTotal,
 		})
 		// The run's start anchor is released only now, after its terminal event
 		// is on the bus. Between the state going idle and this point the run is

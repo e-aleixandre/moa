@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -469,5 +470,93 @@ func TestRewind_SkillInvocationReturnsTheTypedCommand(t *testing.T) {
 	}
 	if got := labels[legacy]; got.Label != "/deploy" || got.Source != "skill" {
 		t.Fatalf("legacy point = %+v", got)
+	}
+}
+
+// The picker lists every user/assistant entry that is a valid target, with its
+// child count and whether it sits on the current path — the contract the
+// one-pass walk must keep, branches and dangling calls included.
+func TestQuery_GetBranchPoints_BranchesCountsAndDanglingCalls(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	tree := session.NewTree()
+	msg := func(role, text string) session.Entry {
+		return session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{Message: core.Message{Role: role, Content: []core.Content{core.TextContent(text)}}}}
+	}
+	root := tree.Append(msg("user", "root"))
+	a1 := tree.Append(msg("assistant", "first answer"))
+	if err := tree.Branch(root); err != nil {
+		t.Fatal(err)
+	}
+	a2 := tree.Append(msg("assistant", "second answer"))
+	call := tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{Message: core.Message{
+		Role: "assistant", Content: []core.Content{core.ToolCallContent("tc1", "bash", nil)},
+	}}})
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	points, err := QueryTyped[GetBranchPoints, []BranchPoint](b, GetBranchPoints{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]BranchPoint{}
+	for _, p := range points {
+		got[p.EntryID] = p
+	}
+	if _, offered := got[call]; offered {
+		t.Fatal("an assistant turn with an unresolved tool call must not be offered")
+	}
+	if len(points) != 3 || points[0].EntryID != root || points[1].EntryID != a1 || points[2].EntryID != a2 {
+		t.Fatalf("points = %+v", points)
+	}
+	if got[root].BranchCount != 2 || !got[root].IsCurrentPath || got[a1].IsCurrentPath || !got[a2].IsCurrentPath || got[a2].BranchCount != 1 {
+		t.Fatalf("counts or path flags wrong: %+v", got)
+	}
+}
+
+func TestQuery_GetBranchPoints_StopsWhenTheCallerLeaves(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	tree := session.NewTree()
+	for i := 0; i < 5000; i++ {
+		tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{Message: core.Message{Role: "user", Content: []core.Content{core.TextContent("m")}}}})
+	}
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := QueryTyped[GetBranchPoints, []BranchPoint](b, GetBranchPoints{Ctx: ctx}); err != context.Canceled {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+// A long owner session used to cost minutes of CPU here (one path copy per
+// entry); this is the same shape at a size the old algorithm could not finish
+// in the allowed time.
+func TestQuery_GetBranchPoints_LongSessionIsLinear(t *testing.T) {
+	b := NewLocalBus()
+	defer b.Close()
+	sctx := newTestSessionContextWithState(b, &fakeAgent{})
+	tree := session.NewTree()
+	for i := 0; i < 30000; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		tree.Append(session.Entry{Type: session.EntryMessage, Message: core.AgentMessage{Message: core.Message{Role: role, Content: []core.Content{core.TextContent("m")}}}})
+	}
+	sctx.Tree = tree
+	RegisterHandlers(sctx)
+
+	start := time.Now()
+	points, err := QueryTyped[GetBranchPoints, []BranchPoint](b, GetBranchPoints{})
+	if err != nil || len(points) != 30000 {
+		t.Fatalf("points = %d, err = %v", len(points), err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("took %s for 30000 entries", d)
 	}
 }

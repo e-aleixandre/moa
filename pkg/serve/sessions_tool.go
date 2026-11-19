@@ -95,7 +95,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 			"directory of this project with a prompt; it needs task: the id of the task of your checklist it " +
 			"works on (create it first), or \"none\" for a question or an exploration. send with task makes that " +
 			"session the task's executor. answer: answer a question a session asked " +
-			"the user, when the book already answers it. You cannot approve permissions: those " +
+			"the user, when the book or your instructions let you decide it. You cannot approve permissions: those " +
 			"are the user's.",
 		Parameters: json.RawMessage(`{
 			"type": "object",

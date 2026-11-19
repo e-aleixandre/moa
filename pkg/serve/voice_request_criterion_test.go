@@ -21,7 +21,7 @@ func TestRequestCall_CriterionInDescriptionAndOwnerPrompt(t *testing.T) {
 		"is work stopped or at risk until they answer",
 		"urgent only for broken production or a real time window",
 		"A call never authorizes anything",
-		"deployments and permissions still need the user's tap on screen",
+		"whatever needs the user's authorization still needs their tap on screen",
 	}
 	desc := (&Manager{}).newRequestCallTool("s", nil, false).Description
 	prompt := owner.RolePrompt("Infra", "main", "")
@@ -32,6 +32,9 @@ func TestRequestCall_CriterionInDescriptionAndOwnerPrompt(t *testing.T) {
 		if !strings.Contains(prompt, w) {
 			t.Errorf("owner prompt lacks %q", w)
 		}
+	}
+	if strings.Contains(desc, "deployments and permissions still need") || strings.Contains(prompt, "deployments and permissions still need") {
+		t.Error("the call criterion still names what needs authorization instead of deferring to the user")
 	}
 	if strings.Contains(desc, "Never for reports") {
 		t.Error("the description still forbids calling about news")

@@ -173,6 +173,10 @@ function normalizeSessionInfo(info, existing, visible) {
     // alarm until the user opens it.
     historyStale: transcriptReset ? visible.has(info.id) : (existing ? !!existing.historyStale : false),
     historyHydrated: transcriptReset ? false : (existing ? !!existing.historyHydrated : false),
+    // Proof that this session's init arrived (see ws/init.js). The roster has
+    // no transcript, so it carries the proof; a new runtime invalidates it and
+    // the next socket's init sets it again.
+    initReceived: transcriptReset ? false : (existing ? !!existing.initReceived : false),
     // Display-only provenance of retained rows. This survives opening a
     // socket so a brief reconnect does not advertise an up-to-date
     // transcript as behind.

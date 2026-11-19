@@ -197,8 +197,10 @@ func (m *Manager) CreateSession(opts CreateOpts) (*ManagedSession, error) {
 	}
 
 	sp := newServePersister(persisted, store, sess.titleState)
+	sp.promptContext = sess.promptContextSnapshot
 	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
 	sp.mcpTools = sess.mcpToolsSnapshot
+	sp.trustLoadedTree(sess.runtime.Context().Tree)
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 
@@ -229,6 +231,10 @@ type buildOpts struct {
 	initialEntries  []session.Entry
 	initialLeafID   string
 	initialMetadata map[string]any
+	// frozenPrompt is the resumed session's own frozen prompt. Only a resume
+	// passes it: a session built from another one's history is a new session
+	// and starts with today's context.
+	frozenPrompt *session.PromptContext
 
 	// artifactStore is the durable artifact catalog of this session, built by
 	// the caller from the FileStore that owns it. Passed in rather than derived
@@ -329,7 +335,9 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	var extraMCPServers map[string]core.MCPServer
 	var mcpToolSeed map[string][]mcp.ToolDef
 	var creatorTZ string
+	var frozenPrompt *session.PromptContext
 	if opts != nil {
+		frozenPrompt = opts.frozenPrompt
 		extraMCPServers = opts.extraMCPServers
 		creatorTZ = opts.creatorTZ
 		mcpToolSeed = mcpToolSeedFromMeta(opts.initialMetadata)
@@ -347,6 +355,8 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 		MCPDisableSources:   mcpSources,
 		ExtraMCPServers:     extraMCPServers,
 		MCPToolSeed:         mcpToolSeed,
+		PromptClock:         m.promptClock,
+		FrozenPrompt:        frozenPrompt,
 		Ctx:                 sessionCtx,
 		EnableAskUser:       true,
 		AsyncQuestions:      askAsync,
@@ -559,7 +569,7 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 			if err != nil {
 				return subagent.ResumedTranscript{}, err
 			}
-			return subagent.ResumedTranscript{Messages: t.Messages, Model: t.Model, Thinking: t.Thinking, Daybreak: t.Daybreak}, nil
+			return subagent.ResumedTranscript{Messages: t.Messages, Model: t.Model, Thinking: t.Thinking, Daybreak: t.Daybreak, SystemPrompt: t.SystemPrompt}, nil
 		},
 		// Scoped to this session's own store: job IDs are random identifiers,
 		// not capabilities, so one session must not be able to read another's
@@ -644,7 +654,10 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// only became complete when an MCP sync rebuilt it, so a restored session,
 	// whose MCP tools come back unchanged, would start with a different prompt
 	// than it had before the restart and lose its prompt cache.
-	if bs.BuildBasePrompt != nil && bs.Agent != nil {
+	//
+	// A restored session's frozen prompt already is that prompt: rebuilding
+	// it here is exactly the restart rewrite it exists to prevent.
+	if bs.BuildBasePrompt != nil && bs.Agent != nil && !bs.PromptRestored {
 		if prompt := bs.BuildBasePrompt(bs.ToolReg.Specs()); prompt != bs.Agent.SystemPrompt() {
 			if err := bs.Agent.SetSystemPrompt(prompt); err == nil {
 				bs.SystemPrompt = prompt
@@ -791,7 +804,8 @@ func (m *Manager) buildManagedSession(id, title, modelSpec, cwd string, opts *bu
 	// point: the serve layer owns the tool registry and the prompt builder, the
 	// bus only knows it has to ask.
 	sess.runtime.Context().ReloadPrompt = sess.reloadSession
-	// Manual compaction and Start fresh call ReloadPrompt themselves; an
+	sess.runtime.Context().RegeneratePrompt = sess.regenerateSession
+	// Manual compaction and Start fresh call RegeneratePrompt themselves; an
 	// automatic compaction happens inside a run, so the agent asks for the
 	// prompt instead.
 	if a, ok := sess.runtime.Context().Agent.(interface {
@@ -1432,6 +1446,7 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 		initialEntries:         saved.Entries,
 		initialLeafID:          saved.LeafID,
 		initialMetadata:        saved.Metadata,
+		frozenPrompt:           saved.PromptContext,
 		titleSource:            saved.TitleSource,
 		artifactStore:          session.NewArtifactStore(store.Dir(), saved.ID),
 		ownerSession:           saved.Kind() == session.KindOwner,
@@ -1480,8 +1495,10 @@ func (m *Manager) resumeSessionValidated(id string, maxLoaded int, validate func
 
 	// 5. Attach persistence.
 	sp := newServePersister(saved, store, sess.titleState)
+	sp.promptContext = sess.promptContextSnapshot
 	sp.onSaved = func() { m.notices.transcriptSaved(sess.ID) }
 	sp.mcpTools = sess.mcpToolsSnapshot
+	sp.trustLoadedTree(sess.runtime.Context().Tree)
 	sess.persister = sp
 	sess.runtime.AttachPersister(sp)
 

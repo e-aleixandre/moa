@@ -421,6 +421,12 @@ type RunEnded struct {
 	HadEdits    bool      // true if edit/write/multiedit/apply_patch completed successfully
 	Cost        float64   // USD cost of this run (0 if the model has no pricing)
 	At          time.Time // when the run ended, for the same reason as RunStarted.At
+
+	// costAdded is set by the run itself, which adds Cost to the session
+	// total (costTotal) before publishing, so every save after RunEnded holds
+	// it. A RunEnded built anywhere else leaves the adding to the reactor.
+	costAdded bool
+	costTotal float64
 }
 
 // HandoffSettled is the terminal outcome of an internal handoff run. Unlike
@@ -505,6 +511,10 @@ type SessionCostUpdated struct {
 	SessionID string
 	TotalUSD  float64
 	RunUSD    float64
+
+	// savedWithTurn marks the cost of a run that added it before its
+	// RunEnded: the save that follows that turn persists it.
+	savedWithTurn bool
 }
 
 // RateLimitUpdated is published after each assistant message with the provider's

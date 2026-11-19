@@ -215,6 +215,8 @@ const config = {
   sourcemap: watch,
   jsx: "automatic",
   jsxImportSource: "preact",
+  // Fonts referenced from CSS are emitted next to app.css under a content hash.
+  loader: { ".woff2": "file" },
   plugins: [publishFrontend],
 };
 

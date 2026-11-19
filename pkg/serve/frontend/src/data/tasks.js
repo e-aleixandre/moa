@@ -10,6 +10,7 @@
 import { api } from './api.js';
 import { store, setState, TASKS_INITIAL } from './store.js';
 import { conflictCurrent, sessionRecords } from './tasks-model.js';
+import { rosterSessions } from './roster.js';
 
 export { TASKS_INITIAL };
 
@@ -55,13 +56,17 @@ export function loadTaskProjects() {
     .catch(() => {});
 }
 
+const sessionLoads = new Set();
+
 export function loadSessionTasks(sessionId) {
   if (!sessionId) return Promise.resolve();
+  sessionLoads.add(sessionId);
   return api('GET', `/api/sessions/${encodeURIComponent(sessionId)}/tasks`)
     .then((res) => patch((t) => ({
       bySession: { ...t.bySession, [sessionId]: { requests: res?.requests || [], checklist: res?.checklist || [], scheduled: res?.scheduled || [], loaded: true } },
     })))
-    .catch(() => {});
+    .catch(() => {})
+    .finally(() => sessionLoads.delete(sessionId));
 }
 
 export function loadTask(id) {
@@ -100,9 +105,16 @@ function watch(map, key, load) {
   };
 }
 
+// Several views of one session mount together (its panel, the pinned line, the
+// status). The first reads the tasks; the others join it instead of asking for
+// the same list again, since a watched session is re-read on every
+// tasks_changed anyway. A failed first read leaves nothing loaded and nothing
+// in flight, so the next mount asks again.
 export function watchSessionTasks(sessionId) {
   if (!sessionId) return () => {};
-  return watch(watchedSessions, sessionId, loadSessionTasks);
+  const joins = watchedSessions.has(sessionId)
+    && (sessionLoads.has(sessionId) || !!tasksSlice(store.get()).bySession?.[sessionId]?.loaded);
+  return watch(watchedSessions, sessionId, joins ? () => {} : loadSessionTasks);
 }
 
 export function watchTask(id) {
@@ -134,6 +146,11 @@ let socket = null;
 let backoff = 1000;
 let retry = null;
 let started = false;
+// The server greets every new socket with the current revision. The first
+// greeting of the page only repeats what the bootstrap read of the list has
+// already asked for, so it triggers a second read only if that read missed it.
+let firstRead = null;
+let firstGreetingPending = false;
 
 function connect() {
   clearTimeout(retry);
@@ -152,7 +169,16 @@ function connect() {
     backoff = 1000;
     let evt = null;
     try { evt = JSON.parse(e.data); } catch (_) { return; }
-    if (evt?.type === 'tasks_changed') refreshTasks();
+    if (evt?.type !== 'tasks_changed') return;
+    if (firstGreetingPending) {
+      firstGreetingPending = false;
+      Promise.resolve(firstRead).then(() => {
+        const slice = tasksSlice(store.get());
+        if (!slice.loaded || slice.revision !== evt.revision) refreshTasks();
+      });
+      return;
+    }
+    refreshTasks();
   };
   ws.onclose = () => {
     if (socket !== ws) return;
@@ -175,7 +201,8 @@ export function startTasksSync() {
   if (started) return;
   started = true;
   patch({ newSince: readSeen() });
-  loadTasks();
+  firstRead = loadTasks();
+  firstGreetingPending = true;
   connect();
 }
 
@@ -439,7 +466,7 @@ export function isNewRequest(task, newSince) {
 let directory = { sessions: null, owners: null, sig: '', value: {} };
 
 export function selectSessionDirectory(state) {
-  const sessions = state?.sessions || {};
+  const sessions = rosterSessions(state?.sessions || {});
   const owners = state?.owners?.list || [];
   if (sessions === directory.sessions && owners === directory.owners) return directory.value;
   const ownerOf = new Map(owners.filter((o) => o?.session_id).map((o) => [o.session_id, o]));

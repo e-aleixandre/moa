@@ -19,8 +19,19 @@ export const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thurs
 const WD_SHORT = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// Resolving the zone builds a formatter, and the pinned task line asks on every
+// render. The answer is kept for a minute so a phone that changes zone while
+// the app stays open is still followed.
+const ZONE_TTL_MS = 60_000;
+let zone = null;
+let zoneAt = 0;
 export function deviceZone() {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+  const now = Date.now();
+  if (zone === null || now - zoneAt >= ZONE_TTL_MS || now < zoneAt) {
+    try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { zone = 'UTC'; }
+    zoneAt = now;
+  }
+  return zone;
 }
 
 const fmtCache = new Map();

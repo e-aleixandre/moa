@@ -157,9 +157,13 @@ type SessionContext struct {
 	// ReloadPrompt re-reads the on-disk prompt inputs and rebuilds the base
 	// system prompt. Set by the serve layer, which owns the tool registry and
 	// the prompt builder; nil in tests and in the CLI. Returns the names of the
-	// inputs that changed, empty when nothing did. Also called after a manual
-	// compaction and Start fresh, where the cache is lost anyway.
+	// inputs that changed, empty when nothing did.
 	ReloadPrompt func() []string
+	// RegeneratePrompt rebuilds the base system prompt from everything current
+	// (disk, date, last commit) after a manual compaction and Start fresh,
+	// where the cache is lost anyway. Same owner and contract as ReloadPrompt;
+	// when nil, ReloadPrompt is used.
+	RegeneratePrompt func() []string
 	// BeforeFirstRun is a frontend-owned initialization gate. It runs inside the
 	// first admitted run, before Agent.Send, so Stop can cancel the wait. A
 	// canceled gate is retried by the next run.

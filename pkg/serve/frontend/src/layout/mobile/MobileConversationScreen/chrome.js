@@ -8,6 +8,7 @@ import { wantsToTalkIds } from "../../../data/call-requests-model.js";
 import { ownerRows, ownerState } from "../../../data/owners-model.js";
 import { ownersHealth, ownersSlice } from "../../../data/owners.js";
 import { activeOwnerIdOf } from "../../Sidebar/sessions.js";
+import { clockBucket, memoRefs, rosterSessions, sameBy } from "../../../data/roster.js";
 
 function relAge(updated) {
   if (!updated) return "";
@@ -163,6 +164,16 @@ function attentionSig(a) {
   return [a.urgent, a.unseen, a.error, a.permission, a.arrival].join("\0");
 }
 
+const sameOwners = sameBy(ownersSig);
+// One per list: each remembers its own last pair.
+const sameNewResults = sameBy(listSig);
+const sameActive = sameBy(listSig);
+const sameSaved = sameBy(listSig);
+const sameRecentSaved = sameBy(listSig);
+const sameRecentOwners = sameBy(recentOwnersSig);
+const sameInbox = sameBy(inboxSig);
+const sameProjects = sameBy((list) => (list || []).map((p) => `${p.cwd}\0${p.updated}`).join("\n"));
+
 function mobileChromeEqual(a, b) {
   return a.activeId === b.activeId
     && a.drawerOpen === b.drawerOpen
@@ -172,7 +183,7 @@ function mobileChromeEqual(a, b) {
     && a.activeOwnerId === b.activeOwnerId
     && a.ownersHealth?.status === b.ownersHealth?.status
     && a.ownersHealth?.error === b.ownersHealth?.error
-    && ownersSig(a.owners) === ownersSig(b.owners)
+    && sameOwners(a.owners, b.owners)
     && a.soundEnabled === b.soundEnabled
     && a.showChip === b.showChip
     && a.title === b.title
@@ -182,17 +193,33 @@ function mobileChromeEqual(a, b) {
     && a.collapsedSections === b.collapsedSections
     && attentionSig(a.attention) === attentionSig(b.attention)
     && a.inboxOpen === b.inboxOpen // wake-on-event
-    && inboxSig(a.inbox) === inboxSig(b.inbox) // wake-on-event
+    && sameInbox(a.inbox, b.inbox) // wake-on-event
     && inboxHealthSig(a.inboxHealth) === inboxHealthSig(b.inboxHealth) // wake-on-event
-    && listSig(a.newResults) === listSig(b.newResults)
-    && listSig(a.active) === listSig(b.active)
-    && listSig(a.saved) === listSig(b.saved)
-    && listSig(a.recentSaved) === listSig(b.recentSaved)
-    && recentOwnersSig(a.recentOwners) === recentOwnersSig(b.recentOwners)
+    && sameNewResults(a.newResults, b.newResults)
+    && sameActive(a.active, b.active)
+    && sameSaved(a.saved, b.saved)
+    && sameRecentSaved(a.recentSaved, b.recentSaved)
+    && sameRecentOwners(a.recentOwners, b.recentOwners)
     && titleOwnerSig(a.titleOwner) === titleOwnerSig(b.titleOwner)
-    && (a.projects || []).map((p) => `${p.cwd}\0${p.updated}`).join("\n")
-      === (b.projects || []).map((p) => `${p.cwd}\0${p.updated}`).join("\n");
+    && sameProjects(a.projects, b.projects);
 }
+
+// What the whole roster contributes to the chip and the drawer. It reads every
+// session, so it is recomputed only when a roster, its owners, the calls
+// asking to talk, the events, the session on screen or the wall-clock bucket
+// (the lists print ages) change; a stream token changes none of them.
+const mobileRoster = memoRefs((roster, activeId, ownersList, callList, events) => {
+  const owners = ownerRows(ownersList, roster, undefined, wantsToTalkIds(callList));
+  return {
+    lists: drawerSessions(roster, activeId),
+    owners,
+    attention: aggregateAttention(roster, activeId),
+    inbox: inboxCards(roster, events, owners), // wake-on-event
+    projects: drawerProjects(roster),
+    recentSaved: recentSavedSessions(roster),
+    recentOwners: recentOwners(owners, roster),
+  };
+});
 
 // Roster the chip and drawer paint. A stream token is not on a card, so the
 // previous object is returned (Object.is) and MobileSessionChrome does not
@@ -200,13 +227,14 @@ function mobileChromeEqual(a, b) {
 export function selectMobileChrome(state, forceMobile = false) {
   const activeId = forceMobile ? (state.activeSession || null) : focusedSessionId(state);
   const session = activeId ? state.sessions[activeId] : null;
-  const lists = drawerSessions(state.sessions, activeId);
-  const owners = ownerRows(ownersSlice(state).list, state.sessions, undefined, wantsToTalkIds(state.callRequests?.list));
+  const { lists, owners, attention, inbox, projects, recentSaved, recentOwners: faces } = mobileRoster(
+    rosterSessions(state.sessions), activeId, ownersSlice(state).list, state.callRequests?.list, state.events, clockBucket(),
+  );
   const next = {
     activeId,
     title: session ? sessionTitle(session) : "",
     showChip: !!(session && !session.viewingSubagent && !session.viewingBashJob),
-    attention: aggregateAttention(state.sessions, activeId),
+    attention,
     drawerOpen: !!state.drawerOpen,
     drawerStep: state.drawerStep || "list",
     groupByProject: !!state.groupByProject,
@@ -218,12 +246,12 @@ export function selectMobileChrome(state, forceMobile = false) {
     // The Recent list's own accordion, beside the folder one.
     collapsedSections: state.collapsedSections,
     soundEnabled: !!state.soundEnabled,
-    inbox: inboxCards(state.sessions, state.events, owners), // wake-on-event
+    inbox, // wake-on-event
     inboxHealth: inboxHealth(state), // wake-on-event
     inboxOpen: !!state.inboxOpen, // wake-on-event
-    projects: drawerProjects(state.sessions),
-    recentSaved: recentSavedSessions(state.sessions),
-    recentOwners: recentOwners(owners, state.sessions),
+    projects,
+    recentSaved,
+    recentOwners: faces,
     titleOwner: titleOwner(session, owners),
     ...lists,
   };
@@ -235,4 +263,5 @@ export function selectMobileChrome(state, forceMobile = false) {
 
 export function __resetMobileChromeForTests() {
   selectMobileChrome._prev = null;
+  mobileRoster.reset();
 }

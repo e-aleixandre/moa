@@ -2,9 +2,11 @@ package serve
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/bus"
+	agentcontext "github.com/e-aleixandre/moa/pkg/context"
 	"github.com/e-aleixandre/moa/pkg/core"
 )
 
@@ -20,7 +22,7 @@ type reloadOutcome struct {
 }
 
 // reloadSession re-reads the on-disk prompt inputs and, if any changed, rebuilds
-// the session's base system prompt.
+// the session's base system prompt. It is /reload.
 //
 // The rebuild is the whole mechanism: a notice appended to the conversation
 // could only ever add instructions, never retract one still present in the
@@ -34,6 +36,24 @@ type reloadOutcome struct {
 // Must run at quiescence: the agent loop captures the system prompt when a run
 // starts, and SetSystemPrompt refuses while running.
 func (s *ManagedSession) reloadSession() []string {
+	return s.refreshPrompt(false)
+}
+
+// regenerateSession is what a compaction and Start fresh do to the prompt once
+// the model's context has been cut: the cached prefix is lost anyway, so the
+// session takes everything new — the disk, today's date, the last commit and
+// this binary's prompt — and freezes that. Same quiescence rule as
+// reloadSession.
+func (s *ManagedSession) regenerateSession() []string {
+	return s.refreshPrompt(true)
+}
+
+// refreshPrompt rebuilds and installs the base prompt from the sources, after
+// regenerating them. A reload installs it only when a file changed; a
+// compaction or Start fresh whenever it differs (see regenerateSession). The
+// installed prompt is what the session freezes, so it has to reach disk before
+// a restart could bring back the one it replaced.
+func (s *ManagedSession) refreshPrompt(regenerate bool) []string {
 	src := s.infra.promptSources
 	build := s.infra.buildBasePrompt
 	reg := s.infra.toolReg
@@ -41,10 +61,20 @@ func (s *ManagedSession) reloadSession() []string {
 		return nil
 	}
 
-	changed, revert := src.Reload()
-	if len(changed) == 0 {
+	before := src.Built()
+	changed, revert := src.Regenerate()
+	if !regenerate && !diskChanged(changed) {
 		// Nothing to do, and nothing to pay: leaving the prompt untouched keeps
-		// the cached prefix valid.
+		// the cached prefix valid. A new day or commit alone is not a reason
+		// to rebuild; with a file changed, the rebuild takes them too (owner's
+		// decision, 18/11/2026).
+		revert()
+		return nil
+	}
+	// A regeneration builds even when no input moved: a deploy may have
+	// changed the prompt itself.
+	prompt := build(reg.Specs())
+	if prompt == before {
 		return nil
 	}
 
@@ -52,7 +82,7 @@ func (s *ManagedSession) reloadSession() []string {
 	for _, c := range changed {
 		labels = append(labels, c.Label)
 	}
-	if err := s.runtime.RefreshBaseSystemPrompt(build(reg.Specs())); err != nil {
+	if err := s.runtime.RefreshBaseSystemPrompt(prompt); err != nil {
 		// A run started between the idle check and here, so the prompt was
 		// refused. Put the recorded state back: otherwise this reports success,
 		// the session keeps the old prompt, and the next reload sees no
@@ -60,7 +90,25 @@ func (s *ManagedSession) reloadSession() []string {
 		revert()
 		return nil
 	}
+	// A compaction or Start fresh saves the session right after the cut; a
+	// reload changes nothing else, so it saves here.
+	if persist := s.runtime.Context().PersistNow; !regenerate && persist != nil {
+		if err := persist(); err != nil {
+			slog.Warn("saving the regenerated prompt failed", "session", s.ID, "error", err)
+		}
+	}
 	return labels
+}
+
+// diskChanged reports whether a regeneration found a prompt input changed on
+// disk, as opposed to only the date or the last commit.
+func diskChanged(changed []agentcontext.Changed) bool {
+	for _, c := range changed {
+		if c.Label != agentcontext.LabelDate && c.Label != agentcontext.LabelGit {
+			return true
+		}
+	}
+	return false
 }
 
 // tryReloadSession admits the whole disk-read/build/install as one idle
@@ -74,8 +122,9 @@ func (s *ManagedSession) tryReloadSession() (labels []string, admitted bool) {
 // promptAfterCompaction is the agent's hook for an automatic compaction, which
 // lands in the middle of a run: the agent refuses SetSystemPrompt then, so
 // instead of applying the rebuilt prompt this hands it to the loop, which
-// installs it before its next request. Same rules as reloadSession — silent,
-// and untouched when no source changed.
+// installs it before its next request. It regenerates like any compaction
+// (see regenerateSession), silently, and leaves the prompt untouched when the
+// result is the same. The run saves the session after the compaction.
 func (s *ManagedSession) promptAfterCompaction() (string, bool) {
 	src := s.infra.promptSources
 	build := s.infra.buildBasePrompt
@@ -83,11 +132,13 @@ func (s *ManagedSession) promptAfterCompaction() (string, bool) {
 	if src == nil || build == nil || reg == nil || s.runtime == nil {
 		return "", false
 	}
-	changed, _ := src.Reload()
-	if len(changed) == 0 {
+	before := src.Built()
+	src.Regenerate()
+	prompt := build(reg.Specs())
+	if prompt == before {
 		return "", false
 	}
-	return s.runtime.RebasePrompt(build(reg.Specs())), true
+	return s.runtime.RebasePrompt(prompt), true
 }
 
 // formatReloadReport turns per-session outcomes into the message the user reads.

@@ -62,9 +62,12 @@ type job struct {
 	// launch or by its own reconfiguration: a parent's later change does not
 	// reach a running child.
 	daybreak bool
-	messages []core.AgentMessage
-	usage    *core.Usage
-	costUSD  float64
+	// systemPrompt is the prompt the child runs with, saved with its
+	// transcript so a resume sends the same one.
+	systemPrompt string
+	messages     []core.AgentMessage
+	usage        *core.Usage
+	costUSD      float64
 	// contextPct is how full the child's OWN context window is (0-100), or -1
 	// when its model is unknown so no window can be measured. The parent's
 	// percentage says nothing about a child: they hold different transcripts
@@ -270,6 +273,26 @@ func (s *jobStore) setDaybreak(id string, on bool) {
 	j.mu.Lock()
 	j.daybreak = on
 	j.mu.Unlock()
+}
+
+func (s *jobStore) setSystemPrompt(id, prompt string) {
+	j, ok := s.get(id)
+	if !ok {
+		return
+	}
+	j.mu.Lock()
+	j.systemPrompt = prompt
+	j.mu.Unlock()
+}
+
+func (s *jobStore) systemPrompt(id string) string {
+	j, ok := s.get(id)
+	if !ok {
+		return ""
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.systemPrompt
 }
 
 func (s *jobStore) setTitle(id, title string) {
@@ -767,6 +790,15 @@ func (j *Jobs) Messages(jobID string) []core.AgentMessage {
 		return nil
 	}
 	return j.store.messages(jobID)
+}
+
+// SystemPrompt returns the prompt the child runs with, "" when the job is
+// not tracked.
+func (j *Jobs) SystemPrompt(jobID string) string {
+	if j == nil || j.store == nil {
+		return ""
+	}
+	return j.store.systemPrompt(jobID)
 }
 
 // EndedTools returns the child's calls that ended while their batch still

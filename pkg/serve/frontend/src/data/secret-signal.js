@@ -3,6 +3,7 @@ import { isPresent } from './presence.js';
 import { addToast, alertAway, removeToast } from './notifications.js';
 import { openSession } from './tile-actions.js';
 import { closeDrawer } from './drawer.js';
+import { memoRefs, rosterSessions } from './roster.js';
 
 // secret-signal — the global "this session is stopped until you enter a
 // password" toast. It is a pure function of the store:
@@ -32,6 +33,9 @@ function cardShown(state, id) {
   return isPresent(state, id) && !(state.isMobile && state.drawerOpen);
 }
 
+// The roster as a list: a stream token leaves it as it was.
+const rosterList = memoRefs((roster) => Object.values(roster));
+
 export function reconcileSecretSignal(state = store.get()) {
   const pending = new Set();
   // A request id is known from the first time this client sees it, in any
@@ -39,7 +43,9 @@ export function reconcileSecretSignal(state = store.get()) {
   // out of view is news worth a sound or a buzz; a reload, a reconnect or a
   // card you were looking at never turns a known id into news again.
   const loading = state.sessionsLoaded === false;
-  for (const sess of Object.values(state.sessions)) {
+  for (const sess of rosterList(rosterSessions(state.sessions))) {
+    // Neither a request nor a toast: nothing below would do anything.
+    if (!sess.secretIds?.length && !raised.has(sess.id)) continue;
     const ids = (sess.secretIds || []).filter((id) => !dismissed.has(id));
     for (const id of sess.secretIds || []) pending.add(id);
     const key = ids.join(',');

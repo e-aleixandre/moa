@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/askuser"
@@ -289,7 +290,20 @@ type MsgIDInUse struct {
 
 // GetBranchPoints returns branch points for the branch picker UI.
 // Handler returns: []BranchPoint
-type GetBranchPoints struct{ SessionID string }
+//
+// Ctx, when set, stops the walk as soon as the caller goes away: on a very
+// large session it is the longest query there is.
+type GetBranchPoints struct {
+	SessionID string
+	Ctx       context.Context
+}
+
+func branchPointsCtx(q GetBranchPoints) context.Context {
+	if q.Ctx == nil {
+		return context.Background()
+	}
+	return q.Ctx
+}
 
 // GetBranchMessage returns the original user message stored at EntryID, the one
 // a rewind puts back in the composer. Handler returns: core.Message. It fails

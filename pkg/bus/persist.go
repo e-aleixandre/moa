@@ -27,6 +27,16 @@ type TreePersister interface {
 	SnapshotTree(entries []session.Entry, leafID string, metadata map[string]any) error
 }
 
+// TreeRevisionPersister is a TreePersister handed the tree itself rather than
+// a copy of it. Each save rewrites the whole transcript, so a persister that
+// knows which tree revision and header it last made durable can skip a save
+// that would write the same thing again, and the deep copy of the entries
+// with it. A skipped save reports success: what it would write is on disk.
+type TreeRevisionPersister interface {
+	TreePersister
+	SnapshotTreeRevision(tree *session.Tree, metadata map[string]any, acknowledged bool) error
+}
+
 // collectMetadata gathers all session metadata for persistence, in the
 // map[string]any format of session.Session.Metadata.
 func collectMetadata(sctx *SessionContext) map[string]any {
@@ -107,12 +117,19 @@ func sessionCostFromMetadata(meta map[string]any) float64 {
 // it saves tree entries instead of flat messages.
 func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersister) {
 	tp, hasTree := p.(TreePersister)
+	rp, hasRevision := p.(TreeRevisionPersister)
 
 	save := func() {
 		sctx.persistMu.Lock()
 		defer sctx.persistMu.Unlock()
 		meta := collectMetadata(sctx)
 
+		if hasRevision && sctx.Tree != nil {
+			if err := rp.SnapshotTreeRevision(sctx.Tree, meta, false); err != nil {
+				slog.Error("session persistence failed", "error", err)
+			}
+			return
+		}
 		// Prefer tree-based persistence when available (even if empty, to clear v2 fields)
 		if hasTree && sctx.Tree != nil {
 			entries, leafID := sctx.Tree.Snapshot()
@@ -145,8 +162,16 @@ func RegisterPersistenceReactor(b EventBus, sctx *SessionContext, p SessionPersi
 	// Metadata-only changes never mutate the tree → safe to persist directly.
 	b.Subscribe(func(e ConfigChanged) { save() })
 	// A child or a background summary can finish while the session is idle:
-	// its spend must reach disk without waiting for the next turn.
-	b.Subscribe(func(e SessionCostUpdated) { save() })
+	// its spend must reach disk without waiting for the next turn. A run's
+	// own cost is already in the total when its RunEnded is published, so
+	// the save that follows the turn (TreeSynced, or RunEnded when flat)
+	// writes it: one rewrite per turn instead of two.
+	b.Subscribe(func(e SessionCostUpdated) {
+		if e.savedWithTurn {
+			return
+		}
+		save()
+	})
 }
 
 // extractFinalAssistantText returns the text of the last assistant message

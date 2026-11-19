@@ -23,7 +23,6 @@ import (
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/dreaming"
 	"github.com/e-aleixandre/moa/pkg/extension"
-	"github.com/e-aleixandre/moa/pkg/git"
 	"github.com/e-aleixandre/moa/pkg/goal"
 	"github.com/e-aleixandre/moa/pkg/history"
 	"github.com/e-aleixandre/moa/pkg/mcp"
@@ -32,6 +31,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/owner"
 	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/secretaction"
+	"github.com/e-aleixandre/moa/pkg/session"
 	"github.com/e-aleixandre/moa/pkg/sessioncheckpoint"
 	"github.com/e-aleixandre/moa/pkg/skill"
 	"github.com/e-aleixandre/moa/pkg/subagent"
@@ -89,6 +89,13 @@ type SessionConfig struct {
 	// MCPToolSeed is a restored session's snapshot of the MCP tools it was
 	// offering, by server (see mcp.Manager.SeedTools). Nil when there is none.
 	MCPToolSeed map[string][]mcp.ToolDef
+	// PromptClock dates a freshly built prompt. Nil means time.Now; tests
+	// set it to rebuild a session on another day.
+	PromptClock func() time.Time
+	// FrozenPrompt is a restored session's frozen prompt (see
+	// session.PromptContext). When usable, the session starts with that
+	// prompt byte for byte and with its inputs instead of today's.
+	FrozenPrompt *session.PromptContext
 
 	// Context for MCP servers and subagent async jobs. Required.
 	Ctx context.Context
@@ -242,7 +249,10 @@ type Session struct {
 	BuildBasePrompt func([]core.ToolSpec) string
 	// Sources holds those on-disk inputs, so /reload can re-read them without
 	// restarting the session.
-	Sources           *agentcontext.Sources
+	Sources *agentcontext.Sources
+	// PromptRestored is true when the session started with its frozen
+	// prompt: whoever registers more tools must not rebuild it.
+	PromptRestored    bool
 	MemoryStore       *memory.Store
 	SessionCheckpoint *sessioncheckpoint.Slot
 	HasVerify         bool
@@ -723,11 +733,19 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 	// sibling subagents all reuse this snapshot so GPT-5.6 can read the
 	// shared instructions prefix; a live clock or last-commit restamp
 	// would miss it. Porcelain is already omitted from git.Context.
-	promptNow := time.Now()
-	promptGit := git.Context(cfg.CWD)
+	//
+	// The pin lives in Sources with the other inputs: a restored session
+	// gets the date and commit it was frozen with, and only a regeneration
+	// (compaction, Start fresh, reload) moves them.
+	promptSources.WithClock(cfg.PromptClock)
+	frozen := cfg.FrozenPrompt.Usable(cfg.CWD)
+	if frozen {
+		promptSources.Restore(*cfg.FrozenPrompt)
+	}
 	promptBuilder := func(opts agentcontext.SystemPromptOptions) string {
-		opts.Now = promptNow
-		opts.Git = &promptGit
+		now, gitCtx := promptSources.Pinned()
+		opts.Now = now
+		opts.Git = &gitCtx
 		return agentcontext.BuildSystemPrompt(opts)
 	}
 
@@ -830,7 +848,7 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 		// updates them, and a later rebuild (an MCP server toggling, a
 		// compaction) must not reinstate the prompt the session started with.
 		agentsMD, skillsIndex, memoryIndex := promptSources.Snapshot()
-		return promptBuilder(agentcontext.SystemPromptOptions{
+		prompt := promptBuilder(agentcontext.SystemPromptOptions{
 			AgentsMD:    agentsMD,
 			Tools:       specs,
 			CWD:         cfg.CWD,
@@ -842,9 +860,20 @@ func BuildSession(cfg SessionConfig) (*Session, error) {
 
 			AsyncQuestions: cfg.AsyncQuestions,
 		})
+		// Every build is installed by its caller (a reload reverts the record
+		// when it cannot install it), so the last one is what the session runs
+		// with and what it freezes.
+		promptSources.RecordBuilt(prompt)
+		return prompt
 	}
 	sess.Sources = promptSources
-	systemPrompt := sess.BuildBasePrompt(toolReg.Specs())
+	var systemPrompt string
+	if frozen {
+		systemPrompt = cfg.FrozenPrompt.System
+		sess.PromptRestored = true
+	} else {
+		systemPrompt = sess.BuildBasePrompt(toolReg.Specs())
+	}
 	sess.SystemPrompt = systemPrompt
 
 	// 12. Agent.

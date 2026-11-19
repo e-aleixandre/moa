@@ -157,16 +157,16 @@ up an active escalation), without dismissing the question. Ordinary sessions,
 blocking questions, permissions, `tasks ask` requests and a `request_call`'s
 written fallback do not get this automatic escalation.
 
-**Calling is not authorization.** A deployment, merge, release or
-permission-like question marked `requires_tap` still needs your own tap or
-typed answer. Neither the voice relay, another agent nor automation may
+**Calling is not authorization.** Whatever needs your authorization still
+needs your tap on screen: a question marked `requires_tap` is closed only by
+your own tap or typed answer. Neither the voice relay, another agent nor automation may
 answer it. Actual tool permissions and passwords keep their own cards.
 
 ## Whose session is it
 
 | Origin | Who directs it | Questions |
 | --- | --- | --- |
-| `owner` | The owner | The owner answers from the book. |
+| `owner` | The owner | The owner answers what the book or your instructions let it decide. |
 | `user` | The user | The owner reports what it would propose; it does not answer for the user. |
 
 Sessions with origin `owner` do not appear in the user's session list. They
@@ -318,7 +318,7 @@ what belongs in it — and never invents facts to fill it.
 
 ```
 PROJECT.md               the index every session is given (8 KiB)
-OWNER.md                 your preferences for the owner; the book tool refuses to write it
+OWNER.md                 your instructions for the owner; the book tool refuses to write it
 areas/README.md          the shape of an area and of a sheet
 areas/<area>/README.md   the area's cover: inspected, gaps, coverage
 areas/<area>/<sheet>.md  one feature, in three views
@@ -470,15 +470,18 @@ Archived facts leave the memory index and the `memory` tool does not read them: 
 
 ## OWNER.md
 
-`book/OWNER.md` is your half of the contract: how you want this owner to brief
-sessions, what to escalate, tone, conventions. It is read into the owner's
+`book/OWNER.md` is your half of the contract: what this owner decides and what
+it asks you, how it briefs sessions, what to escalate, tone, conventions. It is read into the owner's
 prompt through the same loader `PROJECT.md` uses — edit it and a live owner
 picks it up on `/reload` — and the `book` tool **refuses** to write it.
 Instructions an agent can rewrite are not instructions.
 
-It sits after the owner's invariants and is explicitly subordinated to them:
-preferences never override what the owner may not decide. "Merge to master
-whenever tests pass" in OWNER.md still results in the owner asking you.
+The owner's built-in prompt describes its role and method, not its permissions:
+what it may do comes from your instructions — your `AGENTS.md` files, OWNER.md
+and the book's decisions. OWNER.md sits last in its prompt and governs: where it
+differs from the built-in role, the owner follows it. Where nothing covers a
+decision, the owner asks. Tool permissions are the exception: an owner cannot
+approve them, whatever OWNER.md says.
 
 ## Building the book: the `book-init` skill
 

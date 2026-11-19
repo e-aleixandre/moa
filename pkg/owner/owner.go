@@ -393,17 +393,44 @@ func indexCutMark(kept, total int) string {
 // is the user's file and nobody trims it for them, so the prompt does.
 const MaxOwnerPrefsBytes = 16 * 1024
 
-// OwnerPrefs returns book/OWNER.md: the user's preferences for how this owner
-// should work. It is read through the same loader PROJECT.md uses, so editing
-// it reaches a live conversation on /reload, and it is never written by the
-// owner (pkg/book refuses it): instructions the agent can rewrite are not
-// instructions.
+// OwnerPrefs returns book/OWNER.md: the user's instructions for how this owner
+// works, which govern over its built-in role. It is read through the same
+// loader PROJECT.md uses, so editing it reaches a live conversation on
+// /reload, and it is never written by the owner (pkg/book refuses it):
+// instructions the agent can rewrite are not instructions.
 func (s *Store) OwnerPrefs(key string) string {
 	data, err := os.ReadFile(filepath.Join(s.BookDir(key), book.OwnerFile))
 	if err != nil {
 		return ""
 	}
-	return truncateUTF8(string(data), MaxOwnerPrefsBytes)
+	return truncateUTF8(stripLegacyOwnerHeader(string(data)), MaxOwnerPrefsBytes)
+}
+
+// legacyOwnerHeaders are the headers books were seeded with before 19/11,
+// when OWNER.md was "preferences" that "never override the owner's own
+// rules". Every book seeded until then still starts with one, and it would
+// contradict the prompt that now says the file governs. The header is dropped
+// on read, never rewritten: the file is the user's.
+var legacyOwnerHeaders = []string{
+	"# The user's preferences for this project\n\n" +
+		"Edit this file yourself. The owner reads it on every turn and cannot write it.\n" +
+		"It carries preferences — how to brief sessions, what to escalate, tone,\n" +
+		"conventions — not permissions: it never overrides the owner's own rules.\n",
+	"# The user's preferences for this project\n\n" +
+		"Edit this file yourself. The owner cannot write it; it rereads it when its\n" +
+		"session starts, reloads or compacts, not on every turn.\n" +
+		"It carries preferences — how to brief sessions, what to escalate, tone,\n" +
+		"conventions — not permissions: it never overrides the owner's own rules.\n",
+}
+
+func stripLegacyOwnerHeader(s string) string {
+	normalized := strings.ReplaceAll(s, "\r\n", "\n")
+	for _, h := range legacyOwnerHeaders {
+		if strings.HasPrefix(normalized, h) {
+			return strings.TrimPrefix(normalized, h)
+		}
+	}
+	return s
 }
 
 // truncateUTF8 caps s at limit bytes without splitting a rune.
