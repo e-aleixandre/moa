@@ -39,6 +39,7 @@ var (
 
 // PeerConfig configures NewPeer.
 type PeerConfig struct {
+	AudioDiagnostics *AudioDiagnostics `json:"-"`
 	// ICEServers nil selects a public STUN server; an empty non-nil slice
 	// disables ICE servers.
 	ICEServers []webrtc.ICEServer
@@ -49,8 +50,9 @@ type PeerConfig struct {
 // Peer is the offerer side of a WebRTC call that carries PCM24k mono s16le as
 // Opus RTP plus a text datachannel for JSON control events.
 type Peer struct {
-	pc    *webrtc.PeerConnection
-	track *webrtc.TrackLocalStaticSample
+	audioDiagnostics *AudioDiagnostics
+	pc               *webrtc.PeerConnection
+	track            *webrtc.TrackLocalStaticSample
 
 	mu      sync.Mutex // guards dc, err, closing, offered
 	dc      *webrtc.DataChannel
@@ -111,15 +113,16 @@ func NewPeer(cfg PeerConfig) (*Peer, error) {
 		return nil, err
 	}
 	p := &Peer{
-		pc:      pc,
-		open:    make(chan struct{}),
-		done:    make(chan struct{}),
-		control: make(chan []byte, peerControlBacklog),
-		pcm:     make(chan []byte, peerPCMBacklog),
-		up:      NewUpsampler2x(),
-		frame48: make([]byte, 4*peerFrameSamples),
-		packet:  make([]byte, 1500),
-		startup: peerStartup{wake: make(chan struct{}, 1)},
+		audioDiagnostics: cfg.AudioDiagnostics,
+		pc:               pc,
+		open:             make(chan struct{}),
+		done:             make(chan struct{}),
+		control:          make(chan []byte, peerControlBacklog),
+		pcm:              make(chan []byte, peerPCMBacklog),
+		up:               NewUpsampler2x(),
+		frame48:          make([]byte, 4*peerFrameSamples),
+		packet:           make([]byte, 1500),
+		startup:          peerStartup{wake: make(chan struct{}, 1)},
 	}
 	fail := func(err error) error { _ = p.Close(); return err }
 	if p.enc, err = opus.NewEncoder(opus.WithBitrate(32000), opus.WithApplication(opus.ApplicationVoIP)); err != nil {
@@ -319,6 +322,9 @@ func (p *Peer) onControl(m webrtc.DataChannelMessage) {
 		p.fail(errors.New("voice control message too large"))
 		return
 	}
+	if p.audioDiagnostics != nil {
+		p.audioDiagnostics.observeControl(m.Data)
+	}
 	data := bytes.Clone(m.Data)
 	p.ctlMu.Lock()
 	if p.ctlClosed {
@@ -368,10 +374,15 @@ func (p *Peer) readTrack(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 	buf := make([]int16, 2*peerMaxOpusSamples)
 	var last uint16
 	started := false
+	observation := rtpObservation{d: p.audioDiagnostics}
 	for {
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
 			return
+		}
+		epoch := observation.d.Epoch()
+		if epoch != 0 {
+			observation.packet(epoch, pkt.SequenceNumber, pkt.Timestamp, len(pkt.Payload), track.Codec().ClockRate, time.Now())
 		}
 		if started && !seqNewer(last, pkt.SequenceNumber) {
 			continue
@@ -384,7 +395,14 @@ func (p *Peer) readTrack(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		if pkt.Payload[0]&0x04 != 0 { // TOC stereo flag
 			channels, dec = 2, &stereo
 		}
+		var decodeStart time.Time
+		if epoch != 0 && observation.d.Epoch() == epoch {
+			decodeStart = time.Now()
+		}
 		n, err := dec.DecodeToInt16(pkt.Payload, buf)
+		if !decodeStart.IsZero() && observation.d.Epoch() == epoch {
+			observation.decoded(channels, n, err, time.Since(decodeStart))
+		}
 		if err != nil || n == 0 {
 			continue // one corrupt packet must not end the call
 		}
@@ -409,6 +427,9 @@ func (p *Peer) readTrack(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		}
 		p.pcmMu.Unlock()
 		if !ok {
+			if observation.d.Epoch() != 0 {
+				observation.d.Add(RTPOverflow, 1)
+			}
 			p.fail(errPCMOverflow)
 			return
 		}

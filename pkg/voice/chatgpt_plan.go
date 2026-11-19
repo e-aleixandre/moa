@@ -66,7 +66,9 @@ func (a *chatGPTPlan) Open(ctx context.Context, spec CallSpec) (Upstream, error)
 		}
 		began := time.Now()
 		slog.Info("voice startup attempt", "provider", ChatGPTPlan, "attempt", attempt, "stage", "begin")
-		peer, err := NewPeer(a.cfg.Peer)
+		cfg := a.cfg.Peer
+		cfg.AudioDiagnostics = spec.AudioDiagnostics
+		peer, err := NewPeer(cfg)
 		if err != nil {
 			slog.Info("voice startup failed", "provider", ChatGPTPlan, "attempt", attempt, "stage", "peer", "reason", ClassUnavailable, "retry_count", attempt-1)
 			return nil, &OpenError{Class: ClassUnavailable}

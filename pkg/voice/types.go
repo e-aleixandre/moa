@@ -79,13 +79,14 @@ type Availability struct {
 
 // CallSpec is everything an adapter needs to open one call.
 type CallSpec struct {
-	CallID         string // moa-local ID, never the upstream one
-	SessionID      string
-	Voice          string
-	Instructions   string
-	InitialContext string
-	BackendModel   core.Model
-	Tools          []core.ToolSpec
+	AudioDiagnostics *AudioDiagnostics `json:"-"`
+	CallID           string            // moa-local ID, never the upstream one
+	SessionID        string
+	Voice            string
+	Instructions     string
+	InitialContext   string
+	BackendModel     core.Model
+	Tools            []core.ToolSpec
 	// Opening is who speaks first: whoever picks up, as on a phone.
 	Opening Opening
 }
