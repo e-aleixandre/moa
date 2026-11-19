@@ -79,12 +79,12 @@ One line per areas/<area>/: what it covers.
 One line per active work/<feature>.md: branch, what it does, what it waits for.
 `
 
-const ownerTemplate = `# The user's preferences for this project
+const ownerTemplate = `# The user's instructions for this project
 
 Edit this file yourself. The owner cannot write it; it rereads it when its
 session starts, reloads or compacts, not on every turn.
-It carries preferences — how to brief sessions, what to escalate, tone,
-conventions — not permissions: it never overrides the owner's own rules.
+It governs how the owner works here — what it decides and what it asks, how
+to brief sessions, what to escalate, tone, conventions — over its built-in role.
 `
 
 const areasTemplate = `# Areas

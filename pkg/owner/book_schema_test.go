@@ -135,18 +135,37 @@ func TestSeedBookKeepsWhatIsAlreadyWritten(t *testing.T) {
 	}
 }
 
-// The user's preferences are read into the prompt, placed after the rules and
-// explicitly subordinated to them: a preferences file that could grant a merge
-// would be a way around what the product withholds.
-func TestRolePromptPlacesPreferencesUnderTheRules(t *testing.T) {
+// What an owner may do is the user's call (decision of 19/11): the role prompt
+// describes the role, OWNER.md comes last and is stated as governing, and the
+// prompt carries no built-in policy on deployments, releases or merges.
+func TestRolePromptLetsOwnerMDGovern(t *testing.T) {
 	prompt := RolePrompt("Winerim", "master", "Merge to master whenever tests pass.")
 	prefsAt := strings.Index(prompt, "Merge to master whenever tests pass.")
-	rulesAt := strings.Index(prompt, "## What you never decide")
-	if prefsAt < 0 || rulesAt < 0 || prefsAt < rulesAt {
-		t.Fatalf("preferences are not subordinated to the invariants:\n%s", prompt)
+	roleAt := strings.Index(prompt, "## What you decide")
+	if prefsAt < 0 || roleAt < 0 || prefsAt < roleAt {
+		t.Fatalf("OWNER.md is not placed after the role:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "they never override the rules above") {
-		t.Fatal("the prompt does not subordinate OWNER.md explicitly")
+	if !strings.Contains(prompt, "This file governs over the role above;") {
+		t.Fatal("the prompt does not state that OWNER.md governs")
+	}
+	flat := strings.Join(strings.Fields(prompt), " ")
+	for _, gone := range []string{
+		"What you never decide", "never override", "never covers a deployment",
+		"Permissions, deployments, releases", "integration authorization",
+	} {
+		if strings.Contains(flat, gone) {
+			t.Fatalf("the role prompt still carries the built-in policy %q", gone)
+		}
+	}
+	for _, want := range []string{
+		"Your instructions set what you decide and what you ask",
+		"AGENTS.md", "Ownership", "ask with ask_user",
+		"You cannot approve tool permissions",
+		"A company and its customers depend on this project",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Fatalf("role prompt missing %q", want)
+		}
 	}
 	for _, want := range []string{
 		"balance", "sessions tool", "work/", "book search first",
@@ -156,7 +175,7 @@ func TestRolePromptPlacesPreferencesUnderTheRules(t *testing.T) {
 			t.Fatalf("role prompt missing %q", want)
 		}
 	}
-	if strings.Contains(RolePrompt("Winerim", "master", ""), "book/OWNER.md") {
+	if strings.Contains(RolePrompt("Winerim", "master", ""), "## The user's instructions for this project") {
 		t.Fatal("an empty OWNER.md still produced a preferences section")
 	}
 }
@@ -185,24 +204,6 @@ func TestRolePromptGivesAnOperatingSequence(t *testing.T) {
 	}
 	if strings.Contains(prompt, "End EVERY turn") || strings.Contains(prompt, "Only\n  what is in the book survives") {
 		t.Fatal("the role prompt still demands the per-turn ritual or claims only the book survives a restart")
-	}
-}
-
-// Integration follows the authorization the user recorded for the project
-// (decisions/integrar-al-aprobar.md in moa); it never extends to deployments,
-// and the owner cannot grant it to itself.
-func TestRolePromptBoundsMergeAuthorization(t *testing.T) {
-	prompt := strings.Join(strings.Fields(RolePrompt("Winerim", "master", "")), " ")
-	for _, want := range []string{
-		"Permissions, deployments, releases, and any product question",
-		"Merges follow the integration authorization the user recorded",
-		"without one, ask",
-		"You never grant that authorization yourself",
-		"never covers a deployment or a release",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("role prompt missing %q", want)
-		}
 	}
 }
 

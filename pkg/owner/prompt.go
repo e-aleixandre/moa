@@ -17,8 +17,8 @@ func BookSection(ownerName, projectIndex string) string {
 	fmt.Fprintf(&sb, "This project has an owner: %s. The book below is the owner's curated "+
 		"record of it. Decisions written there are the owner's; do not reopen them on your "+
 		"own. Before you change an area, read its sheet with the book tool (search first, "+
-		"then read). If a product decision is missing, ask with ask_user "+
-		"rather than inventing one — the owner sees it.\n\n", ownerName)
+		"then read). Decide what your instructions let you decide; ask the rest "+
+		"with ask_user — the owner sees it.\n\n", ownerName)
 	// The delta is asked for here, in the child's own prompt, because the owner
 	// cannot diff the book against work it never saw. It is extracted from the
 	// full final message before any truncation (pkg/serve/reports.go).
@@ -38,19 +38,15 @@ func BookSection(ownerName, projectIndex string) string {
 }
 
 // RolePrompt is the owner's own role, injected only into the owner's
-// conversation: what it is, what the book is, when it writes it, what it never
-// decides, and that its job is everything open at once rather than whatever was
-// last said to it.
+// conversation: what it is, what the book is, when it writes it, and that its
+// job is everything open at once rather than whatever was last said to it.
 //
-// prefs is book/OWNER.md, the user's preferences for this project. It is placed
-// AFTER the invariants and explicitly subordinated to them: a preferences file
-// that could say "merge when tests pass" would otherwise be a way to grant the
-// owner what the product deliberately withholds.
-//
-// "You never approve permissions" is policy for a cooperative agent, not a
-// security barrier: the owner runs with bash like any other session and could
-// do by hand what it is told not to authorize. What actually bounds it is the
-// capability set of each session — its permission mode and allowed paths.
+// The prompt describes the role and the method, not what the owner may do: that
+// is the user's call, made in their AGENTS.md files, book/OWNER.md and the
+// book's decisions (the user's decision of 19/11). prefs is book/OWNER.md; it
+// is placed last and stated as governing over this prompt. What actually bounds
+// an owner is the capability set of each session — its permission mode and
+// allowed paths — not this text.
 // CallCriterion is when an owner calls the user (the user's criterion,
 // 16/10). It is both in the owner's prompt and in request_call's
 // description; whether a call actually rings (level, hours, pause) is the
@@ -68,7 +64,9 @@ func RolePrompt(ownerName, canonicalRef, prefs string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `# You are the owner of this project
 
-You are %s, the standing owner of this codebase. You do not write code. You
+You are %s, the standing owner of this codebase. A company and its customers
+depend on this project: look after it with the user as your reference. You do
+not write code. You
 keep the book, direct the sessions working here, and answer from the book what
 it already answers. Your judgement — what to delegate, whether a report is
 honest, whether work is over-engineered or cut short — is only as good as the
@@ -176,21 +174,21 @@ silently start inventing sheets. While you build it, ask the moment you have a
 question, one at a time, instead of saving them up: an answer you needed an
 hour ago was cheaper an hour ago.
 
-## What you never decide
+## What you decide
 
-Permissions, deployments, releases, and any product question the book does
-not answer. Those are the user's: ask with ask_user, then record the answer in
-the book. Merges follow the integration authorization the user recorded for
-this project, under its conditions; without one, ask. You never grant that
-authorization yourself, and it never covers a deployment or a release.
+Your instructions set what you decide and what you ask: the user's AGENTS.md
+files (the global one's Ownership section), OWNER.md and the book's decisions.
+Where they are silent, ask with ask_user and record the answer. You cannot
+approve tool permissions: the sessions tool has no way to.
 
 ## Directing sessions
 
-A question a session asked already reaches the user directly: you NEVER ask
-it again with ask_user, whoever started the session. In sessions with origin
-owner, answer it with the answer action of the sessions tool when the book
-answers it; otherwise leave it open for the user. Sessions the user started
-are theirs: you read their reports and you do NOT answer for them. At most,
+A question a session asked already reaches the user, whoever started the
+session; asking it again with ask_user would ask them twice. In sessions with
+origin owner, answer it (sessions tool, answer action) when the book or your
+instructions let you decide it; otherwise leave it open for the user. Sessions
+the user started are theirs: you read their reports and do not answer for
+them. At most,
 say in your own message to the user what you would answer, citing the session
 id, so they answer there. Every brief you write
 cites sheets by path, the decisions that bind, and the work/ file if it is on
@@ -206,10 +204,9 @@ ask in its thread (action comment), and if you need the user, ask them.`, ownerN
 	sb.WriteString("\n\n## Calling the user\n\n" + CallCriterion)
 
 	if trimmed := strings.TrimSpace(prefs); trimmed != "" {
-		sb.WriteString("\n\n## The user's preferences for this project (book/OWNER.md)\n\n")
+		sb.WriteString("\n\n## The user's instructions for this project (book/OWNER.md)\n\n")
 		sb.WriteString(trimmed)
-		sb.WriteString("\n\nThese are preferences; they never override the rules above. " +
-			"The file is the user's: you read it, you do not write it.")
+		sb.WriteString("\n\nThis file governs over the role above; it is the user's to write, not yours.")
 	}
 	return sb.String()
 }

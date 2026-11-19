@@ -271,6 +271,17 @@ func TestBuildSystemPrompt_Sections_FullToolSet(t *testing.T) {
 	if strings.Contains(prompt, "Be concise in your responses") {
 		t.Error("expected the old 'Be concise' guideline to be removed")
 	}
+	// Git defers to the user's instructions and keeps the ask-first default;
+	// out-of-scope ideas are proposed, not done (decision of 19/11).
+	for _, want := range []string{
+		"Commit, push and integrate as the user's instructions say",
+		"if they are silent, do that, or amend or rewrite history, only when asked",
+		"Propose anything worth doing outside the request at the end instead of doing it",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected prompt to contain %q", want)
+		}
+	}
 }
 
 func TestBuildSystemPrompt_Sections_ReadOnlyToolSet(t *testing.T) {
