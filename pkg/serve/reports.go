@@ -1376,7 +1376,7 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 			fmt.Fprintf(&b, "  book delta: %s\n", indentReportText(rep.BookDelta))
 		}
 		for _, t := range rep.LinkedTasks {
-			fmt.Fprintf(&b, "  %s\n", linkedTaskNotice(t, rep.Status == callbackStatusNeedsInput && !rep.InterruptedByRestart))
+			fmt.Fprintf(&b, "  %s\n", linkedTaskNotice(t, rep.Status == callbackStatusNeedsInput && !rep.InterruptedByRestart && !pendingAnswered(rep)))
 		}
 	}
 	b.WriteString("\nUse the sessions tool to read or answer any of them, and update the book " +
@@ -1400,6 +1400,12 @@ func reportAnswered(rep owner.Report, askID string) bool {
 		}
 	}
 	return false
+}
+
+// pendingAnswered says the question a needs_input report waits on has been
+// answered since: nothing about it waits any more.
+func pendingAnswered(rep owner.Report) bool {
+	return rep.Pending != nil && rep.Pending.Kind == pendingKindQuestion && reportAnswered(rep, rep.Pending.ID)
 }
 
 func reportOrigin(origin string) string {
@@ -1429,7 +1435,7 @@ func nowLine(rep owner.Report) string {
 		line = fmt.Sprintf("now: %d background jobs still running — it will report again when they finish", rep.BackgroundCount)
 	case rep.Status == callbackStatusFailed:
 		line = "now: stopped by the error above — it will not continue on its own"
-	case rep.Status == callbackStatusNeedsInput && len(rep.Answered) == 0:
+	case rep.Status == callbackStatusNeedsInput && !pendingAnswered(rep):
 		line = "now: waiting for the answer above — nothing else is running"
 	default:
 		line = "now: idle — nothing is running; it will not continue unless someone sends it a message"

@@ -161,6 +161,25 @@ func TestHeldNeedsInputReportSaysTheUserAnswered(t *testing.T) {
 	}
 }
 
+// A linked task of a needs_input report whose question was answered since no
+// longer waits for that answer.
+func TestLinkedTaskNoticeStopsWaitingOnAnAnsweredQuestion(t *testing.T) {
+	rep := owner.Report{SessionID: "s1", Title: "t", Origin: "owner", Status: callbackStatusNeedsInput,
+		Pending:     &owner.ReportPending{Kind: pendingKindQuestion, ID: "q_1", Text: "Which?"},
+		LinkedTasks: []owner.ReportTask{{ID: 3, Title: "Ship"}}}
+	if text := reportsMessage(owner.Owner{}, []owner.Report{rep}); !strings.Contains(text, "It waits for the answer above") {
+		t.Fatalf("an open question no longer reads as waited on:\n%s", text)
+	}
+	rep.Answered = []owner.ReportAnswer{{AskID: "q_1", By: "user", At: "2026-11-22T13:43:59Z", Text: "A", Delivered: true}}
+	text := reportsMessage(owner.Owner{}, []owner.Report{rep})
+	if strings.Contains(text, "waits for the answer above") {
+		t.Fatalf("the linked task still waits for an answer the session has:\n%s", text)
+	}
+	if !strings.Contains(text, "linked task #3 «Ship» is still open. Before ending your turn") {
+		t.Fatalf("the linked task is no longer a decision for the owner:\n%s", text)
+	}
+}
+
 func TestUserAnswerEntrySaysTheSessionAlreadyHasIt(t *testing.T) {
 	e, ownerSess, child, qid := heldOwnerChildWithQuestion(t)
 	if code, body := f1PostAsk(t, e, child.ID, qid, "Sí, despliega"); !f1Is2xx(code) {
