@@ -624,18 +624,24 @@ func (m *Manager) ownerStopSession(own owner.Owner, id string) core.Result {
 	if info.Origin != "owner" {
 		return core.ErrorResult(fmt.Sprintf("session %s belongs to the user: you cannot stop it. Ask the user to stop it", id))
 	}
-	err = m.Cancel(id)
+	discarded, err := m.CancelWithDiscardedSteers(id, "")
 	switch {
 	case err == nil, errors.Is(err, errFenceNotSaved):
-		msg := fmt.Sprintf("Stopped session %s: its current turn was ended and queued messages were discarded. It stays open; send resumes it.", id)
+		msg := fmt.Sprintf("Stopped session %s: its current turn was ended. It stays open; send resumes it.", id)
+		if lost := recallableSteers(discarded); len(lost) > 0 {
+			msg += fmt.Sprintf(" Discarded %d queued message(s), not delivered:", len(lost))
+			for _, steer := range lost {
+				msg += fmt.Sprintf(" «%s»", steer.Text)
+			}
+			msg += "; send them again if they still apply."
+		}
 		if err != nil {
 			msg += " Warning: " + err.Error()
 		}
 		return core.TextResult(msg)
-	case errors.Is(err, errNotRunning):
+	// The session is saved but not loaded: nothing is running in it.
+	case errors.Is(err, errNotRunning), errors.Is(err, ErrNotFound), errors.Is(err, session.ErrNotFound):
 		return core.TextResult(fmt.Sprintf("Session %s is already idle: nothing to stop.", id))
-	case errors.Is(err, ErrNotFound), errors.Is(err, session.ErrNotFound):
-		return core.ErrorResult(fmt.Sprintf("session %s not found", id))
 	}
 	return core.ErrorResult(fmt.Sprintf("cannot stop %s: %v", id, err))
 }
