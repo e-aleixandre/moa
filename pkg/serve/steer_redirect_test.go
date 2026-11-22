@@ -175,3 +175,37 @@ func TestOwnerSessionsSendQueuesUnlessRedirect(t *testing.T) {
 		t.Errorf("queued Redirect flags = %v, want plain=false redirect=true", got)
 	}
 }
+
+// Automatic notices ride in the queue but no redirect acts on them: the
+// snapshot flags them so a client does not keep offering "Redirect now" for a
+// queue holding only notices, nor miss "redirecting" in a mixed one.
+func TestSnapshotFlagsAutomaticSteers(t *testing.T) {
+	_, sess := blockedSession(t)
+	ag := sess.runtime.Context().Agent
+	for _, it := range []core.SteerItem{
+		{ID: "user", Text: "from the user", Redirect: true},
+		{ID: "owner", Text: "from the owner", Custom: map[string]any{"source": "owner"}},
+		{ID: "inbox", Text: "inbox notice", Custom: map[string]any{"source": "event", "source_name": "Inbox"}},
+		{ID: "schedule", Text: "schedule due", Custom: map[string]any{"source": "schedule"}},
+		{ID: "report", Text: "a report", Custom: map[string]any{"source": "report"}},
+	} {
+		if !ag.Steer(it) {
+			t.Fatalf("steer %s refused", it.ID)
+		}
+	}
+	data := buildInitData(sess, bus.StreamingAggregate{}, nil, "")
+	got := map[string]bool{}
+	for _, s := range data.PendingSteers {
+		got[s.ID] = s.Automatic
+	}
+	want := map[string]bool{"user": false, "owner": false, "inbox": true, "schedule": true, "report": true}
+	for id, w := range want {
+		if a, ok := got[id]; !ok || a != w {
+			t.Errorf("%s: automatic=%v present=%v, want %v", id, a, ok, w)
+		}
+	}
+	raw, _ := json.Marshal(data.PendingSteers)
+	if strings.Count(string(raw), `"automatic":true`) != 3 {
+		t.Errorf("wire form: %s", raw)
+	}
+}

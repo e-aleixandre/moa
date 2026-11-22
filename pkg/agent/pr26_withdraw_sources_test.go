@@ -29,6 +29,8 @@ func TestPR26COnlyUserAndParentOwnerInstructionsWithdraw(t *testing.T) {
 		{name: "webhook", custom: map[string]any{"source": "event", "source_name": "webhook"}},
 		{name: "schedule_due", custom: map[string]any{"source": "schedule"}},
 		{name: "report", custom: map[string]any{"source": "report"}},
+		{name: "voice_call", custom: map[string]any{"source": "voice_call", "kind": "minutes", "call_id": "c1"}},
+		{name: "secret_batch", custom: map[string]any{"source": "secret_batch"}},
 		{name: "report_internal", internal: true, custom: map[string]any{"source": "report"}},
 		{name: "subagent_completion", internal: true, custom: map[string]any{"source": "subagent"}},
 		{name: "bash_job_completion", internal: true, custom: map[string]any{"source": "bash_job"}},

@@ -114,6 +114,10 @@ type PendingSteerData struct {
 	// Redirect marks a message that will be read before the run's next tool
 	// starts, withdrawing the calls not yet started.
 	Redirect bool `json:"redirect,omitempty"`
+	// Automatic marks an item no redirect can act on (an event, schedule or
+	// report notice): the server never marks it, so clients must not count it
+	// when they offer "Redirect now" or show "redirecting".
+	Automatic bool `json:"automatic,omitempty"`
 }
 
 // LiveToolInitData is one tool call that is still generating its arguments or

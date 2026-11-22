@@ -35,6 +35,8 @@ export function mergeSteers(snapshot, local) {
     ...(s.session_mentions?.length ? { session_mentions: s.session_mentions } : {}),
     // Already marked to redirect (by this or another client) before the cut.
     ...(s.redirect ? { redirect: true } : {}),
+    // A notice no redirect acts on (event, schedule, report).
+    ...(s.automatic ? { automatic: true } : {}),
     confirmed: true,
   }));
   const serverIds = new Set(server.map(s => s.id));

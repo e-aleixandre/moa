@@ -1047,8 +1047,14 @@ export function redirectQueuedSteers(id) {
 // A no-op write is skipped so a reply that confirms what the screen already
 // shows does not re-render the transcript.
 function setSteersRedirect(id, ids, on) {
-  const queue = store.get().sessions[id]?.pendingSteers;
-  if (!queue || ids.size === 0) return;
+  const next = withRedirectMarks(store.get().sessions[id]?.pendingSteers, ids, on);
+  if (next) updateSession(id, { pendingSteers: next });
+}
+
+// withRedirectMarks returns the queue with the redirect mark of these ids set
+// or cleared, or null when nothing changes (so nothing re-renders).
+function withRedirectMarks(queue, ids, on) {
+  if (!queue || ids.size === 0) return null;
   let changed = false;
   const next = queue.map((s) => {
     if (!s || !ids.has(s.id) || !!s.redirect === on) return s;
@@ -1057,7 +1063,7 @@ function setSteersRedirect(id, ids, on) {
     const { redirect, ...rest } = s;
     return rest;
   });
-  if (changed) updateSession(id, { pendingSteers: next });
+  return changed ? next : null;
 }
 
 export async function cancelSubagent(id, jobId) {
@@ -1143,17 +1149,8 @@ export function redirectSubagentQueue(id, jobId) {
 }
 
 function setSubagentSteersRedirect(id, jobId, ids, on) {
-  const queue = subagentQueue(id, jobId);
-  if (!queue || ids.size === 0) return;
-  let changed = false;
-  const next = queue.map((s) => {
-    if (!s || !ids.has(s.id) || !!s.redirect === on) return s;
-    changed = true;
-    if (on) return { ...s, redirect: true };
-    const { redirect, ...rest } = s;
-    return rest;
-  });
-  if (changed) setSubagentQueue(id, jobId, next);
+  const next = withRedirectMarks(subagentQueue(id, jobId), ids, on);
+  if (next) setSubagentQueue(id, jobId, next);
 }
 
 // epochMs turns the REST projection's RFC3339 timestamp into the epoch millis

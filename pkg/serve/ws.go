@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/e-aleixandre/moa/pkg/agent"
 	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/session"
@@ -909,6 +910,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 				NonRecallable:   isAdmissionReceipt(s.Custom),
 				SessionMentions: steerSessionMentions(s),
 				Redirect:        s.Redirect,
+				Automatic:       !s.IsBarrier() && !agent.IsInstruction(s),
 			}
 			if label, ok := voiceQueuedText(s.Custom); ok {
 				// The call's records read as what they are, never as the
@@ -1111,7 +1113,7 @@ func liveSubagentInitData(subagents []bus.SubagentSnapshot) []SubagentInitData {
 			Daybreak:          sa.Daybreak,
 		}
 		for _, steer := range sa.PendingSteers {
-			sad.PendingSteers = append(sad.PendingSteers, PendingSteerData{ID: steer.ID, Text: steer.Text, Redirect: steer.Redirect})
+			sad.PendingSteers = append(sad.PendingSteers, PendingSteerData{ID: steer.ID, Text: steer.Text, Redirect: steer.Redirect, Automatic: !agent.IsInstruction(steer)})
 		}
 		if !sa.StartedAt.IsZero() {
 			sad.StartedAtMs = sa.StartedAt.UnixMilli()

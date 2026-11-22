@@ -275,12 +275,12 @@ func (q *steerQueue) len() int {
 // (events, schedules, reports, unknown or malformed sources) never withdraw and
 // are delivered after the batch, even when marked.
 func withdrawsPendingTools(it core.SteerItem) bool {
-	return it.Redirect && isInstruction(it)
+	return it.Redirect && IsInstruction(it)
 }
 
-// isInstruction reports whether a queued item comes from someone who may
+// IsInstruction reports whether a queued item comes from someone who may
 // redirect the run: the user, or a parent or owner of this agent.
-func isInstruction(it core.SteerItem) bool {
+func IsInstruction(it core.SteerItem) bool {
 	if it.Internal || it.IsBarrier() {
 		return false
 	}
@@ -292,7 +292,7 @@ func isInstruction(it core.SteerItem) bool {
 	return ok && (source == "" || source == "owner")
 }
 
-// markRedirect sets Redirect on every queued instruction (see isInstruction)
+// markRedirect sets Redirect on every queued instruction (see IsInstruction)
 // and returns their IDs, in queue order. Items already marked are reported too:
 // the caller asked for the whole queue to redirect and that is now its state.
 // Automatic items and barriers are left as they are. Marking in place is safe:
@@ -302,7 +302,7 @@ func (q *steerQueue) markRedirect() []string {
 	defer q.mu.Unlock()
 	var ids []string
 	for i := range q.items {
-		if !isInstruction(q.items[i]) {
+		if !IsInstruction(q.items[i]) {
 			continue
 		}
 		q.items[i].Redirect = true

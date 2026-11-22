@@ -6,7 +6,9 @@
 import { test, expect } from 'bun:test';
 import {
   willEnqueue, combineQueueText, droppedImageCount, recallActivates, sendMayClear,
+  queueRedirectState,
 } from './composer-queue.js';
+import { mergeSteers } from './ws/init.js';
 
 test('willEnqueue sends immediately when idle or errored', () => {
   expect(willEnqueue({ state: 'idle' })).toBe(false);
@@ -88,4 +90,17 @@ test('sendMayClear lets an undisturbed send empty the composer', () => {
 
 test('sendMayClear refuses to clear a composer written meanwhile', () => {
   expect(sendMayClear(3, 4)).toBe(false);
+});
+
+// Automatic notices (Inbox, webhooks, schedules, reports) come from the
+// snapshot as non_recallable:false; only the server's `automatic` flag says no
+// redirect acts on them. Without it the marker kept offering "Redirect now" for
+// a queue of notices, and a marked message beside one never read "redirecting".
+test('automatic notices from the snapshot neither offer nor block a redirect', () => {
+  const [u, ev] = mergeSteers([
+    { id: 'u', text: 'from the user', redirect: true },
+    { id: 'ev', text: 'inbox notice', automatic: true },
+  ], []);
+  expect(queueRedirectState([u, ev])).toEqual({ redirecting: true, canRedirect: false });
+  expect(queueRedirectState([ev])).toEqual({ redirecting: false, canRedirect: false });
 });

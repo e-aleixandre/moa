@@ -76,12 +76,12 @@ export function sendMayClear(sendEpoch, currentEpoch) {
 }
 
 // canRedirectSteer says whether a queued item is one the owner said and a
-// redirect can act on. Slash-command barriers and task notices are never
-// marked server-side (a barrier is not an instruction, a notice is not the
-// owner's), so they neither count toward "redirecting" nor keep the offer to
-// redirect alive.
+// redirect can act on. Slash-command barriers, task notices and automatic
+// notices (the server's `automatic`: events, schedules, reports) are never
+// marked server-side, so they neither count toward "redirecting" nor keep the
+// offer to redirect alive.
 export function canRedirectSteer(s) {
-  return !!s && !s.command && !s.non_recallable;
+  return !!s && !s.command && !s.non_recallable && !s.automatic;
 }
 
 // queueRedirectState reads the queue for the marker and the composer. The queue
