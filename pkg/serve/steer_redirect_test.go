@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -128,15 +129,49 @@ func TestRedirectQueueEndpointOnEmptyQueue(t *testing.T) {
 	}
 }
 
-// An owner's message keeps redirecting while the owner has not decided
-// whether it should only queue, like the user's default.
-func TestOwnerSendStillRedirects(t *testing.T) {
-	env, sess := blockedSession(t)
-	custom := map[string]any{"source": "owner", "owner_id": "o1", "owner_name": "Owner"}
-	if _, _, _, err := env.mgr.send(sess.ID, "from the owner", nil, "", "", custom); err != nil {
+// An owner's sessions send queues like the user's own message, and withdraws
+// the child's unstarted calls only when it asks for redirect.
+func TestOwnerSessionsSendQueuesUnlessRedirect(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("MOA_CONFIG_DIR", t.TempDir())
+	gate := make(chan struct{})
+	started := make(chan bool, 1)
+	blocking := func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		if last := lastMessage(req); last.Role == "user" && strings.Contains(rsContentText(last), "BLOCK") {
+			select {
+			case started <- true:
+			default:
+			}
+			select {
+			case <-gate:
+			case <-time.After(20 * time.Second):
+			}
+		}
+		return simpleResponse("ok"), nil
+	}
+	mgr := newTestManager(t, ctx, newMockProvider(blocking, blocking, blocking, blocking, blocking, blocking))
+	t.Cleanup(func() { close(gate) })
+	root := t.TempDir()
+	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
+	child, err := mgr.CreateSession(CreateOpts{CWD: root, Origin: "owner", Title: "busy child"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := queuedRedirects(sess); !got["from the owner"] {
-		t.Errorf("owner message Redirect = %v, want true", got)
+	if _, _, _, err := mgr.Send(child.ID, "BLOCK", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	rsWait(t, started)
+
+	for _, params := range []map[string]any{
+		{"action": "send", "session_id": child.ID, "text": "when you can"},
+		{"action": "send", "session_id": child.ID, "text": "stop that now", "redirect": true},
+	} {
+		if res := runSessionsTool(t, ownerSess, params); res.IsError {
+			t.Fatalf("send %v failed: %s", params, toolText(res))
+		}
+	}
+	got := queuedRedirects(child)
+	if len(got) != 2 || got["when you can"] || !got["stop that now"] {
+		t.Errorf("queued Redirect flags = %v, want plain=false redirect=true", got)
 	}
 }

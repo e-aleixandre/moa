@@ -107,6 +107,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 				},
 				"session_id": {"type": "string", "description": "Target session (read, send, stop, close, answer)."},
 				"text": {"type": "string", "description": "Message to send (send), or the prompt for a new session (new)."},
+				"redirect": {"type": "boolean", "description": "For send to a working session: true only if what it is doing now is wrong; its pending tool calls are withdrawn and it reads your message first. Default false: it reads the message after its current step."},
 				"limit": {"type": "integer", "description": "For read: how many recent messages (default 20, max 60)."},
 				"message_id": {"type": "string", "description": "For read: read this one message (or tool call) whole instead of the abridged list. \"last\" is the session's latest assistant message."},
 				"offset": {"type": "integer", "description": "For read with message_id: character to start from, for a message longer than one read returns."},
@@ -407,13 +408,15 @@ func (m *Manager) savedQuestionLine(id string) string {
 	return fmt.Sprintf("open question (ask_id %s): %s", q.ID, strings.Join(questions, " | "))
 }
 
-func (m *Manager) ownerSendToSession(own owner.Owner, id, text string) core.Result {
-	return m.ownerSendCustom(own, id, text, ownerPromptCustom(own))
+func (m *Manager) ownerSendToSession(own owner.Owner, id, text string, redirect bool) core.Result {
+	return m.ownerSendCustom(own, id, text, ownerPromptCustom(own), redirect)
 }
 
 // ownerSendCustom is ownerSendToSession for a message with the given
-// provenance (ownerPromptCustom, perhaps with a task).
-func (m *Manager) ownerSendCustom(own owner.Owner, id, text string, custom map[string]any) core.Result {
+// provenance (ownerPromptCustom, perhaps with a task). Like the user's send, a
+// message to a busy session waits for its current tool batch unless redirect
+// asks it to withdraw the calls not yet started.
+func (m *Manager) ownerSendCustom(own owner.Owner, id, text string, custom map[string]any, redirect bool) core.Result {
 	if text == "" {
 		return core.ErrorResult("text is required")
 	}
@@ -477,7 +480,7 @@ func (m *Manager) ownerSendCustom(own owner.Owner, id, text string, custom map[s
 	if ask != nil && ask.RequiresTap {
 		return core.ErrorResult(tapQuestionMessage(id, ask))
 	}
-	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", custom, func(sess *ManagedSession) error {
+	action, msgID, _, err := m.sendValidated(id, text, nil, "", "", custom, redirect, func(sess *ManagedSession) error {
 		if err := ownerTargetError(own, sess.ID, sess.Kind, sess.CWD, sess.ownerDetached.Load()); err != nil {
 			return err
 		}
@@ -503,8 +506,11 @@ func (m *Manager) ownerSendCustom(own owner.Owner, id, text string, custom map[s
 		}
 		return core.TextResult(fmt.Sprintf("Skipped the pending question (ask_id %s) and queued your message for %s.", ask.ID, id))
 	}
+	if action == "steer" && redirect {
+		return core.TextResult(fmt.Sprintf("Queued for %s (it is working; its pending steps are withdrawn and it reads this first).", id))
+	}
 	if action == "steer" {
-		return core.TextResult(fmt.Sprintf("Queued for %s (it is working; it will read this at its next step).", id))
+		return core.TextResult(fmt.Sprintf("Queued for %s (it is working; it will read this after its current step).", id))
 	}
 	return core.TextResult(fmt.Sprintf("Sent to %s (%s).", id, msgID))
 }
@@ -681,12 +687,13 @@ func (m *Manager) ownerCloseSession(own owner.Owner, id string) core.Result {
 // accepted together, or neither is.
 func (m *Manager) ownerSendWithTask(ctx context.Context, own owner.Owner, params map[string]any) core.Result {
 	id, text := getStr(params, "session_id"), getStr(params, "text")
+	redirect := params["redirect"] == true
 	taskID, none, given, err := executionTaskParam(params)
 	if err != nil {
 		return core.ErrorResult(err.Error())
 	}
 	if !given || none {
-		return m.ownerSendToSession(own, id, text)
+		return m.ownerSendToSession(own, id, text, redirect)
 	}
 	if text == "" {
 		return core.ErrorResult("text is required")
@@ -697,7 +704,7 @@ func (m *Manager) ownerSendWithTask(ctx context.Context, own owner.Owner, params
 	if err := m.checkExecutionLink(ctx, own, taskID); err != nil {
 		return core.ErrorResult(linkErrorText(taskID, err))
 	}
-	res := m.ownerSendCustom(own, id, text, withLiveTask(ownerPromptCustom(own), own, taskID))
+	res := m.ownerSendCustom(own, id, text, withLiveTask(ownerPromptCustom(own), own, taskID), redirect)
 	note := fmt.Sprintf(" It works on task #%d.", taskID)
 	if res.IsError {
 		note = fmt.Sprintf(" Task #%d was not linked to %s.", taskID, id)

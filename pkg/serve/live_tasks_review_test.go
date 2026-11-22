@@ -335,7 +335,7 @@ func (p reviewProvider) Stream(ctx context.Context, req core.Request) (<-chan co
 func TestReviewSavedExecutorRunStillMarksItsLinkedTaskStarted(t *testing.T) {
 	m, own, child, task := reviewLinkedChild(t)
 	closeSession(t, m, child.ID)
-	res := m.ownerSendToSession(own, child.ID, "execute the linked task after resume")
+	res := m.ownerSendToSession(own, child.ID, "execute the linked task after resume", false)
 	if res.IsError {
 		t.Fatal(toolText(res))
 	}

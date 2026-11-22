@@ -1566,12 +1566,15 @@ func handleSteerSubagent(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Text string `json:"text"`
+			// Redirect withdraws the child's tool calls not yet started, as
+			// /send's does for the session's own run.
+			Redirect bool `json:"redirect"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid body", http.StatusBadRequest)
 			return
 		}
-		queued, err := mgr.SteerSubagent(r.PathValue("id"), r.PathValue("jobID"), body.Text)
+		queued, err := mgr.SteerSubagent(r.PathValue("id"), r.PathValue("jobID"), body.Text, body.Redirect)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)

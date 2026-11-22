@@ -3071,7 +3071,7 @@ func TestJobsSteerRefusesAFinishedJob(t *testing.T) {
 	if j, ok := store.get(jobID); !ok || j.getChildAgent() == nil {
 		t.Fatal("precondition: a finished job should still be tracked with its child")
 	}
-	if jobs.Steer(jobID, "too late") {
+	if jobs.Steer(jobID, "too late", false) {
 		t.Fatal("steering a finished job must not report the message as queued")
 	}
 }
@@ -3082,7 +3082,7 @@ func TestJobsSteerRefusesAnUnknownJob(t *testing.T) {
 		ProviderFactory: func(model core.Model) (core.Provider, error) { return newMockProvider(), nil },
 		AppCtx:          context.Background(),
 	})
-	if (&Jobs{store: store}).Steer("sa-nope", "hello") {
+	if (&Jobs{store: store}).Steer("sa-nope", "hello", false) {
 		t.Fatal("steering an unknown job must return false")
 	}
 }
@@ -3104,17 +3104,17 @@ func TestJobsSteerAcceptsARunningJob(t *testing.T) {
 	}
 	jobID := jobIDFromResult(t, res)
 	<-started
-	if !(&Jobs{store: store}).Steer(jobID, "adjust course") {
+	if !(&Jobs{store: store}).Steer(jobID, "adjust course", false) {
 		t.Fatal("a running child must accept a steer")
 	}
-	// Until the owner decides otherwise, a parent's message still redirects
-	// the child instead of only queueing behind its current batch.
+	// A plain message to a child only queues behind its current batch, like
+	// the user's own send.
 	jb, _ := store.get(jobID)
 	jb.mu.Lock()
 	child := jb.childAgent
 	jb.mu.Unlock()
-	if pending := child.PendingSteers(); len(pending) != 1 || !pending[0].Redirect {
-		t.Errorf("pending = %+v, want the parent's message marked Redirect", pending)
+	if pending := child.PendingSteers(); len(pending) != 1 || pending[0].Redirect {
+		t.Errorf("pending = %+v, want the message queued without Redirect", pending)
 	}
 	close(release)
 }
@@ -3434,5 +3434,56 @@ func TestSanitizeResumeTrimsOrphanAfterCompactionSummary(t *testing.T) {
 	}
 	if clean[0].Role != "compaction_summary" {
 		t.Fatalf("expected the summary to remain, got %q", clean[0].Role)
+	}
+}
+
+// subagent_steer queues by default and withdraws the child's unstarted calls
+// only when the parent asks for redirect; the answer says which happened.
+func TestSubagentSteerRedirectOption(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		redirect any
+		want     bool
+		reply    string
+	}{
+		{"default queues", nil, false, "after its current step"},
+		{"false queues", false, false, "after its current step"},
+		{"true redirects", true, true, "pending steps are withdrawn"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			started := make(chan struct{})
+			release := make(chan struct{})
+			defer close(release)
+			provider := newMockProvider(gateResponse(started, release, "done"))
+			sub, _, _, store := newSubagentToolsWithStore(t, Config{
+				DefaultModel:    core.Model{ID: "default", Provider: "mock"},
+				ProviderFactory: func(model core.Model) (core.Provider, error) { return provider, nil },
+				AppCtx:          context.Background(),
+			})
+			res, err := sub.Execute(context.Background(), map[string]any{"task": "long", "async": true}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			jobID := jobIDFromResult(t, res)
+			<-started
+			params := map[string]any{"job_id": jobID, "message": "change course"}
+			if tc.redirect != nil {
+				params["redirect"] = tc.redirect
+			}
+			out, err := newSubagentSteer(store).Execute(context.Background(), params, nil)
+			if err != nil || out.IsError {
+				t.Fatalf("steer = %+v, %v", out, err)
+			}
+			if !strings.Contains(out.Content[0].Text, tc.reply) {
+				t.Errorf("reply %q does not say %q", out.Content[0].Text, tc.reply)
+			}
+			jb, _ := store.get(jobID)
+			jb.mu.Lock()
+			child := jb.childAgent
+			jb.mu.Unlock()
+			if pending := child.PendingSteers(); len(pending) != 1 || pending[0].Redirect != tc.want {
+				t.Errorf("pending = %+v, want Redirect=%v", pending, tc.want)
+			}
+		})
 	}
 }

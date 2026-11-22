@@ -797,6 +797,10 @@ func newSubagentSteer(jobs *jobStore) core.Tool {
 				"message": {
 					"type": "string",
 					"description": "What to tell the subagent. Be explicit about what changes: it has its own context and cannot see this conversation."
+				},
+				"redirect": {
+					"type": "boolean",
+					"description": "True only if what it is doing now is wrong: its pending tool calls are withdrawn and it reads your message first. Default false: it reads the message after its current step."
 				}
 			},
 			"required": ["job_id", "message"]
@@ -808,9 +812,13 @@ func newSubagentSteer(jobs *jobStore) core.Tool {
 			if strings.TrimSpace(message) == "" {
 				return core.ErrorResult("message is required"), nil
 			}
-			accepted, status := jobs.steerJob(jobID, message)
+			redirect := params["redirect"] == true
+			accepted, status := jobs.steerJob(jobID, message, redirect)
 			if accepted {
-				return core.TextResult("Message queued for " + jobID + "; it will be read between steps."), nil
+				if redirect {
+					return core.TextResult("Message queued for " + jobID + "; its pending steps are withdrawn and it reads this first."), nil
+				}
+				return core.TextResult("Message queued for " + jobID + "; it will be read after its current step."), nil
 			}
 			switch status {
 			case "":

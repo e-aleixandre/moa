@@ -868,7 +868,7 @@ func (j *Jobs) Has(jobID string) bool {
 //
 // Returns (accepted, status). The status is returned so callers can say why:
 // "the job already completed" is a far more useful answer than a bare false.
-func (s *jobStore) steerJob(jobID, text string) (bool, string) {
+func (s *jobStore) steerJob(jobID, text string, redirect bool) (bool, string) {
 	jb, ok := s.get(jobID)
 	if !ok {
 		return false, ""
@@ -882,21 +882,21 @@ func (s *jobStore) steerJob(jobID, text string) (bool, string) {
 	}
 	// A user-initiated steer to a subagent child: not Internal (the Internal
 	// flag is only for system-generated completions folded into a snapshot).
-	// It redirects, withdrawing the child's unstarted calls, as it always has:
-	// whether a parent's message should only queue is still undecided.
+	// Like the user's own send, it waits for the child's current tool batch
+	// unless redirect asks it to withdraw the calls not yet started.
 	// The child's own verdict is the last word: reporting success for a message
 	// it refused would tell the caller it was queued when it was dropped.
-	return child.Steer(core.SteerItem{ID: core.NewSteerID(), Text: text, Redirect: true}), status
+	return child.Steer(core.SteerItem{ID: core.NewSteerID(), Text: text, Redirect: redirect}), status
 }
 
 // Steer queues a message for inter-step delivery to the running child agent
 // of jobID. Returns false if no job with that ID is tracked, if the job is no
 // longer running (finished, cancelled or still initializing), or if the child
 // itself refused the message. Non-blocking; safe to call concurrently.
-func (j *Jobs) Steer(jobID string, text string) bool {
+func (j *Jobs) Steer(jobID string, text string, redirect bool) bool {
 	if j == nil || j.store == nil {
 		return false
 	}
-	accepted, _ := j.store.steerJob(jobID, text)
+	accepted, _ := j.store.steerJob(jobID, text, redirect)
 	return accepted
 }

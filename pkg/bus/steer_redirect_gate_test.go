@@ -7,9 +7,9 @@ import (
 )
 
 // A prompt that the strict-order gate turns into a queued steer keeps the
-// caller's Redirect: an owner's message (forced to redirect upstream) or a
-// user's explicit redirect must not silently become a plain queued note
-// because something queued just ahead of it.
+// caller's Redirect: an owner's or a user's explicit redirect must not
+// silently become a plain queued note because something queued just ahead of
+// it.
 func TestStrictOrderGateKeepsRedirect(t *testing.T) {
 	for _, redirect := range []bool{false, true} {
 		for _, withContent := range []bool{false, true} {

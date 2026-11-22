@@ -1423,15 +1423,16 @@ func (m *Manager) Send(sessionID, text string, atts []Attachment, steerID, msgID
 // send delivers a user message with optional transcript provenance. The public
 // Send entrypoint deliberately remains the ordinary-user path.
 func (m *Manager) send(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any) (action, id string, descriptors []attachment.Descriptor, err error) {
-	return m.sendValidated(sessionID, text, atts, steerID, msgID, custom, nil)
+	return m.sendValidated(sessionID, text, atts, steerID, msgID, custom, false, nil)
 }
 
 // sendValidated binds an optional authorization check to the exact runtime
 // that receives the message. Callers which may load a saved session before
 // sending cannot safely authorize only its earlier roster entry: the same ID
-// may resolve to a different persisted record when it is resumed.
-func (m *Manager) sendValidated(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
-	return m.sendCore(sessionID, text, atts, steerID, msgID, custom, nil, false, validate)
+// may resolve to a different persisted record when it is resumed. redirect is
+// SendHuman's: a busy session then withdraws its unstarted tool calls.
+func (m *Manager) sendValidated(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, redirect bool, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
+	return m.sendCore(sessionID, text, atts, steerID, msgID, custom, nil, redirect, validate)
 }
 
 // SendHuman is Send for the human /send endpoint: mentions are the sessions the
@@ -1454,11 +1455,6 @@ func (m *Manager) SendHuman(sessionID, text string, atts []Attachment, steerID, 
 }
 
 func (m *Manager) sendCore(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, mentions []string, redirect bool, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
-	// An owner's message redirects as it always has: whether it should only
-	// queue, like the user's default, is still undecided.
-	if source, _ := custom["source"].(string); source == "owner" {
-		redirect = true
-	}
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", "", nil, ErrNotFound
