@@ -1,6 +1,5 @@
 import { useRef } from "preact/hooks";
 import { queueRedirectState, recallActivates } from "../../data/composer-queue.js";
-import { steerUIVariant } from "../../data/proto-steer-ui.js";
 import { plainMessageText } from "../../data/util/mentions.js";
 import "./QueuedTail.css";
 
@@ -23,7 +22,7 @@ import "./QueuedTail.css";
 //     text is edited, the composer. The title names Alt+↑ because this row and
 //     that key are literally the same gesture, and the same action behind both
 //     (data/session-actions.js recallQueuedSteers).
-//   - "Redirect now" (prototype variant A only, see data/proto-steer-ui.js): the
+//   - "Redirect now": the
 //     urgent case — the agent reads the whole queue before its next step
 //     instead of after the current one (redirectQueuedSteers). It is offered
 //     only while there is something left to redirect; once the queue is marked
@@ -34,8 +33,7 @@ import "./QueuedTail.css";
 // arming: the count side is the real control (the one with the label for
 // assistive tech and the keyboard), the label side is a pointer-only twin kept
 // out of the accessibility tree and the tab order.
-// `variant` is only a seam for the tests; callers leave it to the switch.
-export function QueuedTail({ queue, onBringBack, onRedirect, variant = steerUIVariant() }) {
+export function QueuedTail({ queue, onBringBack, onRedirect }) {
   // Kept before the empty return: this component remains mounted as the queue
   // changes, so its hook order cannot depend on whether there are items.
   const armedPointerId = useRef(null);
@@ -67,7 +65,7 @@ export function QueuedTail({ queue, onBringBack, onRedirect, variant = steerUIVa
   const bringBack = (opts) => activate(armedPointerId, onBringBack, opts);
   const arm = (ref) => (e) => { ref.current = e.pointerId ?? true; };
   const disarm = (ref) => () => { ref.current = null; };
-  const showRedirect = variant === "a" && canRedirect;
+  const showRedirect = canRedirect;
   return (
     <div class="zl-sys queued-tail">
       <div class={`queued-row${showRedirect ? " has-redirect" : ""}`}>

@@ -1020,61 +1020,7 @@ test("while busy the hint and the Send button say queue and redirect, not steer"
   expect(send.props.title).toBe("Send — queues for the next step");
 });
 
-test("variant A has no redirect UI in the composer beyond the hint and the key", () => {
-  globalThis.localStorage = { getItem: () => "a", setItem() {} };
-  try {
-    const nodes = descendants(composerWithText({ state: "running" }));
-    expect(nodes.some((n) => n.props?.class === "zl-redirect")).toBe(false);
-  } finally {
-    delete globalThis.localStorage;
-  }
-});
-
-test("variant B: the Redirect button redirects, and only while busy with text", () => {
-  globalThis.localStorage = { getItem: () => "b", setItem() {} };
-  try {
-    const busy = descendants(composerWithText({ state: "running" }));
-    const button = busy.find((n) => n.props?.class === "zl-redirect");
-    expect(button).toBeDefined();
-    expect(button.props.title).toMatch(/^Redirect now \((⌘⏎|Ctrl\+⏎)\)$/);
-    refs[0].current = { value: "go left", style: {}, scrollHeight: 24 };
-    sent.length = 0;
-    button.props.onClick();
-    expect(sent).toHaveLength(1);
-    expect(sent[0][3]).toEqual({ redirect: true });
-
-    expect(descendants(composerWithText({ state: "idle" })).some((n) => n.props?.class === "zl-redirect")).toBe(false);
-  } finally {
-    delete globalThis.localStorage;
-  }
-});
-
-// The long-press must not also send: its release is followed by a click on
-// most engines. The timer is real here; LONG_PRESS_MS is 450.
-test("variant B: holding Send opens the menu and the click that follows sends nothing; a tap still queues", async () => {
-  globalThis.localStorage = { getItem: () => "b", setItem() {} };
-  try {
-    const tree = composerWithText({ state: "running" });
-    const send = descendants(tree).find((n) => String(n.props?.class || "").split(/\s+/).includes("zl-send"));
-    refs[0].current = { value: "hold me", style: {}, scrollHeight: 24 };
-    sent.length = 0;
-    expect(send.props.onContextMenu).toBeDefined();
-
-    send.props.onPointerDown({ pointerId: 3, button: 0 });
-    await new Promise((r) => setTimeout(r, 520));
-    send.props.onPointerUp({ pointerId: 3 });
-    send.props.onClick({ preventDefault() {} });
-    await Promise.resolve();
-    expect(sent).toHaveLength(0);
-
-    // A short tap on the same button is still just a queued send.
-    send.props.onPointerDown({ pointerId: 4, button: 0 });
-    send.props.onPointerUp({ pointerId: 4 });
-    send.props.onClick({ preventDefault() {} });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(sent).toEqual([["s1", "hold me", []]]);
-  } finally {
-    delete globalThis.localStorage;
-  }
+test("the composer offers no redirect button: the marker and the key carry it", () => {
+  const nodes = descendants(composerWithText({ state: "running" }));
+  expect(nodes.some((n) => /redirect/i.test(String(n.props?.class || "")))).toBe(false);
 });

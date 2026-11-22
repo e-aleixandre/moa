@@ -1,8 +1,7 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Paperclip, X, Loader2, PhoneCall, PhoneOff, TriangleAlert, Zap } from "lucide-preact";
+import { Paperclip, X, Loader2, PhoneCall, PhoneOff, TriangleAlert } from "lucide-preact";
 import { MentionSuggestions } from "../../components/MentionSuggestions/MentionSuggestions.jsx";
 import { MentionMirror } from "./MentionMirror.jsx";
-import { SendRedirectMenu } from "./SendRedirectMenu.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { MicButton } from "../../components/MicButton/MicButton.jsx";
@@ -34,7 +33,6 @@ import { loadDraft, saveDraft, loadDraftMentions, saveDraftMentions } from "../.
 import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/command-policy.js";
 import { processFile } from "../../data/util/attachments.js";
 import { formatShortcut, isMac } from "../../data/util/shortcut.js";
-import { steerUIVariant } from "../../data/proto-steer-ui.js";
 import {
   SEND_BUTTON_INITIAL, sendButtonEvent, reduceContentSendActivation,
 } from "../../data/composer-send-button.js";
@@ -143,10 +141,6 @@ export function keepCommandSuggestionVisible(list, index) {
   }
 }
 
-// How long a press on Send must last to open the redirect menu (variant B).
-// Long enough that a deliberate tap never gets there, short enough that holding
-// feels like asking for something rather than waiting for it.
-const LONG_PRESS_MS = 450;
 // How "redirect now" is NAMED on this device. Not formatShortcut: that labels
 // the modifier Alt off Mac (it avoids Ctrl for browser chords), but Alt+Enter
 // is the plain queue; the chord that redirects is Ctrl+Enter there.
@@ -178,10 +172,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // can await — so a send the reducer refused can never leave it set for the
   // next one.
   const redirectNextRef = useRef(false);
-  // The long-press on Send (prototype variant B): its timer, and whether the
-  // press already turned into the menu, so the click that may still follow the
-  // release is swallowed instead of sending.
-  const longPressRef = useRef({ timer: null, fired: false });
   const [contentSendPending, setContentSendPending] = useState(false);
   const compositionRef = useRef(newCompositionState());
   // The last normal DOM value lets us remove precisely one stale IME insertion
@@ -506,8 +496,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   }, []);
 
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
-  // The Send long-press menu (prototype variant B).
-  const [sendMenuOpen, setSendMenuOpen] = useState(false);
   // Never leave the menu hanging over another screen: a session switch remounts
   // this composer, and a send closes it below.
   useEffect(() => { setPlusMenuOpen(false); }, [sessionId]);
@@ -1286,71 +1274,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       decorating an empty box. Attachments count: a photo with no caption is
       as sendable as a sentence. */
   const armed = hasText || attachments.length > 0;
-  // --- Redirect now (prototype variant B: the Redirect button and the Send
-  // long-press menu; see data/proto-steer-ui.js). A short tap on Send is still
-  // the activation reducer's business and still just queues; the menu is a
-  // second reading of the same press, so it is layered over the existing
-  // handlers rather than replacing them.
-  const variantB = steerUIVariant() === "b";
-  const canRedirect = busy && armed && !contentSendPending;
-  const longPressable = variantB && canRedirect;
-  const clearLongPress = () => {
-    const press = longPressRef.current;
-    if (press.timer) clearTimeout(press.timer);
-    press.timer = null;
-  };
-  const closeSendMenu = useCallback(() => setSendMenuOpen(false), []);
-  // The run can end, or the draft be emptied, with the menu open: a menu for
-  // a state that no longer exists must not outlive it.
-  useEffect(() => { if (!canRedirect) setSendMenuOpen(false); }, [canRedirect]);
-  useEffect(() => () => {
-    if (longPressRef.current.timer) clearTimeout(longPressRef.current.timer);
-  }, []);
-  const sendRedirecting = (redirect) => {
-    setSendMenuOpen(false);
-    dispatchContentSendActivation(sendButtonEvent.keyActivate(), { redirect });
-  };
-  const onSendPointerDown = (e) => {
-    const press = longPressRef.current;
-    clearLongPress();
-    press.fired = false;
-    if (sendMenuOpen) {
-      // Tapping Send while the menu is open only closes it (the document
-      // listener does that); the click that follows must not also send.
-      press.fired = true;
-      return;
-    }
-    handleContentSendPointerDown(e);
-    if (!longPressable || (e.button != null && e.button !== 0)) return;
-    const pointerId = e.pointerId;
-    press.timer = setTimeout(() => {
-      press.timer = null;
-      press.fired = true;
-      // The press is no longer a tap: take it out of the reducer so a
-      // pointercancel from the OS callout cannot send it through the iOS
-      // fallback.
-      dispatchContentSendActivation(sendButtonEvent.longPress(pointerId));
-      setSendMenuOpen(true);
-    }, LONG_PRESS_MS);
-  };
-  const onSendPointerUp = (e) => {
-    clearLongPress();
-    handleContentSendPointerUp(e);
-  };
-  const onSendPointerCancel = (e) => {
-    clearLongPress();
-    handleContentSendPointerCancel(e);
-  };
-  const onSendClick = (e) => {
-    const press = longPressRef.current;
-    if (press.fired) {
-      // The click that completes the long-press: the menu is the answer.
-      press.fired = false;
-      e.preventDefault?.();
-      return;
-    }
-    handleContentSendClick();
-  };
   const callLive = callHere?.phase === 'listening' || callHere?.phase === 'speaking' || callHere?.phase === 'consulting';
   const voiceLit = auroraActive({ recording, callPhase: callLive ? 'live' : '' });
 
@@ -1530,22 +1453,6 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         {canLater && (hasText || later) && (
           <SendLaterButton on={!!later} disabled={contentSendPending} onClick={openLater} />
         )}
-        {variantB && busy && hasText && (
-          /* Redirect now, beside Send. Only on a fine pointer (CSS): on the
-             phone the same verb is the long-press menu, because a second 44px
-             button would take the row's room from the mic and the call. */
-          <button
-            type="button"
-            class="zl-redirect"
-            title={`Redirect now (${REDIRECT_KEY})`}
-            aria-label="Redirect now — the agent reads this before its next step"
-            disabled={contentSendPending}
-            onClick={() => sendRedirecting(true)}
-          >
-            <Zap size={16} aria-hidden="true" />
-            <span>Redirect</span>
-          </button>
-        )}
         {/* Send is always Send now. It no longer has to ask whose turn it is:
             the mic is a button beside it, so one tap has exactly one meaning
             in every state and density. */}
@@ -1559,19 +1466,14 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
                 : "Send"
           }
           disabled={!armed}
-          onPointerDown={onSendPointerDown}
-          onPointerUp={onSendPointerUp}
-          onPointerCancel={onSendPointerCancel}
-          onPointerLeave={clearLongPress}
-          onContextMenu={longPressable ? (e) => e.preventDefault() : undefined}
-          onClick={onSendClick}
+          onPointerDown={handleContentSendPointerDown}
+          onPointerUp={handleContentSendPointerUp}
+          onPointerCancel={handleContentSendPointerCancel}
+          onClick={handleContentSendClick}
           onKeyDown={handleContentSendKeyDown}
         >
           {contentSendPending ? <Loader2 size={16} class="spin" /> : <SendIcon />}
         </button>
-        {variantB && sendMenuOpen && canRedirect && (
-          <SendRedirectMenu onPick={sendRedirecting} onClose={closeSendMenu} />
-        )}
       </div>
     </div>
   );

@@ -64,14 +64,14 @@ test("the marker counts the queue and traces every message once, in order", () =
 // The marker's Bring back is a single gesture for the WHOLE queue: it names
 // Alt+↑ because this row and that key are the same action.
 test("Bring back is one gesture for the whole queue, with a pointer-only twin", () => {
-  const tree = QueuedTail({ queue: [{ id: "q1", text: "only one" }], variant: "b" });
+  const tree = QueuedTail({ queue: [{ id: "q1", text: "only one" }] });
   const line = marker(tree);
   expect(line.props["aria-label"]).toBe("1 queued message — bring it back to the input");
   expect(line.props.title).toContain("Alt+↑");
-  // Nothing is offered per message: no cancel, no edit, no reorder. The only
-  // other button is the label side of the same gesture, hidden from assistive
-  // tech and the tab order.
-  const buttons = descendants(tree).filter((n) => n.type === "button");
+  // Nothing is offered per message: no cancel, no edit, no reorder. Besides
+  // the whole-queue Redirect now, the only other button is the label side of
+  // the same gesture, hidden from assistive tech and the tab order.
+  const buttons = descendants(tree).filter((n) => n.type === "button" && n.props.class !== "queued-redirect");
   expect(buttons).toHaveLength(2);
   expect(buttons[0]).toBe(line);
   expect(buttons[1].props["aria-hidden"]).toBe("true");
@@ -80,7 +80,7 @@ test("Bring back is one gesture for the whole queue, with a pointer-only twin", 
 
 test("the twin shares the arming of the count side", () => {
   const calls = [];
-  const tree = QueuedTail({ queue: [{ id: "q1", text: "one" }], variant: "b", onBringBack: () => calls.push("recall") });
+  const tree = QueuedTail({ queue: [{ id: "q1", text: "one" }], onBringBack: () => calls.push("recall") });
   const twin = descendants(tree).find((n) => n.props?.class === "queued-bring queued-act");
   twin.props.onPointerDown({ pointerId: 5 });
   twin.props.onClick({ pointerId: 5, detail: 1 });
@@ -94,11 +94,11 @@ function redirectButton(tree) {
   return descendants(tree).find((n) => n.props?.class === "queued-redirect");
 }
 
-// Variant A: a separate "Redirect now" sibling, only while something is left to
+// A separate "Redirect now" sibling, only while something is left to
 // redirect. It acts on the whole queue and has its own arming.
-test("variant A offers Redirect now while the queue can still be redirected", () => {
+test("the marker offers Redirect now while the queue can still be redirected", () => {
   const queue = [{ id: "q1", text: "one" }, { id: "q2", text: "/model opus", command: true }];
-  const tree = QueuedTail({ queue, variant: "a" });
+  const tree = QueuedTail({ queue });
   const btn = redirectButton(tree);
   expect(btn.props["aria-label"]).toBe("Redirect now — the agent reads the queue before its next step");
   expect(btn.props.children).toBe("Redirect now");
@@ -110,7 +110,7 @@ test("variant A offers Redirect now while the queue can still be redirected", ()
   // A tap fires it only with its own pointerdown; a click that began elsewhere
   // (or on the Bring back side) does not; the keyboard always does.
   const calls = [];
-  const armed = QueuedTail({ queue, variant: "a", onRedirect: () => calls.push("redirect"), onBringBack: () => calls.push("recall") });
+  const armed = QueuedTail({ queue, onRedirect: () => calls.push("redirect"), onBringBack: () => calls.push("recall") });
   const r = redirectButton(armed);
   r.props.onClick({ pointerId: 1, detail: 1 });
   expect(calls).toEqual([]);
@@ -124,14 +124,9 @@ test("variant A offers Redirect now while the queue can still be redirected", ()
   expect(calls).toEqual(["redirect", "redirect"]);
 });
 
-test("variant B never offers Redirect now on the marker", () => {
-  expect(redirectButton(QueuedTail({ queue: [{ id: "q1", text: "one" }], variant: "b" }))).toBeUndefined();
-});
-
 test("once every message is marked the count says redirecting and the button goes", () => {
   const tree = QueuedTail({
     queue: [{ id: "q1", text: "one", redirect: true }, { id: "q2", text: "two", redirect: true }],
-    variant: "a",
   });
   expect(countText(tree)).toBe("2 queued · redirecting");
   const count = descendants(tree).find((n) => String(n.props?.class || "").startsWith("queued-count zl-data"));
@@ -142,7 +137,6 @@ test("once every message is marked the count says redirecting and the button goe
 test("a queue with one message still unmarked keeps the plain count and the button", () => {
   const tree = QueuedTail({
     queue: [{ id: "q1", text: "one", redirect: true }, { id: "q2", text: "two" }],
-    variant: "a",
   });
   expect(countText(tree)).toBe("2 queued · read at the next step");
   expect(redirectButton(tree)).toBeDefined();
@@ -153,14 +147,12 @@ test("a queue with one message still unmarked keeps the plain count and the butt
 test("commands and notices are ignored by the redirect state", () => {
   const onlyThose = QueuedTail({
     queue: [{ id: "c1", text: "/model opus", command: true }, { id: "n1", text: "notice", non_recallable: true }],
-    variant: "a",
   });
   expect(redirectButton(onlyThose)).toBeUndefined();
   expect(countText(onlyThose)).toBe("2 queued · read at the next step");
 
   const marked = QueuedTail({
     queue: [{ id: "q1", text: "one", redirect: true }, { id: "c1", text: "/model opus", command: true }],
-    variant: "a",
   });
   expect(countText(marked)).toBe("2 queued · redirecting");
   expect(redirectButton(marked)).toBeUndefined();
