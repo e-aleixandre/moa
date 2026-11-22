@@ -356,12 +356,13 @@ question or permission — but **only on sessions the Automation API created**
 ### `POST /api/automation/sessions/{id}/reply`
 
 Send a user message into the session. Same semantics as the message box in the
-web client: if the agent is running, the text is queued as a steer; if it is
-idle, it starts a new run. Attachments are not supported.
+web client: if the agent is running, the text is queued and read after its
+current step; if it is idle, it starts a new run. Attachments are not supported.
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `text` | yes | The message, max 256 KiB (same cap as `prompt`) |
+| `redirect` | no | `true` only when what the agent is doing now is wrong: its pending tool calls are withdrawn and it reads this message first. Ignored when the session is idle. Default `false`. |
 
 ```bash
 curl -sS http://127.0.0.1:8080/api/automation/sessions/$SESSION/reply \

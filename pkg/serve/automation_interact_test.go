@@ -139,6 +139,34 @@ func TestAutomationReplySendsMessage(t *testing.T) {
 	})
 }
 
+// A reply to a busy automation session queues like the user's own send; only
+// redirect:true withdraws the run's unstarted tool calls.
+func TestAutomationReplyQueuesUnlessRedirect(t *testing.T) {
+	gate := make(chan struct{})
+	started := make(chan struct{})
+	blocking := func(_ context.Context, _ core.Request) (<-chan core.AssistantEvent, error) {
+		close(started)
+		<-gate
+		return simpleResponse("ok"), nil
+	}
+	srv, mgr := automationInteractServer(t, core.MoaConfig{DisableSandbox: true}, blocking)
+	t.Cleanup(func() { close(gate) })
+	id := startAutomationRun(t, mgr, "long run")
+	<-started
+	sess, _ := mgr.Get(id)
+	for _, body := range []string{`{"text":"when you can"}`, `{"text":"stop that now","redirect":true}`} {
+		resp := automationReq(t, srv, "/api/automation/sessions/"+id+"/reply", testAutomationToken, body, false)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("%s: status = %d, want 202", body, resp.StatusCode)
+		}
+	}
+	got := queuedRedirects(sess)
+	if len(got) != 2 || got["when you can"] || !got["stop that now"] {
+		t.Errorf("queued Redirect flags = %v, want plain=false redirect=true", got)
+	}
+}
+
 func TestAutomationAskResponseAnswersPendingQuestion(t *testing.T) {
 	srv, mgr := automationInteractServer(t, core.MoaConfig{DisableSandbox: true},
 		toolCallHandlerFor("tc-ask", "ask_user", map[string]any{

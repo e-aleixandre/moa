@@ -173,8 +173,9 @@ func decodeAutomationBody(w http.ResponseWriter, r *http.Request, dst any) bool 
 }
 
 // handleAutomationReply sends a user message into an automation session, the
-// same way the web client's send does. Attachments are deliberately not
-// supported: a machine caller sends text.
+// same way the web client's send does: to a busy session it queues, and
+// redirect withdraws the run's unstarted tool calls instead. Attachments are
+// deliberately not supported: a machine caller sends text.
 func handleAutomationReply(mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := automationSessionOr404(w, mgr, r.PathValue("id"))
@@ -182,7 +183,8 @@ func handleAutomationReply(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		var body struct {
-			Text string `json:"text"`
+			Text     string `json:"text"`
+			Redirect bool   `json:"redirect"`
 		}
 		if !decodeAutomationBody(w, r, &body) {
 			return
@@ -196,7 +198,7 @@ func handleAutomationReply(mgr *Manager) http.HandlerFunc {
 			http.Error(w, "text too large", http.StatusBadRequest)
 			return
 		}
-		action, acceptedID, _, err := mgr.Send(sess.ID, body.Text, nil, "", "")
+		action, acceptedID, _, err := mgr.sendValidated(sess.ID, body.Text, nil, "", "", nil, body.Redirect, nil)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
