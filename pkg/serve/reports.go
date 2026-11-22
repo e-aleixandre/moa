@@ -1423,8 +1423,9 @@ func reportOrigin(origin string) string {
 func nowLine(rep owner.Report) string {
 	var line string
 	answeredNow := answeredNowLine(rep)
+	permission := rep.Pending != nil && rep.Pending.Kind == pendingKindPermission
 	switch {
-	case answeredNow != "":
+	case answeredNow != "" && !permission:
 		line = answeredNow
 	case rep.InterruptedByRestart:
 		// Whatever it left running died with the process; a schedule did not.

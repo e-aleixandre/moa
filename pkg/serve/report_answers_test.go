@@ -31,6 +31,7 @@ package serve
 //	  Then the report is painted exactly as today
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"reflect"
@@ -70,7 +71,7 @@ func heldOwnerChildWithQuestion(t *testing.T) (*f1Env, *ManagedSession, *Managed
 
 // childHasAnswer waits for the answer to be in the child's conversation and
 // for the run it started to end.
-func childHasAnswer(t *testing.T, child *ManagedSession, qid string) {
+func childHasAnswer(t *testing.T, e *f1Env, child *ManagedSession, qid string) {
 	t.Helper()
 	pollUntil(t, f1Guard, "the answer in the child", func() bool {
 		for _, m := range child.History() {
@@ -84,6 +85,29 @@ func childHasAnswer(t *testing.T, child *ManagedSession, qid string) {
 		return strings.Contains(f1Blob(child.History()), "F1-GOT-ANSWER")
 	})
 	f1Settle(t, child)
+	waitOutboxed(t, e, child, "F1-GOT-ANSWER")
+}
+
+// waitOutboxed waits for the child's report saying marker to be queued for
+// the owner, so a release delivers it in the same batch.
+func waitOutboxed(t *testing.T, e *f1Env, child *ManagedSession, marker string) {
+	t.Helper()
+	store, err := e.mgr.ownerStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, found, err := store.FindByDir(child.CWD)
+	if err != nil || !found {
+		t.Fatalf("owner of the child: found=%v err=%v", found, err)
+	}
+	pollUntil(t, f1Guard, "the child's report queued for the owner", func() bool {
+		for _, rep := range outbox(t, e.mgr, own.CodebaseKey) {
+			if rep.SessionID == child.ID && strings.Contains(rep.FinalText, marker) {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // releaseOwner stops the owner's run, which delivers the retained batch, and
@@ -114,7 +138,7 @@ func TestStaleTurnReportSaysTheOwnersAnswerWasDelivered(t *testing.T) {
 	if isErr {
 		t.Fatal(text)
 	}
-	childHasAnswer(t, child, qid)
+	childHasAnswer(t, e, child, qid)
 	// Working again when the owner reads the report.
 	e.send(child, "F1-HOLD more work")
 	pollUntil(t, f1Guard, "child running", func() bool { return sessState(child) == StateRunning })
@@ -144,7 +168,7 @@ func TestHeldNeedsInputReportSaysTheUserAnswered(t *testing.T) {
 	if code, body := f1PostAsk(t, e, child.ID, qid, "Sí, despliega"); !f1Is2xx(code) {
 		t.Fatalf("answer = %d %s", code, body)
 	}
-	childHasAnswer(t, child, qid)
+	childHasAnswer(t, e, child, qid)
 
 	batch := releaseOwner(t, e, ownerSess)
 	if strings.Contains(batch, "asking (ask_id "+qid+")") {
@@ -185,7 +209,7 @@ func TestUserAnswerEntrySaysTheSessionAlreadyHasIt(t *testing.T) {
 	if code, body := f1PostAsk(t, e, child.ID, qid, "Sí, despliega"); !f1Is2xx(code) {
 		t.Fatalf("answer = %d %s", code, body)
 	}
-	childHasAnswer(t, child, qid)
+	childHasAnswer(t, e, child, qid)
 
 	batch := releaseOwner(t, e, ownerSess)
 	said := reportEntry(t, batch, "the user answered ask_id "+qid)
@@ -276,11 +300,101 @@ func TestAnsweredReportRendering(t *testing.T) {
 		t.Fatalf("working session line missing:\n%s", got)
 	}
 
+	permission := working
+	permission.Status = callbackStatusNeedsInput
+	permission.Pending = &owner.ReportPending{Kind: pendingKindPermission, ID: "p1", Text: "bash rm -rf build"}
+	if got := reportsMessage(owner.Owner{}, []owner.Report{permission}); !strings.Contains(got, "now: waiting for the answer above") {
+		t.Fatalf("a pending permission lost its now line to an answer:\n%s", got)
+	}
+
+	several := working
+	several.Answered = []owner.ReportAnswer{answer, {AskID: "q_2", By: "user", At: answer.At, Text: "C", Delivered: true}}
+	if got := reportsMessage(owner.Owner{}, []owner.Report{several}); !strings.Contains(got, "now: working on those answers — it will report when it stops") {
+		t.Fatalf("several answers read as one:\n%s", got)
+	}
+
 	queued := base
 	queued.Answered = []owner.ReportAnswer{{AskID: "q_1", By: "user", At: answer.At, Text: "B"}}
 	got := reportsMessage(owner.Owner{}, []owner.Report{queued})
 	if !strings.Contains(got, "queued for the session, which it wakes; do not relay it") ||
 		!strings.Contains(got, "now: that answer is on its way to it — it will continue on its own") {
 		t.Fatalf("queued answer not said:\n%s", got)
+	}
+}
+
+// answeredWhileHeld answers the child's question while the child is held in a
+// model call: the answer is accepted and its event queued, but the session
+// has not read it. It returns the question as stored.
+func answeredWhileHeld(t *testing.T) (*f1Env, *ManagedSession, tasks.Question) {
+	t.Helper()
+	e, _, ownerSess, child, qid := ownerChildWithQuestion(t, false, "owner")
+	e.send(child, "F1-HOLD keep working")
+	pollUntil(t, f1Guard, "child running", func() bool { return sessState(child) == StateRunning })
+	if text, isErr := f1OwnerAnswers(t, ownerSess, child.ID, qid); isErr {
+		t.Fatal(text)
+	}
+	q := f1QuestionState(t, e, qid)
+	if q.State != tasks.QuestionAnswered || q.Work != tasks.WorkDue || q.EventID == "" {
+		t.Fatalf("precondition: an accepted answer still owing its run, got state=%s work=%q event=%q", q.State, q.Work, q.EventID)
+	}
+	if e.mgr.questions.read(child, q.EventID) {
+		t.Fatal("precondition: the held child must not have read the answer yet")
+	}
+	return e, child, q
+}
+
+func needsInputReport(sessionID, qid string) owner.Report {
+	return owner.Report{ID: "r1", SessionID: sessionID, Title: "child", Origin: "owner", Status: callbackStatusNeedsInput,
+		Pending: &owner.ReportPending{Kind: pendingKindQuestion, ID: qid, Text: f1Question}, EndedAtMs: 1}
+}
+
+// An accepted answer the session has not read is not "delivered": it is
+// queued, and the session will be woken by it.
+func TestAnswerNotYetReadIsQueuedNotDelivered(t *testing.T) {
+	e, child, q := answeredWhileHeld(t)
+	text := reportsMessage(owner.Owner{}, e.mgr.withAnsweredQuestions([]owner.Report{needsInputReport(child.ID, q.ID)}))
+	if strings.Contains(text, "already delivered") {
+		t.Fatalf("an answer the session has not read is reported as delivered:\n%s", text)
+	}
+	if !strings.Contains(text, "answered (ask_id "+q.ID+")") || !strings.Contains(text, "queued for the session, which it wakes") {
+		t.Fatalf("the queued answer is not said:\n%s", text)
+	}
+}
+
+// A rewind abandons an answer the session never read (AbandonQuestionAnswer:
+// the event fails, the work is stopped). It will never arrive, so the report
+// must not say it is delivered or on its way: it paints as it was written.
+func TestAbandonedAnswerIsNotClaimed(t *testing.T) {
+	e, child, q := answeredWhileHeld(t)
+	pending := []owner.Report{needsInputReport(child.ID, q.ID)}
+	plain := reportsMessage(owner.Owner{}, pending)
+	if abandoned, err := e.mgr.tasks.AbandonQuestionAnswer(context.Background(), q.EventID, "rewound"); err != nil || !abandoned {
+		t.Fatalf("abandon = %v, %v", abandoned, err)
+	}
+	if got := f1QuestionState(t, e, q.ID); got.Work != tasks.WorkStopped {
+		t.Fatalf("precondition: work = %q, want stopped", got.Work)
+	}
+	if text := reportsMessage(owner.Owner{}, e.mgr.withAnsweredQuestions(pending)); text != plain {
+		t.Fatalf("an abandoned answer changed the report:\n%s\nwant:\n%s", text, plain)
+	}
+}
+
+// A question asked after a report's text was final is not news to that
+// report, even when it is answered after it.
+func TestQuestionAskedAfterTheReportIsNotAnnotated(t *testing.T) {
+	e, _, ownerSess, child, qid := ownerChildWithQuestion(t, false, "owner")
+	if text, isErr := f1OwnerAnswers(t, ownerSess, child.ID, qid); isErr {
+		t.Fatal(text)
+	}
+	q := f1QuestionState(t, e, qid)
+	report := func(endedAt int64) []owner.Report {
+		return []owner.Report{{ID: "r1", SessionID: child.ID, Title: "child", Origin: "owner",
+			Status: callbackStatusDone, FinalText: "earlier work", EndedAtMs: endedAt}}
+	}
+	if got := e.mgr.withAnsweredQuestions(report(q.AskedAt)); len(got[0].Answered) != 1 {
+		t.Fatalf("a question open when the text was final is not annotated: %+v", got[0].Answered)
+	}
+	if got := e.mgr.withAnsweredQuestions(report(q.AskedAt - 1)); len(got[0].Answered) != 0 {
+		t.Fatalf("a question asked after the report is annotated on it: %+v", got[0].Answered)
 	}
 }

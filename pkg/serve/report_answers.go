@@ -77,7 +77,11 @@ func (m *Manager) answeredSince(ctx context.Context, rep owner.Report) ([]owner.
 		if q.SessionID != rep.SessionID || q.State != tasks.QuestionAnswered {
 			return nil, nil
 		}
-		return []owner.ReportAnswer{m.reportAnswer(q)}, nil
+		a, ok := m.reportAnswer(q)
+		if !ok {
+			return nil, nil
+		}
+		return []owner.ReportAnswer{a}, nil
 	}
 	pendingID := ""
 	if rep.Pending != nil && rep.Pending.Kind == pendingKindQuestion {
@@ -100,12 +104,23 @@ func (m *Manager) answeredSince(ctx context.Context, rep owner.Report) ([]owner.
 		if q.ID != pendingID && !openAtEnd {
 			continue
 		}
-		out = append(out, m.reportAnswer(q))
+		if a, ok := m.reportAnswer(q); ok {
+			out = append(out, a)
+		}
 	}
 	return out, nil
 }
 
-func (m *Manager) reportAnswer(q tasks.Question) owner.ReportAnswer {
+// reportAnswer is how an answered question is painted. ok is false for an
+// answer whose run was stopped before the session read it: a rewind abandoned
+// it (it will never arrive) or a Stop turned it into an append (it arrives,
+// but starts nothing). Neither is "on its way", so the report says what it
+// said when it was written.
+func (m *Manager) reportAnswer(q tasks.Question) (owner.ReportAnswer, bool) {
+	delivered := m.answerDelivered(q)
+	if !delivered && q.Work == tasks.WorkStopped {
+		return owner.ReportAnswer{}, false
+	}
 	text := strings.Join(strings.Fields(strings.Join(q.Answers, " | ")), " ")
 	if r := []rune(text); len(r) > reportAnswerChars {
 		text = string(r[:reportAnswerChars]) + "…"
@@ -115,8 +130,8 @@ func (m *Manager) reportAnswer(q tasks.Question) owner.ReportAnswer {
 		By:        responderLabel(q.Responder),
 		At:        time.UnixMilli(q.ClosedAt).UTC().Format(time.RFC3339),
 		Text:      text,
-		Delivered: m.answerDelivered(q),
-	}
+		Delivered: delivered,
+	}, true
 }
 
 // answerDelivered says the answer's event is in the session's conversation,
@@ -148,12 +163,16 @@ func answeredNowLine(rep owner.Report) string {
 	if len(rep.Answered) == 0 {
 		return ""
 	}
+	that, onItsWay := "that answer", "that answer is on its way"
+	if len(rep.Answered) > 1 {
+		that, onItsWay = "those answers", "those answers are on their way"
+	}
 	if rep.WorkingNow {
-		return "now: working on that answer — it will report when it stops"
+		return "now: working on " + that + " — it will report when it stops"
 	}
 	for _, a := range rep.Answered {
 		if !a.Delivered {
-			return "now: that answer is on its way to it — it will continue on its own"
+			return "now: " + onItsWay + " to it — it will continue on its own"
 		}
 	}
 	return ""
