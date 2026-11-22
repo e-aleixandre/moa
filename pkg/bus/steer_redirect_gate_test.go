@@ -17,6 +17,11 @@ func TestStrictOrderGateKeepsRedirect(t *testing.T) {
 			fa := &fakeAgent{steerQueue: []core.SteerItem{{ID: "ahead", Text: "queued first"}}}
 			sctx := newTestSessionContextWithState(b, fa)
 			RegisterHandlers(sctx)
+			// A busy session: the gate's pump request must not start a run
+			// that drains the queue before it is read.
+			if err := sctx.State.Transition(StateRunning); err != nil {
+				t.Fatal(err)
+			}
 			var cmd any = SendPrompt{Text: "behind", Redirect: redirect, Custom: map[string]any{"source": "owner"}}
 			if withContent {
 				cmd = SendPromptWithContent{Content: []core.Content{core.TextContent("behind")}, Redirect: redirect}
