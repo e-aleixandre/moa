@@ -882,7 +882,7 @@ func (m *Manager) deliverReportsIfIdle(own owner.Owner, pending []owner.Report) 
 		return sess.runtime.Flush()
 	}
 	batchID := reportBatchID(pending)
-	text := reportsMessage(own, m.currentTaskNotices(own, pending))
+	text := reportsMessage(own, m.withAnsweredQuestions(m.currentTaskNotices(own, pending)))
 	sessions := make([]map[string]string, 0, len(pending))
 	for _, rep := range pending {
 		if rep.SessionID == "" {
@@ -1077,6 +1077,9 @@ func reportFrom(sess *ManagedSession, out runOutcome) owner.Report {
 	if !out.ReportedAt.IsZero() {
 		// The observer's stamp: a later follow-up names exactly this one.
 		rep.At = out.ReportedAt.UTC().Format(time.RFC3339)
+	}
+	if !out.EndedAt.IsZero() {
+		rep.EndedAtMs = out.EndedAt.UnixMilli()
 	}
 	pos := gitPosition(sess.CWD)
 	rep.GitAvailable, rep.Branch, rep.Head, rep.Dirty = pos.Available, pos.Branch, pos.Head, pos.Dirty
@@ -1330,7 +1333,9 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 		if rep.Pending != nil {
 			switch rep.Pending.Kind {
 			case pendingKindQuestion:
-				fmt.Fprintf(&b, "  asking (ask_id %s): %s\n", rep.Pending.ID, rep.Pending.Text)
+				if !reportAnswered(rep, rep.Pending.ID) {
+					fmt.Fprintf(&b, "  asking (ask_id %s): %s\n", rep.Pending.ID, rep.Pending.Text)
+				}
 			case pendingKindPermission:
 				fmt.Fprintf(&b, "  waiting for the user to approve: %s\n", rep.Pending.Text)
 			}
@@ -1345,6 +1350,9 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 			// with nothing to quote. Saying nothing would read as finished work.
 			fmt.Fprintf(&b, "  said: nothing — the turn ended without a final message, so it may have "+
 				"stopped mid-work. See where with the sessions tool: action=read, session_id=%s, tools=true\n", rep.SessionID)
+		}
+		for _, a := range rep.Answered {
+			fmt.Fprintf(&b, "  %s\n", answeredLine(a))
 		}
 		switch {
 		case !rep.GitAvailable:
@@ -1376,11 +1384,22 @@ func reportsMessage(own owner.Owner, pending []owner.Report) string {
 	for _, rep := range pending {
 		if rep.UserKind != "" {
 			b.WriteString(" Entries that say \"the user wrote\" or \"the user answered\" are the user's own " +
-				"words in a session you launched: take them into account and write down what they decide.")
+				"words in a session you launched, and that session already has them: write down what they decide, " +
+				"and send it only what it does not have (a condition, a correction).")
 			break
 		}
 	}
 	return b.String()
+}
+
+// reportAnswered says the question askID is among the answers painted on rep.
+func reportAnswered(rep owner.Report, askID string) bool {
+	for _, a := range rep.Answered {
+		if a.AskID == askID {
+			return true
+		}
+	}
+	return false
 }
 
 func reportOrigin(origin string) string {
@@ -1397,7 +1416,10 @@ func reportOrigin(origin string) string {
 // do next.
 func nowLine(rep owner.Report) string {
 	var line string
+	answeredNow := answeredNowLine(rep)
 	switch {
+	case answeredNow != "":
+		line = answeredNow
 	case rep.InterruptedByRestart:
 		// Whatever it left running died with the process; a schedule did not.
 		line = "now: interrupted by a moa restart — it will not continue on its own"
@@ -1407,7 +1429,7 @@ func nowLine(rep owner.Report) string {
 		line = fmt.Sprintf("now: %d background jobs still running — it will report again when they finish", rep.BackgroundCount)
 	case rep.Status == callbackStatusFailed:
 		line = "now: stopped by the error above — it will not continue on its own"
-	case rep.Status == callbackStatusNeedsInput:
+	case rep.Status == callbackStatusNeedsInput && len(rep.Answered) == 0:
 		line = "now: waiting for the answer above — nothing else is running"
 	default:
 		line = "now: idle — nothing is running; it will not continue unless someone sends it a message"

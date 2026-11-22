@@ -82,6 +82,25 @@ type Report struct {
 	// was not an orderly shutdown: its linked tasks whose session was working
 	// and is not any more. The other fields are empty.
 	RestartTasks []ReportTask `json:"restart_tasks,omitempty"`
+	// EndedAtMs is when the turn's text was final (UTC milliseconds): a
+	// question of the session answered after it is something the text does
+	// not know. Zero for an outbox written before the field.
+	EndedAtMs int64 `json:"ended_at_ms,omitempty"`
+	// Answered and WorkingNow are painted at delivery, never stored: the
+	// questions answered since the report was written and whether the session
+	// is working right now.
+	Answered   []ReportAnswer `json:"-"`
+	WorkingNow bool           `json:"-"`
+}
+
+// ReportAnswer is a question of the session answered after its report was
+// written.
+type ReportAnswer struct {
+	AskID     string
+	By        string // "user", "owner:<name>", …
+	At        string // RFC3339
+	Text      string
+	Delivered bool // the answer's event is in the session's conversation
 }
 
 // ReportTask names one of the owner's tasks in a report.

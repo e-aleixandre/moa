@@ -323,7 +323,7 @@ func (o *ownerReportObserver) blocked(runGen uint64, pending *CallbackPending) {
 		return
 	}
 	o.mu.Unlock()
-	out := runOutcome{Status: callbackStatusNeedsInput, RunGen: runGen, Pending: pending}
+	out := runOutcome{Status: callbackStatusNeedsInput, RunGen: runGen, Pending: pending, EndedAt: time.Now()}
 	o.launch(func() {
 		if o.discarded() {
 			return
@@ -367,7 +367,7 @@ func (o *ownerReportObserver) runEnded(e bus.RunEnded) {
 	}
 	o.latest[turn] = runOutcome{Status: callbackStatusDone, RunGen: e.RunGen, FinalText: e.FinalText,
 		FollowUpOf: followUpOf, InterruptedByRestart: e.Cancelled && errors.Is(e.CancelCause, bus.ErrStopRestart),
-		UserStopped: e.Cancelled && errors.Is(e.CancelCause, bus.ErrStopByUser)}
+		UserStopped: e.Cancelled && errors.Is(e.CancelCause, bus.ErrStopByUser), EndedAt: time.Now()}
 	if !o.admitLocked() {
 		o.mu.Unlock()
 		return
@@ -407,6 +407,7 @@ func (o *ownerReportObserver) failed(e bus.RunEnded) {
 		FinalText:  e.FinalText,
 		Err:        e.Err.Error(),
 		FollowUpOf: followUpOf,
+		EndedAt:    time.Now(),
 	}
 	o.launch(func() {
 		// The quiescence counters are maintained by a different subscriber, so

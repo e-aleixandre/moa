@@ -754,6 +754,14 @@ func ownerPromptCustom(own owner.Owner) map[string]any {
 	return map[string]any{"source": "owner", "owner_id": own.ID, "owner_name": own.Name}
 }
 
+// ownerAnsweredText is what answering returns. A report the session wrote
+// before the answer (its turn ended "waiting on" the question) can still
+// arrive after this; owners read it as news and sent the answer again.
+func ownerAnsweredText(askID, id string) string {
+	return fmt.Sprintf("Answered %s in session %s. It has the answer now and continues on its own. "+
+		"A report it wrote before this answer may still arrive: do not resend the answer.", askID, id)
+}
+
 // ownerAnswerAsk answers a child's ask_user. It is gated on the owner's
 // answer_asks flag, and never touches permissions: answering a question the
 // book already answers is delegation, approving an action is not.
@@ -791,7 +799,7 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 			}
 			return core.ErrorResult(fmt.Sprintf("cannot answer %s: %v (it may already have been answered)", askID, err))
 		}
-		return core.TextResult(fmt.Sprintf("Answered %s in session %s.", askID, id))
+		return core.TextResult(ownerAnsweredText(askID, id))
 	}
 	if err := sess.runtime.Bus.Execute(bus.ResolveAskUser{AskID: askID, Answers: answers, Responder: ownerResponder(own)}); err != nil {
 		if errors.Is(err, errFenceBarred) {
@@ -804,5 +812,5 @@ func (m *Manager) ownerAnswerAsk(own owner.Owner, id, askID string, answers []st
 		// forgets a resolved ask, so this is the same error as an unknown one.
 		return core.ErrorResult(fmt.Sprintf("cannot answer %s: %v (it may already have been answered)", askID, err))
 	}
-	return core.TextResult(fmt.Sprintf("Answered %s in session %s.", askID, id))
+	return core.TextResult(ownerAnsweredText(askID, id))
 }

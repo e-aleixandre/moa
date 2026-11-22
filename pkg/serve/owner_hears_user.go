@@ -181,6 +181,9 @@ func writeUserSaid(b *strings.Builder, rep owner.Report) {
 			question = " (" + strings.Join(strings.Fields(q), " ") + ")"
 		}
 		fmt.Fprintf(b, "  the user answered ask_id %s%s: %s\n", rep.UserRef, question, indentReportText(rep.UserText))
+		if line := userAnswerDelivery(rep); line != "" {
+			fmt.Fprintf(b, "  %s\n", line)
+		}
 	default:
 		fmt.Fprintf(b, "  the user wrote: %s\n", indentReportText(rep.UserText))
 	}

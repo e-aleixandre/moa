@@ -31,6 +31,10 @@ type runOutcome struct {
 	UserStopped          bool
 	FollowUpOf           string
 	ReportedAt           time.Time
+	// EndedAt is when the outcome's text was final: the run's end, or the
+	// moment a question was posted. A question answered after it is news to
+	// the report (report_answers.go). Owner reports only.
+	EndedAt time.Time
 }
 
 // subscribeRunOutcomes installs the observer that turns bus traffic into
