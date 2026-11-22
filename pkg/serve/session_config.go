@@ -165,6 +165,9 @@ func (m *Manager) SetPermissionMode(sessionID, modeStr string) (string, error) {
 	return mode, nil
 }
 
+// errNotRunning is what Stop reports for a session with nothing to stop.
+var errNotRunning = errors.New("session is not running")
+
 // Cancel aborts the running agent in a session via bus command.
 func (m *Manager) Cancel(sessionID string) error {
 	_, err := m.CancelWithDiscardedSteers(sessionID, "")
@@ -200,7 +203,7 @@ func (m *Manager) CancelWithDiscardedSteers(sessionID, stopID string) ([]core.St
 		if cancelled || callsCancelled {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("session is not running")
+		return nil, errNotRunning
 	}
 
 	runGen, err := bus.QueryTyped[bus.GetRunGeneration, uint64](sess.runtime.Bus, bus.GetRunGeneration{})

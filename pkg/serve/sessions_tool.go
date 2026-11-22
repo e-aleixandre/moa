@@ -79,9 +79,9 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 	// What send does about a question depends on the session's contract: only
 	// a session whose own ask_user is asynchronous has questions that send
 	// leaves alone, and only it is told so.
-	actionHelp := "list, read, send, new, close or answer. send skips a pending question in the owner's own sessions and is refused in the user's; to answer it, use answer."
+	actionHelp := "list, read, send, new, stop, close or answer. send skips a pending question in the owner's own sessions and is refused in the user's; to answer it, use answer."
 	if asyncQuestions {
-		actionHelp = "list, read, send, new, close or answer. send skips a blocking question in the owner's own sessions and is refused in the user's; an open (asynchronous) question is neither skipped nor in the way. To answer a question, use answer."
+		actionHelp = "list, read, send, new, stop, close or answer. send skips a blocking question in the owner's own sessions and is refused in the user's; an open (asynchronous) question is neither skipped nor in the way. To answer a question, use answer."
 	}
 	actionHelpJSON, _ := json.Marshal(actionHelp)
 	return core.Tool{
@@ -94,7 +94,7 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 			"adds the tool calls. send: a message or a correction to a session. new: start a session in a " +
 			"directory of this project with a prompt; it needs task: the id of the task of your checklist it " +
 			"works on (create it first), or \"none\" for a question or an exploration. send with task makes that " +
-			"session the task's executor. answer: answer a question a session asked " +
+			"session the task's executor. stop: to halt a session's current work; prefer this over sending 'stop' as a message. answer: answer a question a session asked " +
 			"the user, when the book or your instructions let you decide it. You cannot approve permissions: those " +
 			"are the user's.",
 		Parameters: json.RawMessage(`{
@@ -102,10 +102,10 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 			"properties": {
 				"action": {
 					"type": "string",
-					"enum": ["list", "read", "send", "new", "close", "answer"],
+					"enum": ["list", "read", "send", "new", "stop", "close", "answer"],
 					"description": ` + string(actionHelpJSON) + `
 				},
-				"session_id": {"type": "string", "description": "Target session (read, send, close, answer)."},
+				"session_id": {"type": "string", "description": "Target session (read, send, stop, close, answer)."},
 				"text": {"type": "string", "description": "Message to send (send), or the prompt for a new session (new)."},
 				"limit": {"type": "integer", "description": "For read: how many recent messages (default 20, max 60)."},
 				"message_id": {"type": "string", "description": "For read: read this one message (or tool call) whole instead of the abridged list. \"last\" is the session's latest assistant message."},
@@ -145,6 +145,8 @@ func newSessionsTool(mgr *Manager, codebaseKey string, asyncQuestions bool) core
 				return mgr.ownerSendWithTask(ctx, own, params), nil
 			case "new":
 				return mgr.ownerNewSession(ctx, own, params), nil
+			case "stop":
+				return mgr.ownerStopSession(own, getStr(params, "session_id")), nil
 			case "close":
 				return mgr.ownerCloseSession(own, getStr(params, "session_id")), nil
 			case "answer":
@@ -608,6 +610,34 @@ func (m *Manager) daybreakUnavailable(spec string) error {
 		return fmt.Errorf("this account's catalog does not offer it for %s. Nothing was created; start the session with another model or tell the user", model.Name)
 	}
 	return nil
+}
+
+// ownerStopSession is the UI's Stop (Manager.Cancel, the path behind
+// POST /api/sessions/{id}/cancel) for a session the owner started: it ends the
+// current turn and leaves the session open, so a later send resumes it. Like
+// close, the user's own sessions are not the owner's to direct.
+func (m *Manager) ownerStopSession(own owner.Owner, id string) core.Result {
+	info, err := m.ownerSession(own, id)
+	if err != nil {
+		return core.ErrorResult(err.Error())
+	}
+	if info.Origin != "owner" {
+		return core.ErrorResult(fmt.Sprintf("session %s belongs to the user: you cannot stop it. Ask the user to stop it", id))
+	}
+	err = m.Cancel(id)
+	switch {
+	case err == nil, errors.Is(err, errFenceNotSaved):
+		msg := fmt.Sprintf("Stopped session %s: its current turn was ended and queued messages were discarded. It stays open; send resumes it.", id)
+		if err != nil {
+			msg += " Warning: " + err.Error()
+		}
+		return core.TextResult(msg)
+	case errors.Is(err, errNotRunning):
+		return core.TextResult(fmt.Sprintf("Session %s is already idle: nothing to stop.", id))
+	case errors.Is(err, ErrNotFound), errors.Is(err, session.ErrNotFound):
+		return core.ErrorResult(fmt.Sprintf("session %s not found", id))
+	}
+	return core.ErrorResult(fmt.Sprintf("cannot stop %s: %v", id, err))
 }
 
 // ownerCloseSession is the UI's close (Manager.CloseSession) for a session the
