@@ -882,9 +882,11 @@ func (s *jobStore) steerJob(jobID, text string) (bool, string) {
 	}
 	// A user-initiated steer to a subagent child: not Internal (the Internal
 	// flag is only for system-generated completions folded into a snapshot).
+	// It redirects, withdrawing the child's unstarted calls, as it always has:
+	// whether a parent's message should only queue is still undecided.
 	// The child's own verdict is the last word: reporting success for a message
 	// it refused would tell the caller it was queued when it was dropped.
-	return child.Steer(core.SteerItem{ID: core.NewSteerID(), Text: text}), status
+	return child.Steer(core.SteerItem{ID: core.NewSteerID(), Text: text, Redirect: true}), status
 }
 
 // Steer queues a message for inter-step delivery to the running child agent

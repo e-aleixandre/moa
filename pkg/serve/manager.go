@@ -1431,15 +1431,18 @@ func (m *Manager) send(sessionID, text string, atts []Attachment, steerID, msgID
 // sending cannot safely authorize only its earlier roster entry: the same ID
 // may resolve to a different persisted record when it is resumed.
 func (m *Manager) sendValidated(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
-	return m.sendCore(sessionID, text, atts, steerID, msgID, custom, nil, validate)
+	return m.sendCore(sessionID, text, atts, steerID, msgID, custom, nil, false, validate)
 }
 
 // SendHuman is Send for the human /send endpoint: mentions are the sessions the
 // human explicitly selected, recorded as a receipt on the message only once it
 // enters the transcript (a queued steer carries it until delivery). It is the
 // only producer of that receipt.
-func (m *Manager) SendHuman(sessionID, text string, atts []Attachment, steerID, msgID string, mentions []string) (action, id string, descriptors []attachment.Descriptor, err error) {
-	action, id, descriptors, err = m.sendCore(sessionID, text, atts, steerID, msgID, nil, mentions, nil)
+//
+// redirect only matters while the session is busy: the queued message then
+// withdraws the run's tool calls not yet started instead of waiting for them.
+func (m *Manager) SendHuman(sessionID, text string, atts []Attachment, steerID, msgID string, mentions []string, redirect bool) (action, id string, descriptors []attachment.Descriptor, err error) {
+	action, id, descriptors, err = m.sendCore(sessionID, text, atts, steerID, msgID, nil, mentions, redirect, nil)
 	if err == nil {
 		said := userSaid{kind: owner.UserSaidMessage, text: userSaidMessageText(text, len(atts))}
 		if action == "send" {
@@ -1450,7 +1453,12 @@ func (m *Manager) SendHuman(sessionID, text string, atts []Attachment, steerID, 
 	return action, id, descriptors, err
 }
 
-func (m *Manager) sendCore(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, mentions []string, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
+func (m *Manager) sendCore(sessionID, text string, atts []Attachment, steerID, msgID string, custom map[string]any, mentions []string, redirect bool, validate func(*ManagedSession) error) (action, id string, descriptors []attachment.Descriptor, err error) {
+	// An owner's message redirects as it always has: whether it should only
+	// queue, like the user's default, is still undecided.
+	if source, _ := custom["source"].(string); source == "owner" {
+		redirect = true
+	}
 	sess, ok := m.Get(sessionID)
 	if !ok {
 		return "", "", nil, ErrNotFound
@@ -1504,7 +1512,7 @@ retryAfterTerminalRun:
 			steerID = core.NewSteerID()
 		}
 		if len(atts) == 0 {
-			if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Custom: steerCustom(custom, mentions)}); err != nil {
+			if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Custom: steerCustom(custom, mentions), Redirect: redirect}); err != nil {
 				if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
 					goto retryAfterTerminalRun
 				}
@@ -1524,7 +1532,7 @@ retryAfterTerminalRun:
 		if text != "" {
 			content = append(content, core.TextContent(text))
 		}
-		if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Content: content, Custom: steerCustom(custom, mentions)}); err != nil {
+		if err := sess.runtime.Bus.Execute(bus.SteerAgent{ID: steerID, Text: text, Content: content, Custom: steerCustom(custom, mentions), Redirect: redirect}); err != nil {
 			// The steer was rejected (e.g. full queue) — roll back any files
 			// written for it so they don't orphan and count against the quota.
 			for _, p := range writtenFiles {
@@ -1573,6 +1581,7 @@ retryAfterTerminalRun:
 		if err := sess.runtime.Bus.Execute(bus.SendPrompt{
 			Text: text, MsgID: msgID, AcceptedMsgID: &accepted,
 			SteerID: steerID, AcceptedSteerID: &acceptedSteer, Custom: custom, HumanMentions: mentions,
+			Redirect: redirect,
 		}); err != nil {
 			if errors.Is(err, agent.ErrSteerAdmissionClosed) && sess.runtime.WaitSettled(m.baseCtx) {
 				goto retryAfterTerminalRun
@@ -1603,6 +1612,7 @@ retryAfterTerminalRun:
 	if err := sess.runtime.Bus.Execute(bus.SendPromptWithContent{
 		Content: content, MsgID: msgID, AcceptedMsgID: &accepted,
 		SteerID: steerID, AcceptedSteerID: &acceptedSteer, Custom: custom, HumanMentions: mentions,
+		Redirect: redirect,
 	}); err != nil {
 		// The message never entered the conversation — roll back any files
 		// written for it so they don't orphan and count against the quota.

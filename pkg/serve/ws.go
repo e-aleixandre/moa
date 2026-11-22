@@ -339,6 +339,8 @@ func wsEventFromBus(event any) (Event, bool) {
 			data["recall_id"] = e.RecallID
 		}
 		return Event{Type: "steers_canceled", Data: data}, true
+	case bus.SteersRedirected:
+		return Event{Type: "steers_redirected", Data: map[string]any{"steer_ids": e.SteerIDs}}, true
 	case bus.AutoVerifyStarted:
 		return Event{Type: "auto_verify_start", Data: map[string]any{
 			"dir": e.Dir, "manual": e.Manual,
@@ -906,6 +908,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 				Images:          countImageContent(s.Content),
 				NonRecallable:   isAdmissionReceipt(s.Custom),
 				SessionMentions: steerSessionMentions(s),
+				Redirect:        s.Redirect,
 			}
 			if label, ok := voiceQueuedText(s.Custom); ok {
 				// The call's records read as what they are, never as the

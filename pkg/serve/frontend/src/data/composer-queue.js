@@ -74,3 +74,26 @@ export function recallActivates({ armedPointerId, pointerId, detail, fromKeyboar
 export function sendMayClear(sendEpoch, currentEpoch) {
   return sendEpoch === currentEpoch;
 }
+
+// canRedirectSteer says whether a queued item is one the owner said and a
+// redirect can act on. Slash-command barriers and task notices are never
+// marked server-side (a barrier is not an instruction, a notice is not the
+// owner's), so they neither count toward "redirecting" nor keep the offer to
+// redirect alive.
+export function canRedirectSteer(s) {
+  return !!s && !s.command && !s.non_recallable;
+}
+
+// queueRedirectState reads the queue for the marker and the composer. The queue
+// is redirected as a whole, so there are only two honest states: every
+// instruction in it is marked ("redirecting"), or at least one is not (the
+// redirect can still be asked for). A queue with nothing a redirect can act on
+// — only commands and notices — is neither.
+export function queueRedirectState(queue) {
+  const marks = (queue || []).filter(canRedirectSteer);
+  const marked = marks.filter((s) => s.redirect).length;
+  return {
+    redirecting: marks.length > 0 && marked === marks.length,
+    canRedirect: marked < marks.length,
+  };
+}

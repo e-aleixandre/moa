@@ -97,3 +97,23 @@ test("an attachment-only message can only be submitted once by one physical acti
   }
   expect(attachmentOnlySends).toBe(1);
 });
+
+// A long-press (the redirect menu) is not a tap: whatever the browser delivers
+// after it — pointercancel when the callout starts, or the trailing click —
+// must not send, and the next touch must start clean.
+test("a long-press disarms its pointer so a late pointercancel cannot send", () => {
+  const { state, actions } = drive([down(4), sendButtonEvent.longPress(4), cancel(4)]);
+  expect(actions).toEqual([]);
+  expect(state).toEqual(SEND_BUTTON_INITIAL);
+});
+
+test("after a long-press the next touch is a normal tap again", () => {
+  const { state, actions } = drive([down(4), sendButtonEvent.longPress(4), up(4), down(5), up(5), click()]);
+  expect(actions).toEqual(["send"]);
+  expect(state.sendInFlight).toBe(true);
+});
+
+test("a long-press of another pointer leaves the tracked one armed", () => {
+  const { state } = drive([down(4), sendButtonEvent.longPress(9)]);
+  expect(state.activePointerId).toBe(4);
+});

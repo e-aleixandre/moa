@@ -15,6 +15,10 @@ export const sendButtonEvent = {
   pointerDown: (pointerId) => ({ type: "POINTER_DOWN", pointerId }),
   pointerUp: (pointerId) => ({ type: "POINTER_UP", pointerId }),
   pointerCancel: (pointerId) => ({ type: "POINTER_CANCEL", pointerId }),
+  // The press became a long-press (prototype redirect menu): it is no longer a
+  // tap, so it must neither send through the pointercancel fallback nor leave
+  // its identity armed for the next touch.
+  longPress: (pointerId) => ({ type: "LONG_PRESS", pointerId }),
   click: () => ({ type: "CLICK" }),
   keyActivate: () => ({ type: "KEY_ACTIVATE" }),
   sendFinished: () => ({ type: "SEND_FINISHED" }),
@@ -61,6 +65,14 @@ export function reduceContentSendActivation(state = SEND_BUTTON_INITIAL, event) 
         return { state, actions: [] };
       }
       return send(state, { kind: "pointer", pointerId: event.pointerId });
+
+    case "LONG_PRESS":
+      // Only the press being tracked can turn into a long-press. The browser
+      // may still deliver its pointerup/pointercancel/click afterwards; with no
+      // identity left, the first two are inert, and the Composer swallows the
+      // click itself (it never reaches this reducer, so it cannot latch).
+      if (state.activePointerId !== event.pointerId) return { state, actions: [] };
+      return { state: { ...state, activePointerId: null }, actions: [] };
 
     case "KEY_ACTIVATE":
       if (state.sendInFlight) return { state, actions: [] };

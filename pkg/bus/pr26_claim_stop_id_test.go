@@ -63,14 +63,14 @@ func TestPR26DStopRestoresOnlyUnclaimedIDs(t *testing.T) {
 			}
 			r26Await(t, active, "active read")
 			r26Await(t, lockEntered, "writer before frontier")
-			if err := rt.Bus.Execute(SteerAgent{ID: "commit", Text: "committed instruction"}); err != nil {
+			if err := rt.Bus.Execute(SteerAgent{ID: "commit", Text: "committed instruction", Redirect: true}); err != nil {
 				t.Fatal(err)
 			}
 			if order == "stop_after_claim" {
 				openLock()
 				r26Await(t, bEnded, "withdrawal published before Stop")
 			}
-			if err := rt.Bus.Execute(SteerAgent{ID: "suffix", Text: "not yet claimed"}); err != nil {
+			if err := rt.Bus.Execute(SteerAgent{ID: "suffix", Text: "not yet claimed", Redirect: true}); err != nil {
 				t.Fatal(err)
 			}
 			var recalled []core.SteerItem

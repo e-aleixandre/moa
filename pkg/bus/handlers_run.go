@@ -116,7 +116,7 @@ func registerRunControlHandlers(sctx *SessionContext) {
 		if cmd.ID == "" {
 			cmd.ID = core.NewSteerID()
 		}
-		if err := trySteer(sctx.Agent, core.SteerItem{ID: cmd.ID, Text: cmd.Text, Custom: cmd.Custom, Content: cmd.Content, Internal: cmd.Internal}); err != nil {
+		if err := trySteer(sctx.Agent, core.SteerItem{ID: cmd.ID, Text: cmd.Text, Custom: cmd.Custom, Content: cmd.Content, Internal: cmd.Internal, Redirect: cmd.Redirect}); err != nil {
 			return err
 		}
 		// Kick the pump after enqueuing. While a run is in flight this is a
@@ -152,6 +152,20 @@ func registerRunControlHandlers(sctx *SessionContext) {
 
 func registerCancelSteerHandler(sctx *SessionContext) {
 	b := sctx.Bus
+	b.OnCommand(func(cmd RedirectQueue) error {
+		redirector, ok := sctx.Agent.(interface{ RedirectQueued() []string })
+		if !ok {
+			return nil
+		}
+		ids := redirector.RedirectQueued()
+		if cmd.Redirected != nil {
+			*cmd.Redirected = ids
+		}
+		if len(ids) > 0 {
+			sctx.Bus.Publish(SteersRedirected{SessionID: sctx.SessionID, SteerIDs: ids})
+		}
+		return nil
+	})
 	b.OnCommand(func(cmd CancelSteer) error {
 		discarded := sctx.Agent.CancelSteer()
 		if cmd.DiscardedSteers != nil {
@@ -247,7 +261,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			if custom == nil {
 				custom = core.HumanSessionMentionsCustom(cmd.HumanMentions)
 			}
-			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: cmd.Text, Custom: custom}); err != nil {
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: cmd.Text, Custom: custom, Redirect: cmd.Redirect}); err != nil {
 				return err
 			}
 			// Report the identity on the STEER rail: a chip ID must never be
@@ -361,7 +375,7 @@ func registerRunPromptHandlers(sctx *SessionContext, shared *handlerSharedState)
 			// Carry the plain text alongside the content blocks: the Steered
 			// event (and every client rendering it) shows Text, so a queued
 			// send with attachments would otherwise surface as an empty chip.
-			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content, Custom: promptCustom(cmd.Custom, cmd.HumanMentions)}); err != nil {
+			if err := trySteer(sctx.Agent, core.SteerItem{ID: id, Text: contentText(cmd.Content), Content: cmd.Content, Custom: promptCustom(cmd.Custom, cmd.HumanMentions), Redirect: cmd.Redirect}); err != nil {
 				return err
 			}
 			if cmd.AcceptedSteerID != nil {

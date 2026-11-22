@@ -15,6 +15,7 @@ import { closeArtifactsForMissingOwner, closeArtifactsForSession } from './artif
 import { closeSessionPanelForSession } from './session-panel.js';
 import { DAYBREAK_SWITCH_SPEC } from '../components/Daybreak/daybreak-model.js';
 import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.js';
+import { canRedirectSteer } from './composer-queue.js';
 import { rewoundFiles, placeRewoundMessage } from './rewind-edit.js';
 import { rehydrateMentions } from './util/mentions.js';
 import { deviceZone } from './schedule-model.js';
@@ -660,7 +661,7 @@ function adoptMessageRail(id, { optimisticMsg, msgId, effMsgId, optimisticSteer,
 // or had a queued item by the time the server decided), the optimistic message
 // is fiction: drop it and show the confirmed chip instead — unless a Steered
 // event already delivered the chip, which is the authoritative removal.
-function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, sessionMentions = [], prevRunStartedAtMs, prevRunEpoch }) {
+function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, sessionMentions = [], redirect = false, prevRunStartedAtMs, prevRunEpoch }) {
   const cur = store.get().sessions[id];
   if (!cur) return;
   const steers = cur.pendingSteers || [];
@@ -696,6 +697,7 @@ function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, sessionMe
     // Own selection (live composer ids, never parsed from the text), so a recall
     // of a chip created here keeps it.
     if (!existing && sessionMentions.length > 0) chip.session_mentions = sessionMentions;
+    if (!existing && redirect) chip.redirect = true;
     patch.pendingSteers = existing
       ? steers.map((s) => (s === existing ? chip : s))
       : [...steers, chip];
@@ -710,7 +712,14 @@ function adoptSteerRail(id, { optimisticMsg, effSteerId, images, text, sessionMe
 // still has written in `text`: the server grants a read from this list, never
 // from the text. Absent when there are none, so a plain message's body is the
 // one it has always been.
-export async function sendMessage(id, text, attachments = [], { sessionMentions = [] } = {}) {
+//
+// `redirect` is the explicit "change course now" gesture: while a run is busy
+// the message then withdraws the tool calls not yet started instead of waiting
+// behind them. The default is the opposite — a message only queues and is read
+// when the current tool batch ends. It means nothing for an idle session (the
+// message starts a run either way), and the body omits it then and whenever it
+// is false, so a plain send's body is the one it has always been.
+export async function sendMessage(id, text, attachments = [], { sessionMentions = [], redirect = false } = {}) {
   const state = store.get();
   const sess = state.sessions[id];
   if (!sess) return;
@@ -766,6 +775,8 @@ export async function sendMessage(id, text, attachments = [], { sessionMentions 
     // double-send and cancel-vs-in-flight races).
     optimisticSteer = { id: steerId, text };
     if (sessionMentions.length > 0) optimisticSteer.session_mentions = sessionMentions;
+    // The queue marker reads this to say "redirecting" from the first frame.
+    if (redirect) optimisticSteer.redirect = true;
     const imageCount = attachments.filter((a) => a.isImage).length;
     if (imageCount > 0) optimisticSteer.images = imageCount;
     updateSession(id, { pendingSteers: [...steers, optimisticSteer] });
@@ -778,6 +789,7 @@ export async function sendMessage(id, text, attachments = [], { sessionMentions 
       steer_id: steerId,
       msg_id: msgId,
       ...(sessionMentions.length > 0 ? { session_mentions: sessionMentions } : {}),
+      ...(redirect ? { redirect: true } : {}),
     }, { timeoutMs: 0 });
     // The response is authoritative about WHICH rail took the message: our
     // local prediction can be wrong in both directions (a run started between
@@ -813,6 +825,7 @@ export async function sendMessage(id, text, attachments = [], { sessionMentions 
         text,
         images: attachments.filter((a) => a.isImage).length,
         sessionMentions,
+        redirect,
         prevRunStartedAtMs,
         prevRunEpoch,
       });
@@ -988,6 +1001,62 @@ export function recallQueuedSteers(id) {
       addToast({ sessionId: id, title: "Couldn't recall — try again", type: 'error' });
     });
   return true;
+}
+
+// redirectQueuedSteers is THE "redirect now" for a message that is already
+// queued: the whole queue is marked, never one message (the queue is not
+// managed per message — decisions/la-cola-no-se-gestiona.md), so the run reads
+// all of it before its next tool starts. A tool already running is never
+// cancelled; only calls not yet started are withdrawn.
+//
+// The mark shows at once and the server's reply is the truth: it lists every
+// message it marked (including ones that already were), so a chip we marked
+// that is missing from it — a message that arrived after our POST, a refused
+// request — goes back to plain. A chip the reply names that we never marked
+// (another client's) is marked too. Ids that were delivered or recalled in the
+// meantime are already gone from the queue, so there is nothing to undo.
+const redirectsInFlight = new Set();
+
+export function redirectQueuedSteers(id) {
+  if (!id || redirectsInFlight.has(id)) return false;
+  const queue = store.get().sessions[id]?.pendingSteers || [];
+  const marked = new Set(queue.filter((s) => s && canRedirectSteer(s) && !s.redirect).map((s) => s.id));
+  if (marked.size === 0) return false;
+
+  redirectsInFlight.add(id);
+  setSteersRedirect(id, marked, true);
+  api('POST', `/api/sessions/${id}/steers/redirect`, {})
+    .then((res) => {
+      const confirmed = new Set(res?.redirected_steer_ids || []);
+      setSteersRedirect(id, confirmed, true);
+      setSteersRedirect(id, new Set([...marked].filter((sid) => !confirmed.has(sid))), false);
+    })
+    .catch((e) => {
+      console.error('redirectQueuedSteers failed:', e);
+      // Nothing was redirected as far as we know: only our optimistic mark was
+      // wrong, the messages are still queued.
+      setSteersRedirect(id, marked, false);
+      addToast({ sessionId: id, title: "Couldn't redirect — try again", type: 'error' });
+    })
+    .finally(() => redirectsInFlight.delete(id));
+  return true;
+}
+
+// setSteersRedirect flips the redirect mark on the queued chips with these ids.
+// A no-op write is skipped so a reply that confirms what the screen already
+// shows does not re-render the transcript.
+function setSteersRedirect(id, ids, on) {
+  const queue = store.get().sessions[id]?.pendingSteers;
+  if (!queue || ids.size === 0) return;
+  let changed = false;
+  const next = queue.map((s) => {
+    if (!s || !ids.has(s.id) || !!s.redirect === on) return s;
+    changed = true;
+    if (on) return { ...s, redirect: true };
+    const { redirect, ...rest } = s;
+    return rest;
+  });
+  if (changed) updateSession(id, { pendingSteers: next });
 }
 
 export async function cancelSubagent(id, jobId) {

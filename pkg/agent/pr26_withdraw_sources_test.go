@@ -10,6 +10,8 @@ import (
 
 // Source shapes are the producer map supplied by Luna, not invented flags.
 // Withdrawal policy is distinct from the existing interruptible-wait policy.
+// Every item here is marked Redirect: the mark is what asks to withdraw, and
+// the source decides whether it may.
 func TestPR26COnlyUserAndParentOwnerInstructionsWithdraw(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -59,7 +61,7 @@ func TestPR26COnlyUserAndParentOwnerInstructionsWithdraw(t *testing.T) {
 			)
 			done := startAdmissionRun(t, ag)
 			awaitBarrier(t, gate.entered, "started shell before unstarted shell")
-			if err := ag.TrySteer(core.SteerItem{ID: tc.name, Text: "source-specific input", Internal: tc.internal, Custom: tc.custom}); err != nil {
+			if err := ag.TrySteer(core.SteerItem{ID: tc.name, Text: "source-specific input", Internal: tc.internal, Custom: tc.custom, Redirect: true}); err != nil {
 				t.Fatal(err)
 			}
 			gate.open()

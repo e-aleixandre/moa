@@ -33,6 +33,8 @@ export function mergeSteers(snapshot, local) {
     // A task notice: shown in the queue, never handed back to the composer.
     non_recallable: !!s.non_recallable,
     ...(s.session_mentions?.length ? { session_mentions: s.session_mentions } : {}),
+    // Already marked to redirect (by this or another client) before the cut.
+    ...(s.redirect ? { redirect: true } : {}),
     confirmed: true,
   }));
   const serverIds = new Set(server.map(s => s.id));

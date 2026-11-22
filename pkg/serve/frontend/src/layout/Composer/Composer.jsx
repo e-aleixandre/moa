@@ -1,7 +1,8 @@
 import { useRef, useCallback, useEffect, useState } from "preact/hooks";
-import { Paperclip, X, Loader2, PhoneCall, PhoneOff, TriangleAlert } from "lucide-preact";
+import { Paperclip, X, Loader2, PhoneCall, PhoneOff, TriangleAlert, Zap } from "lucide-preact";
 import { MentionSuggestions } from "../../components/MentionSuggestions/MentionSuggestions.jsx";
 import { MentionMirror } from "./MentionMirror.jsx";
+import { SendRedirectMenu } from "./SendRedirectMenu.jsx";
 import { ActionMenu } from "../../components/ActionMenu/ActionMenu.jsx";
 import { useVoiceGesture } from "../../hooks/useVoiceGesture.js";
 import { MicButton } from "../../components/MicButton/MicButton.jsx";
@@ -32,7 +33,8 @@ import { interceptSecretCommand } from "../../data/secrets.js";
 import { loadDraft, saveDraft, loadDraftMentions, saveDraftMentions } from "../../data/composer-draft.js";
 import { classifyCommand, POLICY_QUEUE, POLICY_REJECT } from "../../data/util/command-policy.js";
 import { processFile } from "../../data/util/attachments.js";
-import { formatShortcut } from "../../data/util/shortcut.js";
+import { formatShortcut, isMac } from "../../data/util/shortcut.js";
+import { steerUIVariant } from "../../data/proto-steer-ui.js";
 import {
   SEND_BUTTON_INITIAL, sendButtonEvent, reduceContentSendActivation,
 } from "../../data/composer-send-button.js";
@@ -141,6 +143,15 @@ export function keepCommandSuggestionVisible(list, index) {
   }
 }
 
+// How long a press on Send must last to open the redirect menu (variant B).
+// Long enough that a deliberate tap never gets there, short enough that holding
+// feels like asking for something rather than waiting for it.
+const LONG_PRESS_MS = 450;
+// How "redirect now" is NAMED on this device. Not formatShortcut: that labels
+// the modifier Alt off Mac (it avoids Ctrl for browser chords), but Alt+Enter
+// is the plain queue; the chord that redirects is Ctrl+Enter there.
+const REDIRECT_KEY = isMac ? "⌘⏎" : "Ctrl+⏎";
+
 // Per-session unsent draft, persisted to localStorage so a reload (iOS evicts
 // backgrounded PWAs freely) doesn't lose what you were typing. The prefix is
 // deliberately DISTINCT from the old SPA's `moa-draft-` so the two frontends
@@ -161,6 +172,16 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // event before invoking send, so stale attachments cannot be submitted twice.
   const contentSendActivationRef = useRef(SEND_BUTTON_INITIAL);
   const dispatchContentSendRef = useRef(null);
+  // Whether the send being dispatched is the explicit "redirect now". It is
+  // handed over by the dispatcher only when the activation reducer lets a send
+  // through, and consumed (and cleared) at the top of handleSendInner before it
+  // can await — so a send the reducer refused can never leave it set for the
+  // next one.
+  const redirectNextRef = useRef(false);
+  // The long-press on Send (prototype variant B): its timer, and whether the
+  // press already turned into the menu, so the click that may still follow the
+  // release is swallowed instead of sending.
+  const longPressRef = useRef({ timer: null, fired: false });
   const [contentSendPending, setContentSendPending] = useState(false);
   const compositionRef = useRef(newCompositionState());
   // The last normal DOM value lets us remove precisely one stale IME insertion
@@ -485,6 +506,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   }, []);
 
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  // The Send long-press menu (prototype variant B).
+  const [sendMenuOpen, setSendMenuOpen] = useState(false);
   // Never leave the menu hanging over another screen: a session switch remounts
   // this composer, and a send closes it below.
   useEffect(() => { setPlusMenuOpen(false); }, [sessionId]);
@@ -564,6 +587,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // errored session runs the message and starts a run; a busy session mints a
   // steer chip, optimistic and reconciled by id).
   const handleSendInner = useCallback(async (el) => {
+    const redirect = redirectNextRef.current;
+    redirectNextRef.current = false;
     if (!el || !sessionId) return;
     const text = el.value.trim();
     const atts = attachments;
@@ -807,12 +832,18 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     const block = mentionsBlock(text, mentions, { ownerConversation: session?.kind === 'owner' });
     const sessionIds = block ? sessionMentionIds(text, mentions) : [];
 
+    // Slash commands and !shell returned above, so only a message to the agent
+    // can be a redirect.
+    const options = {
+      ...(sessionIds.length > 0 ? { sessionMentions: sessionIds } : {}),
+      ...(redirect ? { redirect: true } : {}),
+    };
     try {
       await sendMessage(
         sessionId,
         block ? body.replace(/\s+$/, '') + block : body,
         atts,
-        ...(sessionIds.length > 0 ? [{ sessionMentions: sessionIds }] : []),
+        ...(Object.keys(options).length > 0 ? [options] : []),
       );
       if (text) pushHistory(text);
       clearSentComposer();
@@ -837,10 +868,11 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     contentSendActivationRef.current = state;
     setContentSendPending(false);
   }, []);
-  const dispatchContentSendActivation = useCallback((event) => {
+  const dispatchContentSendActivation = useCallback((event, { redirect = false } = {}) => {
     const { state, actions } = reduceContentSendActivation(contentSendActivationRef.current, event);
     contentSendActivationRef.current = state;
     if (actions.some((action) => action.type === "send")) {
+      redirectNextRef.current = redirect;
       // The reducer sets sendInFlight synchronously above, before this async
       // handler can observe the current attachments. Every later DOM event is
       // inert until this exact invocation has completed.
@@ -1081,13 +1113,23 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       return;
     }
 
-    // Alt/⌥+Enter enqueues explicitly (parity with the placeholder hint);
-    // sendMessage still routes to a steer whenever the session is busy, so this
-    // is only meaningful for an idle session the user wants to queue against.
-    if (e.key === "Enter" && (e.altKey || e.metaKey)) {
+    // Alt/⌥+Enter enqueues explicitly; sendMessage routes to the queue
+    // whenever the session is busy anyway, so it is the same as Enter.
+    if (e.key === "Enter" && e.altKey) {
       if (e.isComposing || compositionRef.current.composing) return;
       e.preventDefault();
       dispatchContentSendActivation(sendButtonEvent.keyActivate());
+      return;
+    }
+
+    // ⌘/Ctrl+Enter is "redirect now" while the agent works: the message is
+    // read before its next step instead of after the current one. Idle, there
+    // is nothing to redirect and it is a plain send. Alt is checked first
+    // above, which also keeps AltGr (Ctrl+Alt on Windows) from redirecting.
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (e.isComposing || compositionRef.current.composing) return;
+      e.preventDefault();
+      dispatchContentSendActivation(sendButtonEvent.keyActivate(), { redirect: busy });
       return;
     }
 
@@ -1244,6 +1286,71 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       decorating an empty box. Attachments count: a photo with no caption is
       as sendable as a sentence. */
   const armed = hasText || attachments.length > 0;
+  // --- Redirect now (prototype variant B: the Redirect button and the Send
+  // long-press menu; see data/proto-steer-ui.js). A short tap on Send is still
+  // the activation reducer's business and still just queues; the menu is a
+  // second reading of the same press, so it is layered over the existing
+  // handlers rather than replacing them.
+  const variantB = steerUIVariant() === "b";
+  const canRedirect = busy && armed && !contentSendPending;
+  const longPressable = variantB && canRedirect;
+  const clearLongPress = () => {
+    const press = longPressRef.current;
+    if (press.timer) clearTimeout(press.timer);
+    press.timer = null;
+  };
+  const closeSendMenu = useCallback(() => setSendMenuOpen(false), []);
+  // The run can end, or the draft be emptied, with the menu open: a menu for
+  // a state that no longer exists must not outlive it.
+  useEffect(() => { if (!canRedirect) setSendMenuOpen(false); }, [canRedirect]);
+  useEffect(() => () => {
+    if (longPressRef.current.timer) clearTimeout(longPressRef.current.timer);
+  }, []);
+  const sendRedirecting = (redirect) => {
+    setSendMenuOpen(false);
+    dispatchContentSendActivation(sendButtonEvent.keyActivate(), { redirect });
+  };
+  const onSendPointerDown = (e) => {
+    const press = longPressRef.current;
+    clearLongPress();
+    press.fired = false;
+    if (sendMenuOpen) {
+      // Tapping Send while the menu is open only closes it (the document
+      // listener does that); the click that follows must not also send.
+      press.fired = true;
+      return;
+    }
+    handleContentSendPointerDown(e);
+    if (!longPressable || (e.button != null && e.button !== 0)) return;
+    const pointerId = e.pointerId;
+    press.timer = setTimeout(() => {
+      press.timer = null;
+      press.fired = true;
+      // The press is no longer a tap: take it out of the reducer so a
+      // pointercancel from the OS callout cannot send it through the iOS
+      // fallback.
+      dispatchContentSendActivation(sendButtonEvent.longPress(pointerId));
+      setSendMenuOpen(true);
+    }, LONG_PRESS_MS);
+  };
+  const onSendPointerUp = (e) => {
+    clearLongPress();
+    handleContentSendPointerUp(e);
+  };
+  const onSendPointerCancel = (e) => {
+    clearLongPress();
+    handleContentSendPointerCancel(e);
+  };
+  const onSendClick = (e) => {
+    const press = longPressRef.current;
+    if (press.fired) {
+      // The click that completes the long-press: the menu is the answer.
+      press.fired = false;
+      e.preventDefault?.();
+      return;
+    }
+    handleContentSendClick();
+  };
   const callLive = callHere?.phase === 'listening' || callHere?.phase === 'speaking' || callHere?.phase === 'consulting';
   const voiceLit = auroraActive({ recording, callPhase: callLive ? 'live' : '' });
 
@@ -1357,7 +1464,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       />
       </div>
       {busy && hasText && (
-        <span class="steer-hint" aria-hidden="true">⏎ steers — won't interrupt</span>
+        <span class="steer-hint" aria-hidden="true">{`⏎ queue · ${REDIRECT_KEY} redirect now`}</span>
       )}
       <div class="zl-controls">
         {plusActions.length > 0 ? (
@@ -1423,27 +1530,48 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         {canLater && (hasText || later) && (
           <SendLaterButton on={!!later} disabled={contentSendPending} onClick={openLater} />
         )}
+        {variantB && busy && hasText && (
+          /* Redirect now, beside Send. Only on a fine pointer (CSS): on the
+             phone the same verb is the long-press menu, because a second 44px
+             button would take the row's room from the mic and the call. */
+          <button
+            type="button"
+            class="zl-redirect"
+            title={`Redirect now (${REDIRECT_KEY})`}
+            aria-label="Redirect now — the agent reads this before its next step"
+            disabled={contentSendPending}
+            onClick={() => sendRedirecting(true)}
+          >
+            <Zap size={16} aria-hidden="true" />
+            <span>Redirect</span>
+          </button>
+        )}
         {/* Send is always Send now. It no longer has to ask whose turn it is:
             the mic is a button beside it, so one tap has exactly one meaning
             in every state and density. */}
         <button
           type="button"
           class="zl-send"
-          aria-label={contentSendPending ? "Sending" : busy ? "Send steer" : "Send"}
+          aria-label={contentSendPending ? "Sending" : busy ? "Send — queues for the next step" : "Send"}
           title={
             contentSendPending ? "Sending…"
-              : busy ? "Send — steers the agent, doesn't stop it"
+              : busy ? "Send — queues for the next step"
                 : "Send"
           }
           disabled={!armed}
-          onPointerDown={handleContentSendPointerDown}
-          onPointerUp={handleContentSendPointerUp}
-          onPointerCancel={handleContentSendPointerCancel}
-          onClick={handleContentSendClick}
+          onPointerDown={onSendPointerDown}
+          onPointerUp={onSendPointerUp}
+          onPointerCancel={onSendPointerCancel}
+          onPointerLeave={clearLongPress}
+          onContextMenu={longPressable ? (e) => e.preventDefault() : undefined}
+          onClick={onSendClick}
           onKeyDown={handleContentSendKeyDown}
         >
           {contentSendPending ? <Loader2 size={16} class="spin" /> : <SendIcon />}
         </button>
+        {variantB && sendMenuOpen && canRedirect && (
+          <SendRedirectMenu onPick={sendRedirecting} onClose={closeSendMenu} />
+        )}
       </div>
     </div>
   );

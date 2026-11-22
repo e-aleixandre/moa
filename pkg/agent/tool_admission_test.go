@@ -224,7 +224,7 @@ func TestStopAndSteerBeforeLogicalStartInEitherOrder(t *testing.T) {
 			})
 			done := startAdmissionRun(t, ag)
 			awaitBarrier(t, gate.entered, "scheduling")
-			steer := core.SteerItem{ID: "early", Text: "change direction"}
+			steer := core.SteerItem{ID: "early", Text: "change direction", Redirect: true}
 			if order == "steer_then_stop" {
 				if err := ag.TrySteer(steer); err != nil {
 					t.Fatal(err)
@@ -409,7 +409,7 @@ func TestUserSteerWithdrawsUnstartedCallsOfTheBatch(t *testing.T) {
 			if approvals.Load() != 2 {
 				t.Fatalf("fixture did not approve the entire batch: %d", approvals.Load())
 			}
-			if err := ag.TrySteer(core.SteerItem{ID: "early", Text: "change direction"}); err != nil {
+			if err := ag.TrySteer(core.SteerItem{ID: "early", Text: "change direction", Redirect: true}); err != nil {
 				t.Fatal(err)
 			}
 			gate.open()
@@ -455,7 +455,7 @@ func TestUserSteerLetsStartedParallelToolsFinish(t *testing.T) {
 	done := startAdmissionRun(t, ag)
 	awaitBarrier(t, first.entered, "first parallel tool")
 	awaitBarrier(t, second.entered, "second parallel tool")
-	if err := ag.TrySteer(core.SteerItem{ID: "early", Text: "new instructions"}); err != nil {
+	if err := ag.TrySteer(core.SteerItem{ID: "early", Text: "new instructions", Redirect: true}); err != nil {
 		t.Fatal(err)
 	}
 	first.open()
@@ -495,7 +495,7 @@ func TestNonDeliverableSteerKeepsTheBatch(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				for _, it := range []core.SteerItem{{ID: "command", Command: "/compact"}, {ID: "user", Text: "after command"}} {
+				for _, it := range []core.SteerItem{{ID: "command", Command: "/compact"}, {ID: "user", Text: "after command", Redirect: true}} {
 					if err := ag.TrySteer(it); err != nil {
 						t.Fatal(err)
 					}

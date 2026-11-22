@@ -317,7 +317,7 @@ func TestEarlySteerIsDeliveredOnceAfterWithdrawnCalls(t *testing.T) {
 	})
 	execGen(t, rt.Bus, SendPrompt{Text: "start"})
 	awaitGenBarrier(t, firstStarted, "first tool")
-	execGen(t, rt.Bus, SteerAgent{ID: "early", Text: "change direction"})
+	execGen(t, rt.Bus, SteerAgent{ID: "early", Text: "change direction", Redirect: true})
 	open()
 	e := waitGenRunEnded(t, rt, ended)
 	rt.Bus.Drain(2 * time.Second)

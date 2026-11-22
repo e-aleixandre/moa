@@ -3107,6 +3107,15 @@ func TestJobsSteerAcceptsARunningJob(t *testing.T) {
 	if !(&Jobs{store: store}).Steer(jobID, "adjust course") {
 		t.Fatal("a running child must accept a steer")
 	}
+	// Until the owner decides otherwise, a parent's message still redirects
+	// the child instead of only queueing behind its current batch.
+	jb, _ := store.get(jobID)
+	jb.mu.Lock()
+	child := jb.childAgent
+	jb.mu.Unlock()
+	if pending := child.PendingSteers(); len(pending) != 1 || !pending[0].Redirect {
+		t.Errorf("pending = %+v, want the parent's message marked Redirect", pending)
+	}
 	close(release)
 }
 

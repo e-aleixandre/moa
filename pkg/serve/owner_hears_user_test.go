@@ -77,7 +77,7 @@ func TestOwnerHearsTheUserWritingInItsChild(t *testing.T) {
 	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
 	child := ownerOriginChild(t, mgr, root, "Savia rutinas")
 
-	if _, _, _, err := mgr.SendHuman(child.ID, "usa la hora de Madrid, no UTC", nil, "", "", nil); err != nil {
+	if _, _, _, err := mgr.SendHuman(child.ID, "usa la hora de Madrid, no UTC", nil, "", "", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	var got string
@@ -118,7 +118,7 @@ func TestOwnerDoesNotHearTheUserInASessionItDidNotLaunch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := mgr.SendHuman(mine.ID, "my own business", nil, "", "", nil); err != nil {
+	if _, _, _, err := mgr.SendHuman(mine.ID, "my own business", nil, "", "", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	assertNoUserSaid(t, ownerSess, mine)
@@ -129,7 +129,7 @@ func TestOwnerDoesNotHearItselfTalkingToTheUser(t *testing.T) {
 	mgr := newOwnerTestManager(t, context.Background())
 	root := t.TempDir()
 	_, ownerSess := ownerWithSession(t, mgr, root, "Winerim")
-	if _, _, _, err := mgr.SendHuman(ownerSess.ID, "hola", nil, "", "", nil); err != nil {
+	if _, _, _, err := mgr.SendHuman(ownerSess.ID, "hola", nil, "", "", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	assertNoUserSaid(t, ownerSess, ownerSess)
@@ -144,7 +144,7 @@ func TestOwnerDoesNotHearADetachedChild(t *testing.T) {
 	if _, err := mgr.SetOwnerDetached(child.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := mgr.SendHuman(child.ID, "private", nil, "", "", nil); err != nil {
+	if _, _, _, err := mgr.SendHuman(child.ID, "private", nil, "", "", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	assertNoUserSaid(t, ownerSess, child)
@@ -158,7 +158,7 @@ func TestAUserBurstIsOneDeliveryToTheOwner(t *testing.T) {
 	child := ownerOriginChild(t, mgr, root, "the child")
 
 	for _, text := range []string{"uno primero", "dos segundo", "tres tercero"} {
-		if _, _, _, err := mgr.SendHuman(child.ID, text, nil, "", "", nil); err != nil {
+		if _, _, _, err := mgr.SendHuman(child.ID, text, nil, "", "", nil, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -187,7 +187,7 @@ func TestALongUserMessageIsAbridgedWithHowToReadIt(t *testing.T) {
 	child := ownerOriginChild(t, mgr, root, "the child")
 
 	long := "START" + strings.Repeat("x", 6000) + "END"
-	if _, _, _, err := mgr.SendHuman(child.ID, long, nil, "", "", nil); err != nil {
+	if _, _, _, err := mgr.SendHuman(child.ID, long, nil, "", "", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	var got string

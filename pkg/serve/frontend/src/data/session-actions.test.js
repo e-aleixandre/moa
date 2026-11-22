@@ -10,11 +10,11 @@ let apiResponse = [];
 
 const { store, setState, updateSession } = await import('./store.js');
 const { syncConnections } = await import('./api.js');
-const { createSession, deleteSession, dismissAskUser, loadSessions, loadUsage, openPersistedSubagent, openBashJob, recallQueuedSteers, sendMessage, setOwnerDetached, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
+const { createSession, deleteSession, dismissAskUser, loadSessions, loadUsage, openPersistedSubagent, openBashJob, recallQueuedSteers, redirectQueuedSteers, sendMessage, setOwnerDetached, startPolling, stopPolling, stopRun } = await import('./session-actions.js');
 const { getToasts, removeToast } = await import('./notifications.js');
 const { __resetSteerRestoreForTests } = await import('./steer-restore.js');
 const { consumeComposerDrop } = await import('./share.js');
-const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange, handleWsSteersCanceled } = await import('./ws-handlers.js');
+const { adoptAttentionNamespace, handleWsRunTokens, handleWsStateChange, handleWsSteersCanceled, handleWsSteersRedirected } = await import('./ws-handlers.js');
 
 beforeEach(() => {
   apiResponse = [];
@@ -2087,4 +2087,105 @@ test('dismissAskUser keeps the card when the request fails', async () => {
   globalThis.fetch = () => Promise.resolve(new Response('boom', { status: 500 }));
   await expect(dismissAskUser('s1', 'q1')).rejects.toThrow();
   expect(store.get().sessions.s1.pendingAsk?.id).toBe('q1');
+});
+
+// ── Redirect now ──────────────────────────────────────────────────────────
+// A message only queues by default; `redirect` is the explicit gesture, and
+// redirectQueuedSteers marks the WHOLE queue (no per-message management).
+const redirectSession = (pendingSteers) => setState({
+  sessions: { s1: { id: 's1', state: 'running', subagents: {}, pendingSteers, messages: [] } },
+});
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test('a plain send carries no redirect; a redirected one sends it and its chip says so', async () => {
+  const bodies = [];
+  globalThis.fetch = (path, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    return Promise.resolve(new Response(JSON.stringify({ action: 'steer' }), { status: 200 }));
+  };
+  redirectSession(null);
+  await sendMessage('s1', 'plain', []);
+  await sendMessage('s1', 'urgent', [], { redirect: true });
+  expect('redirect' in bodies[0]).toBe(false);
+  expect(bodies[1].redirect).toBe(true);
+  const [plain, urgent] = store.get().sessions.s1.pendingSteers;
+  expect(plain.redirect).toBeUndefined();
+  expect(urgent.redirect).toBe(true);
+});
+
+test('redirectQueuedSteers marks the whole queue at once, skips commands and notices, and keeps the server\'s answer', async () => {
+  const calls = [];
+  let reply;
+  globalThis.fetch = (path, opts) => {
+    calls.push({ path, method: opts.method, body: opts.body });
+    return new Promise((resolve) => { reply = () => resolve(new Response(JSON.stringify({ redirected_steer_ids: ['a', 'b'] }), { status: 200 })); });
+  };
+  redirectSession([
+    { id: 'a', text: 'one', confirmed: true },
+    { id: 'c', text: '/model opus', command: true, confirmed: true },
+    { id: 'n', text: 'notice', non_recallable: true, confirmed: true },
+    { id: 'b', text: 'two', confirmed: true },
+  ]);
+  expect(redirectQueuedSteers('s1')).toBe(true);
+  // Optimistic: marked before the reply, and only the instructions.
+  expect(store.get().sessions.s1.pendingSteers.map((s) => !!s.redirect)).toEqual([true, false, false, true]);
+  expect(calls[0].path).toBe('/api/sessions/s1/steers/redirect');
+  expect(calls[0].method).toBe('POST');
+  // A second tap while the first is in flight does not post again.
+  expect(redirectQueuedSteers('s1')).toBe(false);
+  reply();
+  await settle();
+  expect(calls).toHaveLength(1);
+  expect(store.get().sessions.s1.pendingSteers.map((s) => !!s.redirect)).toEqual([true, false, false, true]);
+});
+
+test('a refused redirect rolls the mark back and says so', async () => {
+  globalThis.fetch = () => Promise.resolve(new Response('nope', { status: 500 }));
+  redirectSession([{ id: 'a', text: 'one', confirmed: true }]);
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    expect(redirectQueuedSteers('s1')).toBe(true);
+    await settle();
+  } finally { console.error = quiet; }
+  expect(store.get().sessions.s1.pendingSteers[0].redirect).toBeUndefined();
+  expect(getToasts().some((t) => t.title === "Couldn't redirect — try again")).toBe(true);
+});
+
+test('a message the server did not mark goes back to plain', async () => {
+  globalThis.fetch = () => Promise.resolve(new Response(JSON.stringify({ redirected_steer_ids: ['a', 'z'] }), { status: 200 }));
+  redirectSession([
+    { id: 'a', text: 'one', confirmed: true },
+    { id: 'late', text: 'arrived after the click', confirmed: true },
+  ]);
+  expect(redirectQueuedSteers('s1')).toBe(true);
+  await settle();
+  const queue = store.get().sessions.s1.pendingSteers;
+  expect(queue.map((s) => !!s.redirect)).toEqual([true, false]);
+});
+
+test('with nothing to redirect it does not call the server', () => {
+  let called = false;
+  globalThis.fetch = () => { called = true; return Promise.resolve(new Response('{}', { status: 200 })); };
+  redirectSession([{ id: 'c', text: '/model opus', command: true }, { id: 'a', text: 'one', redirect: true }]);
+  expect(redirectQueuedSteers('s1')).toBe(false);
+  redirectSession(null);
+  expect(redirectQueuedSteers('s1')).toBe(false);
+  expect(called).toBe(false);
+});
+
+test('steers_redirected marks those messages on every client, ignoring ones already gone', () => {
+  redirectSession([{ id: 'a', text: 'one' }, { id: 'b', text: 'two' }]);
+  handleWsSteersRedirected('s1', ['a', 'gone']);
+  expect(store.get().sessions.s1.pendingSteers.map((s) => !!s.redirect)).toEqual([true, false]);
+  const same = store.get().sessions.s1.pendingSteers;
+  handleWsSteersRedirected('s1', ['a']);
+  expect(store.get().sessions.s1.pendingSteers).toBe(same); // nothing changed, nothing re-rendered
+});
+
+test('a snapshot restores the redirect mark of a queued message', async () => {
+  const { mergeSteers } = await import('./ws/init.js');
+  const merged = mergeSteers([{ id: 'q1', text: 'x', redirect: true }, { id: 'q2', text: 'y' }], []);
+  expect(merged[0].redirect).toBe(true);
+  expect('redirect' in merged[1]).toBe(false);
 });

@@ -426,6 +426,23 @@ export function handleWsSteerQueued(id, data) {
   });
 }
 
+// handleWsSteersRedirected marks queued messages as redirecting on every client
+// of the session: one client asked for the whole queue to redirect, and the
+// marker everywhere must say so rather than keep offering the gesture. Ids no
+// longer queued (already read or recalled) are simply not found.
+export function handleWsSteersRedirected(id, steerIds) {
+  const sess = store.get().sessions[id];
+  if (!sess?.pendingSteers || !Array.isArray(steerIds) || steerIds.length === 0) return;
+  const marked = new Set(steerIds);
+  let changed = false;
+  const pendingSteers = sess.pendingSteers.map((s) => {
+    if (!s || !marked.has(s.id) || s.redirect) return s;
+    changed = true;
+    return { ...s, redirect: true };
+  });
+  if (changed) updateSession(id, { pendingSteers });
+}
+
 // handleWsSteersCanceled clears the shared queue on every client when the
 // queued (not yet delivered) steers were dropped (e.g. dequeued for editing).
 // `opId` is the stop_id or recall_id the server echoes: when it is one of this

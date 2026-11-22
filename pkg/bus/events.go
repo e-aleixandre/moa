@@ -317,6 +317,13 @@ type SteersCanceled struct {
 	RecallID string
 }
 
+// SteersRedirected is published when queued messages were marked Redirect, so
+// every client of the shared queue shows that they will cut in.
+type SteersRedirected struct {
+	SessionID string
+	SteerIDs  []string
+}
+
 // CommandQueued is published when a slash command is enqueued as a barrier in
 // the unified queue rail (issued while the session was busy). Frontends render
 // an optimistic queued chip for it, distinct from a queued message chip, keyed

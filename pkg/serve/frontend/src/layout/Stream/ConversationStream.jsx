@@ -40,7 +40,7 @@ import {
 } from "../../data/stream-read-anchor.js";
 // The queue lives at the end of the thread: what the owner already said, with
 // the one gesture that brings it back to the input.
-import { recallQueuedSteers, promoteSubagent } from "../../data/session-actions.js";
+import { recallQueuedSteers, redirectQueuedSteers, promoteSubagent } from "../../data/session-actions.js";
 
 // Stream — the scrollable conversation area. It renders the REAL
 // projected block list from stream-model.js (projectStream), mapping each
@@ -336,6 +336,7 @@ export function ConversationStream({
           <QueuedTail
             queue={session?.pendingSteers}
             onBringBack={() => recallQueuedSteers(session?.id)}
+            onRedirect={() => redirectQueuedSteers(session?.id)}
           />
           {historyHydrationTailVisible(session) && (
             <HistoryHydrationTail

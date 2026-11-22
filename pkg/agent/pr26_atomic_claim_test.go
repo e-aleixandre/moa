@@ -86,7 +86,7 @@ func TestPR26DRecallVersusClaimAtLogicalStart(t *testing.T) {
 			done := startAdmissionRun(t, ag)
 			awaitBarrier(t, active.entered, "active read-only tool")
 			awaitBarrier(t, scheduling.entered, "writer before logical start")
-			item := core.SteerItem{ID: "s-claim", Text: "change direction", Custom: map[string]any{"pr26_id": "s-claim"},
+			item := core.SteerItem{ID: "s-claim", Text: "change direction", Custom: map[string]any{"pr26_id": "s-claim"}, Redirect: true,
 				Content: []core.Content{core.TextContent("change direction"), core.ImageContent("0123456789ABCDEF", "image/png")}}
 			if err := ag.TrySteer(item); err != nil {
 				t.Fatal(err)
@@ -292,9 +292,9 @@ func TestPR26DClaimedPrefixStopsAtBarrierAndSurvivesStop(t *testing.T) {
 	awaitBarrier(t, scheduling.entered, "writer scheduling")
 	items := []core.SteerItem{
 		{ID: "notice", Text: "automatic notice", Custom: map[string]any{"source": "event", "pr26_id": "notice"}},
-		{ID: "instruction", Text: "new instruction", Custom: map[string]any{"pr26_id": "instruction"}},
+		{ID: "instruction", Text: "new instruction", Custom: map[string]any{"pr26_id": "instruction"}, Redirect: true},
 		{ID: "barrier", Command: "/compact"},
-		{ID: "after", Text: "after command", Custom: map[string]any{"pr26_id": "after"}},
+		{ID: "after", Text: "after command", Custom: map[string]any{"pr26_id": "after"}, Redirect: true},
 	}
 	for _, it := range items {
 		if err := ag.TrySteer(it); err != nil {

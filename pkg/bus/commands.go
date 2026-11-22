@@ -67,6 +67,10 @@ type SendPrompt struct {
 	SessionID string
 	Text      string
 	Custom    map[string]any
+	// Redirect applies when the strict-order gate turns this prompt into a
+	// queued steer: it then withdraws the run's unstarted calls (see
+	// SteerAgent.Redirect). A prompt that starts a run ignores it.
+	Redirect bool
 	// MsgID, when set, is used as the user message's stable identifier instead
 	// of an auto-minted one, so a caller that later announces this prompt can
 	// reference it by a shared MsgID for reconnect dedup. Ignored when Custom is
@@ -130,6 +134,8 @@ type ContinueRun struct {
 type SendPromptWithContent struct {
 	SessionID string
 	Content   []core.Content
+	// Redirect mirrors SendPrompt.Redirect.
+	Redirect bool
 	// MsgID, when set, is used as the user message's stable identifier instead
 	// of an auto-minted one, so the live announcement of this prompt
 	// (UserMessageAppended) shares an identity with the caller's optimistic
@@ -166,6 +172,10 @@ type SteerAgent struct {
 	// is delivered to the agent but excluded from the user-visible queue
 	// snapshot. Its delivery event is separately suppressed via SteerFilter.
 	Internal bool
+	// Redirect withdraws the run's tool calls not yet started so the message
+	// is read before them (see core.SteerItem.Redirect). Without it the
+	// message waits for the current tool batch.
+	Redirect bool
 	// RefuseQuestion rejects the steer with ErrSessionQuestion while the
 	// session is in StatePermission. Checked under abortMu, before enqueuing.
 	RefuseQuestion bool
@@ -189,6 +199,14 @@ type CancelSteer struct {
 	SessionID       string
 	DiscardedSteers *[]core.SteerItem
 	RecallID        string // echoed on SteersCanceled
+}
+
+// RedirectQueue marks every queued instruction of the session Redirect, so the
+// run reads the queue before its next tool starts (see Agent.RedirectQueued).
+// Redirected reports the IDs it marked; empty when nothing was left to mark.
+type RedirectQueue struct {
+	SessionID  string
+	Redirected *[]string
 }
 
 // AppendToConversation adds a message to the conversation without running the agent.

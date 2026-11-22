@@ -167,6 +167,7 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/send", handleSend(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/secrets", handleStashSecrets(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/steers/cancel", handleCancelSteers(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/steers/redirect", handleRedirectSteers(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/permission", handlePermissionDecision(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/ask", handleAskUserResponse(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/questions/{qid}/dismiss", handleDismissQuestion(manager))
@@ -594,6 +595,10 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			// (@). Only this list mints the read_session receipt; the text
 			// never does.
 			SessionMentions json.RawMessage `json:"session_mentions"`
+			// Redirect, when the session is busy, withdraws the run's tool
+			// calls not yet started so this message is read first. Without
+			// it the message waits for the current tool batch.
+			Redirect bool `json:"redirect"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -609,7 +614,7 @@ func handleSend(mgr *Manager) http.HandlerFunc {
 			return
 		}
 		sessionID := r.PathValue("id")
-		action, acceptedID, descriptors, err := mgr.SendHuman(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID, mentions)
+		action, acceptedID, descriptors, err := mgr.SendHuman(sessionID, body.Text, body.Attachments, body.SteerID, body.MsgID, mentions, body.Redirect)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -1369,6 +1374,28 @@ func handleCancelAndRecall(mgr *Manager) http.HandlerFunc {
 			}
 			writeJSON(w, http.StatusOK, resp)
 		}
+	}
+}
+
+// handleRedirectSteers marks the session's whole queue Redirect: the run reads
+// it before its next tool starts. It answers the IDs marked, empty when the
+// queue had already been read or recalled.
+func handleRedirectSteers(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := mgr.Get(r.PathValue("id"))
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		ids := []string{}
+		if err := sess.runtime.Bus.Execute(bus.RedirectQueue{Redirected: &ids}); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if ids == nil {
+			ids = []string{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"redirected_steer_ids": ids})
 	}
 }
 

@@ -262,6 +262,12 @@ type SteerItem struct {
 	// queue snapshot, since their delivery event is suppressed and they must not
 	// surface as user-visible "queued" chips.
 	Internal bool `json:"-"`
+	// Redirect marks an instruction that must take effect before the run's
+	// next tool starts: calls not yet started are withdrawn for it. Without
+	// it a message waits for the current tool batch and cuts nothing. Only
+	// instruction sources redirect (see the agent's withdrawsPendingTools);
+	// automatic items never do, even when marked.
+	Redirect bool `json:"redirect,omitempty"`
 }
 
 // IsBarrier reports whether this item is a queued command that stops the run

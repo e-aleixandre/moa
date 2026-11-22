@@ -7,13 +7,25 @@
   color: var(--zl-t4);
 }
 
-/* The whole row is the button, so on the phone it is hit without aiming.
-   Nothing is boxed — a filled control here would weigh more than the two words
-   it carries, and this is a receipt, not a call to action. */
-.queued-line {
+/* The row is two or three sibling buttons, never nested ones: the count (the
+   real Bring back), optionally "Redirect now", and the "Bring back" label
+   (its pointer-only twin). Together they cover the row, so on the phone it is
+   hit without aiming. Nothing is boxed — a filled control here would weigh more
+   than the words it carries, and this is a receipt, not a call to action.
+
+   A container, so the narrow-marker rule below answers to the width the
+   marker really has (a split pane is narrower than the viewport). */
+.queued-tail { container-type: inline-size; }
+.queued-row {
   display: flex;
   align-items: center;
-  width: 100%;
+  min-height: 44px;
+}
+.queued-line,
+.queued-redirect,
+.queued-bring {
+  display: flex;
+  align-items: center;
   min-height: 44px;
   padding: 0;
   border: 0;
@@ -23,6 +35,9 @@
   text-align: left;
   cursor: pointer;
 }
+/* The count side takes every pixel the other two leave: it is the generous
+   half of the Bring back target. */
+.queued-line { flex: 1 1 auto; min-width: 0; }
 .queued-count,
 .queued-trace {
   min-width: 0;
@@ -31,18 +46,44 @@
   letter-spacing: 0.01em;
   color: var(--zl-t4);
 }
+.queued-count {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .queued-spring { flex: 1 1 auto; min-width: 8px; }
-.queued-act {
+.queued-act,
+.queued-redirect {
   flex: none;
-  color: var(--zl-t4);
   font-family: var(--mono);
   font-size: var(--zl-fs-micro);
   letter-spacing: 0.01em;
 }
-.queued-line:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
+.queued-act { color: var(--zl-t4); padding-left: 8px; }
+
+/* Peach is the owner's own voice: the redirect is HIS instruction to the
+   agent, so both the state and its action wear it. */
+.queued-count.is-redirecting { color: var(--zl-peach); }
+.queued-redirect {
+  color: var(--zl-peach);
+  padding: 0 10px;
+}
+
+.queued-line:focus-visible,
+.queued-redirect:focus-visible { outline: 2px solid var(--zl-accent); outline-offset: 2px; }
 @media (hover: hover) {
-  .queued-line:hover .queued-count,
-  .queued-line:hover .queued-act { color: var(--zl-t3); }
+  .queued-line:hover .queued-count:not(.is-redirecting),
+  .queued-row:has(.queued-line:hover) .queued-act,
+  .queued-bring:hover { color: var(--zl-t3); }
+  .queued-row:has(.queued-bring:hover) .queued-count:not(.is-redirecting) { color: var(--zl-t3); }
+  .queued-redirect:hover { text-decoration: underline; text-underline-offset: 3px; }
+}
+
+/* At phone width the count, "Redirect now" and "Bring back" do not fit side by
+   side at 11px mono: the sentence gives way ("3 queued"), not the buttons,
+   whose labels are the whole point. */
+@container (max-width: 420px) {
+  .queued-row.has-redirect .queued-count-more { display: none; }
 }
 
 /* One clipped line per message: enough to recognise what is waiting, never

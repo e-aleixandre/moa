@@ -2147,9 +2147,9 @@ func (cfg *loopConfig) lockSteers() func() {
 }
 
 // admitToolStart decides a call's logical start, right before Execute. It
-// runs under steerMu, the lock Abort and steer admission hold: a confirmed
-// Stop or a deliverable user steer either precedes it and the call is not
-// executed, or follows it and finds the call started. It returns the reason
+// runs under steerMu, the lock Abort, steer admission and RedirectQueued hold:
+// a confirmed Stop or a redirecting steer either precedes it and the call is
+// not executed, or follows it and finds the call started. It returns the reason
 // the call is not executed, or "" when it may start.
 func admitToolStart(runCtx context.Context, cfg *loopConfig, batch *toolBatch) string {
 	defer cfg.lockSteers()()

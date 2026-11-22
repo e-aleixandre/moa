@@ -111,6 +111,9 @@ type PendingSteerData struct {
 	// recalled draft keeps the selection. Omitted without a valid receipt; it is
 	// never derived from the text.
 	SessionMentions []string `json:"session_mentions,omitempty"`
+	// Redirect marks a message that will be read before the run's next tool
+	// starts, withdrawing the calls not yet started.
+	Redirect bool `json:"redirect,omitempty"`
 }
 
 // LiveToolInitData is one tool call that is still generating its arguments or

@@ -943,3 +943,138 @@ test("picking an owner keeps the @, adds the label and a space, and never focuse
     { label: "Infra", type: "owner", id: "o1", meta: { root: "/work/infra" } },
   ]);
 });
+
+// ── Redirect now ──────────────────────────────────────────────────────────
+// A message sent while the agent works only QUEUES; ⌘/Ctrl+Enter is the
+// explicit "redirect now". The flag rides the same send path (and the same
+// anti-double-send reducer) as every other send.
+async function keySend(session, key, text = "change course") {
+  refs.length = 0;
+  sent.length = 0;
+  const tree = Composer({ sessionId: "s1", session });
+  const textarea = descendants(tree).find((n) => n.type === "textarea");
+  refs[0].current = { value: text, style: {}, scrollHeight: 24 };
+  let prevented = false;
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false, ctrlKey: false,
+    isComposing: false, preventDefault() { prevented = true; }, ...key,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  return { sent: [...sent], prevented };
+}
+
+test("⌘+Enter and Ctrl+Enter redirect while the agent works", async () => {
+  for (const key of [{ metaKey: true }, { ctrlKey: true }]) {
+    const r = await keySend({ state: "running" }, key);
+    expect(r.prevented).toBe(true);
+    expect(r.sent).toEqual([["s1", "change course", [], { redirect: true }]]);
+  }
+});
+
+test("Enter and Alt+Enter only queue: no redirect flag in the call", async () => {
+  expect((await keySend({ state: "running" }, {})).sent).toEqual([["s1", "change course", []]]);
+  expect((await keySend({ state: "running" }, { altKey: true })).sent).toEqual([["s1", "change course", []]]);
+  // AltGr reports Ctrl+Alt on Windows: it must not be mistaken for a redirect.
+  expect((await keySend({ state: "running" }, { altKey: true, ctrlKey: true })).sent).toEqual([["s1", "change course", []]]);
+});
+
+test("⌘+Enter on an idle session is a plain send", async () => {
+  expect((await keySend({ state: "idle" }, { metaKey: true })).sent).toEqual([["s1", "change course", []]]);
+});
+
+test("a redirect does not leak into the next send, and never touches commands or shell escapes", async () => {
+  expect((await keySend({ state: "running" }, { metaKey: true })).sent).toHaveLength(1);
+  expect((await keySend({ state: "running" }, {})).sent).toEqual([["s1", "change course", []]]);
+  // A !shell escape is executed, never sent to the agent, redirect or not.
+  expect((await keySend({ state: "running" }, { metaKey: true }, "!ls")).sent).toEqual([]);
+});
+
+test("redirect composes with session mentions in one options object", async () => {
+  // The existing mention suite seeds drafts through refs; here only the shape of
+  // the options matters, so it is read from the source of the call.
+  const source = await Bun.file(new URL("./Composer.jsx", import.meta.url)).text();
+  expect(source).toMatch(/\.\.\.\(sessionIds\.length > 0 \? \{ sessionMentions: sessionIds \} : \{\}\)/);
+  expect(source).toMatch(/\.\.\.\(redirect \? \{ redirect: true \} : \{\}\)/);
+});
+
+function composerWithText(session) {
+  const src = require("node:fs").readFileSync(new URL("./Composer.jsx", import.meta.url), "utf8");
+  const slot = src.slice(0, src.indexOf("const [hasText")).split("useState(").length - 1;
+  refs.length = 0;
+  stateCalls = 0;
+  stateOverrides.clear();
+  stateOverrides.set(slot, true);
+  const tree = Composer({ sessionId: "s1", session });
+  stateOverrides.clear();
+  return tree;
+}
+
+test("while busy the hint and the Send button say queue and redirect, not steer", () => {
+  const tree = composerWithText({ state: "running" });
+  const nodes = descendants(tree);
+  const hint = nodes.find((n) => n.props?.class === "steer-hint");
+  expect(hint.props.children).toMatch(/^⏎ queue · (⌘⏎|Ctrl\+⏎) redirect now$/);
+  const send = nodes.find((n) => String(n.props?.class || "").split(/\s+/).includes("zl-send"));
+  expect(send.props["aria-label"]).toBe("Send — queues for the next step");
+  expect(send.props.title).toBe("Send — queues for the next step");
+});
+
+test("variant A has no redirect UI in the composer beyond the hint and the key", () => {
+  globalThis.localStorage = { getItem: () => "a", setItem() {} };
+  try {
+    const nodes = descendants(composerWithText({ state: "running" }));
+    expect(nodes.some((n) => n.props?.class === "zl-redirect")).toBe(false);
+  } finally {
+    delete globalThis.localStorage;
+  }
+});
+
+test("variant B: the Redirect button redirects, and only while busy with text", () => {
+  globalThis.localStorage = { getItem: () => "b", setItem() {} };
+  try {
+    const busy = descendants(composerWithText({ state: "running" }));
+    const button = busy.find((n) => n.props?.class === "zl-redirect");
+    expect(button).toBeDefined();
+    expect(button.props.title).toMatch(/^Redirect now \((⌘⏎|Ctrl\+⏎)\)$/);
+    refs[0].current = { value: "go left", style: {}, scrollHeight: 24 };
+    sent.length = 0;
+    button.props.onClick();
+    expect(sent).toHaveLength(1);
+    expect(sent[0][3]).toEqual({ redirect: true });
+
+    expect(descendants(composerWithText({ state: "idle" })).some((n) => n.props?.class === "zl-redirect")).toBe(false);
+  } finally {
+    delete globalThis.localStorage;
+  }
+});
+
+// The long-press must not also send: its release is followed by a click on
+// most engines. The timer is real here; LONG_PRESS_MS is 450.
+test("variant B: holding Send opens the menu and the click that follows sends nothing; a tap still queues", async () => {
+  globalThis.localStorage = { getItem: () => "b", setItem() {} };
+  try {
+    const tree = composerWithText({ state: "running" });
+    const send = descendants(tree).find((n) => String(n.props?.class || "").split(/\s+/).includes("zl-send"));
+    refs[0].current = { value: "hold me", style: {}, scrollHeight: 24 };
+    sent.length = 0;
+    expect(send.props.onContextMenu).toBeDefined();
+
+    send.props.onPointerDown({ pointerId: 3, button: 0 });
+    await new Promise((r) => setTimeout(r, 520));
+    send.props.onPointerUp({ pointerId: 3 });
+    send.props.onClick({ preventDefault() {} });
+    await Promise.resolve();
+    expect(sent).toHaveLength(0);
+
+    // A short tap on the same button is still just a queued send.
+    send.props.onPointerDown({ pointerId: 4, button: 0 });
+    send.props.onPointerUp({ pointerId: 4 });
+    send.props.onClick({ preventDefault() {} });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sent).toEqual([["s1", "hold me", []]]);
+  } finally {
+    delete globalThis.localStorage;
+  }
+});

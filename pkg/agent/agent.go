@@ -269,11 +269,18 @@ func (q *steerQueue) len() int {
 }
 
 // withdrawsPendingTools reports whether a queued item is an instruction that
-// withdraws tool calls not yet started: a message from the user, or from a
-// parent or owner to this agent. It is an allowlist on the producer's source
-// (absent, empty or "owner"); automatic items (events, schedules, reports,
-// unknown or malformed sources) never withdraw and are delivered after the batch.
+// withdraws tool calls not yet started: a message marked Redirect from the
+// user, or from a parent or owner to this agent. Unmarked messages wait for the
+// batch. The source is an allowlist (absent, empty or "owner"); automatic items
+// (events, schedules, reports, unknown or malformed sources) never withdraw and
+// are delivered after the batch, even when marked.
 func withdrawsPendingTools(it core.SteerItem) bool {
+	return it.Redirect && isInstruction(it)
+}
+
+// isInstruction reports whether a queued item comes from someone who may
+// redirect the run: the user, or a parent or owner of this agent.
+func isInstruction(it core.SteerItem) bool {
 	if it.Internal || it.IsBarrier() {
 		return false
 	}
@@ -283,6 +290,25 @@ func withdrawsPendingTools(it core.SteerItem) bool {
 	}
 	source, ok := value.(string)
 	return ok && (source == "" || source == "owner")
+}
+
+// markRedirect sets Redirect on every queued instruction (see isInstruction)
+// and returns their IDs, in queue order. Items already marked are reported too:
+// the caller asked for the whole queue to redirect and that is now its state.
+// Automatic items and barriers are left as they are. Marking in place is safe:
+// every function that hands out queue items detaches or copies them first.
+func (q *steerQueue) markRedirect() []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var ids []string
+	for i := range q.items {
+		if !isInstruction(q.items[i]) {
+			continue
+		}
+		q.items[i].Redirect = true
+		ids = append(ids, q.items[i].ID)
+	}
+	return ids
 }
 
 // claimWithdrawingPrefix takes, atomically, the whole FIFO prefix before the
@@ -1909,6 +1935,20 @@ func (a *Agent) registerSteerWait(cancel context.CancelCauseFunc, reportEligible
 		cancel(core.ErrWaitInterruptedBySteer)
 	}
 	return unregister
+}
+
+// RedirectQueued marks every queued instruction Redirect, so the next tool call
+// to reach its logical start withdraws the unstarted calls of its batch and the
+// queue is read right after it. It returns the IDs it marked; none when the
+// queue held no instruction (it was delivered or recalled first).
+//
+// It takes steerMu, the lock a tool's logical start holds to claim: a call
+// either starts before the mark and runs, or finds the queue marked and is
+// withdrawn. It never cancels a call already running.
+func (a *Agent) RedirectQueued() []string {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	return a.steers.markRedirect()
 }
 
 // CancelSteer drops and returns all steer messages still queued for inter-step delivery.
