@@ -398,3 +398,25 @@ func TestQuestionAskedAfterTheReportIsNotAnnotated(t *testing.T) {
 		t.Fatalf("a question asked after the report is annotated on it: %+v", got[0].Answered)
 	}
 }
+
+// A Stop fences an answer the session has not admitted (FenceQuestionAnswers
+// with stopRun): it may still join the transcript as an append, but it starts
+// no run. Unread, it is neither delivered nor on its way: the report paints as
+// it was written.
+func TestStoppedUnreadAnswerIsNotClaimed(t *testing.T) {
+	e, child, q := answeredWhileHeld(t)
+	pending := []owner.Report{needsInputReport(child.ID, q.ID)}
+	plain := reportsMessage(owner.Owner{}, pending)
+	if n, err := e.mgr.tasks.FenceQuestionAnswers(context.Background(), child.ID, true, nil); err != nil || n == 0 {
+		t.Fatalf("fence = %d, %v", n, err)
+	}
+	if got := f1QuestionState(t, e, q.ID); got.Work != tasks.WorkStopped {
+		t.Fatalf("precondition: work = %q, want stopped", got.Work)
+	}
+	if e.mgr.questions.read(child, q.EventID) {
+		t.Fatal("precondition: the held child must not have read the fenced answer")
+	}
+	if text := reportsMessage(owner.Owner{}, e.mgr.withAnsweredQuestions(pending)); text != plain {
+		t.Fatalf("a stopped, unread answer changed the report:\n%s\nwant:\n%s", text, plain)
+	}
+}
