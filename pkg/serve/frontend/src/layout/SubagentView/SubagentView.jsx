@@ -19,7 +19,8 @@ import { fmtCost } from "../../data/util/usage-pills.js";
 import { fmtTokens, sessionTitle } from "../../data/util/format.js";
 import { turnFinalResponse } from "../../data/stream-model.js";
 import { useStore } from "../../hooks/useStore.js";
-import { cancelSubagent, promoteSubagent } from "../../data/session-actions.js";
+import { cancelSubagent, promoteSubagent, recallSubagentQueue, redirectSubagentQueue } from "../../data/session-actions.js";
+import { QueuedTail } from "../../components/QueuedTail/QueuedTail.jsx";
 import { store, updateSession } from "../../data/store.js";
 import { useSubagentTranscript } from "../../hooks/useSubagentTranscript.js";
 import "./SubagentView.css";
@@ -220,6 +221,19 @@ export function SubagentLiveBar({ view, onStop, confirmCancel }) {
   );
 }
 
+// SubagentQueue — the child's queue at the end of its record, the same marker
+// and the same two gestures the parent thread offers for its own queue: what
+// the owner sent from here and what the parent sent both wait in it.
+export function SubagentQueue({ session, jobId }) {
+  return (
+    <QueuedTail
+      queue={session?.subagents?.[jobId]?.pendingSteers}
+      onBringBack={() => recallSubagentQueue(session?.id, jobId)}
+      onRedirect={() => redirectSubagentQueue(session?.id, jobId)}
+    />
+  );
+}
+
 // SubagentLive — direct. The record is the body and opens at its live end; the
 // live bar and the steer composer are the foot. This is the functional reason
 // the fork deserves a whole screen.
@@ -231,6 +245,7 @@ function SubagentLive({ view, session, jobId, onBack, onStop, confirmCancel }) {
           session={{ id: session.id, messages: [] }}
           blocks={view.blocks}
           waypointAccent={view.accent}
+          tail={<SubagentQueue session={session} jobId={jobId} />}
         />
       </div>
 

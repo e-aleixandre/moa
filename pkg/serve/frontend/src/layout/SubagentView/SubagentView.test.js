@@ -116,3 +116,18 @@ test("desktop subagent live content shares the conversation measure", () => {
   expect(composerCss).toMatch(/\.subagent-view > \.zl-live,\s*\.subagent-view > \.zl-composer,\s*\.subagent-view > \.zl-status\s*\{[^}]*max-width:\s*var\(--content-block\)[^}]*margin-inline:\s*auto/s);
   expect(streamCss).toMatch(/\.subagent-view \.zl-transcript:not\(\.is-dense\) > \*\s*\{[^}]*max-width:\s*var\(--content-block\)[^}]*margin-inline:\s*auto/s);
 });
+
+test("a live subagent shows its child's queue with the session's own marker, on both surfaces", () => {
+  // Same QueuedTail, wired to the CHILD's queue and the child's two gestures.
+  const queue = view.slice(view.indexOf("export function SubagentQueue"), view.indexOf("// SubagentLive —"));
+  expect(queue).toContain("<QueuedTail");
+  expect(queue).toContain("session?.subagents?.[jobId]?.pendingSteers");
+  expect(queue).toContain("recallSubagentQueue(session?.id, jobId)");
+  expect(queue).toContain("redirectSubagentQueue(session?.id, jobId)");
+  const live = view.slice(view.indexOf("function SubagentLive("));
+  expect(live).toMatch(/<Stream[\s\S]*tail=\{<SubagentQueue session=\{session\} jobId=\{jobId\} \/>\}/);
+  expect(mobile).toMatch(/<MobileStream[\s\S]*tail=\{<SubagentQueue session=\{session\} jobId=\{jobId\} \/>\}/);
+  // A finished report has nothing queued to show.
+  const report = view.slice(view.indexOf("export function SubagentReport"), view.indexOf("// ReportOutcome"));
+  expect(report).not.toContain("SubagentQueue");
+});

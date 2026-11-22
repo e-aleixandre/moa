@@ -8,6 +8,11 @@ import { store, updateSession } from '../store.js';
 import { isSessionAway, markUnseen } from './attention.js';
 import { noteArtifactDelivery } from './tools.js';
 import { newerProviderExecution } from '../provider-wait.js';
+import { reduceSubagentQueue, subagentComposerKey } from '../subagent-queue.js';
+import { endOperation, isOwnOperation, restoreDiscarded } from '../steer-restore.js';
+
+// The frames about a child's queue, not its transcript (see subagent-queue.js).
+const QUEUE_FRAMES = new Set(['steer_queued', 'steers_redirected', 'steers_canceled']);
 
 export function handleWsSubagentTitle(id, data) {
   const sess = store.get().sessions[id];
@@ -88,6 +93,19 @@ export function flushSubagentEvents() {
 	    changed = true;
 	    continue;
 	  }
+      if (QUEUE_FRAMES.has(evt.type)) {
+        // A recall this client asked for brings the text back to that
+        // subagent's steer box, as the session's own recall does to its
+        // composer; every other client only drops the lines.
+        const recallId = evt.data?.recall_id;
+        if (evt.type === 'steers_canceled' && isOwnOperation(recallId)) {
+          restoreDiscarded(subagentComposerKey(id, jobId), evt.data?.discarded_steer_ids, existing.pendingSteers);
+          endOperation(recallId);
+        }
+        subs[jobId] = { ...existing, pendingSteers: reduceSubagentQueue(existing.pendingSteers, evt, existing.messages) };
+        changed = true;
+        continue;
+      }
       // Shallow clone the mutable transcript fields before reducing.
       const target = {
         messages: existing.messages || [],
@@ -100,6 +118,8 @@ export function flushSubagentEvents() {
         messages: target.messages,
         streamingText: target.streamingText,
         thinkingText: target.thinkingText,
+        // The steer that delivers a queued message retires its line.
+        pendingSteers: reduceSubagentQueue(existing.pendingSteers, evt, target.messages),
       };
       changed = true;
     }
@@ -226,6 +246,9 @@ export function handleWsSubagentEnd(id, data) {
     status: data.status || 'completed',
     streamingText: null,
     thinkingText: null,
+    // A finished child reads nothing more: what was still queued is not
+    // waiting for anyone, so the marker must not linger.
+    pendingSteers: null,
     // The completion anchor, kept on the CHILD too (not only on the parent's
     // terminal card): the report's "Completed in 4m12s" is startedAtMs →
     // finishedAtMs, and without this the duration vanished the moment the run

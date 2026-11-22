@@ -913,6 +913,7 @@ func initSubagentSnapshots(infos []subagent.JobInfo, bashInfos []tool.BashJobInf
 			ContextPercent:    info.ContextPercent,
 			AccentIndex:       info.AccentIndex,
 			Daybreak:          info.Daybreak,
+			PendingSteers:     info.PendingSteers,
 		})
 	}
 	return out

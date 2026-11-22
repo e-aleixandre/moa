@@ -302,6 +302,11 @@ type SteerQueued struct {
 	SessionID string
 	ID        string
 	Text      string
+	// Redirect marks a message queued to be read before the next tool starts.
+	Redirect bool
+	// Recallable marks a message the owner may bring back to the composer
+	// (a subagent's queue); a voice call's records are not.
+	Recallable bool
 }
 
 // SteersCanceled is published when all queued (not yet delivered) steers are

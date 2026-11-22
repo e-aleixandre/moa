@@ -16,6 +16,7 @@ import { closeSessionPanelForSession } from './session-panel.js';
 import { DAYBREAK_SWITCH_SPEC } from '../components/Daybreak/daybreak-model.js';
 import { beginOperation, endOperation, restoreDiscarded } from './steer-restore.js';
 import { canRedirectSteer } from './composer-queue.js';
+import { setSubagentQueue, subagentComposerKey, subagentQueue } from './subagent-queue.js';
 import { rewoundFiles, placeRewoundMessage } from './rewind-edit.js';
 import { rehydrateMentions } from './util/mentions.js';
 import { deviceZone } from './schedule-model.js';
@@ -1072,10 +1073,87 @@ export async function promoteSubagent(id, jobId) {
 }
 
 // steerSubagent sends a message to a live subagent's child agent. Returns the
-// server response ({ queued: bool }); there's no WS echo for this (parity with
-// cancelSubagent), so the caller shows optimistic visual feedback.
-export async function steerSubagent(id, jobId, text) {
-  return api('POST', `/api/sessions/${id}/subagents/${jobId}/steer`, { text });
+// server response ({ queued: bool }). The queue line arrives as the child's
+// steer_queued (wrapped in subagent_event), like any other sender's message.
+// `redirect` is the composer's ⌘/Ctrl+Enter: the child withdraws the tool
+// calls it has not started and reads the message first.
+export async function steerSubagent(id, jobId, text, { redirect = false } = {}) {
+  return api('POST', `/api/sessions/${id}/subagents/${jobId}/steer`, redirect ? { text, redirect: true } : { text });
+}
+
+// recallSubagentQueue is recallQueuedSteers for a subagent's child: its whole
+// queue leaves the server and comes back, in order, to that subagent's steer
+// box (subagentComposerKey), never the parent's. The reply and the broadcast
+// carrying our recall_id may arrive in either order; restoreDiscarded restores
+// each message once.
+const subagentRecalls = new Set();
+
+export function recallSubagentQueue(id, jobId) {
+  if (!id || !jobId) return false;
+  const key = subagentComposerKey(id, jobId);
+  if (subagentRecalls.has(key) || !(subagentQueue(id, jobId) || []).some(Boolean)) return false;
+  subagentRecalls.add(key);
+  const recallId = beginOperation('recall');
+  api('POST', `/api/sessions/${id}/subagents/${jobId}/steers/cancel`, { recall_id: recallId })
+    .then((result) => {
+      endOperation(recallId);
+      const discarded = result?.discarded_steer_ids || [];
+      restoreDiscarded(key, discarded, result?.discarded_steers, subagentQueue(id, jobId));
+      if (discarded.length > 0) {
+        const gone = new Set(discarded);
+        const kept = (subagentQueue(id, jobId) || []).filter((s) => !gone.has(s.id));
+        setSubagentQueue(id, jobId, kept.length > 0 ? kept : null);
+      }
+    })
+    .catch((e) => {
+      forgetAnsweredOperation(recallId, e);
+      console.error('recallSubagentQueue failed:', e);
+      addToast({ sessionId: id, title: "Couldn't recall — try again", type: 'error' });
+    })
+    .finally(() => subagentRecalls.delete(key));
+  return true;
+}
+
+// redirectSubagentQueue is redirectQueuedSteers for a subagent's child: the
+// mark shows at once and the server's list of marked ids is the truth.
+const subagentRedirects = new Set();
+
+export function redirectSubagentQueue(id, jobId) {
+  if (!id || !jobId) return false;
+  const key = subagentComposerKey(id, jobId);
+  if (subagentRedirects.has(key)) return false;
+  const marked = new Set((subagentQueue(id, jobId) || []).filter((s) => s && canRedirectSteer(s) && !s.redirect).map((s) => s.id));
+  if (marked.size === 0) return false;
+
+  subagentRedirects.add(key);
+  setSubagentSteersRedirect(id, jobId, marked, true);
+  api('POST', `/api/sessions/${id}/subagents/${jobId}/steers/redirect`, {})
+    .then((res) => {
+      const confirmed = new Set(res?.redirected_steer_ids || []);
+      setSubagentSteersRedirect(id, jobId, confirmed, true);
+      setSubagentSteersRedirect(id, jobId, new Set([...marked].filter((sid) => !confirmed.has(sid))), false);
+    })
+    .catch((e) => {
+      console.error('redirectSubagentQueue failed:', e);
+      setSubagentSteersRedirect(id, jobId, marked, false);
+      addToast({ sessionId: id, title: "Couldn't redirect — try again", type: 'error' });
+    })
+    .finally(() => subagentRedirects.delete(key));
+  return true;
+}
+
+function setSubagentSteersRedirect(id, jobId, ids, on) {
+  const queue = subagentQueue(id, jobId);
+  if (!queue || ids.size === 0) return;
+  let changed = false;
+  const next = queue.map((s) => {
+    if (!s || !ids.has(s.id) || !!s.redirect === on) return s;
+    changed = true;
+    if (on) return { ...s, redirect: true };
+    const { redirect, ...rest } = s;
+    return rest;
+  });
+  if (changed) setSubagentQueue(id, jobId, next);
 }
 
 // epochMs turns the REST projection's RFC3339 timestamp into the epoch millis

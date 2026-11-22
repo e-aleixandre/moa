@@ -325,7 +325,7 @@ func wsEventFromBus(event any) (Event, bool) {
 		}
 		return Event{Type: "user_message", Data: data}, true
 	case bus.SteerQueued:
-		return Event{Type: "steer_queued", Data: SteerQueuedData{ID: e.ID, Text: truncateHistoryString(e.Text), NonRecallable: true}}, true
+		return Event{Type: "steer_queued", Data: SteerQueuedData{ID: e.ID, Text: truncateHistoryString(e.Text), NonRecallable: !e.Recallable, Redirect: e.Redirect}}, true
 	case bus.CommandQueued:
 		return Event{Type: "command_queued", Data: CommandQueuedData{ID: e.ID, Raw: e.Raw}}, true
 	case bus.CommandDequeued:
@@ -1109,6 +1109,9 @@ func liveSubagentInitData(subagents []bus.SubagentSnapshot) []SubagentInitData {
 			ContextPercent:    sa.ContextPercent,
 			AccentIndex:       sa.AccentIndex,
 			Daybreak:          sa.Daybreak,
+		}
+		for _, steer := range sa.PendingSteers {
+			sad.PendingSteers = append(sad.PendingSteers, PendingSteerData{ID: steer.ID, Text: steer.Text, Redirect: steer.Redirect})
 		}
 		if !sa.StartedAt.IsZero() {
 			sad.StartedAtMs = sa.StartedAt.UnixMilli()

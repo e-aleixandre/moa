@@ -357,6 +357,8 @@ type SubagentSnapshot struct {
 	// deterministic accent color that survives reconnects.
 	AccentIndex int
 	Daybreak    bool
+	// PendingSteers is the running child's visible queue.
+	PendingSteers []core.SteerItem
 }
 
 // GetBashJobs returns active/recent background bash jobs for reconnecting UIs.

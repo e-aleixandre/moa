@@ -300,6 +300,7 @@ func RegisterAll(reg *core.Registry, cfg Config) (*Jobs, error) {
 		return nil, errors.New("subagent: AppCtx is required")
 	}
 	jobs := newJobStore()
+	jobs.onChildEvent = cfg.OnChildEvent
 	for _, t := range []core.Tool{
 		newSubagent(cfg, jobs),
 		newSubagentStatus(jobs, cfg),

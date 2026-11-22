@@ -191,6 +191,9 @@ type SubagentInitData struct {
 	AccentIndex int `json:"accent_index"`
 	// Daybreak is whether the child runs with the Daybreak program.
 	Daybreak bool `json:"daybreak,omitempty"`
+	// PendingSteers is the child's queue, shown at the end of the subagent
+	// view as the session's own pending_steers is at the end of its thread.
+	PendingSteers []PendingSteerData `json:"pending_steers,omitempty"`
 }
 
 // BashJobInitData restores a live/recent background command after reconnect.
@@ -454,12 +457,14 @@ type UserMessageData struct {
 
 // SteerQueuedData is sent when a message is queued behind a running turn that
 // the session's clients did not queue themselves (a voice call's relay or
-// question). The client shows it in the queue under ID; the steer event that
+// question), or, wrapped in subagent_event, in a subagent's queue (whoever
+// sent it). The client shows it in the queue under ID; the steer event that
 // delivers it carries the same ID.
 type SteerQueuedData struct {
 	ID            string `json:"id"`
 	Text          string `json:"text"`
 	NonRecallable bool   `json:"non_recallable,omitempty"`
+	Redirect      bool   `json:"redirect,omitempty"`
 }
 
 // CommandQueuedData is sent when a slash command is enqueued as a barrier in the

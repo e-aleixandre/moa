@@ -113,6 +113,12 @@ type jobStore struct {
 	mu         sync.RWMutex
 	jobs       map[string]*job
 	nextAccent int
+	// onChildEvent is Config.OnChildEvent, set once by RegisterAll before any
+	// job exists. The store needs it for the child-queue events that no agent
+	// emits: a message queued (or redirected, or recalled) by the parent's
+	// tool or by the owner from the subagent view must reach every client
+	// showing that child's queue, just like the session's own queue.
+	onChildEvent func(jobID string, inner any)
 }
 
 func newJobStore() *jobStore {
@@ -685,6 +691,9 @@ type JobInfo struct {
 	AccentIndex int
 	// Daybreak is whether the child runs with the Daybreak program.
 	Daybreak bool
+	// PendingSteers is the running child's visible queue, so a reconnecting
+	// client restores the subagent view's queue marker.
+	PendingSteers []core.SteerItem
 }
 
 // Jobs is a handle onto the subagent job store, returned by RegisterAll.
@@ -746,11 +755,17 @@ func (j *Jobs) Snapshot() []JobInfo {
 			continue
 		}
 		var execution core.ProviderExecution
+		var pending []core.SteerItem
 		if job, ok := j.store.get(id); ok {
 			if child := job.getChildAgent(); child != nil {
 				var model core.Model
 				execution, model, snap.Thinking = child.ProviderSnapshot()
 				snap.Model = model.ID
+				// Only a running child still reads its queue; a terminal
+				// one's leftovers would show as waiting forever.
+				if snap.Status == statusRunning {
+					pending = child.PendingSteers()
+				}
 			}
 		}
 		infos = append(infos, JobInfo{
@@ -770,6 +785,7 @@ func (j *Jobs) Snapshot() []JobInfo {
 			ContextPercent:    snap.ContextPercent,
 			AccentIndex:       snap.AccentIndex,
 			Daybreak:          snap.Daybreak,
+			PendingSteers:     pending,
 		})
 	}
 	return infos
@@ -886,7 +902,65 @@ func (s *jobStore) steerJob(jobID, text string, redirect bool) (bool, string) {
 	// unless redirect asks it to withdraw the calls not yet started.
 	// The child's own verdict is the last word: reporting success for a message
 	// it refused would tell the caller it was queued when it was dropped.
-	return child.Steer(core.SteerItem{ID: core.NewSteerID(), Text: text, Redirect: redirect}), status
+	item := core.SteerItem{ID: core.NewSteerID(), Text: text, Redirect: redirect}
+	if !child.Steer(item) {
+		return false, status
+	}
+	// Announce it to the clients of the child's queue whoever sent it (the
+	// owner from the subagent view or the parent's subagent_steer): the steer
+	// event that delivers it carries the same ID and retires the line.
+	s.emit(jobID, bus.SteerQueued{SessionID: jobID, ID: item.ID, Text: text, Redirect: redirect, Recallable: true})
+	return true, status
+}
+
+func (s *jobStore) emit(jobID string, inner any) {
+	if s.onChildEvent != nil {
+		s.onChildEvent(jobID, inner)
+	}
+}
+
+// redirectJobQueue marks the child's whole queue Redirect, as the session's
+// own RedirectQueue does for its run. Returns the IDs marked and false when
+// no job with that ID is tracked. The child's lock is taken outside the job's
+// (see steerJob).
+func (s *jobStore) redirectJobQueue(jobID string) ([]string, bool) {
+	jb, ok := s.get(jobID)
+	if !ok {
+		return nil, false
+	}
+	child := jb.getChildAgent()
+	if child == nil {
+		return nil, true
+	}
+	ids := child.RedirectQueued()
+	if len(ids) > 0 {
+		s.emit(jobID, bus.SteersRedirected{SessionID: jobID, SteerIDs: ids})
+	}
+	return ids, true
+}
+
+// recallJobQueue withdraws the child's whole queue and returns it, so it goes
+// back to the composer it came from; recallID is echoed in the broadcast like
+// the session's own recall, so only the client that asked restores the text.
+// Returns false when no job with that ID is tracked.
+func (s *jobStore) recallJobQueue(jobID, recallID string) ([]core.SteerItem, bool) {
+	jb, ok := s.get(jobID)
+	if !ok {
+		return nil, false
+	}
+	child := jb.getChildAgent()
+	if child == nil {
+		return nil, true
+	}
+	discarded := child.CancelSteer()
+	ids := make([]string, 0, len(discarded))
+	for _, item := range discarded {
+		if !item.Internal {
+			ids = append(ids, item.ID)
+		}
+	}
+	s.emit(jobID, bus.SteersCanceled{SessionID: jobID, SteerIDs: ids, RecallID: recallID})
+	return discarded, true
 }
 
 // Steer queues a message for inter-step delivery to the running child agent
@@ -899,4 +973,30 @@ func (j *Jobs) Steer(jobID string, text string, redirect bool) bool {
 	}
 	accepted, _ := j.store.steerJob(jobID, text, redirect)
 	return accepted
+}
+
+// RedirectQueue marks the whole queue of jobID's child Redirect and returns
+// the IDs marked. Propagates ErrUnknownJob when jobID is not tracked.
+func (j *Jobs) RedirectQueue(jobID string) ([]string, error) {
+	if j == nil || j.store == nil {
+		return nil, ErrUnknownJob
+	}
+	ids, ok := j.store.redirectJobQueue(jobID)
+	if !ok {
+		return nil, ErrUnknownJob
+	}
+	return ids, nil
+}
+
+// RecallQueue withdraws and returns the queue of jobID's child. Propagates
+// ErrUnknownJob when jobID is not tracked.
+func (j *Jobs) RecallQueue(jobID, recallID string) ([]core.SteerItem, error) {
+	if j == nil || j.store == nil {
+		return nil, ErrUnknownJob
+	}
+	items, ok := j.store.recallJobQueue(jobID, recallID)
+	if !ok {
+		return nil, ErrUnknownJob
+	}
+	return items, nil
 }

@@ -183,6 +183,8 @@ func NewServer(manager *Manager, opts ...ServerOption) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/promote", handlePromoteSubagent(manager))
 	mux.HandleFunc("PATCH /api/sessions/{id}/subagents/{jobID}", handleReconfigureSubagent(manager))
 	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steer", handleSteerSubagent(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steers/redirect", handleRedirectSubagentSteers(manager))
+	mux.HandleFunc("POST /api/sessions/{id}/subagents/{jobID}/steers/cancel", handleCancelSubagentSteers(manager))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents", withGzip(handleSubagentList(manager)))
 	mux.HandleFunc("GET /api/sessions/{id}/subagents/{jobID}", withGzip(handleSubagentConversation(manager)))
 	mux.HandleFunc("POST /api/sessions/{id}/trust-mcp", handleTrustMCP(manager))
@@ -1584,6 +1586,56 @@ func handleSteerSubagent(mgr *Manager) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"queued": queued})
+		}
+	}
+}
+
+// handleRedirectSubagentSteers is handleRedirectSteers for a subagent's child:
+// its whole queue is read before the child's next tool starts.
+func handleRedirectSubagentSteers(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ids, err := mgr.RedirectSubagentQueue(r.PathValue("id"), r.PathValue("jobID"))
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			if ids == nil {
+				ids = []string{}
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"redirected_steer_ids": ids})
+		}
+	}
+}
+
+// handleCancelSubagentSteers is the queue recall for a subagent's child: it
+// answers the items withdrawn in the shape handleCancelSteers gives clients
+// that opt in, so they go back to that subagent's composer.
+func handleCancelSubagentSteers(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		op, err := readSteerOperation(w, r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		discarded, err := mgr.RecallSubagentQueue(r.PathValue("id"), r.PathValue("jobID"), op.RecallID)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", http.StatusNotFound)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			steers := recallableSteers(discarded)
+			ids := make([]string, len(steers))
+			for i, steer := range steers {
+				ids[i] = steer.ID
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"discarded_steer_ids": ids,
+				"discarded_steers":    steers,
+				"recall_id":           op.RecallID,
+			})
 		}
 	}
 }

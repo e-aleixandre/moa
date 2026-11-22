@@ -342,6 +342,33 @@ func (m *Manager) SteerSubagent(sessionID, jobID, text string, redirect bool) (b
 	return sess.subagents.Steer(jobID, text, redirect), nil
 }
 
+// RedirectSubagentQueue marks the whole queue of a subagent's child Redirect
+// and returns the IDs marked.
+func (m *Manager) RedirectSubagentQueue(sessionID, jobID string) ([]string, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok || sess.subagents == nil {
+		return nil, ErrNotFound
+	}
+	ids, err := sess.subagents.RedirectQueue(jobID)
+	if errors.Is(err, subagent.ErrUnknownJob) {
+		return nil, ErrNotFound
+	}
+	return ids, err
+}
+
+// RecallSubagentQueue withdraws and returns the queue of a subagent's child.
+func (m *Manager) RecallSubagentQueue(sessionID, jobID, recallID string) ([]core.SteerItem, error) {
+	sess, ok := m.Get(sessionID)
+	if !ok || sess.subagents == nil {
+		return nil, ErrNotFound
+	}
+	items, err := sess.subagents.RecallQueue(jobID, recallID)
+	if errors.Is(err, subagent.ErrUnknownJob) {
+		return nil, ErrNotFound
+	}
+	return items, err
+}
+
 // subagentStoreFor returns the persisted-transcript store for an active
 // session, or nil if the session isn't active / persistence is unavailable.
 func (m *Manager) subagentStoreFor(sessionID string) *session.SubagentStore {

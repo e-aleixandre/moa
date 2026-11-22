@@ -3,7 +3,7 @@ import { Composer } from "../../Composer/Composer.jsx";
 import { MobileStream } from "./MobileStream.jsx";
 import { WorkHead } from "../../WorkChrome/WorkChrome.jsx";
 import {
-  SubagentReport, SubState, SubagentActions, SubagentLiveBar, SubagentStatusStrip,
+  SubagentReport, SubState, SubagentActions, SubagentLiveBar, SubagentStatusStrip, SubagentQueue,
 } from "../../SubagentView/SubagentView.jsx";
 import { subagentView } from "../../../data/subagent-view-model.js";
 import { sessionTitle } from "../../../data/util/format.js";
@@ -138,6 +138,7 @@ function MobileSubagentLive({ view, session, jobId, onBack, onStop, confirmCance
         session={{ id: `${session.id}:${jobId}`, messages: [] }}
         blocks={view.blocks}
         waypointAccent={view.accent}
+        tail={<SubagentQueue session={session} jobId={jobId} />}
       />
 
       <div class="mcomposer zl-dock msa-foot">

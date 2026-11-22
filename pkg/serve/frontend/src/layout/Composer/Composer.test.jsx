@@ -91,6 +91,7 @@ mock.module("../../data/session-actions.js", () => ({
   // data/session-actions.test.js; here what matters is that the composer
   // delegates to it instead of cancelling steers on its own.
   recallQueuedSteers: (id) => { recalled.push(id); return true; },
+  recallSubagentQueue: (id, jobId) => { recalled.push(`${id}/${jobId}`); return true; },
 }));
 
 const { Composer, keepCommandSuggestionVisible } = await import("./Composer.jsx");
@@ -1023,4 +1024,75 @@ test("while busy the hint and the Send button say queue and redirect, not steer"
 test("the composer offers no redirect button: the marker and the key carry it", () => {
   const nodes = descendants(composerWithText({ state: "running" }));
   expect(nodes.some((n) => /redirect/i.test(String(n.props?.class || "")))).toBe(false);
+});
+
+// ── A subagent's steer box ───────────────────────────────────────────────
+// Its child is always working, so it behaves like the busy main composer: ⏎
+// queues, ⌘/Ctrl+Enter redirects, the hint says so, and Alt+↑ brings back the
+// CHILD's queue (data/subagent-queue.test.js covers where the text lands).
+async function steerKeySend(key) {
+  refs.length = 0;
+  steered.length = 0;
+  steerResult = { queued: true };
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" }, steer: { jobId: "sa-1", name: "child" } });
+  const textarea = descendants(tree).find((n) => n.type === "textarea");
+  refs[0].current = { value: "change course", style: {}, scrollHeight: 24 };
+  textarea.props.onKeyDown({
+    key: "Enter", shiftKey: false, altKey: false, metaKey: false, ctrlKey: false,
+    isComposing: false, preventDefault() {}, ...key,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  return [...steered];
+}
+
+test("in a subagent box ⌘/Ctrl+Enter redirects the child and Enter queues", async () => {
+  for (const key of [{ metaKey: true }, { ctrlKey: true }]) {
+    expect(await steerKeySend(key)).toEqual([["s1", "sa-1", "change course", { redirect: true }]]);
+  }
+  expect(await steerKeySend({})).toEqual([["s1", "sa-1", "change course", { redirect: false }]]);
+  expect(await steerKeySend({ altKey: true })).toEqual([["s1", "sa-1", "change course", { redirect: false }]]);
+});
+
+test("a subagent box shows the queue/redirect hint even while the parent is idle", () => {
+  const src = require("node:fs").readFileSync(new URL("./Composer.jsx", import.meta.url), "utf8");
+  const slot = src.slice(0, src.indexOf("const [hasText")).split("useState(").length - 1;
+  refs.length = 0;
+  stateCalls = 0;
+  stateOverrides.clear();
+  stateOverrides.set(slot, true);
+  const tree = Composer({ sessionId: "s1", session: { state: "idle" }, steer: { jobId: "sa-1", name: "child" } });
+  stateOverrides.clear();
+  const nodes = descendants(tree);
+  expect(nodes.find((n) => n.props?.class === "steer-hint").props.children).toMatch(/^⏎ queue · (⌘⏎|Ctrl\+⏎) redirect now$/);
+  const send = nodes.find((n) => String(n.props?.class || "").split(/\s+/).includes("zl-send"));
+  expect(send.props["aria-label"]).toBe("Send — queues for the next step");
+});
+
+test("Alt+\u2191 in a subagent box recalls the child's queue, not the parent's", async () => {
+  refs.length = 0;
+  recalled.length = 0;
+  setState({
+    sessions: {
+      ...store.get().sessions,
+      sq: { id: "sq", pendingSteers: [{ id: "p", text: "parent" }], subagents: { J1: { jobId: "J1", status: "running", pendingSteers: [{ id: "c", text: "child" }] } } },
+    },
+  });
+  const tree = Composer({ sessionId: "sq", session: store.get().sessions.sq, steer: { jobId: "J1", name: "child" } });
+  const textarea = descendants(tree).find((node) => node.type === "textarea");
+  refs[0].current = { value: "", style: {}, scrollHeight: 24, focus() {}, dispatchEvent() {} };
+  let prevented = false;
+  textarea.props.onKeyDown({
+    key: "ArrowUp", altKey: true, shiftKey: false, metaKey: false,
+    isComposing: false, preventDefault() { prevented = true; },
+  });
+  expect(prevented).toBe(true);
+  expect(recalled).toEqual(["sq/J1"]);
+});
+
+test("a subagent box takes only the drops addressed to it", async () => {
+  const source = await Bun.file(new URL("./Composer.jsx", import.meta.url)).text();
+  expect(source).toMatch(/const dropKey = sessionId && steerJobId \? subagentComposerKey\(sessionId, steerJobId\) : sessionId;/);
+  expect(source).toMatch(/consumeComposerDrop\(dropKey\)/);
 });

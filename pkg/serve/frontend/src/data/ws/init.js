@@ -325,6 +325,8 @@ export function initSubagents(raw) {
       // (older payload/specimen), falling back to position-based derivation.
       accentIndex: sa.accent_index,
       daybreak: !!sa.daybreak,
+      // The child's queue at the cut, authoritative like the session's own.
+      pendingSteers: mergeSteers(sa.pending_steers, null),
     };
   }
   return out;

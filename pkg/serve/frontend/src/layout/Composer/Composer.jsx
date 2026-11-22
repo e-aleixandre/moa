@@ -13,10 +13,11 @@ import { ComposerAurora, auroraActive } from "./ComposerAurora.jsx";
 import { useStore } from "../../hooks/useStore.js";
 import {
   sendMessage, stopRun, execCommand, execShell, newSteerId,
-  steerSubagent, recallQueuedSteers,
+  steerSubagent, recallQueuedSteers, recallSubagentQueue,
 } from "../../data/session-actions.js";
 import { store, updateSession } from "../../data/store.js";
 import { consumeComposerDrop } from "../../data/share.js";
+import { subagentComposerKey, subagentQueue } from "../../data/subagent-queue.js";
 import { appendSharedText } from "../../data/share-target.js";
 import { addToast } from "../../data/notifications.js";
 import { sendMayClear } from "../../data/composer-queue.js";
@@ -160,6 +161,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // must never enter the parent's "busy" affordances (Esc-aborts).
   // It always shows a Send button that fires a steer.
   const busy = sessionState === "running" && !steer;
+  // A steer box only exists while its child runs, so what it sends is always
+  // queued behind the child's current step and can always be a redirect.
+  const steerJobId = steer?.jobId || null;
+  const canRedirectSend = busy || !!steerJobId;
   const [hasText, setHasText] = useState(false);
   // Safari may emit pointercancel instead of the click that completes a touch
   // activation. The reducer records pointer identity and latches the terminal
@@ -314,10 +319,12 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // combined text back in order, report the images that cannot come back — is
   // recallQueuedSteers', shared with that marker, and the text lands here
   // through the composerDrops handoff below, the same way Stop's does.
+  // In steer mode the queue is the child's, and it comes back to this box.
   const handleDequeueSteers = useCallback(() => {
     if (!sessionId) return;
-    recallQueuedSteers(sessionId);
-  }, [sessionId]);
+    if (steerJobId) recallSubagentQueue(sessionId, steerJobId);
+    else recallQueuedSteers(sessionId);
+  }, [sessionId, steerJobId]);
 
   // --- Slash command suggestions ---
   // Recomputes the popup from the textarea's current value/cursor. Ported from
@@ -518,10 +525,13 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   // component, and the chosen session's composer may not be mounted yet (a
   // saved session is resumed first). The store is the handoff; the drop is
   // consumed on arrival so a re-render cannot place it twice.
-  const drop = useStore((s) => (sessionId ? s.composerDrops[sessionId] : null));
+  // A steer box takes only the drops addressed to it (its child's recalled
+  // queue): shares and the parent's own recalls belong to the parent's box.
+  const dropKey = sessionId && steerJobId ? subagentComposerKey(sessionId, steerJobId) : sessionId;
+  const drop = useStore((s) => (dropKey ? s.composerDrops[dropKey] : null));
   useEffect(() => {
-    if (!drop || !sessionId || steer) return;
-    consumeComposerDrop(sessionId);
+    if (!drop || !dropKey) return;
+    consumeComposerDrop(dropKey);
     if (drop.text) {
       const el = textareaRef.current;
       if (el) {
@@ -543,8 +553,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         }
       }
     }
-    if (drop.files?.length) addFiles(drop.files);
-  }, [drop, sessionId, steer, addFiles, autoResize, writeComposer, setDraftMentions]);
+    if (drop.files?.length && !steer) addFiles(drop.files);
+  }, [drop, dropKey, sessionId, steer, addFiles, autoResize, writeComposer, setDraftMentions]);
 
   const handlePaste = useCallback((e) => {
     const files = Array.from(e.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));
@@ -624,7 +634,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       if (!text) return;
       const steerEpoch = composerEpoch.current;
       try {
-        const res = await steerSubagent(sessionId, steer.jobId, text);
+        const res = await steerSubagent(sessionId, steer.jobId, text, { redirect });
         // The server answers whether the child actually took the message; a
         // 200 alone does not mean it was queued. A refused steer must leave the
         // text where the user can resend it rather than silently empty the box.
@@ -1002,8 +1012,8 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
   const handleKey = useCallback((e) => {
     // Alt+ArrowUp: dequeue pending steers to input (parity with TUI).
     if (e.key === "ArrowUp" && e.altKey) {
-      const sess = store.get().sessions[sessionId];
-      if (sess?.pendingSteers?.length) {
+      const queue = steerJobId ? subagentQueue(sessionId, steerJobId) : store.get().sessions[sessionId]?.pendingSteers;
+      if (queue?.length) {
         e.preventDefault();
         handleDequeueSteers({ fromKeyboard: true });
         return;
@@ -1117,7 +1127,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       if (e.isComposing || compositionRef.current.composing) return;
       e.preventDefault();
-      dispatchContentSendActivation(sendButtonEvent.keyActivate(), { redirect: busy });
+      dispatchContentSendActivation(sendButtonEvent.keyActivate(), { redirect: canRedirectSend });
       return;
     }
 
@@ -1166,7 +1176,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
       return;
     }
   }, [
-    sessionId, busy, mentionItems, mentionCursor, cmdSuggestions, cmdCursor, writeComposer,
+    sessionId, busy, steerJobId, canRedirectSend, mentionItems, mentionCursor, cmdSuggestions, cmdCursor, writeComposer,
     handleDequeueSteers, handleStop, dispatchContentSendActivation, acceptMention, acceptSuggestion,
     cursorRow, totalRows, autoResize, updateSuggestions, recording, cancelVoice,
   ]);
@@ -1386,7 +1396,7 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         onScroll={() => syncMirrorGeometry(textareaRef.current, mirrorRef.current)}
       />
       </div>
-      {busy && hasText && (
+      {canRedirectSend && hasText && (
         <span class="steer-hint" aria-hidden="true">{`⏎ queue · ${REDIRECT_KEY} redirect now`}</span>
       )}
       <div class="zl-controls">
@@ -1459,10 +1469,10 @@ export function Composer({ sessionId, session, shortPlaceholder = false, compact
         <button
           type="button"
           class="zl-send"
-          aria-label={contentSendPending ? "Sending" : busy ? "Send — queues for the next step" : "Send"}
+          aria-label={contentSendPending ? "Sending" : canRedirectSend ? "Send — queues for the next step" : "Send"}
           title={
             contentSendPending ? "Sending…"
-              : busy ? "Send — queues for the next step"
+              : canRedirectSend ? "Send — queues for the next step"
                 : "Send"
           }
           disabled={!armed}
