@@ -831,7 +831,10 @@ is still reachable as `/skill:<name>`, and both appear in the slash menu.
 **`/reload`** re-reads `AGENTS.md`, the skill index and the memory index, and
 rebuilds the system prompt of every open session — they all read the same files.
 Use it after editing `AGENTS.md`: without it a session keeps the instructions it
-started with, which on a long-lived session can be days old.
+started with, which on a long-lived session can be days old. A session saves its
+system prompt and the inputs it was built from, so a restart or an update sends
+the same prompt (keeping its prompt cache and thinking blocks); `/reload`,
+compaction and **Start fresh** are what rebuild it.
 
 Editing the *body* of a skill needs no reload (it is read from disk each time);
 `/reload` is for the index, so a newly created or deleted skill is noticed. A
@@ -891,6 +894,16 @@ key says who will bill you before it replaces anything. A provider whose key
 comes from an environment variable is shown but not editable here. A phone you
 paired can do everything the browser can, with the same protections as the rest
 of the [pairing](#security).
+
+**Several Anthropic plan accounts.** Anthropic lists your plan sign-ins in
+priority order, each with its state (available, exhausted until a time,
+reconnect) and its own 5-hour and weekly usage. **Add another account** signs in
+through the usual paste flow; the arrows reorder and **Remove** (confirmed)
+deletes one. The first account that is not exhausted serves; when a 5-hour or
+weekly limit is confirmed, the same request moves to the next, and the API key
+is used only when every account is exhausted. When the account serving you is not
+the first, the status line and the usage widget name it by email (or
+*Account N*).
 
 **Anthropic plan plus an API key.** Anthropic has one **API key** field beside
 the subscription sign-in; saving a key does not sign you out of the plan.

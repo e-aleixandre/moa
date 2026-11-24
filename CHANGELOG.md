@@ -5,6 +5,79 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0] - 2026-11-24
+
+### Added
+
+- **GPT-6.2 Astra and GPT-6.2 Sol**, with Fast mode. The `astra` and `sol`
+  aliases now point at them; the earlier GPT-6 and GPT-6.1 models stay
+  selectable by ID. See [Models](docs/cli.md#model-aliases).
+- **Several Anthropic plan accounts.** **Settings → Providers** lists your
+  plan sign-ins in priority order, with each account's state and 5-hour and
+  weekly usage; add, reorder, reconnect or remove them. When the account in
+  use reaches a confirmed limit, the request moves to the next one, and your
+  API key, if you saved one, is used only when every account is exhausted. The
+  status line and usage widget name the account serving you when it is not
+  the first. See [Provider sign-ins](docs/serve.md#provider-sign-ins).
+- **Owners can stop and close sessions.** The `sessions` tool gains `stop`
+  (the UI's Stop, for sessions the owner started) and `close`, and can start a
+  session on Daybreak with `model: "daybreak"`. Sessions you started stay out
+  of reach. See [Owners](docs/owners.md).
+- **Nightly dreaming** (off by default): an owner consolidates its book and
+  project memory while you sleep, keeping every line verbatim in an archive,
+  marking superseded decisions rather than rewriting them, and undoable per
+  night. Settings lets you choose the reader and organizer models, offering
+  only those that fit the night's budget (`dreaming_reader_model`,
+  `dreaming_organizer_model`). See
+  [Dreaming](docs/owners.md#dreaming-nightly-consolidation-of-the-book-and-the-memory).
+- **Live tasks.** An owner's task can be linked to the session executing it;
+  **Tasks** shows owners' checklists by default with each executor's state
+  (*Working*, *Stopped*, *Not started*) and the latest comment. The backlog now
+  holds ideas nobody has decided yet. Owner reports say what will run next and
+  name stalled tasks.
+- **Remember a secret for a few hours.** When answering a password request you
+  can let moa reuse that secret for the same alias in any session; a key on
+  the For you tray lists what is remembered and lets you forget it.
+- **Redirect now.** A message sent while the agent works now waits for its
+  current tool batch instead of cutting pending calls. To interrupt, press
+  **Redirect now** on the queued line or send with ⌘/Ctrl+Enter; the same works
+  in a subagent's view. Owner and parent messages queue the same way, and the
+  `sessions` and `subagent_steer` tools, the subagent steer endpoint and the
+  Automation API reply take an optional `redirect`. See
+  [Queued commands and mid-run messages](docs/serve.md#queued-commands-and-mid-run-messages).
+
+### Changed
+
+- **A session keeps its system prompt across restarts and deploys.** The
+  prompt and the inputs it was built from are saved with the session, so a
+  restart no longer drops Anthropic thinking blocks or the prompt cache.
+  Compaction, **Start fresh** and `/reload` (when files changed) rebuild it.
+- **Idle sessions with live background jobs count as working** in the owner's
+  rows, the drawer and the live bar tally.
+- **Faster to open.** Large sessions open much faster (branch targets are
+  computed in one pass), static assets are compressed and cached, fonts come
+  from the app, and the session list no longer recomputes on every streamed
+  token. Saving skips transcript rewrites that would change nothing.
+- **Owner reports say when a question was already answered**, so owners stop
+  relaying an answer the session already has; a stopped, unread answer is not
+  reported as delivered. Owners also learn what you say in a session they
+  launched.
+- **Voice calls reason more like a partner.** The Live voice debates from the
+  conversation's context and brief, keeps that context through compaction and
+  delegated questions, and bounds startup recovery.
+
+### Fixed
+
+- **Comments on HTML documents** work on callout `div`s and other text
+  containers, not only on paragraphs.
+- **Live Preview** opens the path you typed as its first page instead of
+  appending it to every request, so file URLs no longer 404.
+- A session whose saved prompt cannot be read opens with a fresh prompt.
+
+### Security
+
+- Go toolchain updated to 1.26.11 (GO-2026-6859).
+
 ## [0.48.0] - 2026-11-10
 
 ### Added

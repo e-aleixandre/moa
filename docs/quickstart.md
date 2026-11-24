@@ -116,8 +116,9 @@ best-effort rather than a promised public xAI API integration. If both are set,
 In `moa serve` you can also sign in, replace an API key or switch between a
 subscription and a key from **Settings → Providers**, in the browser or from a
 paired phone (see [Provider sign-ins](./serve.md#provider-sign-ins)). For
-Anthropic you can keep a subscription **and** an API key: the key takes over
-when the plan's limit is reached and the plan resumes when it recovers.
+Anthropic you can keep one or more subscription accounts **and** an API key: the
+next account, then the key, takes over when a plan's limit is reached, and the
+plan resumes when it recovers.
 
 An expired login does not lock you out of Serve: sessions still open and
 existing ones still reopen, and the failure appears when you send a message,

@@ -39,7 +39,9 @@ index.
 **Owner → sessions**: the `sessions` tool, scoped to the owner's codebase:
 `list` (which also names live sessions in other directories that no owner
 watches), `read`, `send` (message or steer), `new` (create a child in a
-directory of the codebase and send its first prompt), `close` (unload a session
+directory of the codebase and send its first prompt), `stop` (the UI's Stop, for
+sessions the owner started: it ends the current turn, the session stays open and
+the next `send` resumes it; refused for the user's sessions), `close` (unload a session
 the owner started, as the UI's close does: it stays saved and can be reopened;
 refused for the user's sessions and for one that is working; if the session was
 the executor of an open task, the result says so) and `answer` (resolve a
