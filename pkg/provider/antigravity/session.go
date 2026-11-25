@@ -39,6 +39,7 @@ type agySession struct {
 	options   []configOption
 	lastUsed  time.Time
 	closeOnce sync.Once
+	runSeq    int // numbers the requests; the last one owns the open turn
 }
 
 type prompt struct {

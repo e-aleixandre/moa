@@ -81,6 +81,10 @@ func Serve() {
 					send(map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{"stopReason": "end_turn"}})
 				}()
 				continue
+			case mode == "second-silent" && prompts == 2:
+				// REVIEW3: the second prompt runs until session/cancel.
+				promptID = m.ID
+				continue
 			case mode == "crash":
 				os.Exit(3)
 			case mode == "unknown" && prompts == 1:

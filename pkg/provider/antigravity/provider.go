@@ -95,6 +95,8 @@ func (p *Provider) Stream(ctx context.Context, req core.Request) (<-chan core.As
 	}
 	s.mu.Lock()
 	s.lastUsed = time.Now()
+	s.runSeq++
+	run := s.runSeq
 	idle := !s.turn && len(s.queue) == 0
 	s.mu.Unlock()
 	if idle && next == nil {
@@ -135,7 +137,10 @@ func (p *Provider) Stream(ctx context.Context, req core.Request) (<-chan core.As
 	// (Stop, even on an approval card, an error, a deleted session), cancel
 	// it; after a normal end there is no turn and this does nothing.
 	context.AfterFunc(ctx, func() {
-		if s.turnRunning() {
+		s.mu.Lock()
+		mine := s.turn && s.runSeq == run
+		s.mu.Unlock()
+		if mine {
 			s.stop()
 		}
 	})
