@@ -21,6 +21,8 @@ type agySession struct {
 	id   string // ACP session id
 	// fullAccess: started with --dangerously-skip-permissions.
 	fullAccess bool
+	// onUsage receives agy's context usage reports (usage_update).
+	onUsage func(used, size int)
 
 	mu     sync.Mutex
 	queue  []turnEvent
@@ -212,6 +214,14 @@ func (s *agySession) onMessage(m rpcMessage) {
 		case "agent_thought_chunk":
 			if head.Content.Type == "text" && head.Content.Text != "" {
 				s.push(turnEvent{kind: "thought", text: head.Content.Text})
+			}
+		case "usage_update":
+			var u struct {
+				Used int `json:"used"`
+				Size int `json:"size"`
+			}
+			if json.Unmarshal(p.Update, &u) == nil && u.Size > 0 && s.onUsage != nil {
+				s.onUsage(u.Used, u.Size)
 			}
 		case "tool_call", "tool_call_update":
 			var u toolUpdate

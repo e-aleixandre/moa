@@ -446,6 +446,10 @@ func registerRunReactors(sctx *SessionContext) {
 	// -------------------------------------------------------------------
 
 	publishContextUpdate := func() {
+		if pct, ok := nativeContextPercent(sctx.Agent); ok {
+			sctx.Bus.Publish(ContextUpdated{SessionID: sctx.SessionID, Percent: pct})
+			return
+		}
 		model := sctx.Agent.Model()
 		if model.MaxInput <= 0 {
 			return

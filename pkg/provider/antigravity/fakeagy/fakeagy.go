@@ -14,6 +14,11 @@ type message struct {
 	ID     json.RawMessage `json:"id,omitempty"`
 	Method string          `json:"method,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
+	Params struct {
+		Prompt []struct {
+			Text string `json:"text"`
+		} `json:"prompt"`
+	} `json:"params,omitempty"`
 }
 
 // Active reports whether this process was started as the fake agy.
@@ -51,6 +56,13 @@ func Serve() {
 			_, _ = fmt.Fprintln(log, in.Text())
 		}
 		// FAKE_AGY_MODE scripts the first prompt of a process.
+		// agy expands slash commands: /compact shrinks the context.
+		if m.Method == "session/prompt" && len(m.Params.Prompt) == 1 && m.Params.Prompt[0].Text == "/compact" {
+			update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "compacted"}})
+			update(map[string]any{"sessionUpdate": "usage_update", "used": 2000, "size": 100000})
+			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{"stopReason": "end_turn"}})
+			continue
+		}
 		if mode != "" && m.Method == "session/prompt" {
 			prompts++
 			switch {
@@ -131,6 +143,9 @@ func Serve() {
 				map[string]any{"id": "model", "category": "model", "currentValue": "flash", "options": []any{map[string]any{"value": "flash"}, map[string]any{"value": "pro"}}},
 				map[string]any{"id": "thought", "category": "thought_level", "currentValue": "low", "options": []any{map[string]any{"value": "low", "name": "Low"}, map[string]any{"value": "high", "name": "High"}, map[string]any{"value": "max", "name": "Max"}}},
 			}}})
+			// Since agy 1.5.8: context usage at start, after each model call
+			// and after a model or thinking change.
+			update(map[string]any{"sessionUpdate": "usage_update", "used": 25000, "size": 100000})
 		case "session/set_config_option":
 			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{}})
 		case "session/prompt":

@@ -34,7 +34,7 @@ func startFake(t *testing.T) (*Provider, string) {
 	t.Setenv("FAKE_AGY_LOG", dir+"/wire.log")
 	t.Setenv("MOA_CONFIG_DIR", dir)
 	cwd := t.TempDir()
-	p := &Provider{Version: "test", sessions: map[string]*agySession{}, calls: map[string]call{}, CWD: func(string) string { return cwd }}
+	p := &Provider{Version: "test", sessions: map[string]*agySession{}, calls: map[string]call{}, usage: map[string][2]int{}, CWD: func(string) string { return cwd }}
 	t.Cleanup(func() {
 		for _, s := range p.sessions {
 			s.close()
@@ -255,5 +255,87 @@ func TestFullAccessSkipsAgyPermissions(t *testing.T) {
 	}
 	if !strings.Contains(readWire(wire), `"session/resume"`) {
 		t.Error("the restarted agy did not resume the conversation")
+	}
+}
+
+func TestUsageUpdateIsReported(t *testing.T) {
+	p, _ := startFake(t)
+	t.Setenv("FAKE_AGY_MODE", "plain")
+	ch, err := p.Stream(context.Background(), request("ctx1", core.NewUserMessage("A")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(t, ch)
+	used, window, ok := p.ContextUsage(core.PromptCacheKey("ctx1"))
+	if !ok || used != 25000 || window != 100000 {
+		t.Fatalf("usage = %d/%d %v", used, window, ok)
+	}
+}
+
+// Compact sends agy exactly /compact, which is not a user message: the mark
+// does not move, and nothing the user wrote is sent again afterwards.
+func TestCompactSendsSlashCompactAndKeepsTheMark(t *testing.T) {
+	p, wire := startFake(t)
+	t.Setenv("FAKE_AGY_MODE", "plain")
+	key := core.PromptCacheKey("ctx2")
+	a := core.NewUserMessage("A")
+	ch, _ := p.Stream(context.Background(), request("ctx2", a))
+	reply, _ := drain(t, ch)
+	if err := p.CompactContext(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(readWire(wire), `"prompt":[{"text":"/compact","type":"text"}]`) {
+		t.Fatalf("agy did not receive exactly /compact:\n%s", readWire(wire))
+	}
+	if used, _, _ := p.ContextUsage(key); used != 2000 {
+		t.Errorf("usage after compact = %d, want 2000", used)
+	}
+	ch, err := p.Stream(context.Background(), request("ctx2", a, *reply, core.NewUserMessage("B")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(t, ch)
+	w := readWire(wire)
+	if n := countPrompts(w, "A"); n != 1 {
+		t.Errorf("A sent %d times", n)
+	}
+	if n := countPrompts(w, "B"); n != 1 {
+		t.Errorf("B sent %d times", n)
+	}
+}
+
+// Start fresh: the next turn opens a new agy conversation holding only what
+// was written after it.
+func TestStartFreshOpensANewConversation(t *testing.T) {
+	p, wire := startFake(t)
+	t.Setenv("FAKE_AGY_MODE", "plain")
+	key := core.PromptCacheKey("ctx3")
+	a := core.NewUserMessage("A")
+	ch, _ := p.Stream(context.Background(), request("ctx3", a))
+	reply, _ := drain(t, ch)
+	cut, err := p.StartFreshContext(key, []core.Message{a, *reply})
+	if err != nil || !cut {
+		t.Fatalf("start fresh = %v, %v", cut, err)
+	}
+	ch, err = p.Stream(context.Background(), request("ctx3", a, *reply, core.NewUserMessage("hola")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(t, ch)
+	lines := strings.Split(readWire(wire), "\n")
+	var news, last string
+	for _, l := range lines {
+		if strings.Contains(l, `"session/new"`) || strings.Contains(l, `"session/resume"`) {
+			news += l[:60] + "\n"
+		}
+		if strings.Contains(l, `"session/prompt"`) {
+			last = l
+		}
+	}
+	if strings.Count(news, "session/new") != 2 || strings.Contains(news, "session/resume") {
+		t.Errorf("want two session/new and no resume, got:\n%s", news)
+	}
+	if !strings.Contains(last, `"prompt":[{"text":"hola","type":"text"}]`) {
+		t.Errorf("the fresh conversation's prompt = %s", last)
 	}
 }

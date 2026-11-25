@@ -868,7 +868,7 @@ func buildInitData(sess *ManagedSession, streaming bus.StreamingAggregate, liveT
 		Error:                stateErr,
 		ErrorDetail:          stateErrDetail,
 		ContextPercent:       ctxPct,
-		ContextWindow:        initModel.MaxInput,
+		ContextWindow:        sess.contextWindow(initModel),
 		CompactAt:            compactAt,
 		CompactAtMin:         compactAtMin,
 		PermissionMode:       permMode,

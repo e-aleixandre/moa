@@ -428,6 +428,9 @@ func registerSessionQueryHandlers(sctx *SessionContext) {
 	})
 
 	b.OnQuery(func(q GetContextUsage) (int, error) {
+		if pct, ok := nativeContextPercent(sctx.Agent); ok {
+			return pct, nil
+		}
 		model := sctx.Agent.Model()
 		if model.MaxInput <= 0 {
 			return -1, nil

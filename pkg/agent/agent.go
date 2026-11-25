@@ -1599,7 +1599,86 @@ func (a *Agent) Compact(ctx context.Context, focus string) (*core.CompactionPayl
 func (a *Agent) CanStartFresh() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if _, ok := core.AsNativeContext(a.config.Provider); ok {
+		return a.cancel == nil && len(a.state.Messages) > 0
+	}
 	return a.cancel == nil && a.freshCutLocked() > 0
+}
+
+// NativeContextUsage is the context usage a backend that keeps its own
+// context reported (core.NativeContext); ok is false for any other provider
+// and before the first report.
+func (a *Agent) NativeContextUsage() (used, window int, ok bool) {
+	a.mu.Lock()
+	provider, key := a.config.Provider, a.config.PromptCacheKey
+	a.mu.Unlock()
+	nc, native := core.AsNativeContext(provider)
+	if !native {
+		return 0, 0, false
+	}
+	return nc.ContextUsage(key)
+}
+
+// startFreshNative has a backend that keeps its own context start a new
+// conversation. moa's messages stay as they are: the backend only ever
+// receives what follows them. Caller holds the cut lock, the agent idle.
+func (a *Agent) startFreshNative(nc core.NativeContext) (*core.FreshPayload, error) {
+	msgs := a.state.Messages
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+	plain := make([]core.Message, len(msgs))
+	for i := range msgs {
+		msgs[i].EnsureMsgID()
+		plain[i] = msgs[i].Message
+	}
+	before, _, _ := nc.ContextUsage(a.config.PromptCacheKey)
+	cut, err := nc.StartFreshContext(a.config.PromptCacheKey, plain)
+	if err != nil || !cut {
+		return nil, err
+	}
+	return &core.FreshPayload{FirstKeptMsgID: msgs[0].MsgID, TokensBefore: before}, nil
+}
+
+// compactNative has a backend that keeps its own context compact it, and
+// records that as a compaction that keeps every message: moa's copy is not
+// what the backend reads.
+func (a *Agent) compactNative(ctx context.Context, nc core.NativeContext, msgs []core.AgentMessage, commit func(context.Context, core.CompactionCommit) error) (*core.CompactionPayload, error) {
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+	key := a.config.PromptCacheKey
+	before, _, _ := nc.ContextUsage(key)
+	if err := nc.CompactContext(ctx, key); err != nil {
+		return nil, err
+	}
+	after, _, _ := nc.ContextUsage(key)
+	summary := core.AgentMessage{Message: core.Message{
+		Role:      "compaction_summary",
+		Content:   []core.Content{core.TextContent("Gemini compacted its own context (/compact).")},
+		Timestamp: time.Now().Unix(),
+	}}
+	summary.EnsureMsgID()
+	compacted := append([]core.AgentMessage{summary}, msgs...)
+	payload := &core.CompactionPayload{
+		Summary:        "Gemini compacted its own context (/compact).",
+		TokensBefore:   before,
+		TokensAfter:    after,
+		SummaryMsgID:   summary.MsgID,
+		FirstKeptMsgID: msgs[0].MsgID,
+		BoundaryID:     core.NewMsgID(),
+	}
+	if commit != nil {
+		originals := append([]core.AgentMessage(nil), msgs...)
+		if err := commit(ctx, core.CompactionCommit{Originals: originals, Payload: payload, Trims: a.trimsEmitted.Load()}); err != nil {
+			return nil, &core.CompactionNotSavedError{Payload: payload, Err: err}
+		}
+	}
+	a.mu.Lock()
+	a.state.Messages = keepAppendedRecords(compacted, msgs, a.state.Messages)
+	a.state.CompactionEpoch++
+	a.mu.Unlock()
+	return payload, nil
 }
 
 // freshCutLocked is the index StartFresh would keep from, or 0 when there is
@@ -1640,6 +1719,9 @@ func (a *Agent) StartFresh() (*core.FreshPayload, error) {
 	defer a.unlockCut()
 	if a.cancel != nil {
 		return nil, fmt.Errorf("cannot start fresh while agent is running")
+	}
+	if nc, ok := core.AsNativeContext(a.config.Provider); ok {
+		return a.startFreshNative(nc)
 	}
 	if a.config.Model.MaxInput <= 0 {
 		return nil, fmt.Errorf("model has no context window configured")
@@ -1751,6 +1833,9 @@ func (a *Agent) compactWithCheckpoint(ctx context.Context, checkpoint, focus str
 	a.aborting = false
 	a.steerMu.Unlock()
 
+	if nc, ok := core.AsNativeContext(provider); ok {
+		return a.compactNative(ctx, nc, msgs, commit)
+	}
 	if settings == nil {
 		defaults := core.DefaultCompactionSettings
 		settings = &defaults

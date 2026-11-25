@@ -91,3 +91,66 @@ func TestFullAccessFollowsPermissionMode(t *testing.T) {
 		t.Fatal("ask session is full access")
 	}
 }
+
+// Given a Gemini session, when agy reports context usage, the indicator
+// shows it; Compact sends agy exactly /compact and shows a compaction; Start
+// fresh opens a new agy conversation with only what follows, and the
+// transcript keeps the earlier messages.
+func TestGeminiContextCompactAndStartFresh(t *testing.T) {
+	mgr, sess, wire := reviewGemini(t, "plain")
+	reviewSend(t, mgr, sess.ID, "first message")
+	reviewWaitIdle(t, mgr, sess.ID, 10*time.Second)
+	if info := sess.info(); info.ContextPercent != 25 || info.ContextWindow != 100000 {
+		t.Fatalf("context = %d%% of %d, want 25%% of 100000", info.ContextPercent, info.ContextWindow)
+	}
+
+	if err := sess.runtime.Bus.Execute(bus.CompactSession{}); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 10*time.Second, "compaction", func() bool {
+		for _, m := range sess.runtime.Context().Agent.Messages() {
+			if m.Role == "compaction_summary" {
+				return true
+			}
+		}
+		return false
+	})
+	reviewWaitIdle(t, mgr, sess.ID, 10*time.Second)
+	if pct := sess.info().ContextPercent; pct != 2 {
+		t.Errorf("context after compact = %d%%, want 2%%", pct)
+	}
+	if n := reviewPrompts(wire, `"text":"/compact"`); n != 1 {
+		t.Errorf("/compact sent %d times", n)
+	}
+
+	reviewSend(t, mgr, sess.ID, "second message")
+	reviewWaitIdle(t, mgr, sess.ID, 10*time.Second)
+	if err := sess.runtime.Bus.Execute(bus.StartFreshSession{}); err != nil {
+		t.Fatalf("start fresh: %v", err)
+	}
+	reviewSend(t, mgr, sess.ID, "hola")
+	reviewWaitIdle(t, mgr, sess.ID, 10*time.Second)
+
+	b, _ := os.ReadFile(wire)
+	var last string
+	for _, l := range strings.Split(string(b), "\n") {
+		if strings.Contains(l, `"session/prompt"`) {
+			last = l
+		}
+	}
+	if strings.Count(string(b), `"session/new"`) != 2 || !strings.Contains(last, `"prompt":[{"text":"hola","type":"text"}]`) {
+		t.Errorf("start fresh: want a second session/new and a prompt of only hola, got last prompt %s", last)
+	}
+	for _, text := range []string{"first message", "second message"} {
+		if n := reviewPrompts(wire, `"text":"`+text+`"`); n != 1 {
+			t.Errorf("%q sent %d times", text, n)
+		}
+	}
+	seen := map[string]bool{}
+	for _, m := range sess.History() {
+		seen[f1MsgText(m)] = true
+	}
+	if !seen["first message"] || !seen["second message"] || !seen["hola"] {
+		t.Error("the transcript lost earlier messages")
+	}
+}

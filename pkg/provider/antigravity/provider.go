@@ -38,7 +38,8 @@ type Provider struct {
 
 	mu       sync.Mutex
 	sessions map[string]*agySession
-	calls    map[string]call // moa tool call id → agy call, for the mirror tools
+	calls    map[string]call   // moa tool call id → agy call, for the mirror tools
+	usage    map[string][2]int // moa session → agy's last context usage (used, size)
 	reaper   sync.Once
 }
 
@@ -50,7 +51,7 @@ var (
 // Default returns the shared provider.
 func Default(version string) *Provider {
 	defaultOnce.Do(func() {
-		defaultP = &Provider{Version: version, sessions: map[string]*agySession{}, calls: map[string]call{}}
+		defaultP = &Provider{Version: version, sessions: map[string]*agySession{}, calls: map[string]call{}, usage: map[string][2]int{}}
 	})
 	return defaultP
 }
@@ -503,6 +504,11 @@ func (p *Provider) open(ctx context.Context, sessionID string, fullAccess bool) 
 	}
 	entry := loadEntry(sessionID)
 	s := &agySession{key: sessionID, cwd: cwd, cmd: cmd, fullAccess: fullAccess, signal: make(chan struct{}, 1), tools: map[string]*toolState{}, lastUsed: time.Now(), mark: entry.Mark}
+	s.onUsage = func(used, size int) {
+		p.mu.Lock()
+		p.usage[sessionID] = [2]int{used, size}
+		p.mu.Unlock()
+	}
 	s.conn = newRPCConn(stdout, stdin, s.onMessage)
 	fail := func(err error) (*agySession, error) {
 		s.close()
@@ -630,12 +636,106 @@ func updateEntry(sessionID string, f func(*entry)) {
 	f(&e)
 	m[sessionID] = e
 	b, _ := json.MarshalIndent(m, "", "  ")
+	_ = os.MkdirAll(filepath.Dir(storePath()), 0o700)
 	tmp := storePath() + ".tmp"
 	if os.WriteFile(tmp, b, 0o600) == nil {
 		_ = os.Rename(tmp, storePath())
 	}
 }
 
-func saveACP(sessionID, acpID string) { updateEntry(sessionID, func(e *entry) { e.ACP = acpID }) }
+func saveACP(sessionID, acpID string) {
+	updateEntry(sessionID, func(e *entry) { e.ACP = acpID })
+}
 
-func saveMark(sessionID, mark string) { updateEntry(sessionID, func(e *entry) { e.Mark = mark }) }
+func saveMark(sessionID, mark string) {
+	updateEntry(sessionID, func(e *entry) { e.Mark = mark })
+}
+
+// ContextUsage is the last context usage agy reported for the session.
+func (p *Provider) ContextUsage(key string) (used, window int, ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	u, ok := p.usage[sessionIDFromKey(key)]
+	return u[0], u[1], ok
+}
+
+// CompactContext sends agy its own /compact command, which is not a user
+// message: the mark stays where it is. Its output is not part of moa's
+// transcript; the usage agy reports afterwards is.
+func (p *Provider) CompactContext(ctx context.Context, key string) error {
+	sessionID := sessionIDFromKey(key)
+	s := p.existing(sessionID)
+	if s == nil {
+		if loadEntry(sessionID).Mark == "" {
+			return errors.New("nothing to compact: Gemini has not received a message yet")
+		}
+		var err error
+		if s, err = p.open(ctx, sessionID, p.FullAccess != nil && p.FullAccess(sessionID)); err != nil {
+			return core.NoAutoRetry(err)
+		}
+	}
+	s.mu.Lock()
+	if s.turn || len(s.queue) > 0 {
+		s.mu.Unlock()
+		return errors.New("the Gemini session is still working: compact when it is done")
+	}
+	if s.mark == "" {
+		s.mu.Unlock()
+		return errors.New("nothing to compact: Gemini has not received a message yet")
+	}
+	s.lastUsed = time.Now()
+	s.startPrompt(prompt{blocks: []any{map[string]any{"type": "text", "text": "/compact"}}, mark: s.mark})
+	s.mu.Unlock()
+	for {
+		ev, err := s.next(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				s.stop()
+			}
+			return err
+		}
+		switch ev.kind {
+		case "permission":
+			s.mu.Lock()
+			t := s.tools[ev.toolID]
+			s.mu.Unlock()
+			if t != nil {
+				s.answer(t, false)
+			}
+		case "done":
+			if ev.err != nil {
+				return core.NoAutoRetry(fmt.Errorf("antigravity: %w", ev.err))
+			}
+			return nil
+		}
+	}
+}
+
+// StartFreshContext makes the next turn open a new agy conversation that
+// starts after msgs: the mark moves to their last user message, so only
+// what is written next reaches agy.
+func (p *Provider) StartFreshContext(key string, msgs []core.Message) (bool, error) {
+	sessionID := sessionIDFromKey(key)
+	mark := ""
+	for i := len(msgs) - 1; i >= 0 && mark == ""; i-- {
+		if len(promptBlocks(msgs[i])) > 0 {
+			mark = messageKey(msgs[i])
+		}
+	}
+	if mark == "" {
+		return false, nil
+	}
+	if s := p.existing(sessionID); s != nil {
+		if !s.quiet() {
+			return false, errors.New("the Gemini session is still working: start fresh when it is done")
+		}
+		p.drop(sessionID, s)
+	}
+	updateEntry(sessionID, func(e *entry) { e.ACP, e.Mark = "", mark })
+	p.mu.Lock()
+	if u, ok := p.usage[sessionID]; ok {
+		p.usage[sessionID] = [2]int{0, u[1]}
+	}
+	p.mu.Unlock()
+	return true, nil
+}

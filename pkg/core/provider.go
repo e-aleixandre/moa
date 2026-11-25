@@ -117,6 +117,37 @@ func ProviderTool(p Provider, name string) (Tool, bool) {
 	return Tool{}, false
 }
 
+// NativeContext is implemented by a provider whose backend keeps the
+// conversation's context itself (Antigravity). moa reads the usage the
+// backend reports and asks the backend to compact or start over, instead of
+// measuring or rewriting its own copy of the messages.
+type NativeContext interface {
+	// ContextUsage is the last usage the backend reported: tokens in its
+	// context and the size of its window.
+	ContextUsage(sessionKey string) (used, window int, ok bool)
+	// CompactContext has the backend compact its context.
+	CompactContext(ctx context.Context, sessionKey string) error
+	// StartFreshContext makes the backend's next turn start a new
+	// conversation holding only what follows msgs. False when there is
+	// nothing to drop.
+	StartFreshContext(sessionKey string, msgs []Message) (bool, error)
+}
+
+// AsNativeContext finds p's NativeContext, following decorators.
+func AsNativeContext(p Provider) (NativeContext, bool) {
+	for p != nil {
+		if n, ok := p.(NativeContext); ok {
+			return n, true
+		}
+		unwrapper, ok := p.(ProviderUnwrapper)
+		if !ok {
+			return nil, false
+		}
+		p = unwrapper.Unwrap()
+	}
+	return nil, false
+}
+
 // Request contains everything needed for an LLM call.
 type Request struct {
 	Model    Model

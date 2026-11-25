@@ -287,6 +287,17 @@ func (s *ManagedSession) titleState() (string, string, bool) {
 	return s.Title, s.TitleSource, s.closing.Load()
 }
 
+// contextWindow is the window the context indicator measures against: the
+// one a backend that keeps its own context reports, else the model's.
+func (s *ManagedSession) contextWindow(model core.Model) int {
+	if agent := s.runtime.Context().Agent; agent != nil {
+		if _, window, ok := bus.NativeContextWindow(agent); ok {
+			return window
+		}
+	}
+	return model.MaxInput
+}
+
 func (s *ManagedSession) setProviderName(provider string) {
 	s.mu.Lock()
 	s.modelProvider = provider
@@ -608,7 +619,7 @@ func (s *ManagedSession) info() SessionInfo {
 		UntrustedMCP:      s.infra.UntrustedMCP,
 		MCP:               mcpSummary,
 		ContextPercent:    ctxPct,
-		ContextWindow:     model.MaxInput,
+		ContextWindow:     s.contextWindow(model),
 		CompactAt:         compactAt,
 		CompactAtMin:      compactAtMin,
 		PermissionMode:    permMode,
