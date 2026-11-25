@@ -214,3 +214,45 @@ func TestModelsAndThoughtLevelsAreLearned(t *testing.T) {
 		t.Errorf("model set although flash is agy's current one:\n%s", b)
 	}
 }
+
+// agy follows the session's permission mode: full access starts it with
+// --dangerously-skip-permissions, and a change restarts it at the next
+// prompt, resuming the same conversation.
+func TestFullAccessSkipsAgyPermissions(t *testing.T) {
+	p, wire := startFake(t)
+	full := false
+	p.FullAccess = func(string) bool { return full }
+	a := core.NewUserMessage("A")
+	ch, err := p.Stream(context.Background(), request("perm1", a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m1, _ := drain(t, ch)
+	tool, _ := core.ProviderTool(p, ApprovalTool)
+	call := m1.Content[len(m1.Content)-1]
+	res, _ := tool.Execute(core.WithToolCallID(context.Background(), call.ToolCallID), nil, nil)
+	tr := core.NewToolResultMessage(call.ToolCallID, call.ToolName, res.Content, false)
+	ch, _ = p.Stream(context.Background(), request("perm1", a, *m1, tr))
+	m2, _ := drain(t, ch)
+
+	full = true // the user switches the session to full access
+	b := core.NewUserMessage("B")
+	ch, err = p.Stream(context.Background(), request("perm1", a, *m1, tr, *m2, b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(t, ch)
+
+	var argvs []string
+	for _, l := range strings.Split(readWire(wire), "\n") {
+		if strings.HasPrefix(l, `{"argv":`) {
+			argvs = append(argvs, l)
+		}
+	}
+	if len(argvs) != 2 || strings.Contains(argvs[0], "--dangerously-skip-permissions") || !strings.Contains(argvs[1], `"acp","--dangerously-skip-permissions"`) {
+		t.Fatalf("agy started with %v", argvs)
+	}
+	if !strings.Contains(readWire(wire), `"session/resume"`) {
+		t.Error("the restarted agy did not resume the conversation")
+	}
+}

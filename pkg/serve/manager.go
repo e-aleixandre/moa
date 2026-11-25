@@ -27,6 +27,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/files"
 	"github.com/e-aleixandre/moa/pkg/mcp"
 	"github.com/e-aleixandre/moa/pkg/owner"
+	"github.com/e-aleixandre/moa/pkg/permission"
 	"github.com/e-aleixandre/moa/pkg/push"
 	"github.com/e-aleixandre/moa/pkg/release"
 	"github.com/e-aleixandre/moa/pkg/secretaction"
@@ -1835,4 +1836,15 @@ type CommandResult struct {
 type missedCall struct {
 	askID string
 	from  string
+}
+
+// FullAccess reports whether session id approves every tool call itself
+// (permission mode yolo).
+func (m *Manager) FullAccess(id string) bool {
+	sess, ok := m.Get(id)
+	if !ok || sess.runtime == nil {
+		return false
+	}
+	g := sess.runtime.Context().GetGate()
+	return g != nil && g.Mode() == permission.ModeYolo
 }

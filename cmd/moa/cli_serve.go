@@ -150,12 +150,14 @@ func runServe(args []string) {
 		UpdateCheckEnabled: core.IsUpdateCheckEnabled(moaCfg),
 	})
 	antigravity.LoadCachedModels()
-	antigravity.Default(version).CWD = func(sessionID string) string {
+	agy := antigravity.Default(version)
+	agy.CWD = func(sessionID string) string {
 		if sess, ok := mgr.Get(sessionID); ok {
 			return sess.CWD
 		}
 		return ""
 	}
+	agy.FullAccess = mgr.FullAccess
 
 	// Settings → Providers administers the same live store every provider
 	// request resolves from, so a saved login applies on the next request.

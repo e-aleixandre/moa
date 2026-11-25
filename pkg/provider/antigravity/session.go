@@ -19,6 +19,8 @@ type agySession struct {
 	cmd  *exec.Cmd
 	conn *rpcConn
 	id   string // ACP session id
+	// fullAccess: started with --dangerously-skip-permissions.
+	fullAccess bool
 
 	mu     sync.Mutex
 	queue  []turnEvent
@@ -87,6 +89,13 @@ type configOption struct {
 		Value string `json:"value"`
 		Name  string `json:"name"`
 	} `json:"options"`
+}
+
+// quiet reports whether agy has no turn in flight and nothing left unread.
+func (s *agySession) quiet() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.turn && len(s.queue) == 0
 }
 
 // push queues agy's output for the relay, dropping a stopped turn's.

@@ -38,6 +38,10 @@ func Serve() {
 		logPath = "wire.log" // one log per process, in the session's cwd
 	}
 	log, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if log != nil {
+		b, _ := json.Marshal(os.Args[1:])
+		fmt.Fprintf(log, "{\"argv\":%s}\n", b)
+	}
 	mode := os.Getenv("FAKE_AGY_MODE")
 	prompts := 0
 	for in.Scan() {

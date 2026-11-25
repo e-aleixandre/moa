@@ -31,6 +31,10 @@ type Provider struct {
 	// CWD returns a moa session's working directory, where agy runs (and
 	// finds the project's AGENTS.md). Set by the server.
 	CWD func(sessionID string) string
+	// FullAccess reports whether a moa session approves every tool call
+	// itself (permission mode yolo). agy then runs with its documented
+	// --dangerously-skip-permissions instead of asking. Set by the server.
+	FullAccess func(sessionID string) bool
 
 	mu       sync.Mutex
 	sessions map[string]*agySession
@@ -73,12 +77,19 @@ func (p *Provider) Stream(ctx context.Context, req core.Request) (<-chan core.As
 	}
 	p.rejectDenied(sessionID, req.Messages)
 
+	// A changed permission mode takes effect at the next prompt: agy reads
+	// it at start, so its process is restarted and resumes the conversation.
+	fullAccess := p.FullAccess != nil && p.FullAccess(sessionID)
+	if s != nil && next != nil && s.fullAccess != fullAccess && s.quiet() {
+		p.drop(sessionID, s)
+		s = nil
+	}
 	if s == nil {
 		if next == nil {
 			return nil, core.NoAutoRetry(ErrNothingToSend)
 		}
 		var err error
-		if s, err = p.open(ctx, sessionID); err != nil {
+		if s, err = p.open(ctx, sessionID, fullAccess); err != nil {
 			return nil, core.NoAutoRetry(err)
 		}
 	}
@@ -438,7 +449,7 @@ func (p *Provider) existing(sessionID string) *agySession {
 
 // open starts agy for a moa session and resumes its previous Antigravity
 // conversation when there is one.
-func (p *Provider) open(ctx context.Context, sessionID string) (*agySession, error) {
+func (p *Provider) open(ctx context.Context, sessionID string, fullAccess bool) (*agySession, error) {
 	p.reaper.Do(func() { go p.reap() })
 	var cwd string
 	if p.CWD != nil {
@@ -447,7 +458,11 @@ func (p *Provider) open(ctx context.Context, sessionID string) (*agySession, err
 	if cwd == "" {
 		cwd, _ = os.UserHomeDir()
 	}
-	cmd := exec.Command(agyBinary(), "acp")
+	args := []string{"acp"}
+	if fullAccess {
+		args = append(args, "--dangerously-skip-permissions")
+	}
+	cmd := exec.Command(agyBinary(), args...)
 	cmd.Dir = cwd
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -462,7 +477,7 @@ func (p *Provider) open(ctx context.Context, sessionID string) (*agySession, err
 		return nil, fmt.Errorf("antigravity: start agy: %w (install Antigravity CLI and run `agy acp --login`)", err)
 	}
 	entry := loadEntry(sessionID)
-	s := &agySession{key: sessionID, cwd: cwd, cmd: cmd, signal: make(chan struct{}, 1), tools: map[string]*toolState{}, lastUsed: time.Now(), mark: entry.Mark}
+	s := &agySession{key: sessionID, cwd: cwd, cmd: cmd, fullAccess: fullAccess, signal: make(chan struct{}, 1), tools: map[string]*toolState{}, lastUsed: time.Now(), mark: entry.Mark}
 	s.conn = newRPCConn(stdout, stdin, s.onMessage)
 	fail := func(err error) (*agySession, error) {
 		s.close()
@@ -510,6 +525,16 @@ func (p *Provider) open(ctx context.Context, sessionID string) (*agySession, err
 	p.sessions[sessionID] = s
 	p.mu.Unlock()
 	return s, nil
+}
+
+// drop closes s, the agy process of sessionID.
+func (p *Provider) drop(sessionID string, s *agySession) {
+	p.mu.Lock()
+	if p.sessions[sessionID] == s {
+		delete(p.sessions, sessionID)
+	}
+	p.mu.Unlock()
+	s.close()
 }
 
 func (p *Provider) reap() {

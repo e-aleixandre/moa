@@ -78,3 +78,16 @@ func TestSwitchIntoOrOutOfGeminiNeedsAnEmptySession(t *testing.T) {
 		t.Fatalf("switch out of Gemini with history: err = %v", err)
 	}
 }
+
+func TestFullAccessFollowsPermissionMode(t *testing.T) {
+	mgr, sess, _ := reviewGemini(t, "plain") // yolo
+	if !mgr.FullAccess(sess.ID) {
+		t.Fatal("yolo session is not full access")
+	}
+	if err := sess.runtime.Bus.Execute(bus.SetPermissionMode{Mode: "ask"}); err != nil {
+		t.Fatal(err)
+	}
+	if mgr.FullAccess(sess.ID) {
+		t.Fatal("ask session is full access")
+	}
+}
