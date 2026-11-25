@@ -49,6 +49,11 @@ func registerConfigHandlers(sctx *SessionContext) {
 		if daybreak && availability.Rejects(newModel) {
 			return fmt.Errorf("%s doesn't support Daybreak. Turn off Daybreak or choose GPT-6 Sol", modelLabel(newModel))
 		}
+		// Antigravity keeps its own history: neither side could see what the
+		// other did, so a conversation stays on one side of the switch.
+		if (newModel.Provider == "antigravity") != (sctx.Agent.Model().Provider == "antigravity") && len(sctx.Agent.Messages()) > 0 {
+			return fmt.Errorf("Gemini and other models can't share a conversation. Start a new session to switch")
+		}
 		newProvider, err := sctx.ProviderFactory(newModel)
 		if err != nil {
 			return fmt.Errorf("provider error: %w", err)

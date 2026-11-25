@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/pkg/bus"
 	"github.com/e-aleixandre/moa/pkg/provider/antigravity"
 )
 
@@ -57,4 +58,23 @@ func TestOwnerPromptReachesAntigravity(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	waitIdle(t, mgr, sess.ID)
+}
+
+// Gemini keeps its own history: a session with history cannot switch between
+// Gemini and another model; an empty one can.
+func TestSwitchIntoOrOutOfGeminiNeedsAnEmptySession(t *testing.T) {
+	mgr, sess, _ := reviewGemini(t, "plain")
+	empty, err := mgr.CreateSession(CreateOpts{Model: "sonnet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := empty.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: "gemini"}); err != nil {
+		t.Fatalf("empty session could not switch to Gemini: %v", err)
+	}
+	reviewSend(t, mgr, sess.ID, "hello")
+	reviewWaitIdle(t, mgr, sess.ID, 10*time.Second)
+	err = sess.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: "sonnet"})
+	if err == nil || !strings.Contains(err.Error(), "Start a new session") {
+		t.Fatalf("switch out of Gemini with history: err = %v", err)
+	}
 }

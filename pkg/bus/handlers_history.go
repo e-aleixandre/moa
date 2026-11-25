@@ -565,6 +565,9 @@ func registerTreeHandlers(sctx *SessionContext) {
 		if sctx.Tree == nil {
 			return fmt.Errorf("branching not available (no session tree)")
 		}
+		if sctx.Agent.Model().Provider == "antigravity" {
+			return fmt.Errorf("Gemini keeps its own history, so it can't go back to an earlier message. Start a new session instead")
+		}
 		// Branching mutates the tree's leaf and then rehydrates the agent via
 		// LoadState, which fails while a run is in flight (StateRunning) or a
 		// permission is pending (StatePermission) — both keep the agent's run

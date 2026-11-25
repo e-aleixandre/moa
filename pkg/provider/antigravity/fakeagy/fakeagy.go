@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 type message struct {
@@ -32,12 +33,65 @@ func Serve() {
 		send(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "s1", "update": u}})
 	}
 	var promptID json.RawMessage
-	log, _ := os.OpenFile(os.Getenv("FAKE_AGY_LOG"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logPath := os.Getenv("FAKE_AGY_LOG")
+	if logPath == "" {
+		logPath = "wire.log" // one log per process, in the session's cwd
+	}
+	log, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	mode := os.Getenv("FAKE_AGY_MODE")
+	prompts := 0
 	for in.Scan() {
 		var m message
 		_ = json.Unmarshal(in.Bytes(), &m)
 		if log != nil {
 			fmt.Fprintln(log, in.Text())
+		}
+		// FAKE_AGY_MODE scripts the first prompt of a process.
+		if mode != "" && m.Method == "session/prompt" {
+			prompts++
+			switch {
+			case mode == "stream" && prompts == 1:
+				// A long turn: one chunk, then wait for session/cancel.
+				promptID = m.ID
+				update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "first"}})
+				continue
+			case mode == "silent" && prompts == 1:
+				// A long turn that has produced nothing yet.
+				promptID = m.ID
+				continue
+			case mode == "crash":
+				os.Exit(3)
+			case mode == "unknown" && prompts == 1:
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32603, "message": "unknown error"}})
+				continue
+			case mode == "tool429" && prompts == 1:
+				update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Read a.go", "kind": "read", "status": "in_progress"})
+				time.Sleep(300 * time.Millisecond)
+				update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed", "content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "package a"}}}})
+				time.Sleep(200 * time.Millisecond)
+				update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "partial"}})
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": 429, "message": "Resource exhausted"}})
+				continue
+			case mode == "repeat" && prompts == 1:
+				for i := 0; i < 4; i++ {
+					id := fmt.Sprintf("r%d", i)
+					update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": id, "title": "Run git status", "kind": "execute", "status": "in_progress", "rawInput": map[string]any{"command": "git status"}})
+					update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": id, "status": "completed", "content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "clean"}}}})
+					time.Sleep(100 * time.Millisecond)
+				}
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{"stopReason": "end_turn"}})
+				continue
+			case mode != "":
+				update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "reply"}})
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{"stopReason": "end_turn"}})
+				continue
+			}
+		}
+		if mode != "" && m.Method == "session/cancel" && promptID != nil {
+			update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "late"}})
+			send(map[string]any{"jsonrpc": "2.0", "id": promptID, "result": map[string]any{"stopReason": "cancelled"}})
+			promptID = nil
+			continue
 		}
 		switch m.Method {
 		case "initialize":

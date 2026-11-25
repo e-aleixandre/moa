@@ -36,10 +36,6 @@ const (
 // offers models (Claude) whose ids moa already knows from other providers.
 const modelPrefix = "agy."
 
-// forYouPrefix opens the For you snapshot moa adds for its own agent loop.
-// It is moa's state for moa's model, not something the user said to agy.
-const forYouPrefix = "<foryou_snapshot>"
-
 func sessionIDFromKey(key string) string {
 	id, ok := strings.CutPrefix(key, "moa:session:")
 	if !ok || strings.Contains(id, ":") {
@@ -48,25 +44,35 @@ func sessionIDFromKey(key string) string {
 	return id
 }
 
-// promptBlocks converts the new user messages into one ACP prompt.
-func promptBlocks(msgs []core.Message) []any {
+// promptBlocks converts a user message into ACP content blocks. Only what
+// someone wrote reaches agy: moa's own user-role notes (the For you snapshot,
+// the stream-repair and doom-loop hints, which the loop does not send for
+// this provider anyway) are left out.
+func promptBlocks(m core.Message) []any {
+	if m.Role != "user" {
+		return nil
+	}
 	var out []any
-	for _, m := range msgs {
-		if m.Role != "user" {
-			continue
-		}
-		for _, c := range m.Content {
-			switch c.Type {
-			case "text":
-				if c.Text != "" && !strings.HasPrefix(c.Text, forYouPrefix) {
-					out = append(out, map[string]any{"type": "text", "text": c.Text})
-				}
-			case "image":
-				out = append(out, map[string]any{"type": "image", "mimeType": c.MimeType, "data": c.Data})
+	for _, c := range m.Content {
+		switch c.Type {
+		case "text":
+			if c.Text != "" && !moaNote(c.Text) {
+				out = append(out, map[string]any{"type": "text", "text": c.Text})
 			}
+		case "image":
+			out = append(out, map[string]any{"type": "image", "mimeType": c.MimeType, "data": c.Data})
 		}
 	}
 	return out
+}
+
+func moaNote(text string) bool {
+	for _, prefix := range []string{"<foryou_snapshot>", "<system-reminder>", "[internal]"} {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func rawString(v json.RawMessage) string {

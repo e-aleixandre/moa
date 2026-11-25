@@ -99,6 +99,18 @@ func (e *EmptyResponseError) Is(target error) bool {
 // ErrEmptyResponse is a sentinel for errors.Is(err, core.ErrEmptyResponse).
 var ErrEmptyResponse = &EmptyResponseError{}
 
+// ErrNoAutoRetry marks a stream error the loop must not repair by sending the
+// request again: the backend is an agent that only acts on what it is told
+// (Antigravity), so a resend would be moa prompting it on its own.
+var ErrNoAutoRetry = errors.New("not retried automatically")
+
+type noAutoRetry struct{ error }
+
+func (e noAutoRetry) Unwrap() []error { return []error{e.error, ErrNoAutoRetry} }
+
+// NoAutoRetry wraps err with ErrNoAutoRetry, keeping its message.
+func NoAutoRetry(err error) error { return noAutoRetry{err} }
+
 // humanizeDuration renders a duration as a compact "2h 36m" / "45m" / "30s"
 // string for user-facing quota messages.
 func humanizeDuration(d time.Duration) string {

@@ -41,6 +41,9 @@ var doomLoopExemptTools = map[string]bool{
 	"subagent_status": true,
 	"bash_wait":       true,
 	"subagent_wait":   true,
+	// Mirrors of Antigravity's own calls: moa does not steer that agent.
+	"antigravity":          true,
+	"antigravity_approval": true,
 }
 
 var steerInterruptibleWaitTools = map[string]bool{
@@ -1134,6 +1137,7 @@ func agentLoop(ctx context.Context, cfg *loopConfig) error {
 			}
 			streamErr = fmt.Errorf("stream: %w", consumeErr)
 			canRepair := ctx.Err() == nil && !errors.Is(consumeErr, core.ErrAPIBackupUncertain) &&
+				!errors.Is(consumeErr, core.ErrNoAutoRetry) &&
 				!hasStreamedToolCalls(assistantMsg) &&
 				isRetryableStreamError(streamErr) &&
 				attempt < maxStreamRepairs

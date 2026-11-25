@@ -33,7 +33,7 @@ func startFake(t *testing.T) (*Provider, string) {
 	t.Setenv("FAKE_AGY_LOG", dir+"/wire.log")
 	t.Setenv("MOA_CONFIG_DIR", dir)
 	cwd := t.TempDir()
-	p := &Provider{Version: "test", sessions: map[string]*agySession{}, calls: map[string]*agySession{}, CWD: func(string) string { return cwd }}
+	p := &Provider{Version: "test", sessions: map[string]*agySession{}, calls: map[string]call{}, CWD: func(string) string { return cwd }}
 	t.Cleanup(func() {
 		for _, s := range p.sessions {
 			s.close()
@@ -82,6 +82,7 @@ func TestTurnWithApprovedToolCall(t *testing.T) {
 	answered := core.Message{Role: "assistant", Content: []core.Content{core.TextContent("ok")}}
 	user := core.NewUserMessage("list files")
 	snapshot := core.NewUserMessage("<foryou_snapshot>\nmoa state</foryou_snapshot>")
+	saveMark("sess1", messageKey(earlier)) // agy received it in an earlier turn
 
 	ch, err := p.Stream(context.Background(), request("sess1", earlier, answered, snapshot, user))
 	if err != nil {
@@ -92,7 +93,7 @@ func TestTurnWithApprovedToolCall(t *testing.T) {
 		t.Fatalf("first leg: text %q stop %q", text, msg.StopReason)
 	}
 	call := msg.Content[len(msg.Content)-1]
-	if call.ToolName != ApprovalTool || call.ToolCallID != "t1" {
+	if call.ToolName != ApprovalTool || call.ToolCallID != "sess1_t1_approve" {
 		t.Fatalf("call = %+v", call)
 	}
 
@@ -100,12 +101,12 @@ func TestTurnWithApprovedToolCall(t *testing.T) {
 	if !ok {
 		t.Fatal("approval tool not resolved")
 	}
-	res, err := tool.Execute(core.WithToolCallID(context.Background(), "t1"), nil, nil)
+	res, err := tool.Execute(core.WithToolCallID(context.Background(), call.ToolCallID), nil, nil)
 	if err != nil || res.IsError || res.Content[0].Text != "file.txt" {
 		t.Fatalf("result = %+v, %v", res, err)
 	}
 
-	ch, err = p.Stream(context.Background(), request("sess1", user, *msg, core.NewToolResultMessage("t1", ApprovalTool, res.Content, false)))
+	ch, err = p.Stream(context.Background(), request("sess1", user, *msg, core.NewToolResultMessage(call.ToolCallID, ApprovalTool, res.Content, false)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +140,7 @@ func TestDeniedApprovalRejectsCall(t *testing.T) {
 	msg, _ := drain(t, ch)
 	// The gate denied the approval card: the loop records an error result
 	// without executing it.
-	denied := core.NewToolResultMessage("t1", ApprovalTool, []core.Content{core.TextContent("denied by user")}, true)
+	denied := core.NewToolResultMessage(msg.Content[len(msg.Content)-1].ToolCallID, ApprovalTool, []core.Content{core.TextContent("denied by user")}, true)
 	ch, err = p.Stream(context.Background(), request("sess2", user, *msg, denied))
 	if err != nil {
 		t.Fatal(err)
@@ -152,11 +153,13 @@ func TestDeniedApprovalRejectsCall(t *testing.T) {
 func TestNothingToSendStartsNothing(t *testing.T) {
 	p, _ := startFake(t)
 	answered := core.Message{Role: "assistant", Content: []core.Content{core.TextContent("ok")}}
+	hi := core.NewUserMessage("hi")
+	saveMark("sess3", messageKey(hi))
 	for name, req := range map[string]core.Request{
 		// A restart's continue, or a retry of a finished turn: agy is never
 		// asked the same thing twice by moa.
-		"no new message":  request("sess3", core.NewUserMessage("hi"), answered),
-		"only a snapshot": request("sess3", core.NewUserMessage("<foryou_snapshot>x</foryou_snapshot>")),
+		"no new message":  request("sess3", hi, answered),
+		"only a snapshot": request("sess3b", core.NewUserMessage("<foryou_snapshot>x</foryou_snapshot>")),
 	} {
 		if _, err := p.Stream(context.Background(), req); !errors.Is(err, ErrNothingToSend) {
 			t.Errorf("%s: err = %v, want ErrNothingToSend", name, err)
@@ -164,6 +167,17 @@ func TestNothingToSendStartsNothing(t *testing.T) {
 	}
 	if len(p.sessions) != 0 {
 		t.Error("agy started with nothing to send")
+	}
+}
+
+// A rewind or an edit removed the last message agy received: moa refuses
+// rather than continue a conversation agy remembers differently.
+func TestDivergedHistoryIsRefused(t *testing.T) {
+	p, _ := startFake(t)
+	saveMark("sess5", messageKey(core.NewUserMessage("rewound away")))
+	_, err := p.Stream(context.Background(), request("sess5", core.NewUserMessage("B")))
+	if !errors.Is(err, ErrHistoryDiverged) || !errors.Is(err, core.ErrNoAutoRetry) {
+		t.Fatalf("err = %v, want ErrHistoryDiverged, not retried", err)
 	}
 }
 

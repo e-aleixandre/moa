@@ -20,14 +20,28 @@ type agySession struct {
 	conn *rpcConn
 	id   string // ACP session id
 
-	mu       sync.Mutex
-	queue    []turnEvent
-	signal   chan struct{} // non-blocking wake for the queue reader
-	tools    map[string]*toolState
-	turn     bool    // a session/prompt is in flight
-	waiting  [][]any // prompts that arrived during a turn, sent after it
-	options  []configOption
-	lastUsed time.Time
+	mu     sync.Mutex
+	queue  []turnEvent
+	signal chan struct{} // non-blocking wake for the queue reader
+	tools  map[string]*toolState
+	// turn is true while a session/prompt is in flight; the goroutine that
+	// sent it clears it. gen numbers the prompts; the output of every prompt
+	// up to dropGen (a stopped turn) is discarded.
+	turn    bool
+	gen     int
+	dropGen int
+	// waiting is the prompt that arrived during a turn, sent when it ends.
+	waiting *prompt
+	// mark is the last user message agy received (see messageKey).
+	mark      string
+	options   []configOption
+	lastUsed  time.Time
+	closeOnce sync.Once
+}
+
+type prompt struct {
+	blocks []any
+	mark   string
 }
 
 type turnEvent struct {
@@ -75,8 +89,13 @@ type configOption struct {
 	} `json:"options"`
 }
 
+// push queues agy's output for the relay, dropping a stopped turn's.
 func (s *agySession) push(ev turnEvent) {
 	s.mu.Lock()
+	if s.gen <= s.dropGen && ev.kind != "done" {
+		s.mu.Unlock()
+		return
+	}
 	s.queue = append(s.queue, ev)
 	s.mu.Unlock()
 	select {
@@ -247,20 +266,64 @@ func (s *agySession) answer(t *toolState, allow bool) {
 	_ = s.conn.reply(perm.rpcID, map[string]any{"outcome": map[string]any{"outcome": "cancelled"}})
 }
 
-// startPrompt sends one prompt; its end arrives as a "done" event.
-func (s *agySession) startPrompt(blocks []any) {
+// startPrompt sends one prompt and owns its turn: when agy answers, it ends
+// the turn, sends the prompt that waited for it, or reports the end to the
+// relay. Caller holds s.mu.
+func (s *agySession) startPrompt(p prompt) {
 	s.turn = true
+	s.gen++
+	gen := s.gen
+	s.mark = p.mark
+	saveMark(s.key, s.mark)
 	go func() {
 		var res struct {
 			StopReason string `json:"stopReason"`
 		}
-		err := s.conn.call(context.Background(), "session/prompt", map[string]any{"sessionId": s.id, "prompt": blocks}, &res)
+		err := s.conn.call(context.Background(), "session/prompt", map[string]any{"sessionId": s.id, "prompt": p.blocks}, &res)
+		s.mu.Lock()
+		s.turn = false
+		next := s.waiting
+		s.waiting = nil
+		if next != nil && err == nil {
+			s.startPrompt(*next)
+			s.mu.Unlock()
+			return
+		}
+		// A waiting prompt is not sent after an error: it stays after the
+		// mark and goes with the next message. A stopped turn nobody waits
+		// on ends silently.
+		stopped := gen <= s.dropGen
+		s.mu.Unlock()
+		if stopped && next == nil {
+			return
+		}
 		s.push(turnEvent{kind: "done", stop: res.StopReason, err: err})
 	}()
 }
 
-func (s *agySession) cancel() {
-	_ = s.conn.notify("session/cancel", map[string]any{"sessionId": s.id})
+// stop ends what moa waits on (Stop): it cancels agy's turn, answers its
+// pending permission requests "cancelled" as ACP asks, and drops the prompt
+// that waited and the stopped turn's remaining output.
+func (s *agySession) stop() {
+	s.mu.Lock()
+	turn := s.turn
+	s.dropGen = s.gen
+	s.queue = nil
+	s.waiting = nil
+	var pending []*permRequest
+	for _, t := range s.tools {
+		if t.perm != nil && !t.perm.answered {
+			t.perm.answered = true
+			pending = append(pending, t.perm)
+		}
+	}
+	s.mu.Unlock()
+	if turn {
+		_ = s.conn.notify("session/cancel", map[string]any{"sessionId": s.id})
+	}
+	for _, perm := range pending {
+		_ = s.conn.reply(perm.rpcID, map[string]any{"outcome": map[string]any{"outcome": "cancelled"}})
+	}
 }
 
 // setOption applies a session config option (model, thought level) by its
@@ -286,13 +349,16 @@ func (s *agySession) setOption(ctx context.Context, category, value string) erro
 }
 
 func (s *agySession) close() {
-	if s.cmd != nil && s.cmd.Process != nil {
-		_ = s.cmd.Process.Kill()
-		_ = s.cmd.Wait()
-	}
+	s.closeOnce.Do(func() {
+		if s.cmd != nil && s.cmd.Process != nil {
+			_ = s.cmd.Process.Kill()
+			_ = s.cmd.Wait()
+		}
+	})
 }
 
-// resultText renders an agy tool call's outcome for its card.
+// resultText renders an agy tool call's outcome for its card. Caller holds
+// the session's mu.
 func (t *toolState) resultText() string {
 	var b strings.Builder
 	for _, raw := range t.content {
