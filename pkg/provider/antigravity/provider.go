@@ -62,7 +62,7 @@ func Default(version string) *Provider {
 func (p *Provider) Stream(ctx context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
 	sessionID := sessionIDFromKey(req.Options.PromptCacheKey)
 	if sessionID == "" {
-		return nil, core.NoAutoRetry(fmt.Errorf("Antigravity runs as a session of its own, not as a subagent or helper model"))
+		return nil, core.NoAutoRetry(fmt.Errorf("a Gemini (Antigravity) model runs as a session of its own, not as a subagent or helper model"))
 	}
 	s := p.existing(sessionID)
 	mark := loadEntry(sessionID).Mark
@@ -157,7 +157,7 @@ var ErrNothingToSend = errors.New("nothing new to send to Antigravity: write a m
 
 // ErrResumeFailed is returned when agy can't reopen the conversation of a
 // session that already has one.
-var ErrResumeFailed = errors.New("Gemini couldn't reopen this conversation. Start a new session to continue")
+var ErrResumeFailed = errors.New("this conversation couldn't be reopened in Gemini: start a new session to continue")
 
 // ErrHistoryDiverged is returned when the last message agy received is no
 // longer in the session's history (it was rewound or edited elsewhere).
@@ -206,9 +206,9 @@ func messageKey(m core.Message) string {
 		return m.MsgID
 	}
 	h := sha256.New()
-	fmt.Fprintf(h, "%d\x00", m.Timestamp)
+	_, _ = fmt.Fprintf(h, "%d\x00", m.Timestamp)
 	for _, c := range m.Content {
-		fmt.Fprintf(h, "%s\x00%s\x00%s\x00", c.Type, c.Text, c.Data)
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00%s\x00", c.Type, c.Text, c.Data)
 	}
 	return "h:" + hex.EncodeToString(h.Sum(nil)[:12])
 }
@@ -539,7 +539,7 @@ func (p *Provider) open(ctx context.Context, sessionID string, fullAccess bool) 
 		if err := s.conn.call(initCtx, "session/new", params, &res); err != nil {
 			var re *rpcError
 			if errors.As(err, &re) && re.Code == -32000 {
-				return fail(fmt.Errorf("Antigravity is not signed in: run `agy acp --login` on the server"))
+				return fail(fmt.Errorf("the Antigravity CLI is not signed in: run `agy acp --login` on the server"))
 			}
 			return fail(fmt.Errorf("antigravity: session/new: %w", err))
 		}

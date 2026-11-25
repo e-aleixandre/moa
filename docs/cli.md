@@ -156,6 +156,7 @@ secret; store it in the provider now):`. See [Event hooks](./automation.md#event
 | `grok-4.6-build` | `grok-4.6` (the subscription backend's name for it) |
 | `grok-4.5-build` | `grok-4.5` (the subscription backend's name for it) |
 | `muse` | `muse-spark-1.3` (Meta) |
+| `gemini` | `antigravity` (Gemini through the Antigravity CLI, `agy acp`, signed in with your Google plan) |
 | `sol` | `gpt-6.2-sol` |
 | `terra` | `gpt-6.1-terra` |
 | `luna` | `gpt-6-luna` |

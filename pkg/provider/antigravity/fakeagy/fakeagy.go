@@ -40,7 +40,7 @@ func Serve() {
 	log, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if log != nil {
 		b, _ := json.Marshal(os.Args[1:])
-		fmt.Fprintf(log, "{\"argv\":%s}\n", b)
+		_, _ = fmt.Fprintf(log, "{\"argv\":%s}\n", b)
 	}
 	mode := os.Getenv("FAKE_AGY_MODE")
 	prompts := 0
@@ -48,7 +48,7 @@ func Serve() {
 		var m message
 		_ = json.Unmarshal(in.Bytes(), &m)
 		if log != nil {
-			fmt.Fprintln(log, in.Text())
+			_, _ = fmt.Fprintln(log, in.Text())
 		}
 		// FAKE_AGY_MODE scripts the first prompt of a process.
 		if mode != "" && m.Method == "session/prompt" {

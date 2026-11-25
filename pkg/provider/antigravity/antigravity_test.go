@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/e-aleixandre/moa/internal/testenv"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/provider/antigravity/fakeagy"
 )
@@ -18,7 +19,7 @@ func TestMain(m *testing.M) {
 		fakeagy.Serve()
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	os.Exit(testenv.Run(m))
 }
 
 func startFake(t *testing.T) (*Provider, string) {

@@ -74,7 +74,7 @@ func TestSwitchIntoOrOutOfGeminiNeedsAnEmptySession(t *testing.T) {
 	reviewSend(t, mgr, sess.ID, "hello")
 	reviewWaitIdle(t, mgr, sess.ID, 10*time.Second)
 	err = sess.runtime.Bus.Execute(bus.SwitchModel{ModelSpec: "sonnet"})
-	if err == nil || !strings.Contains(err.Error(), "Start a new session") {
+	if err == nil || !strings.Contains(err.Error(), "start a new session") {
 		t.Fatalf("switch out of Gemini with history: err = %v", err)
 	}
 }

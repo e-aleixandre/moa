@@ -52,7 +52,7 @@ func registerConfigHandlers(sctx *SessionContext) {
 		// Antigravity keeps its own history: neither side could see what the
 		// other did, so a conversation stays on one side of the switch.
 		if (newModel.Provider == "antigravity") != (sctx.Agent.Model().Provider == "antigravity") && len(sctx.Agent.Messages()) > 0 {
-			return fmt.Errorf("Gemini and other models can't share a conversation. Start a new session to switch")
+			return fmt.Errorf("a session with messages can't switch between Gemini and another model: start a new session to switch")
 		}
 		newProvider, err := sctx.ProviderFactory(newModel)
 		if err != nil {
