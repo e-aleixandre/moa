@@ -63,6 +63,24 @@ func Serve() {
 				// A long turn that has produced nothing yet.
 				promptID = m.ID
 				continue
+			case mode == "gate" && prompts == 1:
+				// REVIEW2: two mirrored calls, each released by a file.
+				id := m.ID
+				go func() {
+					for i, gate := range []string{"gate1", "gate2"} {
+						tid := fmt.Sprintf("g%d", i)
+						update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": tid, "title": "Read " + tid, "kind": "read", "status": "in_progress"})
+						update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": tid, "status": "completed", "content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "ok"}}}})
+						for {
+							if _, err := os.Stat(os.Getenv("FAKE_GATE_DIR") + "/" + gate); err == nil {
+								break
+							}
+							time.Sleep(10 * time.Millisecond)
+						}
+					}
+					send(map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{"stopReason": "end_turn"}})
+				}()
+				continue
 			case mode == "crash":
 				os.Exit(3)
 			case mode == "unknown" && prompts == 1:
@@ -100,7 +118,11 @@ func Serve() {
 		switch m.Method {
 		case "initialize":
 			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{"protocolVersion": 1}})
-		case "session/new", "session/resume":
+		case "session/resume", "session/new":
+			if m.Method == "session/resume" && os.Getenv("FAKE_AGY_NORESUME") == "1" { // REVIEW2
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32002, "message": "conversation not found"}})
+				continue
+			}
 			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{"sessionId": "s1", "configOptions": []any{
 				map[string]any{"id": "model", "category": "model", "currentValue": "flash", "options": []any{map[string]any{"value": "flash"}, map[string]any{"value": "pro"}}},
 				map[string]any{"id": "thought", "category": "thought_level", "currentValue": "low", "options": []any{map[string]any{"value": "low", "name": "Low"}, map[string]any{"value": "high", "name": "High"}, map[string]any{"value": "max", "name": "Max"}}},

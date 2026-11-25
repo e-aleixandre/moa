@@ -112,17 +112,33 @@ func (p *Provider) Stream(ctx context.Context, req core.Request) (<-chan core.As
 	}
 	if next != nil {
 		s.mu.Lock()
-		if s.turn {
+		// Recomputed under the lock that decides: the turn may have ended
+		// meanwhile and sent the earlier waiting prompt, moving the mark.
+		next, ok = newPrompt(req.Messages, s.mark)
+		switch {
+		case !ok:
+			s.mu.Unlock()
+			return nil, core.NoAutoRetry(ErrHistoryDiverged)
+		case next == nil:
+		case s.turn:
 			// A message that arrives during a turn waits for it to end: a
 			// session/prompt sent mid-turn can kill the session
 			// (antigravity-cli #1448). It replaces an earlier waiting one,
 			// since it carries every message after the mark.
 			s.waiting = next
-		} else {
+		default:
 			s.startPrompt(*next)
 		}
 		s.mu.Unlock()
 	}
+	// The run's context ends with the run. If agy's turn is still open then
+	// (Stop, even on an approval card, an error, a deleted session), cancel
+	// it; after a normal end there is no turn and this does nothing.
+	context.AfterFunc(ctx, func() {
+		if s.turnRunning() {
+			s.stop()
+		}
+	})
 
 	ch := make(chan core.AssistantEvent, 64)
 	go p.relay(ctx, s, req.Model, ch)
@@ -133,6 +149,10 @@ func (p *Provider) Stream(ctx context.Context, req core.Request) (<-chan core.As
 // and agy has no turn in flight: there is nothing to ask it, and moa never
 // repeats an earlier prompt on its own.
 var ErrNothingToSend = errors.New("nothing new to send to Antigravity: write a message")
+
+// ErrResumeFailed is returned when agy can't reopen the conversation of a
+// session that already has one.
+var ErrResumeFailed = errors.New("Gemini couldn't reopen this conversation. Start a new session to continue")
 
 // ErrHistoryDiverged is returned when the last message agy received is no
 // longer in the session's history (it was rewound or edited elsewhere).
@@ -503,8 +523,10 @@ func (p *Provider) open(ctx context.Context, sessionID string, fullAccess bool) 
 		if err := s.conn.call(initCtx, "session/resume", params, &res); err == nil {
 			res.SessionID = prev
 			resumed = true
-		} else {
-			slog.Warn("antigravity: resume failed, starting a new conversation", "session", sessionID, "error", err)
+		} else if entry.Mark != "" {
+			// A new conversation would not know what moa's transcript shows.
+			slog.Warn("antigravity: resume failed", "session", sessionID, "error", err)
+			return fail(ErrResumeFailed)
 		}
 		delete(params, "sessionId")
 	}
