@@ -94,6 +94,29 @@ func ProviderSupportsDeferredTools(p Provider, modelID string) bool {
 	return false
 }
 
+// ProviderToolResolver is implemented by a provider whose backend is itself an
+// agent that runs its own tools (Antigravity). The calls it reports are
+// resolved by the provider, not the session's registry: executing one only
+// mirrors what the backend does.
+type ProviderToolResolver interface {
+	ProviderTool(name string) (Tool, bool)
+}
+
+// ProviderTool resolves name against p's own tools, following decorators.
+func ProviderTool(p Provider, name string) (Tool, bool) {
+	for p != nil {
+		if r, ok := p.(ProviderToolResolver); ok {
+			return r.ProviderTool(name)
+		}
+		unwrapper, ok := p.(ProviderUnwrapper)
+		if !ok {
+			return Tool{}, false
+		}
+		p = unwrapper.Unwrap()
+	}
+	return Tool{}, false
+}
+
 // Request contains everything needed for an LLM call.
 type Request struct {
 	Model    Model

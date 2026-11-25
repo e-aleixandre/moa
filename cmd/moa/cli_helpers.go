@@ -10,6 +10,7 @@ import (
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/provider"
+	"github.com/e-aleixandre/moa/pkg/provider/antigravity"
 )
 
 // ProviderBuildResult wraps a provider with optional auth notice.
@@ -35,6 +36,10 @@ func buildProvider(model core.Model, authStore *auth.Store) (ProviderBuildResult
 func buildProviderWithClient(model core.Model, authStore *auth.Store, httpClient *http.Client) (ProviderBuildResult, error) {
 	m := model
 	m.Provider = providerNameForModel(model)
+	if m.Provider == antigravity.ProviderName {
+		// Antigravity signs in inside agy itself: moa holds no credential.
+		return ProviderBuildResult{Provider: antigravity.Default(version)}, nil
+	}
 	p := &snapshotProvider{model: m, authStore: authStore, httpClient: httpClient}
 
 	snap, _ := authStore.PeekSnapshot(m.Provider)

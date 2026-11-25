@@ -15,6 +15,7 @@ import (
 
 	"github.com/e-aleixandre/moa/pkg/auth"
 	"github.com/e-aleixandre/moa/pkg/core"
+	"github.com/e-aleixandre/moa/pkg/provider/antigravity"
 	"github.com/e-aleixandre/moa/pkg/provider/openai"
 	"github.com/e-aleixandre/moa/pkg/push"
 	"github.com/e-aleixandre/moa/pkg/release"
@@ -148,6 +149,13 @@ func runServe(args []string) {
 		UpdateChecker:      release.NewChecker(release.Info{Version: version, Commit: commit, Date: date}),
 		UpdateCheckEnabled: core.IsUpdateCheckEnabled(moaCfg),
 	})
+	antigravity.LoadCachedModels()
+	antigravity.Default(version).CWD = func(sessionID string) string {
+		if sess, ok := mgr.Get(sessionID); ok {
+			return sess.CWD
+		}
+		return ""
+	}
 
 	// Settings → Providers administers the same live store every provider
 	// request resolves from, so a saved login applies on the next request.

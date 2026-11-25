@@ -124,7 +124,11 @@ export function PermissionPrompt({ session }) {
   };
 
   const bash = !perm.tool_name || perm.tool_name === "bash";
-  const title = bash ? undefined : `moa wants to run ${perm.tool_name}`;
+  // Antigravity asks about its own calls: name the agent and its action.
+  const gemini = perm.tool_name === 'antigravity_approval';
+  const title = bash ? undefined
+    : gemini ? `Gemini wants to: ${perm.args?.title || perm.args?.kind || 'run a tool'}`
+    : `moa wants to run ${perm.tool_name}`;
 
   return (
     <PermissionCard

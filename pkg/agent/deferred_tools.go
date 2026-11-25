@@ -56,6 +56,9 @@ func (cfg *loopConfig) lookupTool(name string) (core.Tool, bool) {
 		}
 		return core.Tool{}, false
 	}
+	if t, ok := core.ProviderTool(cfg.provider, name); ok {
+		return t, true
+	}
 	return cfg.tools.Get(name)
 }
 

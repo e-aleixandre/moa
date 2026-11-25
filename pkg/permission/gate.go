@@ -43,6 +43,9 @@ var readOnly = map[string]bool{
 	"history": true, // reads only this session's own transcript
 	// Ranks tool definitions already in the request; core reserves the name.
 	"tool_search": true,
+	// Mirrors a call Antigravity runs on its own authority; the calls it asks
+	// about come as "antigravity_approval", which is not read-only.
+	"antigravity": true,
 }
 
 // selfApproving tools always show the user a card for the exact action and

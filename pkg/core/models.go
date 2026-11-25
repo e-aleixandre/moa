@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 var gpt6AstraReasoningEfforts = []string{"low", "medium", "high", "xhigh", "max"}
@@ -286,6 +287,15 @@ var knownModels = map[string]Model{
 		},
 	},
 
+	// --- Antigravity ---
+	// agy's own default model. The models agy advertises are registered at
+	// run time (RegisterProviderModels) as "agy.<value>".
+	"antigravity": {
+		ID: "antigravity", Provider: "antigravity", Name: "Gemini (Antigravity default)",
+		// Paid by the user's Google plan, not per token.
+		Pricing: &Pricing{},
+	},
+
 	// --- Meta ---
 	// MaxOutput is not published. api.meta.ai accepts large
 	// max_output_tokens values but reserves that capacity against the account's
@@ -323,10 +333,56 @@ var knownModels = map[string]Model{
 // accepts. A nil result preserves the Responses API's existing behavior for
 // models without an explicit capability declaration.
 func ReasoningEffortsForModel(model Model) []string {
+	providerModels.RLock()
+	efforts := providerModels.efforts[strings.ToLower(model.ID)]
+	providerModels.RUnlock()
+	if len(efforts) > 0 {
+		return efforts
+	}
 	if usesShiftedGPT6Efforts(model) {
 		return gpt6AstraReasoningEfforts
 	}
 	return nil
+}
+
+// providerModels holds the models a provider advertises at run time, by id.
+// They never shadow a built-in id.
+var providerModels struct {
+	sync.RWMutex
+	byID map[string]Model
+	// efforts labels the selector's thinking positions of a model that names
+	// its levels itself (ReasoningEffortsForModel).
+	efforts map[string][]string
+}
+
+// RegisterProviderModels replaces the run-time models of provider, all of
+// which share the thinking labels efforts (nil for the usual ones).
+func RegisterProviderModels(provider string, models []Model, efforts []string) {
+	providerModels.Lock()
+	defer providerModels.Unlock()
+	next := map[string]Model{}
+	nextEfforts := map[string][]string{}
+	for id, m := range providerModels.byID {
+		if m.Provider != provider {
+			next[id] = m
+			nextEfforts[id] = providerModels.efforts[id]
+		}
+	}
+	for _, m := range models {
+		id := strings.ToLower(m.ID)
+		if _, builtIn := knownModels[id]; !builtIn {
+			next[id] = m
+			nextEfforts[id] = efforts
+		}
+	}
+	providerModels.byID, providerModels.efforts = next, nextEfforts
+}
+
+func providerModel(id string) (Model, bool) {
+	providerModels.RLock()
+	defer providerModels.RUnlock()
+	m, ok := providerModels.byID[id]
+	return m, ok
 }
 
 func init() {
@@ -367,6 +423,8 @@ var modelAliases = map[string]string{
 	"grok-4.5-build": "grok-4.5",
 	// Meta
 	"muse": "muse-spark-1.3",
+	// Antigravity
+	"gemini": "antigravity",
 }
 
 // ResolveModel resolves a model specifier to a fully-populated Model.
@@ -454,6 +512,9 @@ func resolveModelSpec(spec string) (m Model, ok bool, mismatch bool) {
 	if m, ok := knownModels[lower]; ok {
 		return m, true, false
 	}
+	if m, ok := providerModel(lower); ok {
+		return m, true, false
+	}
 
 	// Fallback: match by display Name (handles legacy session data
 	// that stored "Claude Sonnet 4.6" instead of "claude-sonnet-4-6").
@@ -487,6 +548,9 @@ func resolveModelSpec(spec string) (m Model, ok bool, mismatch bool) {
 		}
 
 		// Direct lookup of model ID part.
+		if m, ok := providerModel(lowerID); ok && m.Provider == provider {
+			return m, true, false
+		}
 		if m, ok := knownModels[lowerID]; ok {
 			if m.Provider != provider {
 				return Model{ID: modelID, Provider: provider}, false, true
@@ -527,6 +591,8 @@ var modelDisplayOrder = []string{
 	"claude-opus-4-8",
 	"claude-haiku-5-5",
 	"claude-haiku-4-5-20251001",
+	// Antigravity (its advertised models follow, unranked)
+	"antigravity",
 	// Meta
 	"muse-spark-1.3",
 	"muse-spark-1.3-contributor",
@@ -562,6 +628,11 @@ func ListModels() []ModelEntry {
 		}
 		byID[m.ID] = m
 	}
+	providerModels.RLock()
+	for _, m := range providerModels.byID {
+		byID[m.ID] = m
+	}
+	providerModels.RUnlock()
 
 	// Build reverse alias map: canonical ID → shortest alias. Equal-length
 	// aliases use lexical order so map iteration cannot change what is shown.

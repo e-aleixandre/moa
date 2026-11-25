@@ -480,8 +480,9 @@ func handleListModels(mgr *Manager) http.HandlerFunc {
 		// answer.
 		DaybreakPending bool `json:"daybreak_pending,omitempty"`
 	}
-	entries := core.ListModels()
 	return func(w http.ResponseWriter, _ *http.Request) {
+		// Listed per request: a provider may advertise models at run time.
+		entries := core.ListModels()
 		var availability core.DaybreakAvailability
 		if mgr != nil && mgr.daybreakCatalog != nil {
 			availability = mgr.daybreakCatalog()

@@ -36,6 +36,8 @@ export function toolVerb(name) {
   if (n === 'ask_user')                      return { verb: '❓ questions', cls: 'ask-user' };
   if (n === 'send_file')                     return { verb: '📤 send', cls: 'send-file' };
   if (n === 'subagent')                      return { verb: '⚡ subagent', cls: 'subagent' };
+  // Calls Antigravity runs itself; the approval variant is one it asked about.
+  if (n === 'antigravity' || n === 'antigravity_approval') return { verb: 'Gemini', cls: '' };
   return { verb: name, cls: '' };
 }
 
@@ -54,6 +56,8 @@ export function toolPath(name, args) {
     return a.action === 'search' ? (a.query || '') : (a.path || '');
   if (n === 'history')
     return a.action === 'search' ? (a.query || a.role || '') : (a.id || '');
+  if (n === 'antigravity' || n === 'antigravity_approval')
+    return a.title || a.kind || '';
   if (n === 'send_file') {
     const p = a.path || '';
     return p.length > 80 ? p.split('/').pop() : p;
@@ -105,6 +109,7 @@ export function secretToolLabel(name) {
   const n = (name || '').toLowerCase();
   if (n === 'run_with_secret') return 'Password used';
   if (n === 'browser_fill_secret') return 'Signed in';
+  if (n === 'antigravity' || n === 'antigravity_approval') return 'Gemini';
   return '';
 }
 

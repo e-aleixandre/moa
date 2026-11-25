@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/e-aleixandre/moa/internal/testenv"
+	"github.com/e-aleixandre/moa/pkg/provider/antigravity/fakeagy"
 )
 
 // TestMain keeps this package's tests away from the developer's real moa config.
@@ -17,6 +18,10 @@ import (
 // config with "ask_user_async": false runs. The tests that only make sense with
 // it on pin it with pinAsyncAskUser.
 func TestMain(m *testing.M) {
+	if fakeagy.Active() {
+		fakeagy.Serve()
+		os.Exit(0)
+	}
 	// The crash children of the asynchronous tests are asynchronous whatever
 	// the suite's mode: they are re-executions of those tests.
 	askUserAsyncDefault.Store(askUserAsyncBuildDefault && os.Getenv("MOA_TEST_ASK_ASYNC") != "0" || os.Getenv(f1CrashChildEnv) != "")
