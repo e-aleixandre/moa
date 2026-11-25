@@ -1637,7 +1637,13 @@ func (a *Agent) startFreshNative(nc core.NativeContext) (*core.FreshPayload, err
 	if err != nil || !cut {
 		return nil, err
 	}
-	return &core.FreshPayload{FirstKeptMsgID: msgs[0].MsgID, TokensBefore: before}, nil
+	// The tree keeps a compaction's summary as its boundary, not as an entry:
+	// keep from the first real message so a reload finds it.
+	first := 0
+	for first < len(msgs)-1 && msgs[first].Role == "compaction_summary" {
+		first++
+	}
+	return &core.FreshPayload{FirstKeptMsgID: msgs[first].MsgID, TokensBefore: before}, nil
 }
 
 // compactNative has a backend that keeps its own context compact it, and
