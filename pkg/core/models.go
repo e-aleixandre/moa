@@ -330,14 +330,15 @@ var knownModels = map[string]Model{
 }
 
 // ReasoningEffortsForModel returns the validated reasoning efforts a model
-// accepts. A nil result preserves the Responses API's existing behavior for
+// accepts; empty for a provider model that names no levels at all. A nil
+// result preserves the Responses API's existing behavior for
 // models without an explicit capability declaration.
 func ReasoningEffortsForModel(model Model) []string {
 	providerModels.RLock()
-	efforts := providerModels.efforts[strings.ToLower(model.ID)]
+	efforts, named := providerModels.efforts[strings.ToLower(model.ID)]
 	providerModels.RUnlock()
-	if len(efforts) > 0 {
-		return efforts
+	if named && efforts != nil {
+		return efforts // empty: a model with no thinking levels at all
 	}
 	if usesShiftedGPT6Efforts(model) {
 		return gpt6AstraReasoningEfforts
@@ -355,9 +356,10 @@ var providerModels struct {
 	efforts map[string][]string
 }
 
-// RegisterProviderModels replaces the run-time models of provider, all of
-// which share the thinking labels efforts (nil for the usual ones).
-func RegisterProviderModels(provider string, models []Model, efforts []string) {
+// RegisterProviderModels replaces the run-time models of provider, and the
+// thinking labels of each of its models that names its levels itself
+// (efforts, by model id).
+func RegisterProviderModels(provider string, models []Model, efforts map[string][]string) {
 	providerModels.Lock()
 	defer providerModels.Unlock()
 	next := map[string]Model{}
@@ -372,8 +374,11 @@ func RegisterProviderModels(provider string, models []Model, efforts []string) {
 		id := strings.ToLower(m.ID)
 		if _, builtIn := knownModels[id]; !builtIn {
 			next[id] = m
-			nextEfforts[id] = efforts
 		}
+	}
+	// Labels may also name a built-in model of the provider (its default).
+	for id, e := range efforts {
+		nextEfforts[strings.ToLower(id)] = e
 	}
 	providerModels.byID, providerModels.efforts = next, nextEfforts
 }

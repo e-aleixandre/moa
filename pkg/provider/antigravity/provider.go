@@ -553,7 +553,7 @@ func (p *Provider) open(ctx context.Context, sessionID string, fullAccess bool) 
 	}
 	s.id = res.SessionID
 	s.options = res.ConfigOptions
-	learnModels(res.ConfigOptions)
+	s.learnModels(initCtx)
 	p.mu.Lock()
 	p.sessions[sessionID] = s
 	p.mu.Unlock()
@@ -586,21 +586,29 @@ func (p *Provider) reap() {
 	}
 }
 
-// thoughtLevel maps moa's thinking position (off, low, medium, high, xhigh)
-// onto agy's thought_level choices by order: the selector labels those
-// positions with agy's own names (Model.ReasoningEfforts).
+// thoughtLevel is agy's value for moa's thinking level among the levels the
+// session's current model offers: the same level by name (moa's xhigh is
+// agy's xhigh), else the highest one below it; off, which agy doesn't have,
+// is the lowest. "" when the model offers no levels (an orchestrator).
 func thoughtLevel(s *agySession, level string) string {
-	pos := slices.Index(core.ThinkingLevels, level)
-	if pos < 0 {
+	o := findOption(s.options, "thought_level")
+	if level == "" || o == nil || len(o.Options) == 0 {
 		return ""
 	}
-	for _, o := range s.options {
-		if o.Category != "thought_level" || len(o.Options) == 0 {
-			continue
-		}
-		return o.Options[min(pos, len(o.Options)-1)].Value
+	want := slices.Index(core.ThinkingLevels, level)
+	if want < 0 {
+		return ""
 	}
-	return ""
+	best := o.Options[0].Value
+	for _, c := range o.Options {
+		if strings.EqualFold(c.Value, level) {
+			return c.Value
+		}
+		if rank := slices.Index(core.ThinkingLevels, strings.ToLower(c.Value)); rank >= 0 && rank <= want {
+			best = c.Value
+		}
+	}
+	return best
 }
 
 // The Antigravity conversation of each moa session and the last user message

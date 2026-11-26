@@ -2,8 +2,11 @@ package antigravity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +72,7 @@ func drain(t *testing.T, ch <-chan core.AssistantEvent) (*core.Message, string) 
 
 func request(sessionID string, msgs ...core.Message) core.Request {
 	return core.Request{
-		Model:    core.Model{ID: "pro", Provider: ProviderName},
+		Model:    core.Model{ID: "agy.carbon", Provider: ProviderName},
 		System:   "MOA SYSTEM PROMPT",
 		Tools:    []core.ToolSpec{{Name: "bash"}},
 		Messages: msgs,
@@ -126,7 +129,7 @@ func TestTurnWithApprovedToolCall(t *testing.T) {
 	if !strings.Contains(sent, `"clientInfo":{"name":"moa"`) {
 		t.Errorf("initialize without clientInfo moa:\n%s", sent)
 	}
-	if !strings.Contains(sent, `"value":"pro"`) {
+	if !strings.Contains(sent, `"value":"carbon"`) {
 		t.Errorf("model not selected:\n%s", sent)
 	}
 }
@@ -190,35 +193,83 @@ func TestSubagentIsRefused(t *testing.T) {
 	}
 }
 
-func TestModelsAndThoughtLevelsAreLearned(t *testing.T) {
+// Each agy model offers its own thought levels, which moa learns, and a
+// turn sets one the model really offers: moa's high is agy's high, xhigh is
+// xhigh where it exists and the highest level otherwise, and a model with no
+// levels gets none. Session ee257ca7 failed with Carbon at high.
+func TestThoughtLevelExistsForTheModel(t *testing.T) {
 	p, wire := startFake(t)
-	req := request("sess4", core.NewUserMessage("hi"))
-	req.Model = core.Model{ID: "agy.flash", Provider: ProviderName}
-	req.Options.ThinkingLevel = "xhigh" // past agy's last level: its highest
+	cases := []struct{ model, level, want string }{
+		{"agy.carbon", "high", "high"},
+		{"agy.carbon", "xhigh", "high"},
+		{"agy.neon", "xhigh", "xhigh"},
+		{"agy.neon", "medium", "medium"},
+		{"agy.carbon", "low", "low"},
+		{"agy.carbon", "off", "low"},
+		{"agy.orchestrator", "high", ""}, // the fake keeps its last level; no thought call is made
+	}
+	for i, c := range cases {
+		before := len(readWire(wire))
+		req := request(fmt.Sprintf("level%d", i), core.NewUserMessage("hi"))
+		req.Model = core.Model{ID: c.model, Provider: ProviderName}
+		req.Options.ThinkingLevel = c.level
+		ch, err := p.Stream(context.Background(), req)
+		if err != nil {
+			t.Fatalf("%s at %s: %v", c.model, c.level, err)
+		}
+		drain(t, ch)
+		turn := readWire(wire)[before:]
+		got := "?"
+		if k := strings.Index(turn, `{"state":`); k >= 0 {
+			var st struct{ State struct{ Model, Level string } }
+			_ = json.Unmarshal([]byte(strings.SplitN(turn[k:], "\n", 2)[0]), &st)
+			if st.State.Model != strings.TrimPrefix(c.model, modelPrefix) {
+				t.Errorf("%s: agy on model %q", c.model, st.State.Model)
+			}
+			got = st.State.Level
+			if !strings.Contains(turn, `"configId":"thought"`) && c.want == "" {
+				got = ""
+			}
+		}
+		if got != c.want {
+			t.Errorf("%s at %s: agy got thought level %q, want %q", c.model, c.level, got, c.want)
+		}
+	}
+}
+
+func TestEachModelsThoughtLevelsAreLearned(t *testing.T) {
+	p, wire := startFake(t)
+	req := request("learn", core.NewUserMessage("hi"))
+	req.Model = core.Model{ID: ProviderName, Provider: ProviderName} // agy's default
 	ch, err := p.Stream(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	drain(t, ch)
-	m, ok := core.ResolveModel("agy.pro")
-	if efforts := core.ReasoningEffortsForModel(m); !ok || m.Provider != ProviderName || len(efforts) != 3 || efforts[2] != "Max" {
-		t.Fatalf("agy.pro = %+v, %v", m, ok)
+	want := map[string][]string{
+		"agy.neon":         {"Low", "Medium", "High", "Extra"},
+		"agy.carbon":       {"Low", "Medium", "High"},
+		"agy.orchestrator": {},
+	}
+	for id, levels := range want {
+		m, ok := core.ResolveModel(id)
+		got := core.ReasoningEffortsForModel(m)
+		if !ok || m.Provider != ProviderName || got == nil || !slices.Equal(got, levels) {
+			t.Errorf("%s: levels %#v (known %v), want %#v", id, got, ok, levels)
+		}
 	}
 	if _, err := os.Stat(modelsPath()); err != nil {
 		t.Fatalf("models not cached in moa's config: %v", err)
 	}
-	b, _ := os.ReadFile(wire)
-	if !strings.Contains(string(b), `"configId":"thought","sessionId":"s1","value":"max"`) {
-		t.Errorf("thought level not mapped to agy's highest:\n%s", b)
-	}
-	if strings.Contains(string(b), `"configId":"model"`) {
-		t.Errorf("model set although flash is agy's current one:\n%s", b)
+	// Reading the levels leaves agy on its own model: the last one set
+	// before the prompt is the default, neon.
+	w := readWire(wire)
+	w = w[:strings.Index(w, `"session/prompt"`)]
+	if k := strings.LastIndex(w, `"configId":"model"`); k >= 0 && !strings.HasPrefix(w[k:], `"configId":"model","sessionId":"s1","value":"neon"`) {
+		t.Errorf("agy left on another model:\n%s", w[k:])
 	}
 }
 
-// agy follows the session's permission mode: full access starts it with
-// --dangerously-skip-permissions, and a change restarts it at the next
-// prompt, resuming the same conversation.
 func TestFullAccessSkipsAgyPermissions(t *testing.T) {
 	p, wire := startFake(t)
 	full := false

@@ -518,7 +518,7 @@ export function ModelSelector({
             <span class="zl-kv-hint zl-data">{models.length} · {groups.length} providers</span>
             <GoIcon />
           </button>
-          {!modelOnly && (
+          {!modelOnly && thinkOpts.length > 0 && (
             <>
               <div class="zl-group"><span>Thinking</span><span class="zl-group-n zl-data">{thinkValue}</span></div>
               <div class="zl-seg" role="radiogroup" aria-label="Thinking level">

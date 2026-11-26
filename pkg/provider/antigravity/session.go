@@ -360,12 +360,30 @@ func (s *agySession) setOption(ctx context.Context, category, value string) erro
 		if !known {
 			return nil
 		}
-		if err := s.conn.call(ctx, "session/set_config_option", map[string]any{"sessionId": s.id, "configId": o.ID, "value": value}, nil); err != nil {
+		var res struct {
+			ConfigOptions []configOption `json:"configOptions"`
+		}
+		if err := s.conn.call(ctx, "session/set_config_option", map[string]any{"sessionId": s.id, "configId": o.ID, "value": value}, &res); err != nil {
 			return fmt.Errorf("antigravity: set %s: %w", category, err)
+		}
+		// agy answers with every option as it now stands: a model brings its
+		// own thought levels.
+		if len(res.ConfigOptions) > 0 {
+			s.options = res.ConfigOptions
+			return nil
 		}
 		s.options[i].CurrentValue = value
 	}
 	return nil
+}
+
+// setModel sets agy's model and returns the options that come with it.
+func (s *agySession) setModel(ctx context.Context, configID, value string) ([]configOption, error) {
+	var res struct {
+		ConfigOptions []configOption `json:"configOptions"`
+	}
+	err := s.conn.call(ctx, "session/set_config_option", map[string]any{"sessionId": s.id, "configId": configID, "value": value}, &res)
+	return res.ConfigOptions, err
 }
 
 func (s *agySession) close() {

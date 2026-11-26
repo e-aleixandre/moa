@@ -134,3 +134,19 @@ test('thinkingOptionsFor: models without backend efforts retain the standard lab
   expect(thinkingPositionFor('high', terra)).toBe('high');
   expect(thinkingOptionsFor(terra).find((option) => option.label === 'xhigh')).toMatchObject({ value: 'xhigh', bars: 4 });
 });
+
+test('thinkingOptionsFor: each Antigravity model shows its own levels, from low', () => {
+  const [neon, carbon, orchestrator] = deriveModelSpecs([
+    { id: 'agy.neon', name: 'Gemini 4 Neon (Antigravity)', provider: 'antigravity', reasoning_efforts: ['Low', 'Medium', 'High', 'Extra'] },
+    { id: 'agy.carbon', name: 'Gemini 4 Carbon (Antigravity)', provider: 'antigravity', reasoning_efforts: ['Low', 'Medium', 'High'] },
+    { id: 'agy.orchestrator', name: 'Orchestrator (Antigravity)', provider: 'antigravity', no_thinking: true },
+  ]);
+  expect(thinkingOptionsFor(neon).map(({ value, label }) => [value, label])).toEqual([
+    ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra'],
+  ]);
+  expect(thinkingOptionsFor(carbon).map(({ value, label }) => [value, label])).toEqual([
+    ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'],
+  ]);
+  expect(thinkingPositionFor('xhigh', carbon)).toBe('high');
+  expect(thinkingOptionsFor(orchestrator)).toEqual([]);
+});

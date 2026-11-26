@@ -70,6 +70,7 @@ export function deriveModelSpecs(models) {
       accent: modelAccent(m.name),
       alias: m.alias || '',
       reasoningEfforts: m.reasoning_efforts || [],
+      noThinking: !!m.no_thinking,
       daybreakSupported: !!m.daybreak_supported,
       daybreakPending: !!m.daybreak_pending,
     };
@@ -142,9 +143,11 @@ export function thinkingLevelsFor(spec, sessionProvider) {
   const provider = spec?.provider || sessionProvider;
   if (provider === "xai") return ["low", "medium", "high"];
   if (provider === "meta") return ["low", "medium", "high", "xhigh"];
-  // Antigravity names its own levels (reasoningEfforts): one position each.
+  // Antigravity names each model's own levels (reasoningEfforts), from low
+  // up: one position each. agy has no "off", and some models no levels.
+  if (provider === "antigravity" && spec?.noThinking) return [];
   if (provider === "antigravity" && spec?.reasoningEfforts?.length) {
-    return THINKING_CYCLE.slice(0, spec.reasoningEfforts.length);
+    return THINKING_CYCLE.slice(1, 1 + spec.reasoningEfforts.length);
   }
   const id = String(spec?.catalogId || spec?.id || "").toLowerCase();
   if (/fable-5|opus-5[-.]5/.test(id)) {

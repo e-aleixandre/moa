@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -18,7 +19,35 @@ type message struct {
 		Prompt []struct {
 			Text string `json:"text"`
 		} `json:"prompt"`
+		ConfigID string `json:"configId"`
+		Value    string `json:"value"`
 	} `json:"params,omitempty"`
+}
+
+// Like agy, each model offers its own thought levels, and an orchestrator
+// none; setting a level the current model doesn't offer is an error.
+var modelLevels = map[string][]string{
+	"neon":         {"low", "medium", "high", "xhigh"},
+	"carbon":       {"low", "medium", "high"},
+	"orchestrator": nil,
+}
+
+var levelNames = map[string]string{"low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra"}
+
+func configOptions(model, level string) []any {
+	opts := []any{map[string]any{"id": "model", "category": "model", "currentValue": model, "options": []any{
+		map[string]any{"value": "neon", "name": "Gemini 4 Neon"},
+		map[string]any{"value": "carbon", "name": "Gemini 4 Carbon"},
+		map[string]any{"value": "orchestrator", "name": "Orchestrator"},
+	}}}
+	if levels := modelLevels[model]; len(levels) > 0 {
+		var choices []any
+		for _, l := range levels {
+			choices = append(choices, map[string]any{"value": l, "name": levelNames[l]})
+		}
+		opts = append(opts, map[string]any{"id": "thought", "category": "thought_level", "currentValue": level, "options": choices})
+	}
+	return opts
 }
 
 // Active reports whether this process was started as the fake agy.
@@ -38,6 +67,7 @@ func Serve() {
 		send(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "s1", "update": u}})
 	}
 	var promptID json.RawMessage
+	model, level := "neon", "high"
 	logPath := os.Getenv("FAKE_AGY_LOG")
 	if logPath == "" {
 		logPath = "wire.log" // one log per process, in the session's cwd
@@ -54,6 +84,10 @@ func Serve() {
 		_ = json.Unmarshal(in.Bytes(), &m)
 		if log != nil {
 			_, _ = fmt.Fprintln(log, in.Text())
+			if m.Method == "session/prompt" {
+				b, _ := json.Marshal(map[string]string{"model": model, "level": level})
+				_, _ = fmt.Fprintf(log, "{\"state\":%s}\n", b)
+			}
 		}
 		// FAKE_AGY_MODE scripts the first prompt of a process.
 		// agy expands slash commands: /compact shrinks the context.
@@ -139,15 +173,25 @@ func Serve() {
 				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32002, "message": "conversation not found"}})
 				continue
 			}
-			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{"sessionId": "s1", "configOptions": []any{
-				map[string]any{"id": "model", "category": "model", "currentValue": "flash", "options": []any{map[string]any{"value": "flash"}, map[string]any{"value": "pro"}}},
-				map[string]any{"id": "thought", "category": "thought_level", "currentValue": "low", "options": []any{map[string]any{"value": "low", "name": "Low"}, map[string]any{"value": "high", "name": "High"}, map[string]any{"value": "max", "name": "Max"}}},
-			}}})
+			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{"sessionId": "s1", "configOptions": configOptions(model, level)}})
 			// Since agy 1.5.8: context usage at start, after each model call
 			// and after a model or thinking change.
 			update(map[string]any{"sessionUpdate": "usage_update", "used": 25000, "size": 100000})
 		case "session/set_config_option":
-			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{}})
+			switch m.Params.ConfigID {
+			case "model":
+				model = m.Params.Value
+				if !slices.Contains(modelLevels[model], level) {
+					level = "high"
+				}
+			case "thought":
+				if !slices.Contains(modelLevels[model], m.Params.Value) {
+					send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32602, "message": fmt.Sprintf("Thinking level %q is not offered for model %q", m.Params.Value, model)}})
+					continue
+				}
+				level = m.Params.Value
+			}
+			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{"configOptions": configOptions(model, level)}})
 		case "session/prompt":
 			promptID = m.ID
 			update(map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "thinking"}})

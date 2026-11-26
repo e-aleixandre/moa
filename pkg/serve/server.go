@@ -472,6 +472,9 @@ func handleListModels(mgr *Manager) http.HandlerFunc {
 		Alias            string   `json:"alias,omitempty"`
 		MaxInput         int      `json:"max_input,omitempty"`
 		ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+		// NoThinking marks a model that offers no thinking levels at all, so
+		// the selector offers none.
+		NoThinking bool `json:"no_thinking,omitempty"`
 		// DaybreakSupported is set only when the account's catalog is known
 		// to offer Daybreak on this model over the selected transport.
 		DaybreakSupported bool `json:"daybreak_supported,omitempty"`
@@ -489,13 +492,15 @@ func handleListModels(mgr *Manager) http.HandlerFunc {
 		}
 		models := make([]modelInfo, len(entries))
 		for i, e := range entries {
+			efforts := core.ReasoningEffortsForModel(e.Model)
 			models[i] = modelInfo{
 				ID:                e.Model.ID,
 				Name:              e.Model.Name,
 				Provider:          e.Model.Provider,
 				Alias:             e.Alias,
 				MaxInput:          e.Model.MaxInput,
-				ReasoningEfforts:  core.ReasoningEffortsForModel(e.Model),
+				ReasoningEfforts:  efforts,
+				NoThinking:        efforts != nil && len(efforts) == 0,
 				DaybreakSupported: availability.Known && availability.Sendable(e.Model),
 				DaybreakPending:   !availability.Known && availability.Sendable(e.Model),
 			}
