@@ -14,8 +14,10 @@ import (
 // tradeoff.
 var dangerousPatterns = []*regexp.Regexp{
 	// (a) curl/wget output piped into a shell interpreter, allowing a
-	//     sudo/env/command wrapper between the pipe and the shell.
-	regexp.MustCompile(`(?:curl|wget)\b.*\|\s*(?:(?:sudo|env|command)\s+[^|]*?)?(?:bash|dash|zsh|ash|sh)\b`),
+	//     sudo/env/command wrapper between the pipe and the shell, a wrapper or
+	//     interpreter named by path (/usr/bin/env, /bin/sh), and newlines
+	//     before the pipe.
+	regexp.MustCompile(`(?:curl|wget)\b[\s\S]*\|\s*(?:(?:\S*/)?(?:sudo|env|command)\s+[^|]*?)?(?:\S*/)?(?:bash|dash|zsh|ash|sh)\b`),
 	// (b) process substitution of a download fed to a shell: bash <(curl …).
 	regexp.MustCompile(`(?:bash|dash|zsh|ash|sh)\b[^<]*<\(\s*(?:curl|wget)\b`),
 	// (c) command substitution of a download passed to sh -c / bash -c.
