@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/e-aleixandre/moa/pkg/core"
 )
@@ -89,7 +91,28 @@ func NewFind(cfg ToolConfig) core.Tool {
 	}
 }
 
+// globEscape makes a path literal inside a glob (fd and find -path).
+func globEscape(p string) string {
+	var sb strings.Builder
+	for _, r := range p {
+		if strings.ContainsRune(`\*?[]{}`, r) {
+			sb.WriteByte('\\')
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
 func buildFindArgs(pattern, searchPath, fileType string) []string {
+	// The search root only matters as a literal prefix: fd and find match
+	// path globs against absolute paths, so an ancestor of the workspace
+	// called like the pattern's first directory must not match.
+	root := searchPath
+	if abs, err := filepath.Abs(searchPath); err == nil {
+		root = abs
+	}
+	root = globEscape(strings.TrimRight(root, "/"))
+
 	// Try fd first (respects .gitignore by default), then fdfind (the
 	// Debian/Ubuntu binary name), fallback to find
 	fdPath, err := exec.LookPath("fd")
@@ -104,6 +127,12 @@ func buildFindArgs(pattern, searchPath, fileType string) []string {
 		case "d":
 			args = append(args, "--type", "d")
 		}
+		if strings.Contains(pattern, "/") {
+			// A bare glob only matches the file name; with a slash the user
+			// means a path relative to the search root.
+			args = append(args, "--full-path")
+			pattern = root + "/**/" + pattern
+		}
 		args = append(args, "--", pattern, searchPath)
 		return args
 	}
@@ -116,6 +145,22 @@ func buildFindArgs(pattern, searchPath, fileType string) []string {
 	case "d":
 		args = append(args, "-type", "d")
 	}
-	args = append(args, "-name", pattern)
+	if strings.Contains(pattern, "/") {
+		// find's * already crosses slashes but "/**/" needs a directory in
+		// between, unlike fd where it may match none: accept both.
+		// -path matches the path as printed, i.e. as given.
+		root := globEscape(strings.TrimRight(searchPath, "/"))
+		p := "/" + pattern
+		if strings.Contains(p, "/**/") {
+			args = append(args, "(",
+				"-path", root+strings.ReplaceAll(p, "/**/", "/*/"),
+				"-o", "-path", root+strings.ReplaceAll(p, "/**/", "/"),
+				")")
+		} else {
+			args = append(args, "-path", root+p)
+		}
+	} else {
+		args = append(args, "-name", pattern)
+	}
 	return args
 }

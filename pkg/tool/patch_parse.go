@@ -43,6 +43,10 @@ const (
 type PatchOp struct {
 	Type PatchOpType
 	Line string // line content without the prefix character
+
+	// bare marks an empty context line that had no leading space at all.
+	// Trailing ones are separators; a " " line is deliberate and kept.
+	bare bool
 }
 
 // ParsePatch parses the Codex-style *** Begin Patch format.
@@ -198,10 +202,19 @@ func parseChunks(lines []string, i int) ([]PatchChunk, int, error) {
 		// @@ starts a new chunk
 		if strings.HasPrefix(line, "@@") {
 			if current != nil {
+				trimTrailingBlankContext(current)
 				chunks = append(chunks, *current)
 			}
 			ctx := strings.TrimSpace(strings.TrimPrefix(line, "@@"))
 			current = &PatchChunk{Context: ctx}
+			i++
+			continue
+		}
+
+		// A bare empty line is an empty context line (editors and models often
+		// strip the single leading space).
+		if line == "" && current != nil {
+			current.Ops = append(current.Ops, PatchOp{Type: OpContext, Line: "", bare: true})
 			i++
 			continue
 		}
@@ -237,9 +250,85 @@ func parseChunks(lines []string, i int) ([]PatchChunk, int, error) {
 	}
 
 	if current != nil {
+		trimTrailingBlankContext(current)
 		chunks = append(chunks, *current)
 	}
 	return chunks, i, nil
+}
+
+// trimTrailingBlankContext drops bare empty lines at the end of a chunk:
+// they are separators before the next header, not part of the change.
+func trimTrailingBlankContext(c *PatchChunk) {
+	for n := len(c.Ops); n > 0; n-- {
+		op := c.Ops[n-1]
+		if !op.bare {
+			c.Ops = c.Ops[:n]
+			return
+		}
+	}
+	c.Ops = c.Ops[:0]
+}
+
+// seekAnchor locates an @@ anchor. A whole-line match wins (first one, like
+// Codex). Otherwise the anchor may be the start of a line ("func main()" for
+// "func main() {"), then any part of one, both at identifier boundaries. At
+// each level exactly one line must match: guessing would edit the wrong place.
+func seekAnchor(lines []string, anchor string, startIdx int) (int, error) {
+	if idx := seekSequence(lines, []string{anchor}, startIdx); idx >= 0 {
+		return idx, nil
+	}
+	a := strings.TrimSpace(anchor)
+	if a == "" {
+		return -1, fmt.Errorf("context anchor %q not found", anchor)
+	}
+	for _, prefixOnly := range []bool{true, false} {
+		var hits []int
+		for i := startIdx; i < len(lines); i++ {
+			if anchorMatches(strings.TrimSpace(lines[i]), a, prefixOnly) {
+				hits = append(hits, i)
+			}
+		}
+		switch len(hits) {
+		case 0:
+		case 1:
+			return hits[0], nil
+		default:
+			nums := make([]string, len(hits))
+			for k, h := range hits {
+				nums[k] = fmt.Sprint(h + 1)
+			}
+			return -1, fmt.Errorf("context anchor %q is ambiguous (lines %s): use the whole line", anchor, strings.Join(nums, ", "))
+		}
+	}
+	return -1, fmt.Errorf("context anchor %q not found", anchor)
+}
+
+func isIdentByte(b byte) bool {
+	return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+}
+
+// anchorMatches reports whether line starts with (or contains) anchor with an
+// identifier boundary wherever the anchor begins or ends in an identifier
+// character, so "func main" does not match "func mainHelper()".
+func anchorMatches(line, anchor string, prefixOnly bool) bool {
+	from := 0
+	for {
+		k := strings.Index(line[from:], anchor)
+		if k < 0 {
+			return false
+		}
+		k += from
+		if prefixOnly && k != 0 {
+			return false
+		}
+		end := k + len(anchor)
+		okBefore := k == 0 || !isIdentByte(anchor[0]) || !isIdentByte(line[k-1])
+		okAfter := end == len(line) || !isIdentByte(anchor[len(anchor)-1]) || !isIdentByte(line[end])
+		if okBefore && okAfter {
+			return true
+		}
+		from = k + 1
+	}
 }
 
 // seekSequence searches for pattern in lines starting at startIdx.
@@ -345,6 +434,16 @@ func chunkNewLines(chunk PatchChunk) []string {
 	return lines
 }
 
+// dropTrailingBlankContext returns the chunk without its trailing empty
+// context lines.
+func dropTrailingBlankContext(c PatchChunk) PatchChunk {
+	n := len(c.Ops)
+	for n > 0 && c.Ops[n-1].Type == OpContext && c.Ops[n-1].Line == "" {
+		n--
+	}
+	return PatchChunk{Context: c.Context, Ops: c.Ops[:n]}
+}
+
 // applyPatchChunks applies update chunks to file content.
 // Chunks are applied with a forward-only cursor.
 func applyPatchChunks(originalContent string, chunks []PatchChunk) (string, error) {
@@ -371,11 +470,11 @@ func applyPatchChunks(originalContent string, chunks []PatchChunk) (string, erro
 			// Pure additions: find context anchor position
 			if chunk.Context != "" {
 				// Find the context anchor line
-				anchorIdx := seekSequence(lines, []string{chunk.Context}, cursor)
-				if anchorIdx < 0 {
-					return "", fmt.Errorf("chunk %d: context anchor %q not found", ci+1, chunk.Context)
+				anchorIdx, err := seekAnchor(lines, chunk.Context, cursor)
+				if err != nil {
+					return "", fmt.Errorf("chunk %d: %w", ci+1, err)
 				}
-				cursor = anchorIdx
+				cursor = anchorIdx + 1
 			}
 			// Insert at cursor position
 			replacements = append(replacements, replacement{
@@ -389,13 +488,24 @@ func applyPatchChunks(originalContent string, chunks []PatchChunk) (string, erro
 		// Use context anchor to advance cursor if present
 		searchFrom := cursor
 		if chunk.Context != "" {
-			anchorIdx := seekSequence(lines, []string{chunk.Context}, cursor)
-			if anchorIdx >= 0 {
-				searchFrom = anchorIdx
+			anchorIdx, err := seekAnchor(lines, chunk.Context, cursor)
+			if err != nil {
+				return "", fmt.Errorf("chunk %d: %w", ci+1, err)
 			}
+			searchFrom = anchorIdx
 		}
 
 		idx := seekSequence(lines, old, searchFrom)
+		if idx < 0 {
+			// A deliberate trailing " " line may just be the blank the model
+			// added after the change: retry without it, as Codex does.
+			if trimmed := dropTrailingBlankContext(chunk); len(trimmed.Ops) != len(chunk.Ops) {
+				old, new = chunkOldLines(trimmed), chunkNewLines(trimmed)
+				if len(old) > 0 {
+					idx = seekSequence(lines, old, searchFrom)
+				}
+			}
+		}
 		if idx < 0 {
 			// Build a helpful error with the first few lines
 			preview := old[0]

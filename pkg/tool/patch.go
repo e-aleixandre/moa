@@ -98,6 +98,18 @@ Format:
 				return errors.Join(errs...)
 			}
 
+			markRead := func(p string) {
+				if cfg.FileTracker != nil {
+					cfg.FileTracker.MarkRead(p)
+				}
+			}
+
+			forget := func(p string) {
+				if cfg.FileTracker != nil {
+					cfg.FileTracker.Forget(p)
+				}
+			}
+
 			var summary []string
 			apply := func() error {
 				for _, s := range staged {
@@ -127,6 +139,7 @@ Format:
 						if err := atomicWriteFile(s.path, []byte(s.content), fileModeOr(s.path, 0o644)); err != nil {
 							return fmt.Errorf("write %s: %v", s.path, err)
 						}
+						markRead(s.path)
 
 					case actionDelete:
 						if cfg.BeforeWrite != nil {
@@ -137,6 +150,7 @@ Format:
 						if err := os.Remove(s.path); err != nil {
 							return fmt.Errorf("delete %s: %v", s.path, err)
 						}
+						forget(s.path)
 
 					case actionMove:
 						// Write new file
@@ -159,6 +173,7 @@ Format:
 						if err := atomicWriteFile(s.moveTo, []byte(s.content), fileModeOr(s.path, 0o644)); err != nil {
 							return fmt.Errorf("write %s: %v", s.moveTo, err)
 						}
+						markRead(s.moveTo)
 						// Remove old file
 						if cfg.BeforeWrite != nil {
 							if err := cfg.BeforeWrite(s.path); err != nil {
@@ -168,9 +183,13 @@ Format:
 						if err := os.Remove(s.path); err != nil {
 							return fmt.Errorf("delete old %s: %v", s.path, err)
 						}
+						forget(s.path)
 					}
 
 					summary = append(summary, s.label)
+					if s.note != "" {
+						summary = append(summary, s.note)
+					}
 				}
 				return nil
 			}
@@ -217,6 +236,7 @@ type stagedChange struct {
 	display  string // path as the patch wrote it, for the display record
 	moveName string // destination as the patch wrote it (move only)
 	label    string // summary line (e.g. "A new.txt")
+	note     string // shown to the model after the summary (stale-file warning)
 }
 
 // validateAndCompute validates all hunks and computes results in memory.
@@ -274,6 +294,9 @@ func validateAndCompute(cfg ToolConfig, hunks []PatchHunk) ([]stagedChange, erro
 			if cfg.FileTracker != nil && !cfg.FileTracker.WasRead(resolved) {
 				return nil, fmt.Errorf("hunk %d: cannot delete %s — file hasn't been read", i+1, h.Path)
 			}
+			if err := checkFresh(cfg, resolved, h.Path); err != nil {
+				return nil, fmt.Errorf("hunk %d: %w", i+1, err)
+			}
 			if deleted[resolved] {
 				return nil, fmt.Errorf("hunk %d: cannot delete %s — already deleted by prior hunk", i+1, h.Path)
 			}
@@ -305,6 +328,7 @@ func validateAndCompute(cfg ToolConfig, hunks []PatchHunk) ([]stagedChange, erro
 			if cfg.FileTracker != nil && !cfg.FileTracker.WasRead(resolved) {
 				return nil, fmt.Errorf("hunk %d: cannot update %s — file hasn't been read", i+1, h.Path)
 			}
+			note := staleNote(cfg, resolved, h.Path)
 			if deleted[resolved] {
 				return nil, fmt.Errorf("hunk %d: cannot update %s — deleted by prior hunk", i+1, h.Path)
 			}
@@ -353,6 +377,7 @@ func validateAndCompute(cfg ToolConfig, hunks []PatchHunk) ([]stagedChange, erro
 					display:  h.Path,
 					moveName: h.MovePath,
 					label:    fmt.Sprintf("R %s → %s", h.Path, h.MovePath),
+					note:     note,
 				})
 			} else {
 				before := shownBefore(resolved, content)
@@ -364,6 +389,7 @@ func validateAndCompute(cfg ToolConfig, hunks []PatchHunk) ([]stagedChange, erro
 					before:  before,
 					display: h.Path,
 					label:   fmt.Sprintf("M %s", h.Path),
+					note:    note,
 				})
 			}
 		}

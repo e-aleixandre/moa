@@ -65,6 +65,10 @@ func NewWrite(cfg ToolConfig) core.Tool {
 				}
 			}
 
+			if err := checkFresh(cfg, resolved, path); err != nil {
+				return core.ErrorResult(err.Error()), nil
+			}
+
 			// Create parent directories
 			dir := filepath.Dir(resolved)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -79,6 +83,10 @@ func NewWrite(cfg ToolConfig) core.Tool {
 
 			if err := atomicWriteFile(resolved, []byte(content), fileModeOr(resolved, 0o644)); err != nil {
 				return core.ErrorResult(fmt.Sprintf("write: %v", err)), nil
+			}
+
+			if cfg.FileTracker != nil {
+				cfg.FileTracker.MarkRead(resolved)
 			}
 
 			return core.TextResult(fmt.Sprintf("Wrote %d bytes to %s", len(content), path)), nil

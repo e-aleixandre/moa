@@ -75,6 +75,8 @@ func NewEdit(cfg ToolConfig) core.Tool {
 				)), nil
 			}
 
+			note := staleNote(cfg, resolved, path)
+
 			data, err := os.ReadFile(resolved)
 			if err != nil {
 				return core.ErrorResult(fmt.Sprintf("read: %v", err)), nil
@@ -96,6 +98,10 @@ func NewEdit(cfg ToolConfig) core.Tool {
 				return core.ErrorResult(fmt.Sprintf("write: %v", err)), nil
 			}
 
+			if cfg.FileTracker != nil {
+				cfg.FileTracker.MarkRead(resolved)
+			}
+
 			diff := unifiedDiff(content, newContent, 3)
 
 			// Emit diff for streaming display.
@@ -105,6 +111,9 @@ func NewEdit(cfg ToolConfig) core.Tool {
 
 			// Include diff and match info in result.
 			label := fmt.Sprintf("Edited %s (%s)", path, matchMsg)
+			if note != "" {
+				label += "\n" + note
+			}
 			if diff != "" {
 				return core.TextResult(fmt.Sprintf("%s\n\n%s", label, diff)), nil
 			}

@@ -93,6 +93,8 @@ func NewMultiEdit(cfg ToolConfig) core.Tool {
 				)), nil
 			}
 
+			note := staleNote(cfg, resolved, path)
+
 			data, err := os.ReadFile(resolved)
 			if err != nil {
 				return core.ErrorResult(fmt.Sprintf("read: %v", err)), nil
@@ -121,6 +123,10 @@ func NewMultiEdit(cfg ToolConfig) core.Tool {
 				return core.ErrorResult(fmt.Sprintf("write: %v", err)), nil
 			}
 
+			if cfg.FileTracker != nil {
+				cfg.FileTracker.MarkRead(resolved)
+			}
+
 			diff := unifiedDiff(original, content, 3)
 
 			if onUpdate != nil && diff != "" {
@@ -128,6 +134,9 @@ func NewMultiEdit(cfg ToolConfig) core.Tool {
 			}
 
 			label := fmt.Sprintf("Applied %d edits to %s", len(edits), path)
+			if note != "" {
+				label += "\n" + note
+			}
 			if diff != "" {
 				return core.TextResult(fmt.Sprintf("%s\n\n%s", label, diff)), nil
 			}
