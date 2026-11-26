@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"syscall"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/usage"
@@ -30,11 +29,10 @@ var signedOutText = regexp.MustCompile(`(?i)log ?in|sign ?in|not authenticated|u
 func ReadUsage(ctx context.Context) (*usage.Snapshot, error) {
 	cmd := exec.CommandContext(ctx, agyBinary(), "-p", "/usage", "--output-format", "json")
 	cmd.Dir, _ = os.UserHomeDir()
-	// At the deadline the whole process group goes, helpers that hold the
-	// output included, and Run returns shortly after: nothing is left behind
-	// and the poller is not held.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	// At the deadline the whole process group goes where the platform has
+	// one (killGroupOnCancel), helpers that hold the output included, and Run
+	// returns shortly after: nothing is left behind and the poller is not held.
+	killGroupOnCancel(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
