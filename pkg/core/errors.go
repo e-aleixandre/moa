@@ -118,3 +118,26 @@ func humanizeDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dh %dm", h, m)
 }
+
+// StreamFailureError is an error a provider reported in the middle of a
+// stream, classified by the provider, which is the only layer that knows what
+// its error codes mean. Transient means the same request may succeed if sent
+// again (an overload, a server error, a stalled connection); the agent loop
+// then repairs the stream instead of ending the turn.
+type StreamFailureError struct {
+	Err       error
+	Transient bool
+}
+
+func (e *StreamFailureError) Error() string { return e.Err.Error() }
+
+func (e *StreamFailureError) Unwrap() error { return e.Err }
+
+// AsStreamFailure extracts a *StreamFailureError from an error chain, if present.
+func AsStreamFailure(err error) (*StreamFailureError, bool) {
+	var sf *StreamFailureError
+	if errors.As(err, &sf) {
+		return sf, true
+	}
+	return nil, false
+}

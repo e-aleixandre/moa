@@ -461,8 +461,24 @@ func (a *Anthropic) handleError(data string) *core.AssistantEvent {
 		}
 	}
 	return &core.AssistantEvent{
-		Type:  core.ProviderEventError,
-		Error: fmt.Errorf("anthropic %s: %s", payload.Error.Type, payload.Error.Message),
+		Type: core.ProviderEventError,
+		Error: &core.StreamFailureError{
+			Err:       fmt.Errorf("anthropic %s: %s", payload.Error.Type, payload.Error.Message),
+			Transient: transientStreamErrorType(payload.Error.Type),
+		},
+	}
+}
+
+// transientStreamErrorType reports whether an error event in the middle of a
+// stream may clear by sending the same request again. Anthropic documents
+// overloaded_error (HTTP 529) and api_error (HTTP 500) as its own transient
+// failures; everything else is about the request, the account or the key.
+func transientStreamErrorType(errType string) bool {
+	switch errType {
+	case "overloaded_error", "api_error":
+		return true
+	default:
+		return false
 	}
 }
 

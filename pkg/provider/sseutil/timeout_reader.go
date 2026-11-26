@@ -3,72 +3,77 @@
 package sseutil
 
 import (
-	"fmt"
+	"errors"
 	"io"
+	"math"
+	"sync/atomic"
 	"time"
+
+	"github.com/e-aleixandre/moa/pkg/core"
 )
 
-// IdleTimeoutReader wraps an io.Reader and returns an error if no data
-// is received within the timeout duration. The timer resets on every
-// successful Read that returns data. This protects against stalled SSE
-// streams where the connection stays open but stops sending events.
+// IdleTimeoutReader wraps a stream body and fails with ErrIdleTimeout when a
+// single Read waits longer than the timeout for data. This protects against
+// stalled SSE streams where the connection stays open but stops sending
+// events. Any bytes reset the clock, SSE keep-alive comments included: with
+// thinking omitted they are all that arrives while the model reasons.
+//
+// On timeout the body is closed, which unblocks the pending Read; Read is
+// delegated directly, so it costs no copy, goroutine or allocation. The clock
+// only runs inside Read: time the consumer spends between reads is not
+// idleness of the connection. Read is not safe for concurrent use, like the
+// body it wraps.
 type IdleTimeoutReader struct {
-	r       io.Reader
+	r       io.ReadCloser
 	timeout time.Duration
 	timer   *time.Timer
+	expired atomic.Bool
 }
 
 // NewIdleTimeoutReader creates a reader that errors after timeout of inactivity.
 // A timeout of 0 disables the idle check (passes reads through directly).
-func NewIdleTimeoutReader(r io.Reader, timeout time.Duration) *IdleTimeoutReader {
+func NewIdleTimeoutReader(r io.ReadCloser, timeout time.Duration) *IdleTimeoutReader {
 	itr := &IdleTimeoutReader{r: r, timeout: timeout}
 	if timeout > 0 {
-		itr.timer = time.NewTimer(timeout)
+		// Armed only by Read; created far in the future so it cannot fire
+		// before the first Reset.
+		itr.timer = time.AfterFunc(math.MaxInt64, itr.expire)
+		itr.timer.Stop()
 	}
 	return itr
 }
 
+// expire runs on the timer goroutine. The flag is set before closing so a
+// Read unblocked by the close always sees it.
+func (itr *IdleTimeoutReader) expire() {
+	if itr.expired.CompareAndSwap(false, true) {
+		_ = itr.r.Close()
+	}
+}
+
 // Read implements io.Reader. Returns ErrIdleTimeout if the underlying
-// reader doesn't produce data within the timeout.
+// reader doesn't produce data within the timeout, and on every Read after.
 func (itr *IdleTimeoutReader) Read(p []byte) (int, error) {
 	if itr.timer == nil {
 		return itr.r.Read(p)
 	}
-
-	type result struct {
-		n   int
-		err error
-	}
-
-	// The goroutine reads into its own buffer, never the caller's p. On timeout
-	// we return while the underlying Read is still in flight; if it later writes
-	// to p, the caller has already moved on — a data race. Copying into p only
-	// on the non-timed-out branch keeps the caller's buffer untouched after we
-	// give up.
-	ch := make(chan result, 1)
-	buf := make([]byte, len(p))
-	go func() {
-		n, err := itr.r.Read(buf)
-		ch <- result{n, err}
-	}()
-
-	// Reset timer before waiting.
-	if !itr.timer.Stop() {
-		select {
-		case <-itr.timer.C:
-		default:
-		}
-	}
-	itr.timer.Reset(itr.timeout)
-
-	select {
-	case res := <-ch:
-		copy(p, buf[:res.n])
-		return res.n, res.err
-	case <-itr.timer.C:
+	if itr.expired.Load() {
 		return 0, ErrIdleTimeout
 	}
+	itr.timer.Reset(itr.timeout)
+	n, err := itr.r.Read(p)
+	itr.timer.Stop()
+	// The timer may fire between Read returning and Stop: the body is then
+	// closed, so report the timeout now rather than a close error next time.
+	if itr.expired.Load() {
+		return n, ErrIdleTimeout
+	}
+	return n, err
 }
 
-// ErrIdleTimeout is returned when no data is received within the timeout.
-var ErrIdleTimeout = fmt.Errorf("stream idle timeout: no data received")
+// ErrIdleTimeout is returned when no data is received within the timeout. It
+// is a transient stream failure: the agent loop repairs the stream.
+var ErrIdleTimeout error = &core.StreamFailureError{
+	Err:       errors.New("stream idle timeout: no data received"),
+	Transient: true,
+}

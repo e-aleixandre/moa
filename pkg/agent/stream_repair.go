@@ -47,6 +47,11 @@ func isRetryableStreamError(err error) bool {
 	if _, ok := core.AsQuotaExceeded(err); ok {
 		return false
 	}
+	// The provider knows what its own error codes mean; its verdict wins over
+	// the text heuristics below.
+	if sf, ok := core.AsStreamFailure(err); ok {
+		return sf.Transient
+	}
 	if strings.Contains(s, "quota") {
 		return false
 	}
