@@ -118,6 +118,9 @@ export function thinkingOptionsFor(spec, sessionProvider) {
 // its five positions differently (such as Astra's low through max).
 export function thinkingPositionFor(level, spec, sessionProvider) {
   const options = thinkingOptionsFor(spec, sessionProvider);
+  // agy has no off: the backend sends the model's first level (thoughtLevel).
+  const provider = spec?.provider || sessionProvider;
+  if (provider === "antigravity" && level === "off" && options.length) return options[0].value;
   return options.find((option) => option.label === level)?.value
     || clampThinkingLevel(level, options.map((option) => option.value));
 }

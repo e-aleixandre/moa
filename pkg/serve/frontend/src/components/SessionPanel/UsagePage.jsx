@@ -193,10 +193,17 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
   const u = usageForSession(session, usage);
   const busy = session?.state === "running" || session?.state === "permission";
   // Gemini's quota is read from agy only when asked: on opening this page.
+  // The read takes some 20 seconds, and the page says so meanwhile.
   const provider = session?.provider;
+  const gemini = provider === "antigravity";
+  const [reading, setReading] = useState(false);
   useEffect(() => {
-    if (provider === "antigravity") loadUsage({ refresh: provider });
-  }, [provider]);
+    if (!gemini) return undefined;
+    let live = true;
+    setReading(true);
+    loadUsage({ refresh: provider }).finally(() => { if (live) setReading(false); });
+    return () => { live = false; };
+  }, [gemini, provider]);
 
   const hasCost = typeof costUSD === "number" && costUSD > 0;
   const keepAlive = keepAliveLine(session);
@@ -258,7 +265,8 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
           </div>
         )}
         <ContextLimitRow session={session} disabled={busy} />
-        <CacheRows session={session} />
+        {/* agy keeps its own context: moa has no prompt cache to read. */}
+        {!gemini && <CacheRows session={session} />}
         {!!session?.id && (
           <button
             type="button"
@@ -273,10 +281,19 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
         )}
       </div>
 
-      {hasPlan && (
+      {(hasPlan || reading) && (
         <>
-          <div class="zl-group"><span>Plan · {providerName(session?.provider)}</span></div>
+          <div class="zl-group">
+            <span>Plan · {providerName(session?.provider)}</span>
+            {reading && (u.fiveHour || u.week) && <span class="zl-group-n zl-data" role="status">updating…</span>}
+          </div>
           <div class="zl-kv">
+            {reading && !u.fiveHour && !u.week && (
+              <div class="zl-kv-row" role="status">
+                <span class="zl-kv-k">Quota</span>
+                <span class="zl-kv-v zl-data is-dim">reading…</span>
+              </div>
+            )}
             {u.account && (
               <div class="zl-kv-row">
                 <span class="zl-kv-k">Account</span>
@@ -349,7 +366,7 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
       )}
 
       {u.providerStatus && u.providerStatus.reason === "signed_out" && (
-        <p class="zl-page-sum">Not signed in to Antigravity.</p>
+        <p class="zl-page-sum">Sign in to Antigravity on the server (<code>agy acp --login</code>) to see the quota.</p>
       )}
 
       {u.providerStatus && u.providerStatus.reason === "plan_unsupported" && (

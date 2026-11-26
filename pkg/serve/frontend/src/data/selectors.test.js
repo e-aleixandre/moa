@@ -148,5 +148,9 @@ test('thinkingOptionsFor: each Antigravity model shows its own levels, from low'
     ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'],
   ]);
   expect(thinkingPositionFor('xhigh', carbon)).toBe('high');
+  // off is not an agy level: the backend sends the model's first level, and
+  // the selector shows that one.
+  expect(thinkingPositionFor('off', neon)).toBe('low');
+  expect(thinkingPositionFor('off', carbon)).toBe('low');
   expect(thinkingOptionsFor(orchestrator)).toEqual([]);
 });

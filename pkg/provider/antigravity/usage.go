@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"syscall"
 	"time"
 
 	"github.com/e-aleixandre/moa/pkg/usage"
@@ -29,6 +30,12 @@ var signedOutText = regexp.MustCompile(`(?i)log ?in|sign ?in|not authenticated|u
 func ReadUsage(ctx context.Context) (*usage.Snapshot, error) {
 	cmd := exec.CommandContext(ctx, agyBinary(), "-p", "/usage", "--output-format", "json")
 	cmd.Dir, _ = os.UserHomeDir()
+	// At the deadline the whole process group goes, helpers that hold the
+	// output included, and Run returns shortly after: nothing is left behind
+	// and the poller is not held.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
@@ -39,10 +46,12 @@ func ReadUsage(ctx context.Context) (*usage.Snapshot, error) {
 				Groups []struct {
 					Name    string `json:"name"`
 					Buckets []struct {
-						ID                string    `json:"id"`
-						Window            string    `json:"window"`
-						RemainingFraction *float64  `json:"remaining_fraction"`
-						ResetTime         time.Time `json:"reset_time"`
+						ID                string   `json:"id"`
+						Window            string   `json:"window"`
+						RemainingFraction *float64 `json:"remaining_fraction"`
+						// Raw so that one odd reset_time loses only its own
+						// renewal time, not the whole quota.
+						ResetTime json.RawMessage `json:"reset_time"`
 					} `json:"buckets"`
 				} `json:"groups"`
 			} `json:"data"`
@@ -66,9 +75,9 @@ func ReadUsage(ctx context.Context) (*usage.Snapshot, error) {
 				}
 				q := usage.Quota{ID: b.ID, Utilization: new(float64)}
 				*q.Utilization = (1 - *b.RemainingFraction) * 100
-				if b.ResetTime.Year() > 1970 { // 1970 marks a window not used yet
-					end := b.ResetTime
-					q.PeriodEnd = &end
+				var reset time.Time
+				if json.Unmarshal(b.ResetTime, &reset) == nil && reset.Year() > 1970 { // 1970 marks a window not used yet
+					q.PeriodEnd = &reset
 					used = true
 				}
 				// The Gemini group reads like any plan: no label, so each
