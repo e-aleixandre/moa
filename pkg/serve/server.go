@@ -1689,7 +1689,15 @@ func handleUsage(mgr *Manager) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, usageResponse{Available: false, Version: 2})
 			return
 		}
-		providers, statuses := mgr.usagePoller.GetAll(r.Context())
+		// ?refresh=<provider>[,…] reads now the on-demand providers (Gemini's
+		// runs agy), which an ordinary poll only serves from their last read.
+		refresh := map[string]bool{}
+		for _, name := range strings.Split(r.URL.Query().Get("refresh"), ",") {
+			if name != "" {
+				refresh[name] = true
+			}
+		}
+		providers, statuses := mgr.usagePoller.GetAllRefreshing(r.Context(), refresh)
 		resp := usageResponse{Available: len(providers) > 0, Version: 2, Providers: providers, ProviderStatus: statuses, Snapshot: providers["anthropic"]}
 		if resp.Snapshot == nil && statuses["anthropic"].Reason == "temporarily_unavailable" {
 			resp.Error = "usage temporarily unavailable"

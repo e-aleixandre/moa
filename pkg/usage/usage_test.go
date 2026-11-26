@@ -273,3 +273,41 @@ func rewriteHost(base string) http.RoundTripper {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// An on-demand poller is read only when a client names it, at most once per
+// interval; otherwise its last reading is served, and a signed-out CLI is a
+// quiet status.
+func TestOnDemandPollerReadsOnlyWhenAsked(t *testing.T) {
+	var runs int
+	var fail error
+	p := NewProviderPoller(func(context.Context) (string, bool, error) { return "", true, nil },
+		func(context.Context, *http.Client, string) (*Snapshot, error) {
+			runs++
+			if fail != nil {
+				return nil, fail
+			}
+			return &Snapshot{Provider: "antigravity", AuthKind: "oauth", Quotas: []Quota{{ID: "gemini-5h"}}}, nil
+		})
+	m := &MultiPoller{OnDemand: map[string]*Poller{"antigravity": p}}
+	ctx := context.Background()
+
+	snaps, statuses := m.GetAll(ctx)
+	if runs != 0 || snaps["antigravity"] != nil || statuses["antigravity"].Reason != "pending" {
+		t.Fatalf("an ordinary poll read it: runs=%d %+v", runs, statuses)
+	}
+	refresh := map[string]bool{"antigravity": true}
+	snaps, _ = m.GetAllRefreshing(ctx, refresh)
+	m.GetAllRefreshing(ctx, refresh)
+	if runs != 1 || snaps["antigravity"] == nil {
+		t.Fatalf("refresh: runs=%d snap=%v", runs, snaps["antigravity"])
+	}
+	if snaps, _ = m.GetAll(ctx); runs != 1 || snaps["antigravity"] == nil {
+		t.Fatalf("an ordinary poll did not serve the last reading: runs=%d", runs)
+	}
+
+	signedOut := &MultiPoller{OnDemand: map[string]*Poller{"antigravity": NewProviderPoller(func(context.Context) (string, bool, error) { return "", true, nil },
+		func(context.Context, *http.Client, string) (*Snapshot, error) { return nil, ErrSignedOut })}}
+	if _, st := signedOut.GetAllRefreshing(ctx, refresh); st["antigravity"].Reason != "signed_out" || st["antigravity"].Error != "" {
+		t.Errorf("signed out = %+v", st["antigravity"])
+	}
+}

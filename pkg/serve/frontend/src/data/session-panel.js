@@ -249,7 +249,7 @@ export function usageVerdict(session, globalUsage) {
 
   const u = usageForSession(session, globalUsage);
   const provider = session?.provider || 'anthropic';
-  const name = provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic' : provider;
+  const name = provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic' : provider === 'antigravity' ? 'Gemini' : provider;
   const meter = u.fiveHour || u.week;
   if (meter) {
     const label = meter.label || (meter === u.fiveHour ? '5h' : 'week');

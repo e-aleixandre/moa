@@ -414,9 +414,13 @@ let usageTimer = null;
 
 // loadUsage refreshes the global plan usage snapshot. Failures keep the
 // previous snapshot rather than clearing the widget.
-export async function loadUsage() {
+// refresh names an on-demand provider to read now (Gemini's runs agy, which
+// takes some 20 seconds): only the Usage page asks for it, on opening.
+export async function loadUsage({ refresh } = {}) {
   try {
-    const usage = await api('GET', '/api/usage');
+    const usage = refresh
+      ? await api('GET', `/api/usage?refresh=${encodeURIComponent(refresh)}`, null, { timeoutMs: 90000 })
+      : await api('GET', '/api/usage');
     const prev = store.get().usage;
     if (usageUnchanged(prev, usage)) return;
     setState({ usage });

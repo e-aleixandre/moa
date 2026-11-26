@@ -8,7 +8,7 @@ import {
 } from "../../data/util/usage-pills.js";
 import { copyToClipboard, fmtTokens } from "../../data/util/format.js";
 import { cacheAdvice, cacheMissCause, cacheUsage } from "../../data/cache-usage.js";
-import { configureSession } from "../../data/session-actions.js";
+import { configureSession, loadUsage } from "../../data/session-actions.js";
 import { keepAliveLine } from "./keepalive-line.js";
 import { addToast } from "../../data/notifications.js";
 
@@ -35,6 +35,7 @@ function Meter({ pct, neutral = false }) {
 function providerName(provider) {
   if (provider === "openai") return "OpenAI";
   if (!provider || provider === "anthropic") return "Anthropic";
+  if (provider === "antigravity") return "Gemini";
   return provider;
 }
 
@@ -191,6 +192,11 @@ function CacheRows({ session }) {
 export function UsagePage({ session, usage, ctxPercent, costUSD }) {
   const u = usageForSession(session, usage);
   const busy = session?.state === "running" || session?.state === "permission";
+  // Gemini's quota is read from agy only when asked: on opening this page.
+  const provider = session?.provider;
+  useEffect(() => {
+    if (provider === "antigravity") loadUsage({ refresh: provider });
+  }, [provider]);
 
   const hasCost = typeof costUSD === "number" && costUSD > 0;
   const keepAlive = keepAliveLine(session);
@@ -213,7 +219,8 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
   };
 
   const buckets = (u.moneyBuckets || []).filter((b) => b.id !== "payg");
-  const hasPlan = !!(u.fiveHour || u.week || extra || buckets.length || u.tier || u.stale);
+  const moreQuotas = u.moreQuotas || [];
+  const hasPlan = !!(u.fiveHour || u.week || moreQuotas.length || extra || buckets.length || u.tier || u.stale);
 
   return (
     <div class="zl-page">
@@ -294,6 +301,14 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
                 {planReset(u.week, "week") && <span class="zl-kv-note zl-data">{planReset(u.week, "week")}</span>}
               </div>
             )}
+            {moreQuotas.map((q) => (
+              <div class="zl-kv-row is-meter" key={q.id}>
+                <span class="zl-kv-k">{q.label}</span>
+                <span class="zl-kv-v zl-data">{q.pct}%</span>
+                <Meter pct={q.pct} />
+                {q.resetsAt && <span class="zl-kv-note zl-data">resets in {fmtReset(q.resetsAt)}</span>}
+              </div>
+            ))}
             {extra && (
               <div class="zl-kv-row">
                 <span class="zl-kv-k">Extra</span>
@@ -331,6 +346,10 @@ export function UsagePage({ session, usage, ctxPercent, costUSD }) {
             )}
           </div>
         </>
+      )}
+
+      {u.providerStatus && u.providerStatus.reason === "signed_out" && (
+        <p class="zl-page-sum">Not signed in to Antigravity.</p>
       )}
 
       {u.providerStatus && u.providerStatus.reason === "plan_unsupported" && (

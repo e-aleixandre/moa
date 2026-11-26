@@ -203,6 +203,13 @@ func (p *Poller) Get(ctx context.Context) (*Snapshot, error) {
 	return cloneSnapshot(snap), nil
 }
 
+// Peek is what Get last read, without reading again.
+func (p *Poller) Peek() (*Snapshot, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return cloneSnapshot(p.latest), p.lastErr
+}
+
 // cloneSnapshot prevents callers (HTTP encoders and UI consumers included)
 // from observing or mutating the poller's cached object.
 func cloneSnapshot(s *Snapshot) *Snapshot {

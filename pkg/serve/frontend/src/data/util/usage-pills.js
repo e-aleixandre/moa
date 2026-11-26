@@ -94,6 +94,7 @@ export function usageForSession(session, globalUsage) {
   let fiveHour = null;
   let week = null;
   let extra = null;
+  let moreQuotas = null;
 
   if (isAnthropic && u) {
     if (u.five_hour && Number.isFinite(u.five_hour.utilization)) {
@@ -126,8 +127,11 @@ export function usageForSession(session, globalUsage) {
   // No hardcoded provider fields: the API owns labels, periods and money ids.
   if (!isAnthropic && !isOpenAI && u) {
     const qs = Array.isArray(u.quotas) ? u.quotas : [];
-    if (qs[0] && Number.isFinite(qs[0].utilization)) fiveHour = { pct: Math.round(qs[0].utilization), resetsAt: qs[0].period_end || null, label: qs[0].label || qs[0].id, source: s.provider, stale: !!u.stale };
-    if (qs[1] && Number.isFinite(qs[1].utilization)) week = { pct: Math.round(qs[1].utilization), resetsAt: qs[1].period_end || null, label: qs[1].label || qs[1].id, source: s.provider, stale: !!u.stale };
+    if (qs[0] && Number.isFinite(qs[0].utilization)) fiveHour = { pct: Math.round(qs[0].utilization), resetsAt: qs[0].period_end || null, label: qs[0].label || null, source: s.provider, stale: !!u.stale };
+    if (qs[1] && Number.isFinite(qs[1].utilization)) week = { pct: Math.round(qs[1].utilization), resetsAt: qs[1].period_end || null, label: qs[1].label || null, source: s.provider, stale: !!u.stale };
+    // Further meters (Gemini's Claude and GPT group) read the same way.
+    moreQuotas = qs.slice(2).filter((q) => Number.isFinite(q.utilization))
+      .map((q) => ({ id: q.id, pct: Math.round(q.utilization), resetsAt: q.period_end || null, label: q.label || q.id }));
     const payg = (u.money || []).find((b) => b.id === "payg");
     if (payg) extra = { enabled: true, used: payg.used_minor ?? 0, limit: payg.limit_minor ?? null, currency: payg.currency || "USD", decimalPlaces: Number.isInteger(payg.decimals) ? payg.decimals : 2 };
   }
@@ -148,6 +152,7 @@ export function usageForSession(session, globalUsage) {
   }
 
   const result = { fiveHour, week, extra, onOverage: !!s.onOverage };
+  if (moreQuotas?.length) result.moreQuotas = moreQuotas;
   // The readings are those of the account being spent; name it when it is not
   // the first (the usual case needs no label).
   if (isAnthropic && u && providerStatus?.account > 1) {

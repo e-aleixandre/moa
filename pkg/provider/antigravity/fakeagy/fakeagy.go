@@ -57,6 +57,10 @@ func Active() bool { return os.Getenv("FAKE_AGY") == "1" }
 // with a tool call that needs permission. Every line it receives is appended
 // to the file named by FAKE_AGY_LOG, so tests can check the wire.
 func Serve() {
+	if slices.Contains(os.Args, "-p") {
+		printMode()
+		return
+	}
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 1<<20), 1<<24)
 	send := func(v any) {
@@ -219,4 +223,41 @@ func Serve() {
 			send(map[string]any{"jsonrpc": "2.0", "id": promptID, "result": map[string]any{"stopReason": "end_turn"}})
 		}
 	}
+}
+
+// printMode answers `agy -p /usage --output-format json` as agy does, with
+// the quota FAKE_AGY_USAGE names: "" a used Gemini group and an unused Claude
+// and GPT one, "3p" both used, "signed_out" no sign-in. Each run is logged.
+func printMode() {
+	if path := os.Getenv("FAKE_AGY_LOG"); path != "" {
+		if log, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			b, _ := json.Marshal(os.Args[1:])
+			_, _ = fmt.Fprintf(log, "{\"print\":%s}\n", b)
+			_ = log.Close()
+		}
+	}
+	mode := os.Getenv("FAKE_AGY_USAGE")
+	if mode == "signed_out" {
+		fmt.Fprintln(os.Stderr, "Error: you are not logged in. Run agy to sign in.")
+		os.Exit(1)
+	}
+	unused := "1970-01-01T00:00:00Z"
+	thirdRemaining, thirdReset := 1.0, unused
+	if mode == "3p" {
+		thirdRemaining, thirdReset = 0.75, "2026-11-30T10:00:00Z"
+	}
+	bucket := func(id, window string, remaining float64, reset string) map[string]any {
+		return map[string]any{"id": id, "window": window, "remaining_fraction": remaining, "reset_time": reset}
+	}
+	b, _ := json.Marshal(map[string]any{"status": "SUCCESS", "command": map[string]any{"name": "usage", "data": map[string]any{"groups": []any{
+		map[string]any{"name": "Gemini Models", "buckets": []any{
+			bucket("gemini-weekly", "weekly", 0.84, "2026-12-03T08:08:42Z"),
+			bucket("gemini-5h", "5h", 0.39, "2026-11-26T13:08:42Z"),
+		}},
+		map[string]any{"name": "Claude and GPT models", "buckets": []any{
+			bucket("3p-weekly", "weekly", thirdRemaining, thirdReset),
+			bucket("3p-5h", "5h", thirdRemaining, thirdReset),
+		}},
+	}}}})
+	fmt.Println(string(b))
 }

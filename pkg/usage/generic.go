@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -200,6 +201,10 @@ func FetchXAI(ctx context.Context, client *http.Client, token string) (*Snapshot
 	return s, nil
 }
 
+// ErrSignedOut is a provider's fetch saying its CLI is not signed in: the
+// status is signed_out, never an error.
+var ErrSignedOut = errors.New("usage: provider not signed in")
+
 // Fetcher permits provider-specific pollers.
 type Fetcher func(context.Context, *http.Client, string) (*Snapshot, error)
 
@@ -224,6 +229,11 @@ type MultiPoller struct {
 	// answers as before.
 	Accounts       *AccountPollers
 	ServingAccount func() (key string, position int, ok bool)
+
+	// OnDemand pollers are costly to read (they run a process), so GetAll
+	// serves only what they last read; GetAllRefreshing names those a
+	// client asked to read now.
+	OnDemand map[string]*Poller
 
 	// observed holds provider usage reported opportunistically in successful
 	// model response headers. Unlike Pollers, these sources have no usage
@@ -295,8 +305,34 @@ func (m *MultiPoller) observedSnapshot(provider string) *Snapshot {
 }
 
 func (m *MultiPoller) GetAll(ctx context.Context) (map[string]*Snapshot, map[string]ProviderStatus) {
+	return m.GetAllRefreshing(ctx, nil)
+}
+
+// GetAllRefreshing is GetAll that also reads the on-demand pollers in
+// refresh whose reading is older than their interval.
+func (m *MultiPoller) GetAllRefreshing(ctx context.Context, refresh map[string]bool) (map[string]*Snapshot, map[string]ProviderStatus) {
 	snaps := map[string]*Snapshot{}
 	statuses := map[string]ProviderStatus{}
+	for name, p := range m.OnDemand {
+		var s *Snapshot
+		var err error
+		if refresh[name] {
+			s, err = p.Get(ctx)
+		} else {
+			s, err = p.Peek()
+		}
+		switch {
+		case s != nil:
+			snaps[name] = s
+			statuses[name] = ProviderStatus{Available: true, AuthKind: s.AuthKind}
+		case errors.Is(err, ErrSignedOut):
+			statuses[name] = ProviderStatus{Reason: "signed_out"}
+		case err != nil:
+			statuses[name] = ProviderStatus{Reason: "temporarily_unavailable", Error: "usage temporarily unavailable"}
+		default:
+			statuses[name] = ProviderStatus{Reason: "pending"}
+		}
+	}
 	for name, status := range m.StaticStatus {
 		statuses[name] = status
 	}

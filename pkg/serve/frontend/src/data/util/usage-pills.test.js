@@ -207,3 +207,26 @@ test("the readings name their account only when it is not the first", () => {
   // Other providers never carry an Anthropic account.
   expect(usageForSession({ provider: "openai" }, { available: true, providers: { openai: snap }, provider_status: { openai: { account: 2 } } }).account).toBeUndefined();
 });
+
+test('usageForSession: a Gemini session reads its 5h and weekly quota, then the Claude/GPT group', () => {
+  const globalUsage = {
+    available: true,
+    providers: {
+      antigravity: {
+        provider: 'antigravity',
+        quotas: [
+          { id: 'gemini-5h', label: '', utilization: 61.5, period_end: '2026-11-26T13:08:42Z' },
+          { id: 'gemini-weekly', label: '', utilization: 16.3, period_end: '2026-12-03T08:08:42Z' },
+          { id: '3p-5h', label: 'Claude/GPT 5h', utilization: 25, period_end: '2026-11-30T10:00:00Z' },
+        ],
+      },
+    },
+    provider_status: { antigravity: { available: true } },
+  };
+  const u = usageForSession({ provider: 'antigravity' }, globalUsage);
+  // No label: each screen names the windows as it does for every plan.
+  expect(u.fiveHour).toMatchObject({ pct: 62, label: null, resetsAt: '2026-11-26T13:08:42Z' });
+  expect(u.week).toMatchObject({ pct: 16, label: null, resetsAt: '2026-12-03T08:08:42Z' });
+  expect(u.moreQuotas).toEqual([{ id: '3p-5h', pct: 25, label: 'Claude/GPT 5h', resetsAt: '2026-11-30T10:00:00Z' }]);
+  expect(usageForSession({ provider: 'anthropic' }, globalUsage).moreQuotas).toBeUndefined();
+});

@@ -156,6 +156,11 @@ test('the usage verdict names the provider, so a quota never reads as global', (
   expect(usageVerdict({ id: 'A' }, usage).warn).toBe(false);
 });
 
+test('a Gemini session names its quota Gemini', () => {
+  const usage = { available: true, providers: { antigravity: { quotas: [{ id: 'gemini-5h', label: '', utilization: 61.5 }] } } };
+  expect(usageVerdict({ id: 'G', provider: 'antigravity' }, usage).text).toBe('Gemini · 5h 62%');
+});
+
 test('a nearly spent quota is the one usage verdict that wears state colour', () => {
   const hot = { available: true, providers: { anthropic: { five_hour: { utilization: 94 } } } };
   expect(usageVerdict({ id: 'A' }, hot).warn).toBe(true);

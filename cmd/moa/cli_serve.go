@@ -347,6 +347,18 @@ func newAnthropicUsagePoller(authStore *auth.Store, client *http.Client) *usage.
 		return token, true, nil
 	}, usage.FetchXAI)
 	multi := &usage.MultiPoller{Pollers: map[string]*usage.Poller{"anthropic": anthropic, "xai": xaiPoller}}
+	// Gemini's quota comes from agy itself, a process of some 20 seconds,
+	// so it is read only when a client asks (the Usage page opening) and kept
+	// a minute. A client that leaves does not cut the read short.
+	if antigravity.Installed() {
+		multi.OnDemand = map[string]*usage.Poller{"antigravity": usage.NewProviderPoller(
+			func(context.Context) (string, bool, error) { return "", true, nil },
+			func(ctx context.Context, _ *http.Client, _ string) (*usage.Snapshot, error) {
+				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+				defer cancel()
+				return antigravity.ReadUsage(ctx)
+			})}
+	}
 	multi.Accounts = &usage.AccountPollers{New: func(generation string) *usage.Poller {
 		return usage.NewPollerWithClient(func(context.Context) (string, bool, error) {
 			token, found, valid := authStore.PeekAnthropicAccountToken(generation)

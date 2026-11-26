@@ -14,6 +14,7 @@ import (
 	"github.com/e-aleixandre/moa/internal/testenv"
 	"github.com/e-aleixandre/moa/pkg/core"
 	"github.com/e-aleixandre/moa/pkg/provider/antigravity/fakeagy"
+	"github.com/e-aleixandre/moa/pkg/usage"
 )
 
 // The test binary doubles as a fake `agy acp` (see fakeagy).
@@ -388,5 +389,39 @@ func TestStartFreshOpensANewConversation(t *testing.T) {
 	}
 	if !strings.Contains(last, `"prompt":[{"text":"hola","type":"text"}]`) {
 		t.Errorf("the fresh conversation's prompt = %s", last)
+	}
+}
+
+// Gemini's quota comes from agy's /usage in print mode: used percent and
+// renewal per window, 5h first; the Claude and GPT group only once used, and
+// a signed-out agy is ErrSignedOut, not a failure.
+func TestReadUsage(t *testing.T) {
+	startFake(t)
+	s, err := ReadUsage(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, q := range s.Quotas {
+		end := "-"
+		if q.PeriodEnd != nil {
+			end = q.PeriodEnd.UTC().Format(time.RFC3339)
+		}
+		got = append(got, fmt.Sprintf("%s %s %.0f%% %s", q.ID, q.Label, *q.Utilization, end))
+	}
+	want := []string{"gemini-5h  61% 2026-11-26T13:08:42Z", "gemini-weekly  16% 2026-12-03T08:08:42Z"}
+	if !slices.Equal(got, want) {
+		t.Errorf("quotas = %q, want %q", got, want)
+	}
+
+	t.Setenv("FAKE_AGY_USAGE", "3p")
+	s, err = ReadUsage(context.Background())
+	if err != nil || len(s.Quotas) != 4 || s.Quotas[2].Label != "Claude/GPT 5h" || s.Quotas[3].Label != "Claude/GPT week" {
+		t.Errorf("with Claude/GPT used: %+v, %v", s, err)
+	}
+
+	t.Setenv("FAKE_AGY_USAGE", "signed_out")
+	if _, err := ReadUsage(context.Background()); !errors.Is(err, usage.ErrSignedOut) {
+		t.Errorf("signed out: %v", err)
 	}
 }
