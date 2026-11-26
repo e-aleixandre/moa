@@ -176,7 +176,7 @@ func Verify(ctx context.Context, cfg VerifyConfig) (Verdict, VerifyStats, error)
 
 // verifyAgentic runs the verifier as a read-only mini-agent.
 func verifyAgentic(ctx context.Context, prov core.Provider, model core.Model, cfg VerifyConfig, timeout time.Duration) (Verdict, VerifyStats, error) {
-	reg, err := newVerifierRegistry(cfg.WorkDir)
+	reg, err := newVerifierRegistry(cfg.WorkDir, cfg.StatePath)
 	if err != nil {
 		return Verdict{}, VerifyStats{}, fmt.Errorf("goal verify: registry: %w", err)
 	}
@@ -507,9 +507,18 @@ func statsFrom(runCost float64, msgs []core.AgentMessage) VerifyStats {
 // the session policy: the session may be unrestricted (yolo) or carry extra
 // allowed paths the maker was granted, and the verifier — which streams whatever
 // it reads to a remote provider — must stay confined to the goal's worktree.
-func newVerifierRegistry(workDir string) (*core.Registry, error) {
-	// unrestricted=false, no extra allowed paths → containment to workDir only.
+//
+// readable lists individual files outside workDir the verifier may also read
+// (the goal's STATE.md, which lives in the session CWD when the maker moved
+// the work to another worktree). Each is granted as that exact regular file;
+// one that is missing or a symlink grants nothing.
+func newVerifierRegistry(workDir string, readable ...string) (*core.Registry, error) {
 	pp := tool.NewPathPolicy(workDir, nil, false)
+	for _, f := range readable {
+		if strings.TrimSpace(f) != "" {
+			_ = pp.AllowFile(f)
+		}
+	}
 	cfg := tool.ToolConfig{WorkspaceRoot: workDir, PathPolicy: pp}
 	reg := core.NewRegistry()
 	if err := tool.RegisterRead(reg, cfg); err != nil {

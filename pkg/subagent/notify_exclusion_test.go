@@ -30,3 +30,26 @@ func TestNotifyIsNotInheritedByChildren(t *testing.T) {
 		})
 	}
 }
+
+// request_call and dreaming_undo belong to the owner's own conversation.
+func TestOwnerOnlyToolsAreNotInheritedByChildren(t *testing.T) {
+	for _, name := range []string{"request_call", "dreaming_undo"} {
+		parent := core.NewRegistry()
+		_ = parent.Register(core.Tool{Name: "read"})
+		_ = parent.Register(core.Tool{Name: name})
+		for label, params := range map[string]map[string]any{
+			"default inheritance":    nil,
+			"explicit allowed tools": {"tools": []any{"read", name}},
+		} {
+			t.Run(name+"/"+label, func(t *testing.T) {
+				reg, errRes := buildChildRegistry(parent, params)
+				if errRes != nil {
+					t.Fatalf("unexpected error: %s", textOf(*errRes))
+				}
+				if _, ok := reg.Get(name); ok {
+					t.Errorf("child registry inherited %s", name)
+				}
+			})
+		}
+	}
+}

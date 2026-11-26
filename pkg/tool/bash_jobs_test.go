@@ -519,3 +519,27 @@ func TestNewBashWaitSteerInterruptKeepsJobRunning(t *testing.T) {
 		t.Fatalf("background job = %+v, %v; want running", info, ok)
 	}
 }
+
+// Child agents never get the completion notification (the lifecycle drops
+// events for jobs owned by an agent), so the tool must not promise one.
+func TestAsyncBashInChildDoesNotPromiseNotification(t *testing.T) {
+	jobs := NewBashJobs(context.Background(), nil, nil, nil)
+	bash := NewBash(ToolConfig{WorkspaceRoot: "/tmp", BashJobs: jobs, BashTimeout: time.Second})
+	run := func(ctx context.Context) string {
+		res, err := bash.Execute(ctx, map[string]any{"command": "true", "async": true}, nil)
+		if err != nil || res.IsError {
+			t.Fatalf("start = %+v, %v", res, err)
+		}
+		return bashResultText(res)
+	}
+	if got := run(context.Background()); !strings.Contains(got, "notified") {
+		t.Errorf("top-level agent should be told about the notification, got %q", got)
+	}
+	got := run(core.WithAgentID(context.Background(), "child-1"))
+	if strings.Contains(got, "notified") {
+		t.Errorf("child must not be promised a notification, got %q", got)
+	}
+	if !strings.Contains(got, "bash_wait") {
+		t.Errorf("child must be sent to bash_wait, got %q", got)
+	}
+}

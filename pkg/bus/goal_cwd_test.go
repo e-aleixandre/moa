@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -95,5 +96,72 @@ func TestGoalWorkDir_FallsBackForStateWorkDirOutsidePolicy(t *testing.T) {
 	sctx := &SessionContext{CWD: root, PathPolicy: tool.NewPathPolicy(root, nil, false)}
 	if got := goalWorkDir(sctx, goal.Info{StatePath: statePath}); got != root {
 		t.Errorf("goalWorkDir() = %q, want fallback %q", got, root)
+	}
+}
+
+// The maker writes WORKDIR: into STATE.md after EnterGoal without --cwd. The
+// goal must then evaluate in that directory: the baseline commit and every
+// later evaluation point resolve through goalWorkDir.
+func TestEnterGoalHonoursStateWorkDirWithoutCwdFlag(t *testing.T) {
+	root := t.TempDir()
+	worktree := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = worktree
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	statePath := filepath.Join(root, goal.DefaultStatePath)
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, []byte("WORKDIR: "+worktree+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b := NewLocalBus()
+	defer b.Close()
+	runEnded := make(chan RunEnded, 1)
+	b.Subscribe(func(e RunEnded) { runEnded <- e })
+	sctx := &SessionContext{
+		SessionID:  "state-workdir",
+		SessionCtx: context.Background(),
+		Bus:        b,
+		Agent:      &fakeAgent{sendErr: errors.New("stop after setup")},
+		State:      NewStateMachine(b, "state-workdir"),
+		Goal:       goal.New(),
+		CWD:        root,
+		PathPolicy: tool.NewPathPolicy(root, []string{worktree}, false),
+	}
+	RegisterHandlers(sctx)
+
+	if err := b.Execute(EnterGoal{Objective: "work elsewhere"}); err != nil {
+		t.Fatalf("EnterGoal: %v", err)
+	}
+	info := sctx.Goal.Info()
+	if info.WorkDir != "" {
+		t.Errorf("Info.WorkDir = %q, want empty so STATE.md's WORKDIR is reachable", info.WorkDir)
+	}
+	real, _ := filepath.EvalSymlinks(worktree)
+	if got := goalWorkDir(sctx, info); got != real {
+		t.Errorf("goalWorkDir = %q, want %q", got, real)
+	}
+	want := repoHeads(context.Background(), real)
+	if want == "" {
+		t.Fatal("control: worktree has no HEAD")
+	}
+	if got := sctx.Goal.LastCommit(); got != want {
+		t.Errorf("baseline commit = %q, want the worktree's %q", got, want)
+	}
+
+	select {
+	case <-runEnded:
+		b.Drain(time.Second)
+	case <-time.After(time.Second):
+		t.Fatal("goal setup run did not finish")
 	}
 }

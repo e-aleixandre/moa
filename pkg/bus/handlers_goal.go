@@ -48,7 +48,13 @@ func registerGoalHandlers(sctx *SessionContext) {
 			statePath = goal.DefaultStatePath
 		}
 		if !filepath.IsAbs(statePath) {
-			statePath = filepath.Join(workDir, statePath)
+			// With --cwd the state file lives inside it (one per worktree);
+			// without it, in the session CWD.
+			base := workDir
+			if base == "" {
+				base = sctx.CWD
+			}
+			statePath = filepath.Join(base, statePath)
 		}
 		// Lower the compaction threshold for the duration of the goal, remembering
 		// the previous value so we can restore it (not blindly reset to 0) on exit.
@@ -105,8 +111,9 @@ func registerGoalHandlers(sctx *SessionContext) {
 		// Baseline the commit state so the driver's progress check has a reference
 		// for the first iteration (progress = new edits or a new commit anywhere in
 		// the repository, including worktrees the maker creates).
-		if workDir != "" {
-			sctx.Goal.SetLastCommit(repoHeads(sctx.SessionCtx, workDir))
+		// goalWorkDir honours a WORKDIR: already present in STATE.md.
+		if dir := goalWorkDir(sctx, sctx.Goal.Info()); dir != "" {
+			sctx.Goal.SetLastCommit(repoHeads(sctx.SessionCtx, dir))
 		}
 		// Persistent start marker in the conversation (survives reload). Appended
 		// while the agent is still idle, before the first kick starts a run.
@@ -631,15 +638,15 @@ func stopGoal(sctx *SessionContext, reason string) {
 }
 
 // resolveGoalWorkDir validates and resolves EnterGoal's --cwd override. An
-// empty cmdWorkDir keeps the existing behavior (evaluate in the session's
-// CWD). A relative override resolves against the session CWD; the result must
+// empty cmdWorkDir returns "" (no override): goalWorkDir then resolves the
+// directory lazily — STATE.md's WORKDIR, else the session CWD. A relative override resolves against the session CWD; the result must
 // exist, be a directory, and pass the session's PathPolicy — otherwise
 // verify.Execute (which runs the target directory's .moa/verify.json) would
 // become a way to run arbitrary commands outside the sandbox. The error is
 // actionable: it tells the user to `/path add` the directory first.
 func resolveGoalWorkDir(sctx *SessionContext, cmdWorkDir string) (string, error) {
 	if strings.TrimSpace(cmdWorkDir) == "" {
-		return sctx.CWD, nil
+		return "", nil
 	}
 	dir := cmdWorkDir
 	if !filepath.IsAbs(dir) {

@@ -118,6 +118,11 @@ func NewBash(cfg ToolConfig) core.Tool {
 				if err != nil {
 					return core.ErrorResult(err.Error()), nil
 				}
+				if core.AgentIDFromContext(ctx) != "" {
+					// Completion events of a child's jobs are dropped by the session
+					// lifecycle, so a child must collect the result itself.
+					return core.TextResult("Bash job started in background.\nJob ID: " + job.JobID + "\nCall bash_wait with this job ID to block until it finishes (no completion message is delivered to subagents), bash_status to peek at output, or bash_cancel to stop it."), nil
+				}
 				return core.TextResult("Bash job started in background.\nJob ID: " + job.JobID + "\nUse bash_wait to block until it finishes, bash_status to peek at output, or bash_cancel to stop it. You will also be notified when it completes."), nil
 			}
 

@@ -67,6 +67,10 @@ var excludedTools = map[string]bool{
 	"read_session": true,
 	// News is the parent's report to the user; a child reports to its parent.
 	"notify": true,
+	// Both belong to the owner's own conversation: a call goes through the
+	// orchestrator's schedule and level, and undoing a dream is the owner's.
+	"request_call":  true,
+	"dreaming_undo": true,
 }
 
 type readOnlyFilesKey struct{}

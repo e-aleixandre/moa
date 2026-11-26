@@ -797,3 +797,32 @@ func lastUserText(req core.Request) string {
 	}
 	return ""
 }
+
+// The goal's STATE.md may live outside the verifier's WorkDir (the maker moved
+// the work to a worktree); the verifier must still read exactly that file.
+func TestVerifierRegistry_CanReadStateFileOutsideWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	stateDir := t.TempDir()
+	state := filepath.Join(stateDir, "STATE.md")
+	if err := os.WriteFile(state, []byte("progress"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sibling := filepath.Join(stateDir, "other.txt")
+	if err := os.WriteFile(sibling, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := newVerifierRegistry(workDir, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readTool, _ := reg.Get("read")
+	res, err := readTool.Execute(context.Background(), map[string]any{"path": state}, nil)
+	if err != nil || res.IsError {
+		t.Fatalf("reading STATE.md should succeed, got err=%v res=%+v", err, res)
+	}
+	res, err = readTool.Execute(context.Background(), map[string]any{"path": sibling}, nil)
+	if err == nil && !res.IsError {
+		t.Fatalf("sibling of STATE.md must stay denied, got %+v", res)
+	}
+}

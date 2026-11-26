@@ -362,3 +362,38 @@ func TestPathPolicy_NilReceiverAllows(t *testing.T) {
 		t.Fatal("a nil policy means no policy configured, which allows everything")
 	}
 }
+
+func TestPathPolicyAllowFileIsExact(t *testing.T) {
+	root, dir := t.TempDir(), t.TempDir()
+	f := filepath.Join(dir, "STATE.md")
+	mustPR167(t, os.WriteFile(f, []byte("x"), 0o644))
+	other := filepath.Join(dir, "other.txt")
+	mustPR167(t, os.WriteFile(other, []byte("x"), 0o644))
+	link := filepath.Join(dir, "link")
+	mustPR167(t, os.Symlink(dir, link))
+
+	p := NewPathPolicy(root, nil, false)
+	if err := p.AllowFile(f); err != nil {
+		t.Fatal(err)
+	}
+	real, _ := filepath.EvalSymlinks(f)
+	if !p.IsAllowed(real) {
+		t.Error("granted file denied")
+	}
+	if realOther, _ := filepath.EvalSymlinks(other); p.IsAllowed(realOther) {
+		t.Error("sibling allowed")
+	}
+	if p.AllowFile(link) == nil {
+		t.Error("symlink was accepted")
+	}
+	if p.AllowFile(dir) == nil {
+		t.Error("directory was accepted")
+	}
+}
+
+func mustPR167(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}

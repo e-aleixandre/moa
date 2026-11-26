@@ -16,7 +16,8 @@ type PathPolicy struct {
 	workspaceRoot string
 	realRoot      string // cached EvalSymlinks(workspaceRoot), resolved once at construction
 	allowedPaths  []string
-	unrestricted  bool // true = no path checks (was DisableSandbox)
+	allowedFiles  []string // exact real paths; no prefix match, no re-resolving
+	unrestricted  bool     // true = no path checks (was DisableSandbox)
 }
 
 // NewPathPolicy creates a PathPolicy. root is the workspace directory.
@@ -59,6 +60,12 @@ func (p *PathPolicy) IsAllowed(realPath string) bool {
 		return true
 	}
 
+	for _, f := range p.allowedFiles {
+		if realPath == f {
+			return true
+		}
+	}
+
 	for _, ap := range p.allowedPaths {
 		realAP, err := filepath.EvalSymlinks(ap)
 		if err != nil {
@@ -69,6 +76,29 @@ func (p *PathPolicy) IsAllowed(realPath string) bool {
 		}
 	}
 	return false
+}
+
+// AllowFile permits exactly one regular file outside the root. The file's
+// directory is resolved once, now; the file itself must not be a symlink, so
+// neither a later swap for a link nor a link to a directory or another file
+// widens the grant. Returns an error (and grants nothing) otherwise.
+func (p *PathPolicy) AllowFile(path string) error {
+	realDir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	real := filepath.Join(realDir, filepath.Base(path))
+	fi, err := os.Lstat(real)
+	if err != nil {
+		return err
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("path %q is not a regular file", path)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.allowedFiles = append(p.allowedFiles, real)
+	return nil
 }
 
 // AddPath adds a directory to the allowed paths list.
