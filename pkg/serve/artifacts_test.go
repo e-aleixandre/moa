@@ -1,7 +1,13 @@
 package serve
 
 import (
+	"context"
+	"fmt"
+	"net/http/httptest"
+	"time"
+
 	"encoding/json"
+	"github.com/e-aleixandre/moa/pkg/core"
 	"io"
 	"net/http"
 	"os"
@@ -472,5 +478,54 @@ func TestArtifactsEndpoint_ResumePreservesReferences(t *testing.T) {
 	body, _ = getArtifacts(t, testSrvURL{srv.URL}, sessionID)
 	if len(body.Artifacts) != 1 {
 		t.Fatalf("re-send after resume duplicated the entry: %#v", body.Artifacts)
+	}
+}
+
+// Calls the model makes in one block run in the scheduler, but the collection
+// must still list them by call order: newest first, so the last call leads.
+func TestArtifactsEndpoint_ParallelBlockFollowsCallOrder(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tmp := t.TempDir()
+	const n = 8
+	var calls []core.Content
+	for i := 1; i <= n; i++ {
+		p := filepath.Join(tmp, fmt.Sprintf("f%d.md", i))
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		calls = append(calls, core.ToolCallContent(fmt.Sprintf("tc-%d", i), "send_file",
+			map[string]any{"path": p, "title": fmt.Sprintf("Prueba %d de %d", i, n)}))
+	}
+	prov := newMockProvider(func(_ context.Context, req core.Request) (<-chan core.AssistantEvent, error) {
+		ch := make(chan core.AssistantEvent, 4)
+		msg := core.Message{Role: "assistant", Timestamp: time.Now().Unix()}
+		if len(req.Messages) > 0 && req.Messages[len(req.Messages)-1].Role == "tool_result" {
+			msg.Content, msg.StopReason = []core.Content{core.TextContent("done")}, "end_turn"
+		} else {
+			msg.Content, msg.StopReason = calls, "tool_use"
+		}
+		ch <- core.AssistantEvent{Type: core.ProviderEventStart, Partial: &msg}
+		ch <- core.AssistantEvent{Type: core.ProviderEventDone, Message: &msg}
+		close(ch)
+		return ch, nil
+	})
+	mgr := newTestManagerWithRoot(t, ctx, prov, tmp)
+	srv := httptest.NewServer(NewServer(mgr))
+	defer srv.Close()
+
+	sess := newSendFileTestSession(t, mgr, tmp)
+	if _, _, _, err := mgr.Send(sess.ID, "send them", nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, 5*time.Second, "all files published", func() bool {
+		body, _ := getArtifacts(t, testSrvURL{srv.URL}, sess.ID)
+		return len(body.Artifacts) == n
+	})
+	body, _ := getArtifacts(t, testSrvURL{srv.URL}, sess.ID)
+	for i, a := range body.Artifacts {
+		if want := fmt.Sprintf("Prueba %d de %d", n-i, n); a.Title != want {
+			t.Errorf("artifacts[%d] = %q, want %q", i, a.Title, want)
+		}
 	}
 }

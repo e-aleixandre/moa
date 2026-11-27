@@ -60,7 +60,12 @@ func newSendFileTool(cfg tool.ToolConfig, sessionID string, store *session.Artif
 			},
 			"required": ["path"]
 		}`),
-		Effect: core.EffectReadOnly,
+		// Calls in one block must publish in call order, because the collection
+		// is ordered by publication time. A constant lock key makes the
+		// scheduler chain them in order while other tools keep running in
+		// parallel; it cannot collide with the absolute-path keys of file tools.
+		Effect:  core.EffectWritePath,
+		LockKey: func(map[string]any) string { return "moa:send_file" },
 		Execute: func(_ context.Context, params map[string]any, _ func(core.Result)) (core.Result, error) {
 			path, _ := params["path"].(string)
 			if path == "" {
